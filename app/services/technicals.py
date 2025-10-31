@@ -1,0 +1,1 @@
+# TODO: compute RSI/SMA etc. from recent OHLCV

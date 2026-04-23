@@ -1,6 +1,8 @@
+from sqlalchemy import TIMESTAMP, String, text
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import String, TIMESTAMP, text
+
 from app.db.models.base import Base
+
 
 class NewsItemModel(Base):
     __tablename__ = "news_items"

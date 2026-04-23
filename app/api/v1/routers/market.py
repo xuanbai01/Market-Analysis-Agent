@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.api.v1.dependencies import get_session
-from app.schemas.market import IngestRequest, MarketSnapshotOut, MarketHistoryOut
-from app.services.data_ingestion import ingest_market_data
-from app.services.market_repository import get_latest_snapshot, get_history
 
+from app.api.v1.dependencies import get_session
+from app.schemas.market import IngestRequest, MarketHistoryOut, MarketSnapshotOut
+from app.services.data_ingestion import ingest_market_data
+from app.services.market_repository import get_history, get_latest_snapshot
 
 router = APIRouter()
 

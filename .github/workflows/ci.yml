@@ -36,14 +36,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
       - name: Install deps
-        run: uv sync --extra dev || pip install -e ".[dev]" || pip install fastapi uvicorn sqlalchemy asyncpg pydantic pydantic-settings pytest pytest-asyncio httpx ruff
+        run: uv sync
       - name: Lint
-        run: uv run ruff check app || ruff check app
-        continue-on-error: true
+        run: uv run ruff check app tests
       - name: Tests
-        run: uv run pytest -v || pytest -v
-        # Drop `continue-on-error` once a real test suite exists.
-        continue-on-error: true
+        run: uv run pytest -v
 
   # ── Security ───────────────────────────────────────────────────────────────
   secrets-scan:

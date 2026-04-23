@@ -8,10 +8,10 @@ Active sprint for the Market Analysis Agent. Reference: [`design_doc.md`](../des
 
 ## Up next (Story 2 — real market ingest)
 
-- [ ] Stand up a `tests/` directory with `conftest.py`, async client fixture, rollback-per-test DB fixture
-- [ ] Add `pytest`, `pytest-asyncio`, `httpx`, `ruff` to dev deps (`pyproject.toml [tool.uv] dev-dependencies`) and `uv sync`
-- [ ] Write failing tests for `GET /v1/health`, `GET /v1/symbols`, `GET /v1/news` (happy path + 404s)
-- [ ] Add a `candles` table (ts, symbol, o/h/l/c/v, interval) to `db/init.sql` + a SQLAlchemy model
+- [x] Stand up a `tests/` directory with `conftest.py`, async client fixture, rollback-per-test DB fixture
+- [x] Add `pytest`, `pytest-asyncio`, `ruff` pins to dev deps (`pyproject.toml [tool.uv] dev-dependencies`) and `uv sync`
+- [x] Write tests for `GET /v1/health`, `GET /v1/symbols`, `GET /v1/news` (happy path + 404 + 422)
+- [ ] Wire Alembic for schema migrations and add a `candles` table (ts, symbol, o/h/l/c/v, interval)
 - [ ] Implement `ingest_market_data` in [app/services/data_ingestion.py](../app/services/data_ingestion.py) with yfinance as the first provider; log service id, input, output shape, latency per [security.md#a09](../docs/security.md#a09)
 - [ ] Replace the fake bar in [app/services/market_repository.py](../app/services/market_repository.py) with a real query against `candles`
 - [ ] Compute RSI / SMA20 / SMA50 / SMA200 in [app/services/technicals.py](../app/services/technicals.py) from recent `candles`

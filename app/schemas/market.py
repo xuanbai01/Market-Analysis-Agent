@@ -1,5 +1,4 @@
 from pydantic import BaseModel
-from typing import Optional
 
 
 class IngestRequest(BaseModel):
@@ -18,10 +17,10 @@ class OHLCV(BaseModel):
 
 
 class Technicals(BaseModel):
-    rsi: Optional[float] = None
-    sma20: Optional[float] = None
-    sma50: Optional[float] = None
-    sma200: Optional[float] = None
+    rsi: float | None = None
+    sma20: float | None = None
+    sma50: float | None = None
+    sma200: float | None = None
 
 
 class MarketSnapshotOut(BaseModel):

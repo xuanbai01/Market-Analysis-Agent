@@ -7,8 +7,8 @@ Strategy:
   uses NullPool so connections never leak across event loops — pytest-asyncio
   gives each test its own loop, and asyncpg connections are bound to the
   loop they were created in. Tables are created/dropped per test from
-  SQLAlchemy metadata (no reliance on db/init.sql). Cost is small (2 tiny
-  tables) and in exchange we get bulletproof isolation.
+  SQLAlchemy metadata (not via Alembic — tests bypass migrations). Cost
+  is small (3 tiny tables) and in exchange we get bulletproof isolation.
 - Each test runs inside an outer connection transaction with
   `join_transaction_mode="create_savepoint"` on the sessionmaker. Any
   `session.commit()` from a route handler commits a SAVEPOINT, and the
@@ -29,6 +29,7 @@ from sqlalchemy.pool import NullPool
 
 from app.api.v1.dependencies import get_session
 from app.db.models.base import Base
+from app.db.models.candles import Candle  # noqa: F401  -- registers on Base.metadata
 from app.db.models.news import NewsItemModel  # noqa: F401  -- registers on Base.metadata
 from app.db.models.symbols import Symbol  # noqa: F401  -- registers on Base.metadata
 from app.main import app

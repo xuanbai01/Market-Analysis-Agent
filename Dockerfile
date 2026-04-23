@@ -16,7 +16,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
         pydantic==2.9.2 \
         pydantic-settings==2.6.1 \
         python-dotenv==1.0.1 \
-        httpx==0.27.2
+        httpx==0.27.2 \
+        yfinance==0.2.44
 
 # Copy the app code + migrations.
 COPY app ./app

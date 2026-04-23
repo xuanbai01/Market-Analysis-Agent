@@ -12,8 +12,8 @@ Active sprint for the Market Analysis Agent. Reference: [`design_doc.md`](../des
 - [x] Add `pytest`, `pytest-asyncio`, `ruff` pins to dev deps (`pyproject.toml [tool.uv] dev-dependencies`) and `uv sync`
 - [x] Write tests for `GET /v1/health`, `GET /v1/symbols`, `GET /v1/news` (happy path + 404 + 422)
 - [x] Wire Alembic for schema migrations and add a `candles` table (ts, symbol, open/high/low/close/volume, interval)
-- [ ] Implement `ingest_market_data` in [app/services/data_ingestion.py](../app/services/data_ingestion.py) with yfinance as the first provider; log service id, input, output shape, latency per [security.md#a09](../docs/security.md#a09)
-- [ ] Replace the fake bar in [app/services/market_repository.py](../app/services/market_repository.py) with a real query against `candles`
+- [x] Implement `ingest_market_data` in [app/services/data_ingestion.py](../app/services/data_ingestion.py) with yfinance as the first provider; log service id, input, output shape, latency per [security.md#a09](../docs/security.md#a09)
+- [x] Replace the fake bar in [app/services/market_repository.py](../app/services/market_repository.py) with a real query against `candles`
 - [ ] Compute RSI / SMA20 / SMA50 / SMA200 in [app/services/technicals.py](../app/services/technicals.py) from recent `candles`
 - [ ] Write first ADR: `docs/adr/0001-stack-choice.md` (FastAPI + async SQLAlchemy + Postgres)
 

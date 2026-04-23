@@ -83,7 +83,7 @@ FastAPI router  ─▶  services/<domain>_repository.py or <domain>_service.py
 | Health | `GET /v1/health` | ✅ real (pings DB) |
 | Symbols | `GET /v1/symbols`, `POST /v1/symbols` | ✅ real |
 | News | `POST /v1/news/ingest`, `GET /v1/news`, `GET /v1/news/{id}` | GET is real; ingest is a no-op |
-| Market | `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | 🟡 returns fake 1.0 bar / empty history |
+| Market | `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ real (yfinance ingest + upsert → `candles`; latest + date-range history queries) |
 | Analysis | `POST /v1/analysis` | ❌ 501 |
 | Reports | `GET /v1/reports/daily/latest` | ❌ 501 |
 | Forecasts | `GET /v1/forecasts/{symbol}` | ❌ 501 |

@@ -13,8 +13,8 @@ Your first hour on this repo. This project already exists (Story 1 scaffolding i
 ## 1. Clone and inspect (5 min)
 
 ```bash
-git clone https://github.com/xuanbai01/Discord_AI_Chatbot.git
-cd Discord_AI_Chatbot
+git clone https://github.com/xuanbai01/Market-Analysis-Agent.git
+cd Market-Analysis-Agent
 ```
 
 Read, in this order:

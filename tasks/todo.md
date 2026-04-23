@@ -1,6 +1,6 @@
 # TODO
 
-Active sprint for the Market Analysis Agent. Reference: [`design_doc`](../design_doc) phases 1–4.
+Active sprint for the Market Analysis Agent. Reference: [`design_doc.md`](../design_doc.md) phases 1–4.
 
 ## In progress
 

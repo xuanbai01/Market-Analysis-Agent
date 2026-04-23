@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) when working in this repository.
 
 > **Product context:** this repo is a **Financial Market Analysis Agent** — a FastAPI backend that aggregates market data, news, and sentiment to produce analysis, forecasts, and trading strategies via a multi-agent RAG pipeline. The repo name `Discord_AI_Chatbot` is historical; Discord is one of several planned client surfaces, not the product.
 >
-> **System design:** `design_doc` (root) is the source of truth for scope, budget, stack, and roadmap. Read it before making non-trivial changes.
+> **System design:** [`design_doc.md`](design_doc.md) (root) is the source of truth for scope, budget, stack, and roadmap. Read it before making non-trivial changes.
 > **Active tasks:** `tasks/todo.md`. Lessons: `tasks/lessons.md`.
 > **Architecture Decision Records:** `docs/adr/`.
 

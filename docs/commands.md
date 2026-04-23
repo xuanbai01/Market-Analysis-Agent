@@ -29,14 +29,19 @@ uvicorn app.main:app --reload    # runs on :8000
 
 ## Tests
 
-A test suite does not exist yet. Once it does:
+Tests live in `tests/` and expect a reachable Postgres at `DATABASE_URL` (by default `localhost:5432/test_db`). The CI job spins one up; locally:
 
 ```bash
-uv run pytest -v                 # full suite
-uv run pytest tests/test_symbols.py  # one file
-uv run pytest -k "news" -v       # filter by name
+docker compose up -d db          # or point DATABASE_URL at any other Postgres
+export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/test_db
+
+uv run pytest -v                       # full suite
+uv run pytest tests/test_symbols.py    # one file
+uv run pytest -k news -v               # filter by name
 uv run pytest --cov=app --cov-report=term-missing
 ```
+
+Each test runs inside a SAVEPOINT that rolls back, so tests are isolated without dropping/recreating the schema per test.
 
 ## Lint / typecheck
 

@@ -96,6 +96,56 @@ async def test_history_respects_date_filters(db_session: AsyncSession) -> None:
     assert closes == [101.0, 102.0, 103.0]
 
 
+async def test_latest_snapshot_computes_technicals_when_enough_bars(
+    db_session: AsyncSession,
+) -> None:
+    """End-to-end: seed 200 bars with a known linear trend, confirm
+    `get_latest_snapshot` fills in every technical. Exact values are
+    checked by the pure-function suite — here we only assert the wiring
+    and the handoff of closes DESC → ASC."""
+    await _seed_symbol(db_session, "NVDA")
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    # Linear ramp: close[i] = 100 + i. SMA20 over last 20 closes (i=180..199)
+    # is mean(280..299) = 289.5.
+    db_session.add_all(
+        [
+            _bar(symbol="NVDA", ts=base + timedelta(days=i), close=100.0 + i)
+            for i in range(200)
+        ]
+    )
+    await db_session.flush()
+
+    snap = await get_latest_snapshot(db_session, "NVDA", tz="UTC")
+    assert snap is not None
+    assert snap.ohlcv.c == 299.0  # newest bar
+    assert snap.technicals.sma20 == 289.5
+    assert snap.technicals.sma50 == 274.5
+    assert snap.technicals.sma200 == 199.5
+    # Monotone up → RSI saturated at 100.
+    assert snap.technicals.rsi == 100.0
+
+
+async def test_latest_snapshot_leaves_long_windows_none_when_history_short(
+    db_session: AsyncSession,
+) -> None:
+    await _seed_symbol(db_session, "NVDA")
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    db_session.add_all(
+        [
+            _bar(symbol="NVDA", ts=base + timedelta(days=i), close=100.0 + i)
+            for i in range(21)  # enough for SMA20 + RSI(14), not SMA50/200
+        ]
+    )
+    await db_session.flush()
+
+    snap = await get_latest_snapshot(db_session, "NVDA", tz="UTC")
+    assert snap is not None
+    assert snap.technicals.sma20 is not None
+    assert snap.technicals.sma50 is None
+    assert snap.technicals.sma200 is None
+    assert snap.technicals.rsi is not None
+
+
 async def test_history_ascending_order(db_session: AsyncSession) -> None:
     await _seed_symbol(db_session, "NVDA")
     base = datetime(2026, 4, 1, tzinfo=UTC)

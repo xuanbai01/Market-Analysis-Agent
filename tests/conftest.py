@@ -28,7 +28,6 @@ from app.db.models.news import NewsItemModel  # noqa: F401  -- registers on Base
 from app.db.models.symbols import Symbol  # noqa: F401  -- registers on Base.metadata
 from app.main import app
 
-
 TEST_DATABASE_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql+asyncpg://postgres:postgres@localhost:5432/test_db",
@@ -59,7 +58,15 @@ async def db_session(engine) -> AsyncIterator[AsyncSession]:
     """
     async with engine.connect() as connection:
         trans = await connection.begin()
-        sessionmaker = async_sessionmaker(bind=connection, expire_on_commit=False)
+        # `join_transaction_mode="create_savepoint"` makes every session.commit()
+        # from inside a route handler commit a SAVEPOINT rather than the outer
+        # transaction, so the trans.rollback() below still wipes everything the
+        # test (or the app code it drove) wrote.
+        sessionmaker = async_sessionmaker(
+            bind=connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        )
         async with sessionmaker() as session:
             yield session
         await trans.rollback()

@@ -6,7 +6,6 @@ from app.schemas.market import IngestRequest, MarketHistoryOut, MarketSnapshotOu
 from app.services.data_ingestion import ingest_market_data
 from app.services.market_repository import get_history, get_latest_snapshot
 
-
 router = APIRouter()
 
 

@@ -6,7 +6,6 @@ from app.schemas.news import NewsItemOut, NewsListResponse
 from app.services.data_ingestion import ingest_news_once
 from app.services.news_repository import get_news_by_id, list_news
 
-
 router = APIRouter()
 
 

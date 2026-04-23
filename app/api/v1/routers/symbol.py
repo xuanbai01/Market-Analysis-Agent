@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.v1.dependencies import get_session
 from app.db.models.symbols import Symbol
-from app.schemas.symbol import SymbolOut, SymbolCreate
+from app.schemas.symbol import SymbolCreate, SymbolOut
 
 
 router = APIRouter()

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.v1.dependencies import get_session
 from app.schemas.news import NewsItemOut, NewsListResponse
-from app.services.news_repository import list_news, get_news_by_id
 from app.services.data_ingestion import ingest_news_once
+from app.services.news_repository import get_news_by_id, list_news
 
 
 router = APIRouter()
@@ -31,6 +32,5 @@ async def news_list(
 async def news_detail(news_id: str, session: AsyncSession = Depends(get_session)):
     item = await get_news_by_id(session, news_id)
     if not item:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="News item not found")
     return item

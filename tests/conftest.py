@@ -24,9 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.api.v1.dependencies import get_session
 from app.db.models.base import Base
-# Importing the model classes registers them on Base.metadata so create_all sees them.
-from app.db.models.news import NewsItemModel  # noqa: F401
-from app.db.models.symbols import Symbol  # noqa: F401
+from app.db.models.news import NewsItemModel  # noqa: F401  -- registers on Base.metadata
+from app.db.models.symbols import Symbol  # noqa: F401  -- registers on Base.metadata
 from app.main import app
 
 

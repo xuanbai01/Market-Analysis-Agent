@@ -1,6 +1,7 @@
-from datetime import datetime, timedelta, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.news import NewsItemModel
 from app.schemas.news import NewsItemOut
@@ -19,7 +20,7 @@ async def list_news(
     - Filter by last `hours` of news.
     - Order by ts desc, limit N.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
 
     stmt = (
         select(NewsItemModel)

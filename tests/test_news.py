@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +27,7 @@ async def test_list_news_empty_by_default(client: AsyncClient) -> None:
 async def test_list_news_returns_recent_items_newest_first(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db_session.add_all(
         [
             _make_news("a", "Older headline", now - timedelta(hours=2)),
@@ -45,7 +45,7 @@ async def test_list_news_returns_recent_items_newest_first(
 async def test_list_news_excludes_items_older_than_window(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db_session.add_all(
         [
             _make_news("recent", "In window", now - timedelta(hours=1)),
@@ -63,7 +63,7 @@ async def test_list_news_excludes_items_older_than_window(
 async def test_news_detail_returns_item(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    db_session.add(_make_news("xyz", "A headline", datetime.now(timezone.utc)))
+    db_session.add(_make_news("xyz", "A headline", datetime.now(UTC)))
     await db_session.flush()
 
     resp = await client.get("/v1/news/xyz")

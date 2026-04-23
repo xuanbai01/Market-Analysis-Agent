@@ -1,0 +1,50 @@
+{
+  "_comment": "Claude Code harness settings for the Market Analysis Agent. Permissions tuned for a flat Python/FastAPI backend layout (app/, db/, docs/, tasks/).",
+  "permissions": {
+    "allow": [
+      "Read(**/*)",
+      "Write(app/**/*)",
+      "Write(db/**/*)",
+      "Write(docs/**/*)",
+      "Write(tasks/**/*)",
+      "Write(tests/**/*)",
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(uv:*)",
+      "Bash(pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(uvicorn:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker-compose:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)"
+    ]
+  },
+  "_hooks_note": "Uncomment the hooks below once ruff + pytest are installed (either via `uv sync` or pip). Paths assume the flat layout at the repo root (no backend/ prefix).",
+  "hooks": {
+    "_PostToolUse_example": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; if [[ \"$file\" == *.py ]]; then ruff check \"$file\" --fix-only -q; fi"
+          }
+        ]
+      }
+    ],
+    "_Stop_example": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pytest tests/ -q --tb=short 2>&1 | tail -5"
+          }
+        ]
+      }
+    ]
+  }
+}

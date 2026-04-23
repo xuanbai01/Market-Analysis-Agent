@@ -1,0 +1,81 @@
+name: CI
+
+# Backend-only pipeline for the Market Analysis Agent (FastAPI + Postgres).
+# Add frontend / e2e jobs later when the web dashboard or Discord bot lands.
+
+on:
+  push:
+    branches: ["main", "feature/**", "fix/**", "chore/**", "docs/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  # ── Backend ────────────────────────────────────────────────────────────────
+  backend-tests:
+    name: Backend — Unit Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/test_db
+      TZ: America/New_York
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Install deps
+        run: uv sync --extra dev || pip install -e ".[dev]" || pip install fastapi uvicorn sqlalchemy asyncpg pydantic pydantic-settings pytest pytest-asyncio httpx ruff
+      - name: Lint
+        run: uv run ruff check app || ruff check app
+        continue-on-error: true
+      - name: Tests
+        run: uv run pytest -v || pytest -v
+        # Drop `continue-on-error` once a real test suite exists.
+        continue-on-error: true
+
+  # ── Security ───────────────────────────────────────────────────────────────
+  secrets-scan:
+    name: Security — Secrets Scan (Gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── AI PR Review ───────────────────────────────────────────────────────────
+  # Note: this job will fail on PRs that modify ci.yml itself. That is by
+  # design — the Claude Code Action refuses to run if the workflow file on
+  # the PR differs from the version on main, to prevent a malicious PR from
+  # modifying the workflow to exfiltrate secrets. Merge the change and the
+  # check passes on the next PR.
+  ai-review:
+    name: AI — PR Review (Claude)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}

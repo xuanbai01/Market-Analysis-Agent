@@ -13,6 +13,8 @@ dependencies = [
   "SQLAlchemy==2.0.35",
   "asyncpg==0.29.0",
   "alembic==1.13.2",
+  # Market data providers
+  "yfinance==0.2.44",
 ]
 
 [tool.uv]

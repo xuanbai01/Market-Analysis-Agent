@@ -47,7 +47,7 @@ See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for the full first-hour c
 | `GET /v1/symbols`, `POST /v1/symbols` | ✅ Real |
 | `GET /v1/news`, `GET /v1/news/{id}` | ✅ Real (list, detail, 404 as RFC 7807 `problem+json`) |
 | `POST /v1/news/ingest` | 🟡 No-op stub |
-| `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | 🟡 Returns a fake bar / empty history |
+| `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ Real (yfinance ingest with upsert → `candles`; latest-bar and date-range queries) |
 | `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ `501 Not Implemented` |
 
 All errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](app/core/errors.py).

@@ -28,7 +28,7 @@ async def market_history(
     symbol: str,
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
-    interval: str = Query("1d", regex="^(1d|1h|5m)$"),
+    interval: str = Query("1d", pattern="^(1d|1h|5m)$"),
     session: AsyncSession = Depends(get_session),
 ):
     data = await get_history(session, symbol.upper(), start_date, end_date, interval)

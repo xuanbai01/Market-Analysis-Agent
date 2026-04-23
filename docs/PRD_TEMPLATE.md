@@ -4,7 +4,7 @@
 **Date:** <YYYY-MM-DD>
 **Status:** Draft / Approved / Shipping
 
-<!-- The long-form design lives in `design_doc` at the repo root. Use this template
+<!-- The long-form design lives in `design_doc.md` at the repo root. Use this template
      when scoping a specific feature / release, not for the whole product. Copy to
      docs/PRD-<feature>.md or docs/PRD.md as appropriate. -->
 
@@ -14,7 +14,7 @@
 
 ## 2. Problem
 
-<!-- What pain are we solving? Cite specific evidence — interviews, trading-desk feedback, design_doc section numbers, or user requests. Avoid "traders want better insights" abstractions. -->
+<!-- What pain are we solving? Cite specific evidence — interviews, trading-desk feedback, design_doc.md section numbers, or user requests. Avoid "traders want better insights" abstractions. -->
 
 ## 3. Who is this for
 
@@ -65,7 +65,7 @@
 
 ## 9. Technical approach (high-level)
 
-<!-- Not architecture — just the shape of the solution. Refer to `design_doc` and `docs/architecture.md` for the full system. Call out which services/routers/models change. -->
+<!-- Not architecture — just the shape of the solution. Refer to `design_doc.md` and `docs/architecture.md` for the full system. Call out which services/routers/models change. -->
 
 ## 10. Cost impact
 

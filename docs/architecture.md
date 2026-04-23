@@ -1,6 +1,6 @@
 # Architecture
 
-Read this before opening source files. The [design_doc](../design_doc) at the repo root is the long-form system design; this page is the short version of what actually exists in code today and where it's heading.
+Read this before opening source files. The [design_doc.md](../design_doc.md) at the repo root is the long-form system design; this page is the short version of what actually exists in code today and where it's heading.
 
 ## Project Overview
 
@@ -47,7 +47,7 @@ A production-grade **Financial Market Analysis Agent** that aggregates real-time
 │   └── init.sql                 # schema + seed, applied on first Postgres start
 ├── docs/                        # this directory (PRD, ADRs, testing, etc.)
 ├── tasks/                       # todo.md, lessons.md
-├── design_doc                   # long-form system design (read this first)
+├── design_doc.md                # long-form system design (read this first)
 ├── Dockerfile
 ├── docker-compose.yml           # postgres + api
 ├── pyproject.toml

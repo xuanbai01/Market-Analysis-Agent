@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from app.core.settings import settings
 from app.api.v1.routers.health import router as health_router
-from app.core.errors import problem_json_exception_handler, ProblemDetail, add_problem_handlers
+from app.core.errors import add_problem_handlers
 from app.api.v1.routers import market, news, analysis, reports, forecasts, symbol
 
 app = FastAPI(

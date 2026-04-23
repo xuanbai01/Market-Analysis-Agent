@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas.market import MarketSnapshotOut, MarketHistoryOut, OHLCV, Technicals
 
@@ -9,7 +9,7 @@ async def get_latest_snapshot(session: AsyncSession, symbol: str, tz: str) -> Ma
     - In the future, query OHLCV from the DB and compute technicals.
     - For now, return a fake 1.0 bar so the endpoint works.
     """
-    now = datetime.utcnow().isoformat() + "Z"
+    now = datetime.now(timezone.utc).isoformat()
 
     # TODO: replace with real DB query using SQLAlchemy
     ohlcv = OHLCV(

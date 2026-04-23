@@ -18,7 +18,7 @@ cd Discord_AI_Chatbot
 ```
 
 Read, in this order:
-1. `design_doc` — what this project is and where it's going
+1. `design_doc.md` — what this project is and where it's going
 2. `CLAUDE.md` — modular docs index and current-state summary
 3. `docs/architecture.md` — what exists today vs. what's planned
 
@@ -53,7 +53,7 @@ If `db` is `false` in the health response, Postgres isn't reachable — check `d
 ## 4. Read the roadmap (10 min)
 
 - `tasks/todo.md` for active sprint items
-- `design_doc` sections 12–15 for phased roadmap and near-term enhancements
+- `design_doc.md` sections 12–15 for phased roadmap and near-term enhancements
 - Existing stubs (`app/services/data_ingestion.py`, `app/services/market_repository.py`, `app/services/technicals.py`) mark where the next implementation work lives
 
 ## 5. Write your first failing test (15 min)

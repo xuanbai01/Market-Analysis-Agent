@@ -23,10 +23,11 @@ cd Market-Analysis-Agent
 cp .env.example .env              # dev defaults, no real secrets required
 
 # 3. Database
-docker compose up -d db            # Postgres 15 on :5432, seeded from db/init.sql
+docker compose up -d db            # Postgres 15 on :5432
 
-# 4. Install + run
+# 4. Install + migrate + run
 uv sync                            # install pinned deps (or `pip install -e .`)
+uv run alembic upgrade head        # apply schema + seed NVDA/SPY
 uv run uvicorn app.main:app --reload
 ```
 
@@ -87,7 +88,9 @@ Full detail in [docs/architecture.md](docs/architecture.md) and [design_doc.md](
 │   │   └── models/              # SQLAlchemy models
 │   ├── schemas/                 # Pydantic request/response models
 │   └── services/                # repositories, ingestion, technicals
-├── db/init.sql                  # seed schema (will be replaced by Alembic)
+├── alembic/                     # schema migrations (Alembic, async mode)
+│   ├── env.py
+│   └── versions/                # one file per migration; `alembic upgrade head` applies all
 ├── tests/                       # pytest-asyncio; function-scoped DB with SAVEPOINT rollback
 ├── docs/                        # architecture, security, testing, commands, ADRs, PRD template
 ├── tasks/                       # active sprint (todo.md) + lessons learned

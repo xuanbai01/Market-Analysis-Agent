@@ -34,7 +34,7 @@ The `@imports` below pull in modular docs — one concern per file — so a sing
 - **Working:** `/v1/health`, `/v1/symbols` (GET/POST), `/v1/news` (list + detail).
 - **Stubbed (returns fake data or 501):** `/v1/market/*`, `/v1/analysis`, `/v1/reports/daily/latest`, `/v1/forecasts/{symbol}`.
 - **Ingestion:** [app/services/data_ingestion.py](app/services/data_ingestion.py) is a no-op.
-- **DB:** Postgres via async SQLAlchemy 2.0 + asyncpg. Schema lives in [db/init.sql](db/init.sql); only `symbols` and `news_items` exist.
+- **DB:** Postgres via async SQLAlchemy 2.0 + asyncpg. Schema managed by Alembic — see [alembic/versions/](alembic/versions/). Tables: `symbols`, `news_items`, `candles`.
 - **Infra:** local dev via `docker-compose up`. No Redis, Celery, vector DB, LangChain, or Discord bot yet (all on the roadmap).
 
 When making changes, prefer filling in stubs (market repo, ingestion, technicals) over adding new surface area unless the PRD/roadmap asks for it.

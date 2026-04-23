@@ -40,11 +40,12 @@ A production-grade **Financial Market Analysis Agent** that aggregates real-time
 │   │   └── routers/             # one file per route group
 │   ├── db/
 │   │   ├── session.py           # async engine + sessionmaker
-│   │   └── models/              # SQLAlchemy models (Base, Symbol, NewsItem)
+│   │   └── models/              # SQLAlchemy models (Base, Symbol, NewsItemModel, Candle)
 │   ├── schemas/                 # Pydantic request/response models
 │   └── services/                # business logic + repositories
-├── db/
-│   └── init.sql                 # schema + seed, applied on first Postgres start
+├── alembic/                     # schema migrations (async mode)
+│   ├── env.py                   # reads DATABASE_URL from app.core.settings
+│   └── versions/                # 0001_baseline.py creates all 3 tables + seeds NVDA/SPY
 ├── docs/                        # this directory (PRD, ADRs, testing, etc.)
 ├── tasks/                       # todo.md, lessons.md
 ├── design_doc.md                # long-form system design (read this first)
@@ -69,10 +70,11 @@ FastAPI router  ─▶  services/<domain>_repository.py or <domain>_service.py
 
 | Entity | Fields | Notes |
 |---|---|---|
-| `symbols` | `symbol` (PK, varchar 16), `name` (varchar 128, nullable) | Seeded with NVDA, SPY. |
-| `news_items` | `id` (PK, varchar 64), `ts` (timestamptz), `title`, `url`, `source` | No symbol tagging yet despite the API exposing a `symbols` field. |
+| `symbols` | `symbol` (PK, varchar 16), `name` (varchar 128, nullable) | Seeded with NVDA, SPY in the baseline migration. |
+| `news_items` | `id` (PK, varchar 64), `ts` (timestamptz), `title`, `url`, `source` | Indexed on `ts DESC`. No symbol tagging yet despite the API exposing a `symbols` field. |
+| `candles` | composite PK `(symbol, ts, interval)`; `open`, `high`, `low`, `close` (numeric 18/6), `volume` (bigint) | `symbol` has FK → `symbols.symbol` with `ON DELETE CASCADE`. Indexed on `(symbol, interval, ts DESC)` for fast "latest bar" lookups. Append-only; supersede rather than update on restatement. |
 
-**Not yet modeled** (from design doc): OHLCV candles table, news embeddings, user sessions, query history, portfolio positions, strategy backtests.
+**Not yet modeled** (from design doc): news embeddings, user sessions, query history, portfolio positions, strategy backtests.
 
 ## Routes (current)
 

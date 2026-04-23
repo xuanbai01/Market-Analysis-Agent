@@ -11,7 +11,7 @@ Active sprint for the Market Analysis Agent. Reference: [`design_doc.md`](../des
 - [x] Stand up a `tests/` directory with `conftest.py`, async client fixture, rollback-per-test DB fixture
 - [x] Add `pytest`, `pytest-asyncio`, `ruff` pins to dev deps (`pyproject.toml [tool.uv] dev-dependencies`) and `uv sync`
 - [x] Write tests for `GET /v1/health`, `GET /v1/symbols`, `GET /v1/news` (happy path + 404 + 422)
-- [ ] Wire Alembic for schema migrations and add a `candles` table (ts, symbol, o/h/l/c/v, interval)
+- [x] Wire Alembic for schema migrations and add a `candles` table (ts, symbol, open/high/low/close/volume, interval)
 - [ ] Implement `ingest_market_data` in [app/services/data_ingestion.py](../app/services/data_ingestion.py) with yfinance as the first provider; log service id, input, output shape, latency per [security.md#a09](../docs/security.md#a09)
 - [ ] Replace the fake bar in [app/services/market_repository.py](../app/services/market_repository.py) with a real query against `candles`
 - [ ] Compute RSI / SMA20 / SMA50 / SMA200 in [app/services/technicals.py](../app/services/technicals.py) from recent `candles`
@@ -19,7 +19,6 @@ Active sprint for the Market Analysis Agent. Reference: [`design_doc.md`](../des
 
 ## Up next (cross-cutting)
 
-- [ ] Wire Alembic for schema migrations (replace the raw `db/init.sql` bootstrap)
 - [ ] Add a `news_symbols` join table + symbol tagging so `NewsItemOut.symbols` isn't hardcoded `[]`
 - [ ] Turn on branch protection for `main` and add `ANTHROPIC_API_KEY` as a repo secret for the AI PR review job
 

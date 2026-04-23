@@ -9,8 +9,6 @@ services:
       POSTGRES_DB: marketdb
     ports:
       - "5432:5432"
-    volumes:
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s

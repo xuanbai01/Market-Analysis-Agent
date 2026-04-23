@@ -5,7 +5,7 @@ All commands run from the repo root unless stated otherwise.
 ## Local stack (Docker Compose)
 
 ```bash
-docker compose up -d db          # Postgres 15 on :5432, seeded from db/init.sql
+docker compose up -d db          # Postgres 15 on :5432 (empty; run `alembic upgrade head` next)
 docker compose up --build        # also build + run the FastAPI container on :8000
 docker compose down              # stop everything; add -v to wipe the volume
 ```
@@ -54,12 +54,17 @@ uv run mypy app                  # (once mypy config lands)
 
 ## Database
 
-No migration tool is wired up yet. Schema currently lives in [db/init.sql](../db/init.sql) and is applied on first container start. When we adopt Alembic:
+Schema is managed by Alembic — see [alembic/versions/](../alembic/versions/). A fresh Postgres only has `alembic_version` + the Alembic schema until `alembic upgrade head` runs.
 
 ```bash
-uv run alembic upgrade head                                 # apply
-uv run alembic revision --autogenerate -m "describe change" # new migration
+uv run alembic upgrade head                                 # apply all pending migrations
+uv run alembic current                                      # show current revision
+uv run alembic history                                      # list all migrations
+uv run alembic revision --autogenerate -m "describe change" # generate from model diffs
+uv run alembic downgrade -1                                 # roll back one revision
 ```
+
+After `docker compose up -d db` on a fresh machine, always run `alembic upgrade head` before `uvicorn` — the app expects the schema to exist.
 
 ## Pre-push sanity check
 

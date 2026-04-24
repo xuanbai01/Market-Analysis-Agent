@@ -2,19 +2,19 @@
 # See docs/adr/0002-deployment.md for the rationale behind these choices
 # and docs/deployment.md for the first-time setup + ongoing-ops runbook.
 
-app = "market-analysis-agent"
-primary_region = "iad"          # US East (Ashburn). Pair with a Neon region
-                                # in us-east-2 / us-east-1 for <10ms DB latency.
-kill_signal = "SIGINT"          # uvicorn responds to SIGINT with graceful shutdown
-kill_timeout = "10s"            # give in-flight requests time to drain
+app = 'market-analysis-agent'
+primary_region = 'iad'          # US East (Ashburn). Pair with a Neon region
+                                # in us-east-1 / us-east-2 for <10ms DB latency.
+kill_signal = 'SIGINT'          # uvicorn responds to SIGINT with graceful shutdown
+kill_timeout = '10s'            # give in-flight requests time to drain
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  APP_ENV = "prod"
-  TZ = "UTC"
-  PORT = "8000"
+  APP_ENV = 'prod'
+  PORT = '8000'
+  TZ = 'UTC'
   # DATABASE_URL is set via `flyctl secrets set ...` — never hardcoded here.
 
 [http_service]
@@ -24,31 +24,31 @@ kill_timeout = "10s"            # give in-flight requests time to drain
   # Flip `auto_stop_machines = "off"` and `min_machines_running = 1` if
   # recruiter-grade instant response starts mattering more than the ~$2/mo
   # always-on cost.
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
-  processes = ["app"]
+  processes = ['app']
 
   [http_service.concurrency]
-    type = "requests"
+    type = 'requests'
     hard_limit = 50              # refuse beyond this; triggers autoscale-up
     soft_limit = 40              # signal "consider another machine"
 
   # Health check. Path matches our real DB-probing endpoint so if Postgres
   # is unreachable, Fly marks the machine unhealthy and doesn't route traffic.
   [[http_service.checks]]
-    grace_period = "30s"         # Alembic upgrade + uvicorn boot window
-    interval = "30s"
-    method = "GET"
-    path = "/v1/health"
-    protocol = "http"
-    timeout = "5s"
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '30s'         # alembic upgrade + uvicorn boot window
+    method = 'GET'
+    path = '/v1/health'
+    protocol = 'http'
 
 # 512 MB is comfortable for FastAPI + pandas/numpy (yfinance pulls them in).
 # Shared CPU is fine for this workload — the hot path is external I/O.
 # Monthly cost at always-on: ~$1.94. With auto_stop_machines it'll be
 # pennies until real traffic.
 [[vm]]
-  memory = "512mb"
-  cpu_kind = "shared"
+  memory = '512mb'
+  cpu_kind = 'shared'
   cpus = 1

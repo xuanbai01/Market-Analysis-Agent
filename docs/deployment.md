@@ -7,18 +7,26 @@ Runbook for deploying the Market Analysis Agent to Fly.io with a Neon Postgres b
 ### 1. Create the Neon project (5 min)
 
 1. Sign up at <https://neon.tech> (free tier is fine).
-2. Create a new project. Pick a region near your Fly region — `US East (Ohio)` pairs well with Fly's `iad`.
-3. On the project dashboard, under **Connection details**, copy the **Connection string** (not the direct host, the one already formatted as a URI). It looks like:
+2. Create a new project. Pick a region near your Fly region — `US East (Ohio)` or `US East (N. Virginia)` pair well with Fly's `iad`.
+3. On the project dashboard, under **Connection details**:
+   - Set the endpoint dropdown to **Direct** (not Pooled — see warning below).
+   - Set the role to your `*_owner` user (or whatever you'll connect as).
+   - Copy the **Connection string**. Neon's default copy looks like:
+     ```
+     postgres://USER:PASSWORD@ep-xxxxx.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+     ```
+4. **Three substitutions** turn the libpq-flavoured Neon string into one asyncpg accepts:
+   - Scheme: `postgres://` → `postgresql+asyncpg://`
+   - `sslmode=require` → `ssl=require`
+   - Drop `&channel_binding=require` entirely
+   - Drop any other libpq-only params you see (`gssencmode`, `application_name`, `options`, …) — asyncpg rejects them with `TypeError: connect() got an unexpected keyword argument '<name>'`
+   Final form:
    ```
-   postgres://USER:PASSWORD@ep-xxxxx.us-east-2.aws.neon.tech/neondb?sslmode=require
+   postgresql+asyncpg://USER:PASSWORD@ep-xxxxx.us-east-1.aws.neon.tech/neondb?ssl=require
    ```
-4. **Convert the scheme** from `postgres://` to `postgresql+asyncpg://` for async SQLAlchemy. Final form:
-   ```
-   postgresql+asyncpg://USER:PASSWORD@ep-xxxxx.us-east-2.aws.neon.tech/neondb?sslmode=require
-   ```
-   Hang on to this string — you'll paste it into Fly secrets below.
+   Hang on to this string — you'll paste it into both `.env` (locally) and Fly secrets below.
 
-> **Don't use the `-pooler` endpoint for MVP.** asyncpg + Neon's transaction-mode pooler requires `statement_cache_size=0` on the engine. ADR 0002 calls this out; we default to the direct endpoint until a single Fly machine bumps the connection cap.
+> **Use the Direct endpoint, not the Pooled one, for MVP.** Neon's pooled endpoint is `-pooler.<region>.aws.neon.tech`; the direct endpoint drops the `-pooler` segment. asyncpg + Neon's transaction-mode pooler requires `statement_cache_size=0` on the engine, otherwise concurrent requests hit `prepared statement "__asyncpg_stmt_X__" already exists`. ADR 0002 calls this out; we default to the direct endpoint until a single Fly machine bumps the connection cap.
 
 ### 2. Install the Fly CLI (2 min)
 
@@ -49,8 +57,16 @@ fly launch --no-deploy --copy-config --name market-analysis-agent --region iad
 ### 4. Set secrets (2 min)
 
 ```bash
+# bash/zsh
 fly secrets set \
-  DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@ep-xxxxx.us-east-2.aws.neon.tech/neondb?sslmode=require"
+  DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@ep-xxxxx.us-east-1.aws.neon.tech/neondb?ssl=require"
+```
+
+```powershell
+# PowerShell — note the SINGLE quotes. Double quotes let PowerShell see the
+# `=` inside `ssl=require` as its own delimiter, splitting the URL in half
+# and producing "is not a valid secret name". Single quotes are literal.
+fly secrets set 'DATABASE_URL=postgresql+asyncpg://USER:PASSWORD@ep-xxxxx.us-east-1.aws.neon.tech/neondb?ssl=require'
 ```
 
 `APP_ENV`, `TZ`, and `PORT` are set as plain env vars in `fly.toml`, so you don't need to pass them as secrets.
@@ -149,18 +165,44 @@ If you ever scale past one machine, move the Alembic step out of the container `
 Use the Neon dashboard's SQL editor or connect with `psql`:
 
 ```bash
-psql "postgres://USER:PASSWORD@ep-xxxxx.us-east-2.aws.neon.tech/neondb?sslmode=require"
+psql "postgres://USER:PASSWORD@ep-xxxxx.us-east-1.aws.neon.tech/neondb?sslmode=require"
 ```
 
-(Note: `psql` wants `postgres://`, not `postgresql+asyncpg://` — strip the driver suffix.)
+Note: `psql` wants `postgres://` (libpq) and `sslmode=require` — the *opposite* of asyncpg's `postgresql+asyncpg://` and `ssl=require`. Each driver speaks its own connection-string dialect.
 
 ## Troubleshooting
 
+### `TypeError: connect() got an unexpected keyword argument 'sslmode'`
+
+Your `DATABASE_URL` uses libpq's `sslmode=require` syntax. asyncpg uses `ssl=require`. Edit your `.env` (or `fly secrets set` again) and replace the parameter name. Same TLS, different spelling.
+
+### `TypeError: connect() got an unexpected keyword argument 'channel_binding'` (or `gssencmode`, `application_name`, etc.)
+
+Same family of bug — Neon's default copy-paste string includes libpq-only query params asyncpg doesn't understand. Strip everything from the URL except `?ssl=require`. See step 1 above for the canonical form.
+
+### `fly secrets set` fails with `"... is not a valid secret name"`
+
+PowerShell ate the `=` inside `ssl=require`. Use single quotes around the whole `KEY=VALUE` argument:
+
+```powershell
+fly secrets set 'DATABASE_URL=postgresql+asyncpg://...?ssl=require'
+```
+
+### `POST /v1/market/ingest` returns `200` with `"ingested": 0`
+
+yfinance returned an empty DataFrame. yfinance has been brittle against Yahoo's API for years; if the version pinned in `pyproject.toml` is more than a few months old, bump it. Quick sanity check locally:
+
+```powershell
+uv run python -c "import yfinance as yf; print(len(yf.Ticker('NVDA').history(period='1y')))"
+```
+
+Expect ~250. If you see 0 + a `possibly delisted` message, your pin is stale: `uv add "yfinance>=1.0"` and update the Dockerfile to match.
+
 ### Health check fails immediately after deploy
 
-`fly logs` usually shows the cause. Most common: `DATABASE_URL` is missing or malformed. Check with `fly secrets list`; re-set with `fly secrets set DATABASE_URL=...`.
+`fly logs` usually shows the cause. Most common: `DATABASE_URL` is missing or malformed. Check with `fly secrets list`; re-set with `fly secrets set 'DATABASE_URL=...'` (single quotes).
 
-### "prepared statement \"__asyncpg_stmt_X__\" already exists"
+### `prepared statement "__asyncpg_stmt_X__" already exists`
 
 You set `DATABASE_URL` to Neon's `-pooler` endpoint. Either:
 - Switch to the direct endpoint (drop `-pooler` from the hostname), or

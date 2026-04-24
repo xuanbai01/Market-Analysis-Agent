@@ -17,6 +17,15 @@ Active sprint for the Market Analysis Agent. Reference: [`design_doc.md`](../des
 - [x] Compute RSI / SMA20 / SMA50 / SMA200 in [app/services/technicals.py](../app/services/technicals.py) from recent `candles`
 - [x] Write first ADR: [`docs/adr/0001-stack-choice.md`](../docs/adr/0001-stack-choice.md) (FastAPI + async SQLAlchemy + Postgres)
 
+## Up next (MVP deploy — follow docs/deployment.md)
+
+- [ ] Create Neon project → grab `DATABASE_URL` (convert scheme to `postgresql+asyncpg://`)
+- [ ] `fly launch --no-deploy --copy-config --name market-analysis-agent --region iad`
+- [ ] `fly secrets set DATABASE_URL="..."`
+- [ ] `fly deploy` — verify `/v1/health`, `/v1/symbols`, `/docs`
+- [ ] `fly tokens create deploy --name github-actions --expiry 8760h` → add as `FLY_API_TOKEN` repo secret
+- [ ] Write ADR 0003 if anything about the deploy surprises us vs ADR 0002's predictions
+
 ## Up next (cross-cutting)
 
 - [ ] Add a `news_symbols` join table + symbol tagging so `NewsItemOut.symbols` isn't hardcoded `[]`

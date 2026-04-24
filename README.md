@@ -119,6 +119,12 @@ Every PR runs (see [.github/workflows/ci.yml](.github/workflows/ci.yml)):
 - **Secrets Scan (Gitleaks):** blocks committed secrets.
 - **AI PR Review (Claude):** posts an inline review on the PR.
 
+## Deployment
+
+Target: **Fly.io** for the API, **Neon** for Postgres. Both on free tiers until traffic warrants. Rationale in [ADR 0002](docs/adr/0002-deployment.md); first-time setup and ongoing ops in [docs/deployment.md](docs/deployment.md).
+
+Push-to-deploy via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) — `git push origin main` runs `flyctl deploy --remote-only`. The deployed container runs `alembic upgrade head` before `uvicorn`, so schema migrations apply on every rollout.
+
 ## Contributing
 
 This is a personal learning / portfolio project, but PRs are welcome. If you're opening one:

@@ -1,0 +1,40 @@
+name: Deploy
+
+# Push to `main` → Fly build + deploy. `workflow_dispatch` gives us a
+# manual "redeploy current main" button in the Actions UI.
+#
+# Required repo secret: FLY_API_TOKEN — generate with
+#   fly tokens create deploy --name github-actions --expiry 8760h
+# and add it at Settings → Secrets and variables → Actions.
+
+on:
+  push:
+    branches: ["main"]
+    # Skip deploy on doc-only / CI-config changes. The deploy runs the
+    # Dockerfile build and an Alembic upgrade; there's no point paying
+    # for it on a README typo.
+    paths-ignore:
+      - "docs/**"
+      - "tasks/**"
+      - "*.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/pull_request_template.md"
+  workflow_dispatch:
+
+# Serialize deploys — two concurrent `flyctl deploy` runs would race on
+# the same app.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Fly.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

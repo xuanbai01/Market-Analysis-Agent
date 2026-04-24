@@ -22,6 +22,7 @@ You don't need an ADR for "I picked Postgres because it's the default". You do n
 
 | Number | Title | Status |
 |---|---|---|
-| 0000 | Template (copy me) | n/a |
+| 0000 | [Template (copy me)](0000-template.md) | n/a |
+| 0001 | [FastAPI + async SQLAlchemy + PostgreSQL](0001-stack-choice.md) | Accepted |
 
 <!-- Add rows as you add ADRs. -->

@@ -19,7 +19,7 @@ Active sprint for the Market Analysis Agent.
 
 ### 2.1 Tool registry build-out (one PR per tool)
 
-- [ ] **`fetch_news`** — NewsAPI dev tier + 2 RSS feeds. Reuse `data_ingestion.py` provider-registry pattern. New `news_symbols` join table for symbol tagging via simple keyword match at ingest. Upsert.
+- [x] **`fetch_news`** — NewsAPI dev tier + Yahoo Finance per-ticker RSS. Provider-registry pattern matching `data_ingestion.py`. `news_symbols` join table (Alembic 0002) with composite PK + cascading FKs; symbol tagging via `app.services.symbol_tagger` (cashtag / ticker word-boundary / company-name first token, case-insensitive). Upsert via `ON CONFLICT DO UPDATE`. Provider failures isolated. `POST /v1/news/ingest` accepts optional `{"symbol": ...}`; `GET /v1/news?symbol=` filters via the join.
 - [ ] **`fetch_fundamentals`** — yfinance.info + financials/balance_sheet/cashflow → valuation (P/E, P/S, EV/EBITDA, PEG), quality (ROE, ROIC, gross-margin trend, FCF conversion), capital allocation (buybacks, dividends, SBC dilution as % of revenue), short interest. One tool, one round trip, returns a flat `dict[str, Claim]`.
 - [ ] **`fetch_edgar`** — generic SEC EDGAR filing fetcher. Given `(symbol, form_type, recent_n)` returns metadata + raw text. Cache to disk between requests.
 - [ ] **`parse_filing`** — purpose-built parsers built on `fetch_edgar`:

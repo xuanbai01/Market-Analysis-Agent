@@ -1,16 +1,34 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_session
 from app.schemas.news import NewsItemOut, NewsListResponse
-from app.services.data_ingestion import ingest_news_once
+from app.services.news_ingestion import fetch_news_for_symbol, ingest_news_once
 from app.services.news_repository import get_news_by_id, list_news
 
 router = APIRouter()
 
 
+class NewsIngestRequest(BaseModel):
+    """Optional symbol-scoped ingest. Omit ``symbol`` to fan out across
+    every tracked symbol (slower; rate-limited by NewsAPI's free tier)."""
+
+    symbol: str | None = None
+
+
 @router.post("/news/ingest")
-async def news_ingest(session: AsyncSession = Depends(get_session)):
+async def news_ingest(
+    payload: NewsIngestRequest | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    if payload and payload.symbol:
+        count = await fetch_news_for_symbol(session, payload.symbol)
+        return {
+            "job_id": "local-inline",
+            "ingested": count,
+            "symbol": payload.symbol.upper(),
+        }
     count = await ingest_news_once(session)
     return {"job_id": "local-inline", "ingested": count}
 

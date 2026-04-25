@@ -128,11 +128,6 @@ async def ingest_market_data(
     return len(rows)
 
 
-async def ingest_news_once(session: AsyncSession) -> int:
-    """
-    Story 1 stub — real implementation lands with the news provider work.
-    Kept here so the POST /v1/news/ingest endpoint has something to call.
-    """
-    # TODO: implement NewsAPI / RSS ingest with dedup
-    _ = session  # silence unused-arg lint
-    return 0
+# Note: news ingestion lives in app.services.news_ingestion.
+# Keep market and news ingestion in separate modules — different
+# providers, different DB shapes, different rate limits.

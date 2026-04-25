@@ -13,6 +13,21 @@ class Settings(BaseSettings):
     # for on-demand research. Empty default; the news-ingestion service
     # silently skips the NewsAPI provider when missing rather than 500ing.
     NEWSAPI_KEY: str = ""
+    # SEC EDGAR fair-access compliance. SEC requires every request carry a
+    # User-Agent identifying the client; the policy text is at
+    # https://www.sec.gov/os/accessing-edgar-data. Default points to the
+    # public repo so SEC operators can reach the maintainer if needed.
+    EDGAR_USER_AGENT: str = (
+        "Market Analysis Agent "
+        "(https://github.com/xuanbai01/Market-Analysis-Agent)"
+    )
+    # On-disk cache for SEC filings. Filings are immutable (amendments get
+    # new accession numbers), so the cache never invalidates — write on
+    # miss, read on hit. Override per-test via tmp_path. Fly's filesystem
+    # is ephemeral on auto-stop, so this still wins within a machine's
+    # lifetime; switch to a Fly volume only when cross-restart hit-rate
+    # measurably matters.
+    EDGAR_CACHE_DIR: str = ".edgar_cache"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

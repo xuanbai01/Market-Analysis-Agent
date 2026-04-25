@@ -58,3 +58,6 @@ yarn-error.log*
 # Misc
 *.tmp
 .cache/
+
+# SEC EDGAR disk cache (filings are immutable; safe to recreate on demand)
+.edgar_cache/

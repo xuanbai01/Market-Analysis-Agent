@@ -25,5 +25,6 @@ You don't need an ADR for "I picked Postgres because it's the default". You do n
 | 0000 | [Template (copy me)](0000-template.md) | n/a |
 | 0001 | [FastAPI + async SQLAlchemy + PostgreSQL](0001-stack-choice.md) | Accepted |
 | 0002 | [Deploy to Fly.io, Postgres on Neon](0002-deployment.md) | Accepted |
+| 0003 | [Pivot to AI Equity Research Assistant](0003-pivot-equity-research.md) | Accepted |
 
 <!-- Add rows as you add ADRs. -->

@@ -1,5 +1,91 @@
-# Financial Market Analysis Agent - System Design Document
-## Production-Grade Implementation ($50-80/month Budget)
+# Financial Market Analysis Agent — System Design Document
+
+> **Status: v2 supersedes v1 (April 2026).** The v1 vision below is preserved for historical context and because much of the *infrastructure* it specifies (FastAPI, async SQLAlchemy, Postgres on Neon, Fly.io, RAG via pgvector, $50–80/mo budget) carries forward unchanged. The *product layer* pivoted — see [§0 v2 Scope](#0-v2-scope-april-2026) directly below for what we're actually building, and [ADR 0003](docs/adr/0003-pivot-equity-research.md) for the rationale.
+
+---
+
+## 0. v2 Scope (April 2026)
+
+### What changed
+
+Pivoted from **"real-time multi-agent market analysis platform"** (v1) to **"AI Equity Research Assistant"** (v2):
+
+- **From** scheduled 15-min news firehose, multi-agent-as-architecture, Discord bot, real-time freshness
+- **To** on-demand structured research reports, single agent + tools by default (multi-agent reserved as one optional supervisor mode), free data only, depth over freshness
+
+### v2 product
+
+**Primary entry point:** `POST /v1/research/{symbol}` returning a Pydantic-typed structured report.
+
+Sections (each populated by a tool, citing its source + fetched-at timestamp):
+- **Valuation** — P/E, P/S, EV/EBITDA, PEG vs sector median
+- **Quality** — ROE, ROIC, gross-margin trend, FCF conversion
+- **Capital allocation** — buyback yield, dividend trajectory, SBC dilution as % of revenue
+- **Technicals** — already-built RSI, SMA20/50/200
+- **Recent news synthesis** — last N items, summarized
+- **Earnings analysis** — last quarter beat/miss + transcript synthesis + guidance changes
+- **Peer comparison** — auto-pulled sector peers, 3–4 metrics each
+- **Macro context** — sector-relevant FRED series in one paragraph
+- **Insider activity** — Form 4 cluster summary
+- **Institutional flows** — recent 13F changes from major holders
+- **Risk-factor delta** — what's *new* in the latest 10-K Item 1A vs prior year
+- **Short interest + days-to-cover** — squeeze setup / pessimism gauge
+- **Options-implied move** — implied move on next earnings, IV percentile (when relevant)
+
+### v2 architecture
+
+```
+POST /v1/research/{symbol}
+        │
+        ▼
+   ┌──────────────────────────────────────────────────────┐
+   │  Default mode: single agent + tools (modern pattern) │
+   │  Supervisor mode (opt-in for complex queries):       │
+   │  delegates to Research / Technical / Sentiment /     │
+   │  Earnings specialists                                │
+   └──────────────────────────────────────────────────────┘
+        │
+        ▼
+   Tool registry (each one its own PR):
+     fetch_market ✓        compute_technicals ✓
+     fetch_fundamentals    fetch_news
+     fetch_edgar           parse_filing
+     fetch_earnings        fetch_macro
+     fetch_peers           search_history (pgvector RAG)
+     compute_options
+        │
+        ▼
+   Pydantic-typed structured output → JSON response
+```
+
+### v2 success criteria — non-negotiable
+
+A research-report agent that produces beautifully-formatted hallucinations is worse than no agent. Every Phase 2 PR is gated on:
+
+1. **Citation discipline** — every claim cites its tool call. No free-form text in the structured schema.
+2. **Per-section confidence** (`high | medium | low`) set programmatically based on data freshness and sparsity.
+3. **Eval harness** — ~20 golden questions auto-graded on factuality + structure + latency. Regressions fail CI.
+4. **`last_updated` per data point** so stale data does not masquerade as fresh.
+
+### v2 cost discipline
+
+- **Cost-tier routing** — small model for tool-call planning (Haiku-class), capable model for synthesis (Sonnet-class).
+- **Per-symbol response cache** — same-day requests return cached unless `?refresh=true`.
+- **Hard rate limit** on `/v1/research/*` before any public exposure.
+
+### What v2 explicitly cuts (vs v1 below)
+
+- Real-time / 15-min scheduled ingest → **on-demand or daily only**
+- Discord bot → **deferred indefinitely**
+- Multi-agent as architecture → **demoted to one optional mode**
+- `POST /v1/option-explain` as a top-level endpoint → **folded into the research report's "options context" section**
+- Reddit / r/wallstreetbets ingest → **moved to future scope** (real signal too narrow vs noise for a Phase 2 must-have)
+
+---
+
+## v1 (original) — preserved below for historical context
+
+> Sections 1, 2, 6, and 12 below are partially superseded by §0. Sections 3 (Tech Stack), 4 (Data Pipeline), 5 (RAG), 7 (API Design — adapted), 8 (Performance), 9 (Security), 10 (Deployment), 11 (Monitoring), 13 (Risks), 14 (Success Metrics) carry forward.
 
 ## Executive Summary
 

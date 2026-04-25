@@ -22,7 +22,6 @@ import pytest
 
 from tests.evals.golden import GOLDEN_CASES
 
-
 # Two reasons to skip golden evals:
 #   - no ANTHROPIC_API_KEY → can't call the model at all
 #   - no GOLDEN_CASES yet  → nothing to test

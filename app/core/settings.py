@@ -5,6 +5,10 @@ class Settings(BaseSettings):
     APP_ENV: str = "dev"
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/marketdb"
     TZ: str = "America/New_York"
+    # Anthropic API key. Empty default so the app boots without it locally
+    # (LLM-backed routes will 503 until set); production sets it via Fly
+    # secrets. Never log this — `app.core.observability` redacts by default.
+    ANTHROPIC_API_KEY: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

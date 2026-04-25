@@ -12,9 +12,10 @@ Active sprint for the Market Analysis Agent.
 
 ### 2.0 Foundations (must land first — gate every later PR)
 
-- [ ] **Eval harness skeleton** — `tests/evals/` with ~5 golden questions to start (P/E for AAPL on date X, latest 8-K date for NVDA, etc.) and a rubric scorer (factuality + structure + latency). Runs via `pytest tests/evals/` and on every PR.
-- [ ] **Citation-enforcing structured-output schema** — define `Claim { value, source, fetched_at }` and `ResearchReport { sections: list[Section], confidence: Literal["high","medium","low"], generated_at: datetime }` Pydantic models in `app/schemas/research.py`. Every tool returns `Claim`s; the agent cannot synthesize free text outside the schema.
-- [ ] **LLM client + cost-tier routing** — `app/services/llm.py` with two callables: `triage_call(...)` (small model — Haiku/equivalent, structured output, picks tools) and `synth_call(...)` (capable model — Sonnet/equivalent, structured output, writes the report). Wrapped in `log_external_call`. Add `ANTHROPIC_API_KEY` to Fly secrets + repo `.env.example`.
+- [x] **Eval harness skeleton** — `tests/evals/` with rubric (structure/factuality/latency), `GoldenCase` shape, and rubric unit tests on every PR. Real-LLM golden tests live in `test_golden.py` and skip without `ANTHROPIC_API_KEY`. Cases populate as tools come online.
+- [x] **Citation-enforcing structured-output schema** — `app/schemas/research.py` with `Source { tool, fetched_at, url }`, `Claim { description, value, source }`, `Section { claims, summary, confidence }`, `ResearchReport`. Every numeric fact in `summary` prose must appear in `claims` (rubric-enforced).
+- [x] **LLM client + cost-tier routing** — `app/services/llm.py` with `triage_call` (Haiku 4.5) + `synth_call` (Sonnet 4.6), both forced-schema tool use, both wrapped in `log_external_call`. Prompt caching enabled on system blocks. `ANTHROPIC_API_KEY` added to `.env.example` and `app.core.settings`.
+- [ ] **Set `ANTHROPIC_API_KEY` as a Fly secret** before any tool PR ships: `fly secrets set 'ANTHROPIC_API_KEY=sk-ant-...'`
 
 ### 2.1 Tool registry build-out (one PR per tool)
 

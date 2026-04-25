@@ -15,6 +15,8 @@ dependencies = [
   "alembic==1.13.2",
   # Market data providers
   "yfinance==1.3.0",
+  # LLM provider
+  "anthropic==0.97.0",
 ]
 
 [tool.uv]

@@ -17,6 +17,8 @@ dependencies = [
   "yfinance==1.3.0",
   # LLM provider
   "anthropic==0.97.0",
+  # News providers
+  "feedparser==6.0.12",
 ]
 
 [tool.uv]

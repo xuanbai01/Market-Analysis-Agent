@@ -16,6 +16,7 @@ from app.core.settings import settings
 # --autogenerate sees the full schema.
 from app.db.models import candles as _candles  # noqa: F401
 from app.db.models import news as _news  # noqa: F401
+from app.db.models import news_symbols as _news_symbols  # noqa: F401
 from app.db.models import symbols as _symbols  # noqa: F401
 from app.db.models.base import Base
 

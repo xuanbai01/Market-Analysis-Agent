@@ -18,7 +18,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
         python-dotenv==1.0.1 \
         httpx==0.27.2 \
         yfinance==1.3.0 \
-        anthropic==0.97.0
+        anthropic==0.97.0 \
+        feedparser==6.0.12
 
 # Copy the app code + migrations.
 COPY app ./app

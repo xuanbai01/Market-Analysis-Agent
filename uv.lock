@@ -678,7 +678,7 @@ requires-dist = [
     { name = "anthropic", specifier = "==0.97.0" },
     { name = "asyncpg", specifier = "==0.29.0" },
     { name = "fastapi", specifier = "==0.115.0" },
-    { name = "feedparser", specifier = ">=6.0,<7" },
+    { name = "feedparser", specifier = "==6.0.12" },
     { name = "httpx", specifier = "==0.27.2" },
     { name = "pydantic", specifier = "==2.9.2" },
     { name = "pydantic-settings", specifier = "==2.6.1" },

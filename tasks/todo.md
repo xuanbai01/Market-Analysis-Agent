@@ -19,9 +19,10 @@ Active sprint for the Market Analysis Agent.
 
 ### 2.1 Tool registry build-out (one PR per tool)
 
-- [x] **`fetch_news`** — NewsAPI dev tier + Yahoo Finance per-ticker RSS. Provider-registry pattern matching `data_ingestion.py`. `news_symbols` join table (Alembic 0002) with composite PK + cascading FKs; symbol tagging via `app.services.symbol_tagger` (cashtag / ticker word-boundary / company-name first token, case-insensitive). Upsert via `ON CONFLICT DO UPDATE`. Provider failures isolated. `POST /v1/news/ingest` accepts optional `{"symbol": ...}`; `GET /v1/news?symbol=` filters via the join.
-- [ ] **`fetch_fundamentals`** — yfinance.info + financials/balance_sheet/cashflow → valuation (P/E, P/S, EV/EBITDA, PEG), quality (ROE, ROIC, gross-margin trend, FCF conversion), capital allocation (buybacks, dividends, SBC dilution as % of revenue), short interest. One tool, one round trip, returns a flat `dict[str, Claim]`.
-- [ ] **`fetch_edgar`** — generic SEC EDGAR filing fetcher. Given `(symbol, form_type, recent_n)` returns metadata + raw text. Cache to disk between requests.
+- [x] **`fetch_news`** (PR #13) — NewsAPI dev tier + Yahoo Finance per-ticker RSS. Provider-registry pattern matching `data_ingestion.py`. `news_symbols` join table (Alembic 0002) with composite PK + cascading FKs; symbol tagging via `app.services.symbol_tagger` (cashtag / ticker word-boundary / company-name first token, case-insensitive). Upsert via `ON CONFLICT DO UPDATE`. Provider failures isolated. `POST /v1/news/ingest` accepts optional `{"symbol": ...}`; `GET /v1/news?symbol=` filters via the join.
+- [x] **`fetch_fundamentals`** (PR #14) — yfinance.info + financials/cashflow → valuation (P/E, P/S, EV/EBITDA, PEG), quality (ROE, gross/profit margin, gross-margin YoY trend), capital allocation (dividend yield, buyback yield, SBC % revenue), short interest, market cap. One tool, one round trip, flat `dict[str, Claim]`. ROIC + multi-year history + sector-relative versions deferred to follow-ups.
+- [x] **`fetch_peers`** (PR #15) — curated `_TICKER_TO_SECTOR` map (~50 large-caps × 10 sectors) with `yfinance.info["industry"]` fallback. Returns sector + 3–5 peers + 4-metric comparison matrix (trailing P/E, P/S, EV/EBITDA, gross margin) per peer + per-metric medians. Per-peer `.info` failures isolated; single `log_external_call` wraps the whole fan-out.
+- [ ] **`fetch_edgar`** — generic SEC EDGAR filing fetcher. Given `(symbol, form_type, recent_n)` returns metadata + raw text. Cache to disk between requests. Polite-crawl rate limits (SEC requires User-Agent + ≤10 req/sec).
 - [ ] **`parse_filing`** — purpose-built parsers built on `fetch_edgar`:
     - [ ] `form_4` — insider transactions, cluster summary
     - [ ] `13f` — institutional ownership changes (top holders + recent deltas)
@@ -29,7 +30,6 @@ Active sprint for the Market Analysis Agent.
     - [ ] `10k_business` — Item 1 summary (moat / segments / customer concentration / geo mix all fall out)
 - [ ] **`fetch_earnings`** — last 4 quarters: 8-K earnings releases (free, structured), transcript scrape (Motley Fool / Investor.com — fragile, gracefully fails), consensus EPS from `yfinance.Ticker.earnings_estimate`, beat/miss + magnitude.
 - [ ] **`fetch_macro`** — FRED API. Sector→series map (semis: DGS10 + ISM PMI; banks: yield curve + NIM; consumer: retail sales + UMCSENT; etc.). Return one paragraph of context, cited.
-- [ ] **`fetch_peers`** — hybrid: hardcoded top-N for major sectors + `yfinance.Ticker.info["sector"]` fallback. Returns 3–5 peers + a comparison matrix on 3–4 metrics.
 - [ ] **`search_history`** — pgvector RAG over our stored news + filings. Time-weighted (`semantic × exp(-λ × hours_since)`). Adds the `vector` extension to Neon and an `embeddings` column to relevant tables via Alembic.
 - [ ] **`compute_options`** — yfinance `option_chain` for nearest expiry → IV percentile (snapshot daily, build the history ourselves), term structure, implied move from at-the-money straddle. Daily snapshot job needed; Alembic migration for `option_iv_history` table.
 

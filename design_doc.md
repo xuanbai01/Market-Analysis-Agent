@@ -1,527 +1,212 @@
-# Financial Market Analysis Agent — System Design Document
+# Financial Market Analysis Agent — Design
 
-> **Status: v2 supersedes v1 (April 2026).** The v1 vision below is preserved for historical context and because much of the *infrastructure* it specifies (FastAPI, async SQLAlchemy, Postgres on Neon, Fly.io, RAG via pgvector, $50–80/mo budget) carries forward unchanged. The *product layer* pivoted — see [§0 v2 Scope](#0-v2-scope-april-2026) directly below for what we're actually building, and [ADR 0003](docs/adr/0003-pivot-equity-research.md) for the rationale.
+> **Status:** v2 — **AI Equity Research Assistant**. Live at <https://market-analysis-agent.fly.dev>. Pivoted from the v1 "real-time multi-agent platform" vision in [ADR 0003](docs/adr/0003-pivot-equity-research.md). This doc is the single source of truth for current scope, architecture, and roadmap. The v1 design lives in git history.
 
----
+## Goal
 
-## 0. v2 Scope (April 2026)
+Given a US-equity ticker, return a fully-cited structured research report — valuation, quality, capital allocation, technicals, news, earnings, peers, macro, insider/institutional flows, risk-factor delta. The agent calls free-data tools, the schema enforces citations, the eval harness gates regressions.
 
-### What changed
+Two real workflows the system serves:
 
-Pivoted from **"real-time multi-agent market analysis platform"** (v1) to **"AI Equity Research Assistant"** (v2):
+1. **Long-term value diligence** — main-account research before adding or trimming a position.
+2. **Options education with quantitative grounding** — IV percentile, implied move, term structure (when `compute_options` lands).
 
-- **From** scheduled 15-min news firehose, multi-agent-as-architecture, Discord bot, real-time freshness
-- **To** on-demand structured research reports, single agent + tools by default (multi-agent reserved as one optional supervisor mode), free data only, depth over freshness
+Cost target: **$5–15 / month all-in** (free-tier infra + free data + cost-tier-routed LLM). The original $50–80/mo design budget is wide enough to absorb a Sonnet-only synth tier without breaking.
 
-### v2 product
+## Scope
 
-**Primary entry point:** `POST /v1/research/{symbol}` returning a Pydantic-typed structured report.
+**In:** structured equity research reports on US-listed equities. On-demand per request, cached same-day. Reuses Phase 1 ingest for OHLCV + news + technicals.
 
-Sections (each populated by a tool, citing its source + fetched-at timestamp):
-- **Valuation** — P/E, P/S, EV/EBITDA, PEG vs sector median
-- **Quality** — ROE, ROIC, gross-margin trend, FCF conversion
-- **Capital allocation** — buyback yield, dividend trajectory, SBC dilution as % of revenue
-- **Technicals** — already-built RSI, SMA20/50/200
-- **Recent news synthesis** — last N items, summarized
-- **Earnings analysis** — last quarter beat/miss + transcript synthesis + guidance changes
-- **Peer comparison** — auto-pulled sector peers, 3–4 metrics each
-- **Macro context** — sector-relevant FRED series in one paragraph
-- **Insider activity** — Form 4 cluster summary
-- **Institutional flows** — recent 13F changes from major holders
-- **Risk-factor delta** — what's *new* in the latest 10-K Item 1A vs prior year
-- **Short interest + days-to-cover** — squeeze setup / pessimism gauge
-- **Options-implied move** — implied move on next earnings, IV percentile (when relevant)
+**Out:** real-time feeds, intraday alerts, scheduled news firehose, Discord client, options copilots without IV data, multi-symbol portfolio orchestration, Reddit sentiment (revisit later if a query genuinely benefits).
 
-### v2 architecture
+## Architecture (current)
 
 ```
-POST /v1/research/{symbol}
-        │
-        ▼
-   ┌──────────────────────────────────────────────────────┐
-   │  Default mode: single agent + tools (modern pattern) │
-   │  Supervisor mode (opt-in for complex queries):       │
-   │  delegates to Research / Technical / Sentiment /     │
-   │  Earnings specialists                                │
-   └──────────────────────────────────────────────────────┘
-        │
-        ▼
-   Tool registry (each one its own PR):
-     fetch_market ✓        compute_technicals ✓
-     fetch_fundamentals    fetch_news
-     fetch_edgar           parse_filing
-     fetch_earnings        fetch_macro
-     fetch_peers           search_history (pgvector RAG)
-     compute_options
-        │
-        ▼
-   Pydantic-typed structured output → JSON response
+HTTP request
+    │
+    ▼
+┌─────────────────────────────────────────────────────┐
+│ FastAPI 0.115 — async SQLAlchemy 2.0 + asyncpg      │
+│ RFC 7807 errors, log_external_call observability    │
+└─────────────────────────────────────────────────────┘
+    │
+    ├──── Existing endpoints ────────────────────────────
+    │   /v1/health, /v1/symbols, /v1/news (list/ingest),
+    │   /v1/market/{symbol} (latest + history + ingest)
+    │
+    └──── Planned: POST /v1/research/{symbol} ───────────
+              │
+              ▼
+          ┌──────────────────────────────────────────┐
+          │ Default mode: single agent + tools       │
+          │  ─ Triage (Haiku 4.5) picks tools        │
+          │  ─ Synth (Sonnet 4.6) composes report    │
+          │  Both forced-tool with Pydantic schemas  │
+          │                                          │
+          │ Optional supervisor mode for complex     │
+          │ queries — kept as one mode, not the      │
+          │ architecture.                            │
+          └──────────────────────────────────────────┘
+              │
+              ▼
+          Tool registry (see below)
+              │
+              ▼
+          Pydantic ResearchReport → JSON
 ```
 
-### v2 success criteria — non-negotiable
+Layering: `router → service → repository / external`. Business logic never lives in routers. See [docs/architecture.md](docs/architecture.md) for the per-file map.
+
+### Storage
+
+- **Postgres on Neon** (managed, autosuspend). Schema in `alembic/versions/`. Tables: `symbols`, `news_items`, `news_symbols` (join), `candles`. Vector extension + `embeddings` columns added in a future Alembic migration when `search_history` lands.
+- **No Redis, no Celery, no scheduled cron.** Re-introduced only if a real workload forces it.
+
+### Hosting
 
-A research-report agent that produces beautifully-formatted hallucinations is worse than no agent. Every Phase 2 PR is gated on:
+- **Fly.io** — shared-CPU 256 MB machine, primary region IAD, auto-stop. CI deploys on push to `main`. See [ADR 0002](docs/adr/0002-deployment.md) for why Fly + Neon over Railway + Supabase.
 
-1. **Citation discipline** — every claim cites its tool call. No free-form text in the structured schema.
-2. **Per-section confidence** (`high | medium | low`) set programmatically based on data freshness and sparsity.
-3. **Eval harness** — ~20 golden questions auto-graded on factuality + structure + latency. Regressions fail CI.
-4. **`last_updated` per data point** so stale data does not masquerade as fresh.
+## Tech stack (current pins)
 
-### v2 cost discipline
-
-- **Cost-tier routing** — small model for tool-call planning (Haiku-class), capable model for synthesis (Sonnet-class).
-- **Per-symbol response cache** — same-day requests return cached unless `?refresh=true`.
-- **Hard rate limit** on `/v1/research/*` before any public exposure.
-
-### What v2 explicitly cuts (vs v1 below)
-
-- Real-time / 15-min scheduled ingest → **on-demand or daily only**
-- Discord bot → **deferred indefinitely**
-- Multi-agent as architecture → **demoted to one optional mode**
-- `POST /v1/option-explain` as a top-level endpoint → **folded into the research report's "options context" section**
-- Reddit / r/wallstreetbets ingest → **moved to future scope** (real signal too narrow vs noise for a Phase 2 must-have)
-
----
-
-## v1 (original) — preserved below for historical context
-
-> Sections 1, 2, 6, and 12 below are partially superseded by §0. Sections 3 (Tech Stack), 4 (Data Pipeline), 5 (RAG), 7 (API Design — adapted), 8 (Performance), 9 (Security), 10 (Deployment), 11 (Monitoring), 13 (Risks), 14 (Success Metrics) carry forward.
-
-## Executive Summary
-
-A production-ready financial analysis agent that aggregates real-time market data, news, and sentiment analysis to provide comprehensive market insights and trading strategies. The system uses RAG architecture with time-weighted relevance scoring and multi-agent orchestration, designed to showcase industry-standard practices while maintaining reasonable costs.
-
-## 1. Project Scope
-
-### 1.1 Coverage
-- **Indices**: S&P 500 (SPY), NASDAQ (QQQ), Dow Jones (DIA)
-- **Individual Stocks**: Magnificent 7 (AAPL, MSFT, GOOGL, AMZN, NVDA, META, TSLA)
-- **Commodities**: Gold (GLD), Silver (SLV), Oil (USO)
-- **Extended Coverage**: Top 20 S&P 500 holdings for broader analysis
-
-### 1.2 Core Capabilities
-- Real-time market data analysis with technical indicators
-- Multi-source news aggregation with sentiment analysis
-- Investment bank target price tracking
-- Time-weighted information retrieval using RAG
-- Virtual portfolio tracking with strategy backtesting
-- Multi-agent system for specialized analysis tasks
-
-### 1.3 Budget Constraint
-Target monthly operational cost: $50-80 for production deployment
-
-## 2. System Architecture
-
-### 2.1 High-Level Architecture
-
-```
-Client Layer (Discord Bot, REST API, Web Dashboard)
-                    ↓
-API Gateway (Nginx + Rate Limiting)
-                    ↓
-Agent Orchestration Layer (LangChain + Celery)
-                    ↓
-        ┌───────────┼───────────┐
-Market Agent   News Agent   Strategy Agent
-        └───────────┼───────────┘
-                    ↓
-RAG Infrastructure (Vector Store + Cache)
-                    ↓
-Data Pipeline (Market Data + News Sources)
-                    ↓
-PostgreSQL Database (Supabase Managed)
-```
-
-### 2.2 Component Breakdown
-
-**Client Applications**
-- Discord bot for interactive queries
-- RESTful API for programmatic access
-- Web dashboard for visualization (optional)
-
-**Agent System**
-- Market Analysis Agent: Technical analysis, price movements, peer comparison
-- News Synthesis Agent: Aggregation, sentiment analysis, source attribution
-- Strategy Agent: Trading strategy generation, risk assessment, backtesting
-
-**Data Infrastructure**
-- Primary storage: PostgreSQL with TimescaleDB for time-series data
-- Vector database: Pinecone (free tier) or Qdrant (self-hosted)
-- Cache layer: Redis for hot data and rate limiting
-- Message queue: Celery with Redis backend
-
-**Data Sources**
-- Market data: Polygon.io (free tier) with yfinance fallback
-- News: NewsAPI, Benzinga, RSS feeds from major outlets
-- Alternative data: Reddit API for retail sentiment, StockTwits
-
-## 3. Technical Stack
-
-### 3.1 Core Technologies
-
-**Backend**
-- Language: Python 3.11
-- Web Framework: FastAPI
-- Task Queue: Celery + Redis
-- ORM: SQLAlchemy 2.0
-- Agent Framework: LangChain
-
-**LLM Strategy**
-- Primary: OpenAI GPT-4o-mini ($0.15/1M tokens)
-- Embeddings: text-embedding-3-small ($0.02/1M tokens)
-- Fallback: Anthropic Claude Haiku ($0.25/1M tokens)
-- Alternative: Groq (free tier with Mixtral)
-
-**Infrastructure**
-- Hosting: Railway.com (~$20/month for always-on services)
-- Database: Supabase PostgreSQL ($25/month)
-- Container: Docker + Docker Compose
-- CI/CD: GitHub Actions
-- Monitoring: BetterStack free tier
-
-### 3.2 Cost Breakdown
-
-| Service | Monthly Cost | Purpose |
-|---------|-------------|---------|
-| Railway Hosting | $20 | API + Worker services |
-| Supabase Database | $25 | Managed PostgreSQL |
-| OpenAI API | $15 | ~50M tokens/month |
-| Embeddings | $2 | ~10M tokens |
-| Pinecone | $0 | Free tier (100K vectors) |
-| Redis (Upstash) | $0 | Free tier (10K commands/day) |
-| Data Sources | $0 | Free tiers only |
-| **Total** | **$62** | Within budget |
-
-## 4. Data Pipeline Design
-
-### 4.1 Data Collection Strategy
-
-**Market Data Pipeline**
-- Primary source: Polygon.io (5 requests/minute free tier)
-- Fallback: yfinance (unlimited but less reliable)
-- Update frequency: 1-minute during market hours, 5-minute after hours
-- Data points: OHLCV, volume profile, technical indicators
-
-**News Aggregation Pipeline**
-- NewsAPI: 500 requests/day (developer tier)
-- Benzinga: Free tier for basic news
-- RSS Feeds: Bloomberg, Reuters, MarketWatch, SeekingAlpha
-- Reddit: Top posts from r/stocks, r/investing, r/wallstreetbets
-- Update frequency: 15-minute intervals
-
-**Deduplication Strategy**
-- MinHash algorithm for near-duplicate detection
-- Similarity threshold: 80% for article deduplication
-- Source priority ranking for conflicting information
-
-### 4.2 Data Storage Architecture
-
-**Hot Data (Redis)**
-- Last 24 hours of market data
-- Recent news articles
-- Active user sessions
-- Rate limiting counters
-
-**Warm Data (PostgreSQL)**
-- 30 days of historical data
-- Processed news with embeddings
-- Analysis cache
-- User query history
-
-**Cold Data (S3/Archive)**
-- Data older than 30 days
-- Compressed and archived
-- Accessible for backtesting
-
-## 5. RAG System Design
-
-### 5.1 Vector Database Architecture
-
-**Embedding Strategy**
-- Model: OpenAI text-embedding-3-small
-- Dimension: 1536
-- Chunking: 512 tokens with 50 token overlap
-- Metadata: timestamp, source, symbols, sentiment
-
-**Time-Weighted Retrieval**
-- Base retrieval: Semantic similarity search
-- Time decay function: exponential with λ=0.01
-- Formula: `relevance_score = semantic_similarity × e^(-λ × hours_since_publication)`
-- Re-ranking: Combine similarity and recency scores
-
-### 5.2 Context Management
-
-**Context Window Optimization**
-- Maximum context: 8000 tokens
-- Priority system: Recent > Relevant > Diverse
-- Dynamic truncation based on query complexity
-- Source attribution for all retrieved information
-
-## 6. Agent System Architecture
-
-### 6.1 Agent Roles and Responsibilities
-
-**Market Analysis Agent**
-- Real-time price monitoring
-- Technical indicator calculation
-- Pattern recognition
-- Peer comparison analysis
-- Support/resistance identification
-
-**News Synthesis Agent**
-- Multi-source aggregation
-- Sentiment extraction
-- Event detection
-- Source credibility scoring
-- Trend identification
-
-**Strategy Agent**
-- Strategy generation based on market conditions
-- Risk assessment and position sizing
-- Backtesting against historical data
-- Entry/exit point recommendations
-- Portfolio optimization
-
-### 6.2 Agent Orchestration
-
-**Communication Protocol**
-- Request routing based on query intent
-- Parallel execution when possible
-- Result aggregation and synthesis
-- Fallback handling for agent failures
-
-**Quality Control**
-- Confidence scoring for all outputs
-- Source citation requirements
-- Consistency checking across agents
-- Human-readable explanations
-
-## 7. API Design
-
-### 7.1 Core Endpoints
-
-**Analysis Endpoints**
-- `POST /api/v1/analyze` - Main analysis endpoint
-- `GET /api/v1/market/{symbol}` - Real-time market data
-- `GET /api/v1/news/{symbol}` - Latest news for symbol
-- `POST /api/v1/strategy/generate` - Strategy generation
-- `GET /api/v1/portfolio/performance` - Portfolio metrics
-
-**WebSocket Streams**
-- `/ws/stream/{symbol}` - Real-time price updates
-- `/ws/news` - Live news feed
-- `/ws/alerts` - Custom alert notifications
-
-### 7.2 Rate Limiting Strategy
-
-**External API Limits**
-- Polygon.io: 5 requests/minute
-- NewsAPI: 500 requests/day
-- Reddit: 60 requests/minute
-- OpenAI: 3500 requests/minute (GPT-4o-mini)
-
-**Internal Rate Limiting**
-- Per-user: 100 requests/hour
-- Per-endpoint: Varies by computational cost
-- Caching: 1-minute TTL for market data, 15-minute for news
-
-## 8. Performance Requirements
-
-### 8.1 Latency Targets
-- Market data retrieval: < 500ms
-- News aggregation: < 2 seconds
-- Full analysis query: < 5 seconds
-- Strategy generation: < 10 seconds
-
-### 8.2 Scalability Metrics
-- Concurrent users: 100+ 
-- Daily requests: 10,000+
-- Data retention: 30 days hot/warm, unlimited cold
-- Vector storage: 100K documents (free tier limit)
-
-### 8.3 Reliability Requirements
-- Uptime target: 99.5%
-- Graceful degradation on service failures
-- Automatic failover for data sources
-- Data consistency across agents
-
-## 9. Security Considerations
-
-### 9.1 Data Security
-- API keys in environment variables
-- TLS for all external communications
-- Input sanitization and validation
-- SQL injection prevention via ORM
-
-### 9.2 Access Control
-- JWT-based authentication
-- Role-based permissions
-- API key rotation policy
-- Audit logging for all operations
-
-### 9.3 Compliance
-- No storage of material non-public information
-- Clear disclaimers on investment advice
-- GDPR-compliant data retention
-- Rate limiting to prevent abuse
-
-## 10. Deployment Strategy
-
-### 10.1 Infrastructure as Code
-- Docker containers for all services
-- Docker Compose for local development
-- Railway.com for production deployment
-- GitHub Actions for CI/CD
-
-### 10.2 Deployment Pipeline
-1. Code push triggers GitHub Actions
-2. Run test suite (unit, integration)
-3. Build Docker images
-4. Deploy to Railway staging
-5. Run smoke tests
-6. Promote to production
-7. Monitor deployment metrics
-
-### 10.3 Rollback Strategy
-- Blue-green deployment on Railway
-- Automatic rollback on health check failures
-- Database migration versioning
-- Configuration rollback capability
-
-## 11. Monitoring and Observability
-
-### 11.1 Metrics to Track
-- API response times (p50, p95, p99)
-- LLM token usage and costs
-- Cache hit rates
-- Error rates by component
-- Data pipeline latency
-- User query patterns
-
-### 11.2 Alerting Thresholds
-- API latency > 5 seconds
-- Error rate > 1%
-- LLM costs > $1/day
-- Database storage > 80%
-- Failed data updates > 3 consecutive
-
-## 12. Development Roadmap
-
-### Phase 1: Core Infrastructure (Week 1-2)
-- Set up development environment
-- Configure PostgreSQL and Redis
-- Implement basic data pipeline
-- Create simple RAG system
-- Deploy MVP to Railway
-
-### Phase 2: Agent Development (Week 3-4)
-- Build market analysis agent
-- Implement news aggregation
-- Create strategy generator
-- Add time-weighted retrieval
-- Integrate LangChain orchestration
-
-### Phase 3: Production Features (Week 5-6)
-- Add comprehensive error handling
-- Implement caching strategy
-- Set up monitoring and alerting
-- Create API documentation
-- Build Discord bot interface
-
-### Phase 4: Optimization (Week 7-8)
-- Performance tuning
-- Cost optimization
-- Load testing
-- Security audit
-- Final documentation
-
-## 13. Risk Analysis
-
-### 13.1 Technical Risks
-- **API Rate Limits**: Mitigated by caching and fallback sources
-- **LLM Costs**: Controlled by token limits and model selection
-- **Data Quality**: Addressed by multi-source validation
-- **Latency Issues**: Solved by aggressive caching
-
-### 13.2 Operational Risks
-- **Service Downtime**: Mitigated by health checks and auto-restart
-- **Data Loss**: Prevented by regular backups
-- **Cost Overruns**: Monitored daily with automatic alerts
-- **Security Breach**: Minimized by following security best practices
-
-## 14. Success Metrics
-
-### 14.1 Technical Metrics
-- Sub-2 second average response time
-- 99.5% uptime
-- < $80/month operational cost
-- 90%+ cache hit rate
-
-### 14.2 Functional Metrics
-- 95% accuracy in sentiment analysis
-- 80% relevance in news retrieval
-- Successful backtesting of strategies
-- Positive user feedback on analysis quality
-
-## 15. Future Enhancements
-
-### 15.1 Near-term (Post-launch)
-- Add more technical indicators
-- Expand to crypto markets
-- Implement options chain analysis
-- Add earnings calendar integration
-
-### 15.2 Long-term Vision
-- Custom fine-tuned models
-- Real-time websocket data feeds
-- Multi-user portfolio management
-- Mobile application
-- Institutional data integration
-
-## Appendix A: Technology Justifications
-
-**Why FastAPI over Flask/Django**
-- Native async support for better performance
-- Automatic API documentation
-- Type hints and validation
-- Modern Python features
-
-**Why GPT-4o-mini over GPT-4**
-- 200x cheaper while maintaining 90% quality
-- Faster response times
-- Sufficient for financial analysis tasks
-- Budget-friendly for portfolio project
-
-**Why Railway over AWS/GCP**
-- Simple deployment for Python apps
-- Predictable pricing
-- Built-in CI/CD
-- No DevOps complexity
-
-**Why Pinecone over self-hosted**
-- Generous free tier (100K vectors)
-- Managed service reliability
-- Production-grade performance
-- No maintenance overhead
-
-## Appendix B: Estimated Resume Impact
-
-**Quantifiable Achievements**
-- Processes 10K+ requests daily with 99.5% uptime
-- Achieves sub-2 second response time using intelligent caching
-- Reduces analysis costs by 85% through model optimization
-- Implements time-weighted RAG with 94% relevance accuracy
-
-**Technical Skills Demonstrated**
-- Production system design and deployment
-- Multi-agent AI orchestration
-- Real-time data pipeline architecture
-- Cost optimization and monitoring
-- Modern Python development practices
-
-**Interview Talking Points**
-- Trade-offs in system design decisions
-- Handling rate limits and API failures
-- Time-decay algorithm for information relevance
-- Cost vs. performance optimization strategies
-- Production deployment considerations
+| Layer | Tech | Status |
+|---|---|---|
+| Language | Python 3.11 | ✅ |
+| Web framework | FastAPI 0.115 | ✅ |
+| ORM | SQLAlchemy 2.0 (async) + asyncpg | ✅ |
+| Migrations | Alembic 1.13 | ✅ |
+| Validation | Pydantic 2.9 | ✅ |
+| LLM provider | Anthropic SDK 0.97 (Claude Haiku 4.5 + Sonnet 4.6) | ✅ |
+| Market data | yfinance 1.3 | ✅ |
+| News | NewsAPI dev tier + Yahoo per-ticker RSS (feedparser 6.0) | ✅ |
+| Database | PostgreSQL 15 (Docker locally; Neon in prod) | ✅ |
+| Hosting | Fly.io | ✅ |
+| Tests | pytest 8.3 + pytest-asyncio | ✅ |
+| Lint | ruff 0.6 | ✅ |
+| CI | GitHub Actions (backend tests + Gitleaks + Claude PR review) | ✅ |
+| Vector store (planned) | pgvector on Neon | 🟡 |
+| Embeddings (planned) | TBD when `search_history` lands | 🟡 |
+
+**Deliberately not used:** OpenAI, LangChain, Celery, Redis, Pinecone. ADR 0003 dropped them; the single-agent-with-tools pattern doesn't need them. Re-introduce only with a documented decision.
+
+## Data model
+
+| Table | Columns | Indexes | Notes |
+|---|---|---|---|
+| `symbols` | `symbol` (PK), `name` | — | Watchlist. Seeded with NVDA, SPY. |
+| `candles` | `(symbol, ts, interval)` PK; OHLCV; FK on `symbol` | `(symbol, interval, ts DESC)` | Append-only; supersede on restate. |
+| `news_items` | `id` (`sha256(url)`) PK, `ts`, `title`, `url`, `source` | `ts DESC` | Hash-id collapses duplicates across providers. |
+| `news_symbols` | `(news_id, symbol)` composite PK; cascading FKs | `(symbol, news_id)` | Tags articles to one or more symbols. |
+
+**Planned:** `embeddings` column on `news_items` and a `filings` table when `search_history` lands; `option_iv_history` when `compute_options` lands; `research_reports` for the same-day response cache.
+
+## Tool registry
+
+Tools live in `app/services/<tool>.py`. Each follows the same shape: provider-registry pattern, sync provider wrapped in `asyncio.to_thread`, every external call wrapped in `log_external_call`. Tests mock at the provider registry, not at the network.
+
+| Tool | Source | Status |
+|---|---|---|
+| `fetch_market` | yfinance OHLCV | ✅ |
+| `compute_technicals` | in-memory (RSI, SMA20/50/200) | ✅ |
+| `fetch_news` | NewsAPI dev tier + Yahoo RSS, symbol tagging | ✅ (PR #13) |
+| `fetch_fundamentals` | yfinance .info + financials/cashflow | ✅ (PR #14) |
+| `fetch_peers` | curated sector map + yfinance.industry fallback | ✅ (PR #15) |
+| `fetch_edgar` | SEC EDGAR generic filing fetcher | next |
+| `parse_filing` | Form 4 / 13F / 10-K Item 1A diff / 10-K Item 1 | depends on `fetch_edgar` |
+| `fetch_earnings` | yfinance + transcript scrape | |
+| `fetch_macro` | FRED API + sector→series map | |
+| `search_history` | pgvector RAG over stored news + filings | |
+| `compute_options` | yfinance option_chain → IV percentile, implied move | needs daily snapshot job |
+
+Active sprint tracking: [tasks/todo.md](tasks/todo.md).
+
+## LLM strategy
+
+- **Cost-tier routing.** Triage (Claude Haiku 4.5) picks tools; synth (Claude Sonnet 4.6) composes the report. See [app/services/llm.py](app/services/llm.py). Saves ~60–80% of token cost vs always running on Sonnet, to be re-measured after the agent endpoint ships and documented in a follow-up ADR.
+- **Forced-tool pattern with Pydantic schemas.** The model is forced to populate a single `submit_response` tool whose `input_schema` is the Pydantic JSON schema. Output is either a parseable `tool_use` block or an SDK exception — no JSON-string parsing, no free-form prose path.
+- **Prompt caching.** System blocks carry `cache_control: ephemeral`. Identical system prompts across calls hit the prefix cache. Cache effectiveness logged in observability output (`cache_read_input_tokens`).
+- **No user input is interpolated into prompts.** Fields are Pydantic-typed slots; the symbol comes from the URL path (validated), tool outputs are structured (validated). See [docs/security.md](docs/security.md) A03.
+
+## Anti-hallucination disciplines
+
+Non-negotiable. Every Phase 2 PR is gated on these.
+
+1. **Citation discipline.** [`app/schemas/research.py`](app/schemas/research.py) makes citations the *only* path. `Source` is frozen (`tool, fetched_at, url, detail`); `Claim` carries `value + source`; `Section` has `claims: list[Claim] + summary: str`. Free-form text exists only inside `summary`, and the eval rubric checks every number in `summary` is also in `claims`.
+2. **Per-section confidence** (`high|medium|low`), set programmatically by the agent based on data freshness + sparsity. Never set by the LLM directly.
+3. **Eval harness.** [`tests/evals/`](tests/evals/) runs rubric unit tests on every PR (free, no LLM). Real-LLM golden tests in `test_golden.py` skip without `ANTHROPIC_API_KEY` so they don't run on every PR; can be triggered locally or on a separate cost-aware CI lane.
+4. **`last_updated` per data point.** Every `Claim.source.fetched_at` is the wall time the upstream call returned, not when the report was generated. `Section.last_updated` is the max across its claims.
+
+## API surface
+
+| Group | Routes | Status |
+|---|---|---|
+| Health | `GET /v1/health` | ✅ |
+| Symbols | `GET /v1/symbols`, `POST /v1/symbols` | ✅ |
+| News | `GET /v1/news`, `GET /v1/news/{id}`, `POST /v1/news/ingest` | ✅ |
+| Market | `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history`, `POST /v1/market/{symbol}/ingest` | ✅ |
+| Research | `POST /v1/research/{symbol}` | planned (Phase 2.2) |
+| Analysis / Reports / Forecasts | placeholders | return 501 |
+
+Errors are RFC 7807 problem+json via [`app/core/errors.py`](app/core/errors.py).
+
+## Cost model
+
+| Item | Monthly | Notes |
+|---|---|---|
+| Fly.io shared-CPU 256MB | $0–5 | Auto-stop machines; idle cost $0 |
+| Neon free tier | $0 | 0.5 GB storage, autosuspend |
+| Anthropic API | $1–10 | Cost-tier routed; cached system prompts. Scales with research-report volume. |
+| NewsAPI dev tier | $0 | 100 req/day. Yahoo RSS fills the gap. |
+| **Estimated total** | **$5–15** | Well inside the $50–80 design budget |
+
+Hard rate limit on `/v1/research/*` lands before public exposure to bound LLM cost.
+
+## Security
+
+Active mitigations for OWASP Top 10 in [docs/security.md](docs/security.md). The two non-negotiables:
+
+- **A09 observability.** Every external call (LLM, market, news, FRED, EDGAR) logged with service id, input/output shape, latency, timestamp, outcome via `log_external_call`.
+- **A03 injection.** No user input in SQL strings (SQLAlchemy 2.0 typed `select()`). No user input in LLM prompts (typed Pydantic slots only).
+
+Auth, real rate limiting, and per-user cost caps land only when the project has real users — not a Phase 2 concern.
+
+## Roadmap
+
+**Phase 1 — Core infrastructure (done).** FastAPI scaffold, async DB stack, Alembic, yfinance ingest, RSI + SMA technicals, observability, RFC 7807, deploy to Fly + Neon, CI with Gitleaks + Claude PR review.
+
+**Phase 2 — Equity research assistant (in progress).**
+
+- 2.0 Foundations ✅ — research schemas, LLM client, eval harness skeleton.
+- 2.1 Tool registry — 5/11 done. Next: `fetch_edgar`. See [tasks/todo.md](tasks/todo.md).
+- 2.2 Agent + `POST /v1/research/{symbol}` — planned after enough tools land to compose a useful report (likely after `fetch_edgar` + `parse_filing` + `fetch_macro`).
+- 2.3 Optional supervisor mode — only if eval shows multi-agent gives a factuality / structure win over single-agent. Cut otherwise.
+
+**Phase 3+ (future).** pgvector RAG (`search_history`), options daily snapshots (`compute_options`), small web frontend, auth + per-user cost caps, Reddit sentiment (only if a recurring query justifies it).
+
+## Risks
+
+| Risk | Mitigation |
+|---|---|
+| EDGAR / transcript scrapers break | Tools fail gracefully; agent surfaces "data unavailable" rather than fabricating. |
+| LLM cost overruns | Cost-tier routing, prompt caching, per-symbol response cache, hard rate limit before public exposure. |
+| Free-data sparsity | Per-section confidence + `last_updated`; eval harness catches regressions in factuality. |
+| yfinance schema drift | Defensive lookups (`_safe_loc`); missing fields become None claims with a stable shape. |
+| Eval coverage gaps | Add golden cases as tools land; rubric scores both structure and factuality. |
+
+## ADR index
+
+- [ADR 0001](docs/adr/0001-stack-choice.md) — FastAPI + async SQLAlchemy + PostgreSQL
+- [ADR 0002](docs/adr/0002-deployment.md) — Fly.io + Neon
+- [ADR 0003](docs/adr/0003-pivot-equity-research.md) — Pivot to AI Equity Research Assistant
+
+## Resume framing
+
+What this project demonstrates, with backing in the codebase:
+
+| Skill | Backed by |
+|---|---|
+| Production system design | Live deploy, RFC 7807 errors, observability, CI, migrations, deploy pipeline |
+| Modern AI patterns (2026) | Single agent + tools, structured outputs, eval harness, cost-tier routing, prompt caching |
+| Anti-hallucination engineering | Citation-enforcing schema, per-section confidence, factuality rubric, `last_updated` invariant |
+| Cost-aware engineering | Free-tier infra + free data + Haiku triage / Sonnet synth split, ~$5–15/mo all-in |
+| Test discipline | TDD on services + agents, mocked providers, separate eval harness, 80%+ coverage on `app/services/` |
+| Tradeoff articulation | ADRs 0001–0003 capture the *why* behind every load-bearing choice |

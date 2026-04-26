@@ -50,6 +50,7 @@ from typing import Any
 
 from app.core.observability import log_external_call
 from app.schemas.research import Claim, ClaimValue, Source
+from app.services.sectors import SECTOR_PEERS, resolve_sector
 
 # ── Comparison contract ───────────────────────────────────────────────
 # Four metrics, picked for cross-peer comparability. Keep this lean —
@@ -77,78 +78,20 @@ _DESCRIPTIONS: dict[str, str] = {
     "gross_margin": "Gross margin",
 }
 
-# ── Sector resolution ─────────────────────────────────────────────────
-# Curated peer sets keyed by our internal sector id. Names are short
-# and descriptive; the synth call may quote them. Add aggressively as
-# requested coverage grows — this is just a starting set of ~10 sectors
-# covering the most common large-cap research targets.
-_SECTOR_PEERS: dict[str, list[str]] = {
-    "semiconductors": ["NVDA", "AMD", "INTC", "AVGO", "QCOM", "TSM", "MU"],
-    "megacap_tech": ["MSFT", "GOOGL", "META", "AMZN", "AAPL", "ORCL"],
-    "cloud_saas": ["SNOW", "NET", "DDOG", "MDB", "CRWD", "ZS", "OKTA"],
-    "banks": ["JPM", "BAC", "WFC", "C", "GS", "MS"],
-    "ecommerce_retail": ["AMZN", "SHOP", "EBAY", "ETSY", "MELI"],
-    "streaming_media": ["NFLX", "DIS", "ROKU", "SPOT"],
-    "auto_ev": ["TSLA", "F", "GM", "RIVN", "LCID"],
-    "pharma": ["PFE", "JNJ", "MRK", "ABBV", "LLY"],
-    "oil_gas": ["XOM", "CVX", "COP", "OXY", "EOG"],
-    "consumer_staples": ["PG", "KO", "PEP", "COST", "WMT"],
-}
-
-# Reverse-index from each ticker to the sector that lists it. A ticker
-# that appears in multiple sectors (e.g. AMZN) gets the first
-# enumeration order — for AMZN that's ``megacap_tech``, which is the
-# more common framing for valuation comparison than ``ecommerce_retail``.
-_TICKER_TO_SECTOR: dict[str, str] = {}
-for _sector, _tickers in _SECTOR_PEERS.items():
-    for _t in _tickers:
-        _TICKER_TO_SECTOR.setdefault(_t, _sector)
-
-# Map yfinance ``info["industry"]`` strings to our sector ids. yfinance
-# uses Yahoo's industry taxonomy which is fairly stable. When a ticker
-# is outside our curated map, this is the second-tier lookup.
-_INDUSTRY_TO_SECTOR: dict[str, str] = {
-    "Semiconductors": "semiconductors",
-    "Semiconductor Equipment & Materials": "semiconductors",
-    "Software—Infrastructure": "cloud_saas",
-    "Software—Application": "cloud_saas",
-    "Banks—Diversified": "banks",
-    "Banks—Regional": "banks",
-    "Capital Markets": "banks",
-    "Internet Retail": "ecommerce_retail",
-    "Specialty Retail": "ecommerce_retail",
-    "Entertainment": "streaming_media",
-    "Auto Manufacturers": "auto_ev",
-    "Drug Manufacturers—General": "pharma",
-    "Drug Manufacturers—Specialty & Generic": "pharma",
-    "Biotechnology": "pharma",
-    "Oil & Gas Integrated": "oil_gas",
-    "Oil & Gas E&P": "oil_gas",
-    "Household & Personal Products": "consumer_staples",
-    "Beverages—Non-Alcoholic": "consumer_staples",
-    "Discount Stores": "consumer_staples",
-}
-
+# Sector resolution lives in ``app.services.sectors`` — peers and macro
+# both need it. ``resolve_sector`` and the underlying maps are imported
+# at the top of this file.
 
 # Provider returns the resolved sector + peer list + per-peer metrics.
 # Sync — yfinance is blocking; the async entry point hands it to to_thread.
 PeersProvider = Callable[[str], dict[str, Any]]
 
 
-def _resolve_sector(symbol: str, industry: str | None) -> str | None:
-    """Curated map first; yfinance industry fallback second; else None."""
-    if symbol in _TICKER_TO_SECTOR:
-        return _TICKER_TO_SECTOR[symbol]
-    if industry and industry in _INDUSTRY_TO_SECTOR:
-        return _INDUSTRY_TO_SECTOR[industry]
-    return None
-
-
 def _select_peers(symbol: str, sector: str | None) -> list[str]:
     """Peers from sector list, primary excluded, capped at 5 for response size."""
     if sector is None:
         return []
-    return [p for p in _SECTOR_PEERS[sector] if p != symbol][:5]
+    return [p for p in SECTOR_PEERS[sector] if p != symbol][:5]
 
 
 def _fetch_peer_info(symbol: str) -> dict[str, ClaimValue | None]:
@@ -174,7 +117,7 @@ def _fetch_yfinance_peers(symbol: str) -> dict[str, Any]:
         getattr(yfinance.Ticker(symbol), "info", {}) or {}
     )
     industry = primary_info.get("industry")
-    sector = _resolve_sector(symbol, industry)
+    sector = resolve_sector(symbol, industry)
     peers = _select_peers(symbol, sector)
 
     metrics: dict[str, dict[str, ClaimValue | None]] = {}

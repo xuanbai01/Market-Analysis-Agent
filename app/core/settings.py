@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # lifetime; switch to a Fly volume only when cross-restart hit-rate
     # measurably matters.
     EDGAR_CACHE_DIR: str = ".edgar_cache"
+    # FRED API key (https://fred.stlouisfed.org/docs/api/api_key.html).
+    # Free tier is 120 req/min, plenty for on-demand research. Optional —
+    # when missing, fetch_macro silently emits metadata claims (sector,
+    # series_list) with None-valued data claims rather than 500ing.
+    # Mirrors the NEWSAPI_KEY graceful-degradation pattern.
+    FRED_API_KEY: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

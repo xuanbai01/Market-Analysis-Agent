@@ -73,23 +73,28 @@ from app.core.settings import settings
 from app.schemas.edgar import EdgarFiling
 
 # ── Form-type allowlist ───────────────────────────────────────────────
-# Forms the parsers understand. 13F is *not* here on purpose — see the
-# module docstring. Add new forms only in lock-step with parser support.
+# Forms the parsers understand. 13F-HR is filed by *institutions* about
+# their portfolio holdings (not by the company being researched), so
+# callers fetching 13Fs must pass ``cik=`` directly — the ticker→CIK
+# lookup wouldn't find an institution. See holdings_13f for the caller.
 SUPPORTED_FORM_TYPES: frozenset[str] = frozenset(
     {
-        "10-K",   # annual report
-        "10-Q",   # quarterly report
-        "8-K",    # current events / earnings release
-        "4",      # insider transactions (Form 4)
+        "10-K",     # annual report
+        "10-Q",     # quarterly report
+        "8-K",      # current events / earnings release
+        "4",        # insider transactions (Form 4)
+        "13F-HR",   # institutional holdings (cik= required, not symbol)
     }
 )
 
 
-# Provider signature: (symbol, form_type, recent_n, include_text) -> filings.
-# Sync — the production provider uses httpx (which is sync by default
-# when called as ``httpx.get``); the async entry point hands it to
-# ``asyncio.to_thread`` so the event loop stays free.
-EdgarProvider = Callable[[str, str, int, bool], list[EdgarFiling]]
+# Provider signature: (symbol, form_type, recent_n, include_text, cik) ->
+# filings. ``cik`` is optional: when non-None, the provider should skip
+# its ticker→CIK lookup and use the provided CIK directly. Sync — the
+# production provider uses httpx (which is sync by default when called
+# as ``httpx.get``); the async entry point hands it to ``asyncio.to_thread``
+# so the event loop stays free.
+EdgarProvider = Callable[[str, str, int, bool, str | None], list[EdgarFiling]]
 
 
 # ── Cache helpers ─────────────────────────────────────────────────────
@@ -195,10 +200,20 @@ def _resolve_cik(symbol: str) -> str:
 
 
 def _fetch_edgar_sec(
-    symbol: str, form_type: str, recent_n: int, include_text: bool
+    symbol: str,
+    form_type: str,
+    recent_n: int,
+    include_text: bool,
+    cik: str | None = None,
 ) -> list[EdgarFiling]:
-    """Production provider: ticker → CIK → submissions JSON → recent N filings."""
-    cik = _resolve_cik(symbol)
+    """Production provider: ticker → CIK → submissions JSON → recent N filings.
+
+    When ``cik`` is provided, the ticker→CIK lookup is skipped and the
+    provided CIK is used directly. holdings_13f relies on this because
+    institution filers don't have tickers in ``company_tickers.json``.
+    """
+    if cik is None:
+        cik = _resolve_cik(symbol)
     submissions = _sec_get(
         f"https://data.sec.gov/submissions/CIK{cik}.json"
     ).json()
@@ -275,6 +290,7 @@ async def fetch_edgar(
     recent_n: int = 1,
     include_text: bool = False,
     provider: str = "sec",
+    cik: str | None = None,
 ) -> list[EdgarFiling]:
     """
     Fetch the ``recent_n`` most recent ``form_type`` filings for ``symbol``.
@@ -284,6 +300,11 @@ async def fetch_edgar(
     the cached subset. ``include_text=True`` populates
     ``EdgarFiling.primary_doc_text`` (much larger response, only ask
     for it when ``parse_filing`` actually needs the text).
+
+    ``cik`` bypasses the ticker→CIK lookup. Required for institution
+    filings (13F-HR), where the filer is an asset manager that doesn't
+    appear in SEC's company_tickers.json. ``symbol`` is still required
+    as a stable label for ``EdgarFiling.symbol``.
     """
     if form_type not in SUPPORTED_FORM_TYPES:
         raise ValueError(
@@ -322,7 +343,7 @@ async def fetch_edgar(
         # Cache satisfied the request entirely → skip the provider.
         if cache_hits < recent_n:
             provider_filings = await asyncio.to_thread(
-                fetch, target, form_type, recent_n, include_text
+                fetch, target, form_type, recent_n, include_text, cik
             )
             for f in provider_filings:
                 _write_filing_to_cache(root, f)

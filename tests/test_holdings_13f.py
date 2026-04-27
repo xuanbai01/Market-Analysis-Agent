@@ -26,7 +26,6 @@ from app.services.holdings_13f import (
     parse_13f_holdings,
 )
 
-
 # ── XML fixtures ──────────────────────────────────────────────────────
 
 

@@ -30,7 +30,6 @@ from app.services.ten_k import (
     extract_10k_risks,
 )
 
-
 # ── HTML fixtures ─────────────────────────────────────────────────────
 
 

@@ -19,6 +19,9 @@ dependencies = [
   "anthropic==0.97.0",
   # News providers
   "feedparser==6.0.12",
+  # 10-K HTML parser (Item 1 / Item 1A extraction). Picked over lxml
+  # because real 10-K HTML is messy and BeautifulSoup tolerates it.
+  "beautifulsoup4==4.14.3",
 ]
 
 [tool.uv]

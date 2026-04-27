@@ -84,7 +84,7 @@ async def test_returns_filings_from_provider(
     monkeypatch.setitem(
         PROVIDERS,
         "fake",
-        lambda _sym, _form, _n, _txt: filings,
+        lambda _sym, _form, _n, _txt, _cik=None: filings,
     )
 
     result = await fetch_edgar(
@@ -197,7 +197,13 @@ async def test_include_text_flag_passed_to_provider(
 ) -> None:
     seen: list[bool] = []
 
-    def _capture(_sym: str, _form: str, _n: int, include_text: bool) -> list[EdgarFiling]:
+    def _capture(
+        _sym: str,
+        _form: str,
+        _n: int,
+        include_text: bool,
+        _cik: str | None = None,
+    ) -> list[EdgarFiling]:
         seen.append(include_text)
         return []
 
@@ -395,3 +401,78 @@ async def test_cik_zero_padded_in_provider_filings(
             primary_doc_url="https://www.sec.gov/foo",
             size_bytes=1,
         )
+
+
+# ── cik= bypass for institution filings (added with 2.1.4c) ──────────
+
+
+async def test_cik_kwarg_passed_to_provider(
+    monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
+) -> None:
+    """When ``cik=`` is provided, it's threaded through to the provider.
+
+    Used by holdings_13f to fetch institution filings without going
+    through the ticker→CIK lookup (institutions don't have tickers).
+    """
+    seen_cik: list[str | None] = []
+
+    def _capture(
+        _sym: str,
+        _form: str,
+        _n: int,
+        _txt: bool,
+        cik: str | None = None,
+    ) -> list[EdgarFiling]:
+        seen_cik.append(cik)
+        return []
+
+    monkeypatch.setitem(PROVIDERS, "fake", _capture)
+
+    await fetch_edgar(
+        "BRK_13F",
+        form_type="13F-HR",
+        recent_n=1,
+        provider="fake",
+        cik="0001067983",
+    )
+
+    assert seen_cik == ["0001067983"]
+
+
+async def test_13f_hr_is_supported_form_type(
+    monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
+) -> None:
+    monkeypatch.setitem(PROVIDERS, "fake", lambda *_a, **_kw: [])
+
+    # Should not raise — 13F-HR is a supported form type for institution filings.
+    result = await fetch_edgar(
+        "BRK_13F",
+        form_type="13F-HR",
+        recent_n=1,
+        provider="fake",
+        cik="0001067983",
+    )
+    assert result == []
+
+
+async def test_cik_kwarg_default_none_preserves_existing_behavior(
+    monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
+) -> None:
+    """Calls without cik= still work — kwargs is optional."""
+    seen_cik: list[str | None] = []
+
+    def _capture(
+        _sym: str,
+        _form: str,
+        _n: int,
+        _txt: bool,
+        cik: str | None = None,
+    ) -> list[EdgarFiling]:
+        seen_cik.append(cik)
+        return []
+
+    monkeypatch.setitem(PROVIDERS, "fake", _capture)
+
+    await fetch_edgar("AAPL", form_type="10-K", recent_n=1, provider="fake")
+
+    assert seen_cik == [None]

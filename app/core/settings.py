@@ -13,14 +13,21 @@ class Settings(BaseSettings):
     # for on-demand research. Empty default; the news-ingestion service
     # silently skips the NewsAPI provider when missing rather than 500ing.
     NEWSAPI_KEY: str = ""
-    # SEC EDGAR fair-access compliance. SEC requires every request carry a
-    # User-Agent identifying the client; the policy text is at
-    # https://www.sec.gov/os/accessing-edgar-data. Default points to the
-    # public repo so SEC operators can reach the maintainer if needed.
-    EDGAR_USER_AGENT: str = (
-        "Market Analysis Agent "
-        "(https://github.com/xuanbai01/Market-Analysis-Agent)"
-    )
+    # SEC EDGAR fair-access compliance. SEC's policy
+    # (https://www.sec.gov/os/accessing-edgar-data) requires every request
+    # to carry a ``User-Agent`` declaring NAME + EMAIL. SEC's edge layer
+    # rejects UAs that lack an email-shaped token (HTTP 403) and also
+    # blocks several "obviously non-deliverable" domains including
+    # ``users.noreply.github.com``.
+    #
+    # The default below uses an ``example.com`` placeholder that satisfies
+    # SEC's parser and lets a fresh clone exercise EDGAR locally. It is
+    # NOT spec-compliant — ``example.com`` is RFC 2606 reserved and
+    # unmonitored. **Production deployments MUST override via the
+    # ``EDGAR_USER_AGENT`` env var with a monitored address**, otherwise
+    # SEC has no way to reach the operator if the client misbehaves and
+    # may revoke access.
+    EDGAR_USER_AGENT: str = "Market Analysis Agent admin@example.com"
     # On-disk cache for SEC filings. Filings are immutable (amendments get
     # new accession numbers), so the cache never invalidates — write on
     # miss, read on hit. Override per-test via tmp_path. Fly's filesystem

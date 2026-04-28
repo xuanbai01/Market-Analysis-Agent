@@ -22,12 +22,16 @@ from typing import Any
 import pytest
 
 from app.schemas.edgar import EdgarFiling
-from app.schemas.ten_k import Extracted10KSection
+from app.schemas.ten_k import Extracted10KSection, Risk10KDiff
 from app.services import ten_k as ten_k_module
 from app.services.ten_k import (
     _extract_section,
+    _extract_section_paragraphs,
+    _flatten_html_to_paragraphs,
+    _paragraph_diff,
     extract_10k_business,
     extract_10k_risks,
+    extract_10k_risks_diff,
 )
 
 # ── HTML fixtures ─────────────────────────────────────────────────────
@@ -481,3 +485,322 @@ async def test_fetch_edgar_exception_propagates(
     records = [r for r in caplog.records if r.name == "app.external"]
     assert len(records) == 1
     assert records[0].outcome == "error"
+
+
+# ── Risk10KDiff: paragraph-aware extractor + mechanical diff ──────────
+#
+# The diff tool answers "what's new in Item 1A this year vs last" without
+# asking the LLM to compare two ~50KB texts (the failure mode the citation
+# schema exists to prevent). It works by splitting each year's Item 1A
+# into paragraphs, then bucketing each paragraph as added/removed/kept
+# via a fuzzy similarity threshold so cosmetic edits ("we" → "the
+# Company") don't get falsely flagged as new risks.
+
+# Paragraphs that show up identically in both years.
+_FILLER_PARA_1 = (
+    "The Company faces intense competition in all segments, including from "
+    "competitors with greater financial, operational, or marketing "
+    "resources, and increased competition could materially impact margins, "
+    "demand, and overall results of operations and financial condition."
+)
+_FILLER_PARA_2 = (
+    "Our supply chain is concentrated in a small number of contract "
+    "manufacturers, primarily in Asia, and any disruption to that "
+    "concentration could constrain output or increase component costs in "
+    "ways that materially harm gross margins and product availability."
+)
+# Reworded version of _FILLER_PARA_2 — same risk, slightly different prose.
+# At similarity >= 0.6 this should bucket as "kept" rather than added/removed.
+_FILLER_PARA_2_REWORDED = (
+    "Our supply chain remains concentrated in a small number of contract "
+    "manufacturers, principally in Asia, and disruption to that "
+    "concentration could constrain output or raise component costs in ways "
+    "that materially harm gross margins and product availability."
+)
+_NEW_PARA_AI = (
+    "Cybersecurity threats specifically targeting AI training pipelines "
+    "and model weights emerged this year as a new and rapidly evolving "
+    "category of risk for the Company, including state-sponsored actors "
+    "seeking access to proprietary model architectures."
+)
+_REMOVED_PARA_CLIMATE = (
+    "Climate change and physical risks may disrupt manufacturing in "
+    "coastal regions where the Company has key suppliers, including "
+    "potential impacts from severe weather events, sea-level rise, and "
+    "regional water scarcity affecting semiconductor fabrication."
+)
+
+
+def _wrap_risks_html(paragraphs: list[str]) -> str:
+    """Wrap paragraphs as a 10-K with Item 1A bracketed by Item 2."""
+    body = "\n".join(f"<p>{p}</p>" for p in paragraphs)
+    return _wrap_html(f"""
+        <h1>Item 1A. Risk Factors</h1>
+        {body}
+        <h1>Item 2. Properties</h1>
+        <p>None.</p>
+    """)
+
+
+# ── _flatten_html_to_paragraphs ────────────────────────────────────────
+
+
+def test_flatten_html_to_paragraphs_preserves_block_structure() -> None:
+    html = "<html><body><p>First para.</p><p>Second para.</p></body></html>"
+    assert _flatten_html_to_paragraphs(html) == ["First para.", "Second para."]
+
+
+def test_flatten_html_to_paragraphs_drops_empty_blocks() -> None:
+    html = "<html><body><p>First.</p><p>   </p><p>Last.</p></body></html>"
+    assert _flatten_html_to_paragraphs(html) == ["First.", "Last."]
+
+
+def test_flatten_html_to_paragraphs_normalizes_internal_whitespace() -> None:
+    html = "<html><body><p>Multiple  \n  spaces\tinside.</p></body></html>"
+    assert _flatten_html_to_paragraphs(html) == ["Multiple spaces inside."]
+
+
+def test_flatten_html_to_paragraphs_handles_div_and_li() -> None:
+    """Real 10-Ks use <div> and <li> as block containers, not just <p>."""
+    html = (
+        "<html><body>"
+        "<div>Block A.</div>"
+        "<ul><li>Item one.</li><li>Item two.</li></ul>"
+        "</body></html>"
+    )
+    paras = _flatten_html_to_paragraphs(html)
+    assert "Block A." in paras
+    assert "Item one." in paras
+    assert "Item two." in paras
+
+
+# ── _extract_section_paragraphs ────────────────────────────────────────
+
+
+def test_extract_section_paragraphs_returns_list_of_paragraphs() -> None:
+    html = _wrap_risks_html([_FILLER_PARA_1, _FILLER_PARA_2, _NEW_PARA_AI])
+    paras = _extract_section_paragraphs(html, section_id="Item 1A")
+    assert paras is not None
+    # Three content paragraphs go in; the heading paragraphs are excluded.
+    assert len(paras) == 3
+    assert any("intense competition" in p for p in paras)
+    assert any("AI training" in p for p in paras)
+    # Item 2 content shouldn't bleed in.
+    assert not any("None." in p and len(p) < 20 for p in paras)
+
+
+def test_extract_section_paragraphs_returns_none_when_section_missing() -> None:
+    assert _extract_section_paragraphs(
+        _html_with_only_item_2(), section_id="Item 1A"
+    ) is None
+
+
+def test_extract_section_paragraphs_returns_none_when_below_threshold() -> None:
+    """TOC-only HTML matches anchors but content is too short."""
+    assert _extract_section_paragraphs(
+        _html_toc_only_below_threshold(), section_id="Item 1A"
+    ) is None
+
+
+# ── _paragraph_diff ────────────────────────────────────────────────────
+
+
+def test_paragraph_diff_identifies_added_and_removed() -> None:
+    prior = [_FILLER_PARA_1, _FILLER_PARA_2, _REMOVED_PARA_CLIMATE]
+    current = [_FILLER_PARA_1, _FILLER_PARA_2, _NEW_PARA_AI]
+    added, removed, kept = _paragraph_diff(current, prior)
+
+    assert added == [_NEW_PARA_AI]
+    assert removed == [_REMOVED_PARA_CLIMATE]
+    assert kept == 2
+
+
+def test_paragraph_diff_treats_cosmetic_edit_as_kept() -> None:
+    """Slightly reworded paragraph >= 0.6 similarity is kept, not flagged."""
+    prior = [_FILLER_PARA_2]
+    current = [_FILLER_PARA_2_REWORDED]
+    added, removed, kept = _paragraph_diff(current, prior)
+
+    assert added == []
+    assert removed == []
+    assert kept == 1
+
+
+def test_paragraph_diff_preserves_input_order() -> None:
+    """Added paragraphs appear in their order in `current`; removed in `prior`."""
+    prior = ["Old A only.", "Shared paragraph that appears identically.", "Old B only."]
+    current = [
+        "New X only.",
+        "Shared paragraph that appears identically.",
+        "New Y only.",
+    ]
+    added, removed, _ = _paragraph_diff(current, prior)
+
+    assert added == ["New X only.", "New Y only."]
+    assert removed == ["Old A only.", "Old B only."]
+
+
+def test_paragraph_diff_handles_empty_inputs() -> None:
+    assert _paragraph_diff([], []) == ([], [], 0)
+
+    added, removed, kept = _paragraph_diff(["new only"], [])
+    assert added == ["new only"]
+    assert removed == []
+    assert kept == 0
+
+    added, removed, kept = _paragraph_diff([], ["dropped only"])
+    assert added == []
+    assert removed == ["dropped only"]
+    assert kept == 0
+
+
+# ── extract_10k_risks_diff (fetch_edgar mocked) ────────────────────────
+
+
+async def test_extract_10k_risks_diff_returns_full_diff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current_html = _wrap_risks_html([_FILLER_PARA_1, _FILLER_PARA_2, _NEW_PARA_AI])
+    prior_html = _wrap_risks_html(
+        [_FILLER_PARA_1, _FILLER_PARA_2_REWORDED, _REMOVED_PARA_CLIMATE]
+    )
+    current = _mk_filing(
+        accession="0000320193-24-000123",
+        filed_at=datetime(2024, 11, 1, tzinfo=UTC),
+        primary_doc_text=current_html,
+    )
+    prior = _mk_filing(
+        accession="0000320193-23-000110",
+        filed_at=datetime(2023, 11, 3, tzinfo=UTC),
+        primary_doc_text=prior_html,
+    )
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+
+    result = await extract_10k_risks_diff("AAPL")
+
+    assert isinstance(result, Risk10KDiff)
+    assert result.symbol == "AAPL"
+    assert result.current.accession == current.accession
+    assert result.prior.accession == prior.accession
+    assert result.current.section_id == "Item 1A"
+    assert result.prior.section_id == "Item 1A"
+
+    # The AI paragraph is genuinely new; the climate paragraph is dropped.
+    assert any("AI training" in p for p in result.added_paragraphs)
+    assert any("Climate change" in p for p in result.removed_paragraphs)
+
+    # FILLER_PARA_1 is identical → kept; FILLER_PARA_2 reworded → kept.
+    assert result.kept_paragraph_count == 2
+
+    # Computed delta matches the section char counts.
+    assert result.char_delta == result.current.char_count - result.prior.char_count
+
+
+async def test_extract_10k_risks_diff_uppercases_symbol(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[dict[str, Any]] = []
+
+    async def _capture(symbol: str, **kw: Any) -> list[EdgarFiling]:
+        seen.append({"symbol": symbol, **kw})
+        return []
+
+    monkeypatch.setattr(ten_k_module, "fetch_edgar", _capture)
+
+    await extract_10k_risks_diff("aapl")
+    assert seen and seen[0]["symbol"] == "AAPL"
+    # Diff should ask for two filings in one round trip.
+    assert seen[0]["recent_n"] == 2
+    assert seen[0]["form_type"] == "10-K"
+    assert seen[0]["include_text"] is True
+
+
+async def test_extract_10k_risks_diff_returns_none_when_only_one_filing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    only_one = _mk_filing(primary_doc_text=_html_with_item_1_and_1a())
+    _patch_fetch_edgar(monkeypatch, [only_one])
+
+    assert await extract_10k_risks_diff("AAPL") is None
+
+
+async def test_extract_10k_risks_diff_returns_none_when_no_filings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_fetch_edgar(monkeypatch, [])
+    assert await extract_10k_risks_diff("AAPL") is None
+
+
+async def test_extract_10k_risks_diff_returns_none_when_extraction_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both filings present, but neither has matchable Item 1A anchors."""
+    weird_html = _wrap_html("<p>This document contains no Item headings.</p>" * 20)
+    current = _mk_filing(
+        accession="0000320193-24-000123", primary_doc_text=weird_html
+    )
+    prior = _mk_filing(
+        accession="0000320193-23-000110",
+        filed_at=datetime(2023, 11, 3, tzinfo=UTC),
+        primary_doc_text=weird_html,
+    )
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+
+    assert await extract_10k_risks_diff("AAPL") is None
+
+
+async def test_extract_10k_risks_diff_logs_external_call(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    current_html = _wrap_risks_html([_FILLER_PARA_1, _FILLER_PARA_2, _NEW_PARA_AI])
+    prior_html = _wrap_risks_html(
+        [_FILLER_PARA_1, _FILLER_PARA_2_REWORDED, _REMOVED_PARA_CLIMATE]
+    )
+    current = _mk_filing(
+        accession="0000320193-24-000123",
+        filed_at=datetime(2024, 11, 1, tzinfo=UTC),
+        primary_doc_text=current_html,
+    )
+    prior = _mk_filing(
+        accession="0000320193-23-000110",
+        filed_at=datetime(2023, 11, 3, tzinfo=UTC),
+        primary_doc_text=prior_html,
+    )
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+
+    with caplog.at_level(logging.INFO, logger="app.external"):
+        await extract_10k_risks_diff("AAPL")
+
+    records = [
+        r for r in caplog.records
+        if r.name == "app.external" and r.service_id == "sec.ten_k_risks_diff"
+    ]
+    assert len(records) == 1
+    r = records[0]
+    assert r.input_summary == {"symbol": "AAPL", "edgar_provider": "sec"}
+    assert r.output_summary["available"] is True
+    assert r.output_summary["added_count"] >= 1
+    assert r.output_summary["removed_count"] >= 1
+    assert r.output_summary["kept_count"] == 2
+    assert r.outcome == "ok"
+
+
+async def test_extract_10k_risks_diff_logs_unavailable_when_only_one_filing(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    only_one = _mk_filing(primary_doc_text=_html_with_item_1_and_1a())
+    _patch_fetch_edgar(monkeypatch, [only_one])
+
+    with caplog.at_level(logging.INFO, logger="app.external"):
+        await extract_10k_risks_diff("AAPL")
+
+    records = [
+        r for r in caplog.records
+        if r.name == "app.external" and r.service_id == "sec.ten_k_risks_diff"
+    ]
+    assert len(records) == 1
+    assert records[0].output_summary["available"] is False

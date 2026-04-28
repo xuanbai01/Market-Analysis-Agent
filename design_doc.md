@@ -110,11 +110,11 @@ Tools live in `app/services/<tool>.py`. Each follows the same shape: provider-re
 | `fetch_news` | NewsAPI dev tier + Yahoo RSS, symbol tagging | ✅ (PR #13) |
 | `fetch_fundamentals` | yfinance .info + financials/cashflow | ✅ (PR #14) |
 | `fetch_peers` | curated sector map + yfinance.industry fallback | ✅ (PR #15) |
-| `fetch_edgar` | SEC EDGAR generic filing fetcher | next |
-| `parse_filing` | Form 4 / 13F / 10-K Item 1A diff / 10-K Item 1 | depends on `fetch_edgar` |
-| `fetch_earnings` | yfinance + transcript scrape | |
-| `fetch_macro` | FRED API + sector→series map | |
-| `search_history` | pgvector RAG over stored news + filings | |
+| `fetch_edgar` | SEC EDGAR generic filing fetcher (disk cache, polite-crawl) | ✅ (PR #17) |
+| `parse_filing` | Form 4 / 13F / 10-K Business / 10-K risks YoY diff | ✅ (PRs #19, #21, #22, #23) |
+| `fetch_earnings` | yfinance earnings dates + consensus + beat-rate | ✅ (PR #18) |
+| `fetch_macro` | FRED API + sector→series map | ✅ (PR #20) |
+| `search_history` | pgvector RAG over stored news + filings | next |
 | `compute_options` | yfinance option_chain → IV percentile, implied move | needs daily snapshot job |
 
 Active sprint tracking: [tasks/todo.md](tasks/todo.md).
@@ -176,8 +176,8 @@ Auth, real rate limiting, and per-user cost caps land only when the project has 
 **Phase 2 — Equity research assistant (in progress).**
 
 - 2.0 Foundations ✅ — research schemas, LLM client, eval harness skeleton.
-- 2.1 Tool registry — 5/11 done. Next: `fetch_edgar`. See [tasks/todo.md](tasks/todo.md).
-- 2.2 Agent + `POST /v1/research/{symbol}` — planned after enough tools land to compose a useful report (likely after `fetch_edgar` + `parse_filing` + `fetch_macro`).
+- 2.1 Tool registry — 9/11 done. Remaining: `search_history` (pgvector) and `compute_options` (daily IV snapshot job). See [tasks/todo.md](tasks/todo.md).
+- 2.2 Agent + `POST /v1/research/{symbol}` — gating tools (`fetch_edgar` + `parse_filing` + `fetch_macro`) all merged; this is the next major sprint.
 - 2.3 Optional supervisor mode — only if eval shows multi-agent gives a factuality / structure win over single-agent. Cut otherwise.
 
 **Phase 3+ (future).** pgvector RAG (`search_history`), options daily snapshots (`compute_options`), small web frontend, auth + per-user cost caps, Reddit sentiment (only if a recurring query justifies it).

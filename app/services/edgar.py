@@ -336,7 +336,9 @@ async def fetch_edgar(
             "provider": provider,
         },
     ) as call:
-        cached = _try_cache(root, target, form_type, recent_n)
+        cached = _try_cache(
+            root, target, form_type, recent_n, require_text=include_text
+        )
         cache_hits = len(cached)
         provider_filings: list[EdgarFiling] = []
 
@@ -356,17 +358,32 @@ async def fetch_edgar(
 
 
 def _try_cache(
-    root: Path, symbol: str, form_type: str, recent_n: int
+    root: Path,
+    symbol: str,
+    form_type: str,
+    recent_n: int,
+    *,
+    require_text: bool = False,
 ) -> list[EdgarFiling]:
-    """Read up to ``recent_n`` cached filings for (symbol, form_type)."""
+    """Read up to ``recent_n`` cached filings for (symbol, form_type).
+
+    When ``require_text=True`` (caller passed ``include_text=True``), a
+    cached entry whose ``primary_doc_text`` is None counts as a miss —
+    the provider must be invoked to fetch the text. Without this gate, a
+    prior metadata-only cache entry silently satisfies a text request
+    and the caller receives a useless empty-text filing.
+    """
     index = _read_cached_index(root, symbol, form_type)
     out: list[EdgarFiling] = []
     for entry in index:
         if len(out) >= recent_n:
             break
         cached = _read_cached_filing(root, entry["cik"], entry["accession"])
-        if cached is not None:
-            out.append(cached)
+        if cached is None:
+            continue
+        if require_text and not cached.primary_doc_text:
+            continue
+        out.append(cached)
     return out
 
 

@@ -61,6 +61,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -175,6 +176,23 @@ def _write_filing_to_cache(root: Path, filing: EdgarFiling) -> None:
 
 _SEC_RATE_LIMIT_SLEEP_SECONDS = 0.15  # 6.7 req/sec ceiling
 
+# SEC's submissions JSON returns ``primaryDocument`` as the
+# stylesheet-rendered HTML version for filings whose underlying
+# document is XML (Forms 3/4/5 use ``xslF345X06/``, ``xslF345X05/``,
+# etc.; Schedule 13D/G uses ``xslSCHEDULE_13D_X01/``). The bare path on
+# the same accession serves the raw XML. Programmatic parsers want the
+# raw XML, so we strip the prefix before constructing the URL.
+_XSL_PREFIX_PAT = re.compile(r"^xsl[\w]+/")
+
+
+def _strip_xsl_prefix(primary_doc: str) -> str:
+    """Strip a leading ``xsl*/`` segment from a SEC primary-document path.
+
+    No-op when the path doesn't start with an XSL segment, so 10-K HTML
+    paths and other non-rendered docs pass through unchanged.
+    """
+    return _XSL_PREFIX_PAT.sub("", primary_doc)
+
 
 def _sec_get(url: str) -> httpx.Response:
     """One polite GET against SEC: required User-Agent + rate-limit sleep."""
@@ -233,7 +251,9 @@ def _fetch_edgar_sec(
         if len(out) >= recent_n:
             break
         accession = accession_numbers[i]
-        primary = primary_docs[i] if i < len(primary_docs) else ""
+        primary = _strip_xsl_prefix(
+            primary_docs[i] if i < len(primary_docs) else ""
+        )
         url = (
             f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/"
             f"{accession.replace('-', '')}/{primary}"

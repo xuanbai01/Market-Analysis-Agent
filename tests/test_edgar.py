@@ -27,6 +27,7 @@ from app.services.edgar import (
     PROVIDERS,
     SUPPORTED_FORM_TYPES,
     _cache_key_dir,
+    _strip_xsl_prefix,
     fetch_edgar,
 )
 
@@ -588,3 +589,49 @@ async def test_cik_kwarg_default_none_preserves_existing_behavior(
     await fetch_edgar("AAPL", form_type="10-K", recent_n=1, provider="fake")
 
     assert seen_cik == [None]
+
+
+# ── XSL prefix stripping for Form 3/4/5 raw-XML access ───────────────
+#
+# SEC's submissions JSON returns ``primaryDocument`` as the
+# stylesheet-rendered HTML version for filings whose underlying
+# document is XML (Forms 3/4/5, 13D/G, NPORT, etc.) — for example
+# ``xslF345X06/form4.xml``. The bare path (``form4.xml``) on the same
+# accession serves the raw XML, which is what programmatic parsers
+# need. The URL-construction layer strips ``xsl*/`` prefixes so callers
+# always get the parseable underlying document.
+
+
+def test_strip_xsl_prefix_removes_form4_stylesheet_prefix() -> None:
+    """The Form 4 case that surfaced from the live AAPL smoke."""
+    assert _strip_xsl_prefix("xslF345X06/form4.xml") == "form4.xml"
+
+
+def test_strip_xsl_prefix_removes_other_form_stylesheets() -> None:
+    """Other Form 3/4/5 stylesheet IDs and Schedule 13D/G prefixes."""
+    assert _strip_xsl_prefix("xslF345X05/form3.xml") == "form3.xml"
+    assert _strip_xsl_prefix("xslF345X07/form5.xml") == "form5.xml"
+    assert (
+        _strip_xsl_prefix("xslSCHEDULE_13D_X01/primary_doc.xml")
+        == "primary_doc.xml"
+    )
+
+
+def test_strip_xsl_prefix_leaves_bare_paths_unchanged() -> None:
+    """A primary doc without an xsl prefix is the document itself."""
+    assert _strip_xsl_prefix("aapl-20240928.htm") == "aapl-20240928.htm"
+    assert _strip_xsl_prefix("R2.htm") == "R2.htm"
+    assert _strip_xsl_prefix("") == ""
+
+
+def test_strip_xsl_prefix_only_strips_leading_xsl_segment() -> None:
+    """Non-xsl path segments must be preserved.
+
+    Hypothetical: a filing whose primary doc lives under a normal
+    subdirectory shouldn't have the subdirectory stripped.
+    """
+    assert _strip_xsl_prefix("subdir/file.htm") == "subdir/file.htm"
+    assert (
+        _strip_xsl_prefix("Financial_Report.xlsx")
+        == "Financial_Report.xlsx"
+    )

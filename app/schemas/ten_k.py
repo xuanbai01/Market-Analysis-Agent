@@ -42,3 +42,28 @@ class Extracted10KSection(BaseModel):
     text: str = Field(min_length=1)
     char_count: int = Field(ge=0)
     primary_doc_url: str = Field(min_length=1, max_length=512)
+
+
+class Risk10KDiff(BaseModel):
+    """
+    Year-over-year diff of Item 1A (Risk Factors) between the two most
+    recent 10-Ks. Mechanical paragraph-level diff with fuzzy matching
+    so cosmetic edits ("we" → "the Company") don't get flagged as new
+    risks — the agent reads ``added_paragraphs`` to write a
+    high-confidence "what's new in risks" section without comparing
+    two ~50KB texts itself.
+
+    ``current`` and ``prior`` are the full extracted sections (so the
+    agent has each year's prose available if it needs context). The
+    diff buckets are over the paragraph splits, not the flattened text.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str = Field(min_length=1, max_length=16)
+    current: Extracted10KSection
+    prior: Extracted10KSection
+    added_paragraphs: list[str]
+    removed_paragraphs: list[str]
+    kept_paragraph_count: int = Field(ge=0)
+    char_delta: int  # current.char_count − prior.char_count; can be negative

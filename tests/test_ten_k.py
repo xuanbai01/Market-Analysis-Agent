@@ -628,16 +628,28 @@ def test_paragraph_diff_treats_cosmetic_edit_as_kept() -> None:
 
 def test_paragraph_diff_preserves_input_order() -> None:
     """Added paragraphs appear in their order in `current`; removed in `prior`."""
-    prior = ["Old A only.", "Shared paragraph that appears identically.", "Old B only."]
+    shared = (
+        "Macroeconomic conditions in any of our principal operating regions "
+        "could materially affect demand for our products and services."
+    )
+    prior = [
+        "Reliance on a single tier-one supplier for power management ICs "
+        "exposes the Company to single-source supply disruption.",
+        shared,
+        "Pension liabilities tied to defined-benefit plans in legacy "
+        "European subsidiaries remain a material balance-sheet risk.",
+    ]
     current = [
-        "New X only.",
-        "Shared paragraph that appears identically.",
-        "New Y only.",
+        "Generative-AI competitive entrants have begun to reshape the "
+        "search-advertising market in ways that may erode our share.",
+        shared,
+        "Geopolitical tensions in the Taiwan Strait could disrupt foundry "
+        "capacity that the Company depends on for advanced-node silicon.",
     ]
     added, removed, _ = _paragraph_diff(current, prior)
 
-    assert added == ["New X only.", "New Y only."]
-    assert removed == ["Old A only.", "Old B only."]
+    assert added == [current[0], current[2]]
+    assert removed == [prior[0], prior[2]]
 
 
 def test_paragraph_diff_handles_empty_inputs() -> None:

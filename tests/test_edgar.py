@@ -365,6 +365,118 @@ async def test_cache_hit_reflected_in_observability(
     assert rec.output_summary["filing_count"] == 1
 
 
+async def test_text_request_bypasses_metadata_only_cache(
+    monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
+) -> None:
+    """A cached filing without text must NOT satisfy ``include_text=True``.
+
+    Real failure mode discovered by smoke-testing the live tools: a prior
+    ``fetch_edgar(include_text=False)`` populates the cache with
+    ``primary_doc_text=None``, and a subsequent call with
+    ``include_text=True`` would reuse that cached entry without invoking
+    the provider — leaving the caller with a useless empty-text filing.
+    The fix: cache hits only count when the cached entry has text, when
+    text was requested.
+    """
+    # Cache a filing WITHOUT text (mimics a prior include_text=False call).
+    metadata_only = _mk_filing(primary_doc_text=None)
+    cache_dir = _cache_key_dir(
+        edgar_cache, metadata_only.cik, metadata_only.accession
+    )
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "metadata.json").write_text(
+        metadata_only.model_dump_json(), encoding="utf-8"
+    )
+    index_path = edgar_cache / "AAPL" / "10-K.json"
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_text(
+        json.dumps(
+            [{"cik": metadata_only.cik, "accession": metadata_only.accession}]
+        ),
+        encoding="utf-8",
+    )
+
+    # Provider returns the same filing WITH text. The provider must be
+    # called — the metadata-only cache entry doesn't satisfy the request.
+    with_text = _mk_filing(
+        primary_doc_text="<html>Item 1A. Risk Factors. Real text.</html>",
+    )
+    provider_calls = 0
+
+    def _provider(*_a: Any) -> list[EdgarFiling]:
+        nonlocal provider_calls
+        provider_calls += 1
+        return [with_text]
+
+    monkeypatch.setitem(PROVIDERS, "fake", _provider)
+
+    result = await fetch_edgar(
+        "AAPL",
+        form_type="10-K",
+        recent_n=1,
+        include_text=True,
+        provider="fake",
+    )
+
+    assert provider_calls == 1, (
+        "include_text=True with metadata-only cache must hit the provider"
+    )
+    assert len(result) == 1
+    assert result[0].primary_doc_text is not None
+    assert "Real text" in result[0].primary_doc_text
+
+
+async def test_text_cache_hit_skips_provider(
+    monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
+) -> None:
+    """A cached filing WITH text DOES satisfy ``include_text=True``."""
+    cached_with_text = _mk_filing(
+        primary_doc_text="<html>Item 1A. cached body.</html>"
+    )
+    cache_dir = _cache_key_dir(
+        edgar_cache, cached_with_text.cik, cached_with_text.accession
+    )
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "metadata.json").write_text(
+        cached_with_text.model_dump_json(), encoding="utf-8"
+    )
+    index_path = edgar_cache / "AAPL" / "10-K.json"
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "cik": cached_with_text.cik,
+                    "accession": cached_with_text.accession,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    called = False
+
+    def _provider(*_a: Any) -> list[EdgarFiling]:
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setitem(PROVIDERS, "fake", _provider)
+
+    result = await fetch_edgar(
+        "AAPL",
+        form_type="10-K",
+        recent_n=1,
+        include_text=True,
+        provider="fake",
+    )
+
+    assert called is False, "cached filing with text should skip the provider"
+    assert len(result) == 1
+    assert result[0].primary_doc_text is not None
+    assert "cached body" in result[0].primary_doc_text
+
+
 async def test_cache_write_atomic_no_partial_files(
     monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
 ) -> None:

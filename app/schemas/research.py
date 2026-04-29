@@ -108,3 +108,44 @@ class ResearchReport(BaseModel):
     @property
     def all_claims(self) -> list[Claim]:
         return [c for s in self.sections for c in s.claims]
+
+
+# ── Synth-call output schema (internal, not user-facing) ──────────────
+#
+# The agent's only job in 2.2a is to write summary prose. Section
+# composition (which claims go in which section) is determined by code
+# in ``app.services.research_tool_registry`` so the LLM cannot
+# misplace a metric. The synth call's forced-tool schema is therefore
+# bounded to ``{title, summary}`` pairs — one per section the
+# orchestrator requested.
+#
+# The orchestrator passes the agent the full claim list per section in
+# the user prompt, and instructs the model to write a 2–4 sentence
+# summary that ONLY references values present in those claims. After
+# the call returns, the orchestrator matches summaries to sections by
+# title; unknown titles are dropped, missing titles get a fallback
+# summary.
+
+
+class SectionSummary(BaseModel):
+    """One ``{title, summary}`` pair emitted by the synth call.
+
+    ``title`` MUST match a section title the orchestrator requested
+    (case-sensitive). Lookups that miss are dropped silently rather
+    than raised — the orchestrator already has the canonical title
+    list, the model is allowed to be sloppy, and a missing summary
+    falls back to a neutral default.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    title: str = Field(min_length=1, max_length=80)
+    summary: str = Field(default="", max_length=4000)
+
+
+class SectionSummaries(BaseModel):
+    """Synth-call output: the prose for every requested section."""
+
+    model_config = ConfigDict(frozen=True)
+
+    sections: list[SectionSummary] = Field(default_factory=list)

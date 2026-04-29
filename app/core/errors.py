@@ -17,22 +17,35 @@ class ProblemDetail(BaseModel):
 _PROBLEM_MEDIA_TYPE = "application/problem+json"
 
 
-def _problem_response(status: int, title: str, detail: str | None = None) -> JSONResponse:
+def _problem_response(
+    status: int,
+    title: str,
+    detail: str | None = None,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
     body = ProblemDetail(
         title=title,
         status=status,
         detail=detail,
         instance=str(uuid.uuid4()),
     ).model_dump()
-    return JSONResponse(body, status_code=status, media_type=_PROBLEM_MEDIA_TYPE)
+    return JSONResponse(
+        body,
+        status_code=status,
+        media_type=_PROBLEM_MEDIA_TYPE,
+        headers=headers,
+    )
 
 
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     # Preserve the caller's status code (404, 422, etc.) — don't flatten to 500.
+    # Also propagate ``exc.headers`` so things like Retry-After (on 429),
+    # Allow (on 405), WWW-Authenticate (on 401) survive the wrap.
     return _problem_response(
         status=exc.status_code,
         title=exc.detail if isinstance(exc.detail, str) else "HTTP Error",
         detail=exc.detail if not isinstance(exc.detail, str) else None,
+        headers=exc.headers,
     )
 
 

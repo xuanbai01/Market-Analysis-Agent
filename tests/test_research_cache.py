@@ -20,7 +20,7 @@ from app.schemas.research import (
     Section,
     Source,
 )
-from app.services.research_cache import lookup_recent, upsert
+from app.services.research_cache import list_recent, lookup_recent, upsert
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 
@@ -414,3 +414,141 @@ async def test_upsert_logs_external_call(
     )
     assert rec.input_summary["symbol"] == "AAPL"
     assert rec.input_summary["focus"] == "full"
+
+
+# ── list_recent (Phase 3.0 A3) ────────────────────────────────────────
+
+
+async def test_list_recent_empty_returns_empty_list(
+    db_session: AsyncSession,
+) -> None:
+    rows = await list_recent(db_session, limit=20, offset=0)
+    assert rows == []
+
+
+async def test_list_recent_orders_by_generated_at_desc(
+    db_session: AsyncSession,
+) -> None:
+    """Most-recent reports first — that's how the dashboard sidebar reads."""
+    # Three reports across different (symbol, date) so PK doesn't collide.
+    older = _build_report(symbol="AAPL").model_copy(
+        update={"generated_at": datetime.now(UTC) - timedelta(hours=72)}
+    )
+    middle = _build_report(symbol="MSFT").model_copy(
+        update={"generated_at": datetime.now(UTC) - timedelta(hours=24)}
+    )
+    newest = _build_report(symbol="NVDA").model_copy(
+        update={"generated_at": datetime.now(UTC) - timedelta(hours=1)}
+    )
+
+    await upsert(
+        db_session, symbol="AAPL", focus="full",
+        report_date=date.today() - timedelta(days=3), report=older,
+    )
+    await upsert(
+        db_session, symbol="MSFT", focus="full",
+        report_date=date.today() - timedelta(days=1), report=middle,
+    )
+    await upsert(
+        db_session, symbol="NVDA", focus="full",
+        report_date=date.today(), report=newest,
+    )
+    await db_session.flush()
+
+    rows = await list_recent(db_session, limit=20, offset=0)
+    assert [r.symbol for r in rows] == ["NVDA", "MSFT", "AAPL"]
+
+
+async def test_list_recent_returns_summary_fields(
+    db_session: AsyncSession,
+) -> None:
+    """Each row carries the 5 summary fields the dashboard renders."""
+    report = _build_report(symbol="AAPL", confidence=Confidence.HIGH).model_copy(
+        update={"generated_at": datetime.now(UTC) - timedelta(hours=2)}
+    )
+    await upsert(
+        db_session, symbol="AAPL", focus="full",
+        report_date=date(2026, 4, 29), report=report,
+    )
+    await db_session.flush()
+
+    rows = await list_recent(db_session, limit=20, offset=0)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.symbol == "AAPL"
+    assert row.focus == "full"
+    assert row.report_date == date(2026, 4, 29)
+    assert row.overall_confidence == Confidence.HIGH
+    # ``generated_at`` round-trips as a tz-aware datetime.
+    assert row.generated_at.tzinfo is not None
+
+
+async def test_list_recent_filters_by_symbol(
+    db_session: AsyncSession,
+) -> None:
+    """``symbol=AAPL`` must exclude rows for other tickers."""
+    aapl = _build_report(symbol="AAPL").model_copy(
+        update={"generated_at": datetime.now(UTC)}
+    )
+    nvda = _build_report(symbol="NVDA").model_copy(
+        update={"generated_at": datetime.now(UTC)}
+    )
+    await upsert(
+        db_session, symbol="AAPL", focus="full",
+        report_date=date.today(), report=aapl,
+    )
+    await upsert(
+        db_session, symbol="NVDA", focus="full",
+        report_date=date.today(), report=nvda,
+    )
+    await db_session.flush()
+
+    rows = await list_recent(db_session, limit=20, offset=0, symbol="AAPL")
+
+    assert [r.symbol for r in rows] == ["AAPL"]
+
+
+async def test_list_recent_pagination(
+    db_session: AsyncSession,
+) -> None:
+    """Limit + offset combine to slice the ordered list."""
+    for i, sym in enumerate(["A", "B", "C", "D", "E"]):
+        # Ensure deterministic ordering: A is oldest, E is newest.
+        rep = _build_report(symbol=sym).model_copy(
+            update={"generated_at": datetime.now(UTC) - timedelta(hours=10 - i)}
+        )
+        await upsert(
+            db_session, symbol=sym, focus="full",
+            report_date=date.today() - timedelta(days=10 - i), report=rep,
+        )
+    await db_session.flush()
+
+    page1 = await list_recent(db_session, limit=2, offset=0)
+    page2 = await list_recent(db_session, limit=2, offset=2)
+    page3 = await list_recent(db_session, limit=2, offset=4)
+
+    # Newest first → E, D, C, B, A.
+    assert [r.symbol for r in page1] == ["E", "D"]
+    assert [r.symbol for r in page2] == ["C", "B"]
+    assert [r.symbol for r in page3] == ["A"]
+
+
+async def test_list_recent_logs_external_call(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A09: list operations log under db.research_cache.list."""
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="app.external"):
+        await list_recent(db_session, limit=10, offset=0, symbol="AAPL")
+
+    rec = next(
+        r for r in caplog.records
+        if r.name == "app.external" and r.service_id == "db.research_cache.list"
+    )
+    assert rec.input_summary == {
+        "limit": 10, "offset": 0, "symbol": "AAPL",
+    }
+    # ``count`` is the number of rows returned — useful for debugging.
+    assert rec.output_summary["count"] == 0

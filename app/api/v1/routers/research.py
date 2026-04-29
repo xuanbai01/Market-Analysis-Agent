@@ -30,10 +30,14 @@ ET reads the same row a request at 9am ET the next morning UTC writes.
 - Any other exception → 500 problem+json via the global handler in
   ``app.core.errors``.
 
-## What the route still does NOT do
+## Rate limiting
 
-- Rate limiting → Phase 2.2c. Until that lands, an attacker who knows
-  the URL could force ``?refresh=true`` repeatedly to drain LLM budget.
+Per-IP token bucket via ``enforce_research_rate_limit``. Default is
+3 reports/hour/IP (env: ``RESEARCH_RATE_LIMIT_PER_HOUR``). The cache
+in 2.2b means a repeat ``refresh=false`` request costs nothing, so
+the limit only kicks in for genuinely new (symbol, focus)
+combinations or ``?refresh=true`` calls. Returns 429 + Retry-After
+on deny. Set the env var to 0 to disable.
 """
 from __future__ import annotations
 
@@ -43,7 +47,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import get_session
+from app.api.v1.dependencies import enforce_research_rate_limit, get_session
 from app.core.settings import settings
 from app.schemas.research import ResearchReport
 from app.services import research_cache, research_orchestrator
@@ -52,7 +56,11 @@ from app.services.research_tool_registry import Focus
 router = APIRouter()
 
 
-@router.post("/research/{symbol}", response_model=ResearchReport)
+@router.post(
+    "/research/{symbol}",
+    response_model=ResearchReport,
+    dependencies=[Depends(enforce_research_rate_limit)],
+)
 async def research(
     symbol: str,
     focus: Focus = Query(

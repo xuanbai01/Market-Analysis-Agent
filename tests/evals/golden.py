@@ -39,6 +39,14 @@ class GoldenCase:
     facts: list[ExpectedFact] = field(default_factory=list)
 
 
-# Empty until tools land. Each tool PR is expected to add 1–3 cases that
-# exercise its outputs.
-GOLDEN_CASES: list[GoldenCase] = []
+# Each PR that touches the agent layer is expected to add 1–3 cases.
+# Day-1 case for Phase 2.2a: a single full-focus report on AAPL, large-cap
+# with stable filings, exercises every section the orchestrator
+# produces. Expected facts are intentionally empty — the rubric grades
+# structure (Pydantic validation) and factuality (numbers in summary
+# prose backed by claims), neither of which requires external ground
+# truth. Pin specific values once the report shape stabilizes and the
+# eval becomes a regression gate, not just a smoke check.
+GOLDEN_CASES: list[GoldenCase] = [
+    GoldenCase(symbol="AAPL", focus="full"),
+]

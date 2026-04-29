@@ -1,36 +1,52 @@
 """
 Research-report endpoint.
 
-Thin router: parse the path + query, hand off to the orchestrator,
-return the resulting ``ResearchReport``. Business logic — section
-composition, tool fan-out, LLM synthesis, confidence stamping — lives
-in ``app.services.research_orchestrator``.
+Thin coordinator: parse the path + query, look up the same-day cache,
+dispatch to the orchestrator on miss, write the fresh report back to
+the cache, return it. Business logic (section composition, tool
+fan-out, LLM synthesis, confidence stamping) lives in
+``app.services.research_orchestrator``; cache I/O lives in
+``app.services.research_cache``.
+
+## Cache semantics
+
+A successful synthesis is upserted into ``research_reports`` keyed on
+``(symbol, focus, report_date)``. Subsequent calls within
+``settings.RESEARCH_CACHE_MAX_AGE_HOURS`` (default 168 = 7 days)
+re-serve the cached row instead of paying for another LLM round trip.
+``?refresh=true`` skips the lookup but still upserts — same-day refresh
+overwrites the existing row rather than duplicating.
+
+``report_date`` is computed in ``settings.TZ`` (America/New_York), so
+"same trading day" means same date in ET, not UTC. A request at 11pm
+ET reads the same row a request at 9am ET the next morning UTC writes.
 
 ## Error mapping
 
 - ``RuntimeError`` from the orchestrator → 503. The most common cause
   is ``ANTHROPIC_API_KEY`` not configured; "service up but dependency
-  unavailable" is what 503 communicates. The RFC 7807 problem+json
-  body carries the original message so the operator sees it.
-- Any other exception propagates to the global handler in
-  ``app.core.errors`` → 500 problem+json.
+  unavailable" is what 503 communicates. RFC 7807 problem+json carries
+  the original message.
+- Any other exception → 500 problem+json via the global handler in
+  ``app.core.errors``.
 
-## What the route deliberately does NOT do (yet)
+## What the route still does NOT do
 
-- Same-day cache lookup → Phase 2.2b
-- Rate limiting → Phase 2.2c
-
-So this endpoint should not be exposed to public traffic before 2.2b
-+ 2.2c land — every call is a fresh ~$0.05–$0.20 LLM round trip with
-no de-dup. The route handler is intentionally minimal so the cache
-middleware in 2.2b can wrap it cleanly.
+- Rate limiting → Phase 2.2c. Until that lands, an attacker who knows
+  the URL could force ``?refresh=true`` repeatedly to drain LLM budget.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.v1.dependencies import get_session
+from app.core.settings import settings
 from app.schemas.research import ResearchReport
-from app.services import research_orchestrator
+from app.services import research_cache, research_orchestrator
 from app.services.research_tool_registry import Focus
 
 router = APIRouter()
@@ -48,23 +64,58 @@ async def research(
             "(Earnings, Valuation, Risk Factors)."
         ),
     ),
+    refresh: bool = Query(
+        False,
+        description=(
+            "If true, skip the same-day cache lookup and force a fresh "
+            "synthesis. The fresh report still upserts into the cache, "
+            "overwriting any same-day row. Use sparingly — every "
+            "refresh=true call is a paid LLM round trip."
+        ),
+    ),
+    session: AsyncSession = Depends(get_session),
 ) -> ResearchReport:
-    """Generate a structured research report for a US-listed equity ticker.
+    """Generate (or re-serve) a structured research report for a ticker.
 
-    Symbol is uppercased before tool dispatch. Cost: one Haiku-class
-    triage call (currently deterministic, no LLM) plus one Sonnet-class
-    synthesis call. Response time is dominated by the slowest tool —
-    typically EDGAR ~5 s for first 10-K fetch, sub-second on a warm
-    cache.
+    Cost on cache hit: ~10 ms (one DB SELECT). Cost on miss:
+    one Sonnet synthesis (~$0.05–$0.15) plus tool fan-out latency
+    dominated by EDGAR (~5 s cold cache, sub-second warm).
     """
+    target = symbol.upper()
+
+    # Anchor the cache key in the configured trading timezone so a
+    # 11pm-ET request and a 9am-ET request the next UTC morning still
+    # land on the same logical day.
+    tz = ZoneInfo(settings.TZ)
+    report_date = datetime.now(tz).date()
+
+    if not refresh:
+        cached = await research_cache.lookup_recent(
+            session,
+            symbol=target,
+            focus=focus.value,
+            max_age_hours=settings.RESEARCH_CACHE_MAX_AGE_HOURS,
+        )
+        if cached is not None:
+            return cached
+
     try:
-        return await research_orchestrator.compose_research_report(
-            symbol.upper(), focus
+        report = await research_orchestrator.compose_research_report(
+            target, focus
         )
     except RuntimeError as exc:
-        # Orchestration succeeded structurally but an upstream
-        # dependency (LLM provider, missing API key) is not usable.
+        # Orchestration's upstream dependency (LLM provider, missing API
+        # key) is unusable. Don't cache this — next request retries.
         raise HTTPException(
             status_code=503,
             detail=f"Research synthesis unavailable: {exc}",
         ) from exc
+
+    await research_cache.upsert(
+        session,
+        symbol=target,
+        focus=focus.value,
+        report_date=report_date,
+        report=report,
+    )
+    return report

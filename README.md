@@ -4,7 +4,7 @@ An **AI Equity Research Assistant**. POST a ticker, get back a structured analys
 
 Live: <https://market-analysis-agent.fly.dev/docs>
 
-> **Status — Phase 1 done, Phase 2 in progress.** Phase 1 (the data + infrastructure layer) is shipped and live: FastAPI + async SQLAlchemy, Postgres on Neon, Fly.io deploy, Alembic migrations, real yfinance ingest with upsert, RSI + SMA technicals, RFC 7807 error handling, A09 external-call logging, 45-test suite, push-to-deploy from `main`. Phase 2 (the agent + tool layer) is being built per [ADR 0003](docs/adr/0003-pivot-equity-research.md). Tracking in [tasks/todo.md](tasks/todo.md).
+> **Status — Phase 1 + Phase 2 substantively done.** The agent endpoint `POST /v1/research/{symbol}` is live, with a 7-day same-day cache and per-IP rate limit. Real-LLM golden eval passes at factuality ≥ 0.97. Phase 1 (FastAPI + async SQLAlchemy, Postgres on Neon, Fly.io deploy, Alembic, real yfinance ingest, RSI/SMA technicals, RFC 7807 errors, A09 external-call logging, push-to-deploy) shipped first; Phase 2 added the agent layer, 9 free-data tools, citation-enforcing schema, eval harness, cost-tier-routed LLM client. **378 tests passing.** Optional follow-ups (LLM-driven section composition, supervisor mode, pgvector RAG, options snapshots) deliberately deferred — see [design_doc.md](design_doc.md) §Roadmap.
 
 ## What this is (and isn't)
 
@@ -49,49 +49,103 @@ See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for the full first-hour c
 | `GET /v1/health` | ✅ Real — pings the DB |
 | `GET /v1/symbols`, `POST /v1/symbols` | ✅ Real |
 | `GET /v1/news`, `GET /v1/news/{id}` | ✅ Real (list, detail, 404 as RFC 7807 `problem+json`) |
-| `POST /v1/news/ingest` | 🟡 No-op stub — Phase 2 wires NewsAPI + RSS providers |
+| `POST /v1/news/ingest` | ✅ Real — NewsAPI dev tier + Yahoo per-ticker RSS, symbol tagging, `news_symbols` join |
 | `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ Real (yfinance ingest with upsert → `candles`; latest-bar with technicals; date-range history) |
-| `POST /v1/research/{symbol}` | 🟡 Phase 2 — the v2 primary endpoint |
+| `POST /v1/research/{symbol}?focus={full,earnings}&refresh={false,true}` | ✅ **The v2 primary endpoint.** 7 sections in `full` mode (Valuation, Quality, Capital Allocation, Earnings, Peers, Risk Factors, Macro) or 3 in `earnings`. Same-day cache (default 7 days, configurable) + per-IP rate limit (default 3/hour, configurable). |
 | `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ `501 Not Implemented` (legacy v1 routes; will be removed or redirected to `/v1/research`) |
 
 All errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](app/core/errors.py).
 
+### Hitting the research endpoint
+
+```bash
+# In .env: ANTHROPIC_API_KEY=sk-ant-... (required)
+# In .env: FRED_API_KEY=... (optional — Macro section degrades gracefully without it)
+
+uv run uvicorn app.main:app --reload
+
+# Cold call: ~30 s, full LLM round trip + tool fan-out
+curl -X POST http://localhost:8000/v1/research/AAPL -o report.json
+
+# Same call within 7 days: ~10 ms, served from research_reports table
+curl -X POST http://localhost:8000/v1/research/AAPL -o report-cached.json
+
+# Force fresh synthesis (consumes 1 rate-limit token + ~$0.10 LLM cost)
+curl -X POST "http://localhost:8000/v1/research/AAPL?refresh=true" -o report-fresh.json
+```
+
+Spot-check the data layer end-to-end without the LLM via [`scripts/smoke.py`](scripts/smoke.py):
+
+```bash
+uv run python scripts/smoke.py AAPL --skip-13f
+```
+
+Runs each Phase 2 tool against live providers (yfinance, SEC EDGAR, FRED) and prints a one-line summary per tool — fast way to verify nothing has drifted upstream before the agent runs.
+
 ## v2 architecture at a glance
 
 ```
-POST /v1/research/{symbol}
+POST /v1/research/{symbol}?focus=full
         │
         ▼
-   ┌───────────────────────────────────────────────────────────┐
-   │ Default: single agent + tools                              │
-   │   triage_call (small model, structured output) picks tools │
-   │   synth_call  (capable model, structured output) writes    │
-   │                                                            │
-   │ Optional: supervisor mode for multi-symbol queries         │
-   │   delegates to Research / Technical / Sentiment / Earnings │
-   └───────────────────────────────────────────────────────────┘
-        │
-        ▼  Tool registry (one PR each):
-            ✅ fetch_market           ✅ compute_technicals
-               fetch_fundamentals        fetch_news
-               fetch_edgar               parse_filing
-               fetch_earnings            fetch_macro
-               fetch_peers               search_history (pgvector)
-               compute_options
-        │
-        ▼
-   Pydantic-typed structured report → JSON response
-   { sections: list[Section], confidence: "high"|"medium"|"low",
-     generated_at: datetime, every claim cites source + fetched_at }
+   Cache lookup (research_reports, configurable window, default 7d)
+        │   hit  → return (no LLM, no token consumed) ─┐
+        │ miss                                         │
+        ▼                                              │
+   Rate limit (per-IP token bucket, default 3/hour)    │
+        │   deny → 429 + Retry-After                   │
+        │ pass                                         │
+        ▼                                              │
+   Orchestrator (deterministic-everything-except-prose)│
+   ─ runs every focus-required tool in parallel        │
+   ─ static SECTION_TO_CLAIM_KEYS — code picks claims, │
+     not the LLM                                       │
+   ─ Sonnet writes only the 2-4 sentence summaries     │
+     under a forced SectionSummaries schema            │
+   ─ confidence stamped programmatically per section   │
+        │                                              │
+        ▼                                              │
+   Cache upsert  (overwrites same-day row)             │
+        │                                              │
+        ▼                                              │
+   Pydantic-typed structured report ◀──────────────────┘
+   { sections: list[Section{claims, summary, confidence}],
+     overall_confidence: "high"|"medium"|"low",
+     tool_calls_audit: ["fetch_fundamentals: ok", ...],
+     generated_at: datetime — every claim cites source + fetched_at }
 ```
 
+**Tool registry** (every tool is a focused async function returning `dict[str, Claim]` or a typed Pydantic record; all wrapped in `log_external_call`):
+
+| Tool | Source | Status |
+|---|---|---|
+| `fetch_market`, `compute_technicals` | yfinance OHLCV + in-memory RSI/SMA | ✅ |
+| `fetch_news` | NewsAPI dev + Yahoo per-ticker RSS, symbol tagger | ✅ |
+| `fetch_fundamentals` | yfinance.info + financials/cashflow | ✅ |
+| `fetch_peers` | curated sector map + yfinance fallback | ✅ |
+| `fetch_edgar` | SEC EDGAR with disk cache + polite-crawl | ✅ |
+| `parse_filing` | Form 4 cluster, 13F holdings, 10-K Item 1, 10-K risks YoY diff | ✅ |
+| `fetch_earnings` | yfinance earnings dates + consensus | ✅ |
+| `fetch_macro` | FRED API + sector→series map | ✅ (graceful no-op without `FRED_API_KEY`) |
+| `search_history` | pgvector RAG | 🟡 Phase 3 |
+| `compute_options` | yfinance options + daily IV snapshots | 🟡 Phase 3 |
+
 - **Language:** Python 3.11, FastAPI 0.115, SQLAlchemy 2.0 (async + asyncpg)
-- **DB:** Postgres 15 (Docker locally; Neon free tier in prod) — pgvector enabled for RAG
-- **LLM (Phase 2):** Claude Haiku for triage, Sonnet for synthesis (cost-tier routing)
-- **RAG (Phase 2):** pgvector on Neon, time-weighted retrieval (`score × e^(-λ × hours)`)
-- **Hosting:** Fly.io (auto-stop-machines, ~$0–3/mo idle)
+- **DB:** Postgres 15 (Docker locally; Neon free tier in prod). pgvector lands when `search_history` does.
+- **LLM:** Claude Haiku 4.5 for triage (currently unused — section composition is deterministic; the client is wired and ready), Claude Sonnet 4.6 for synthesis. System prompts are cached (`cache_control: ephemeral`) for cost savings on repeat shape.
+- **Hosting:** Fly.io (auto-stop machines, ~$0–3/mo idle)
 
 Full detail in [docs/architecture.md](docs/architecture.md), [design_doc.md](design_doc.md), and the [ADRs](docs/adr/).
+
+### Rate limit posture (current choice — easy to flip)
+
+The rate-limit check on `/v1/research/{symbol}` runs **after** the cache lookup, not before. **Cache hits do not consume rate-limit tokens** — only cache misses and `?refresh=true` calls do. The reasoning: the rate limit exists to bound *LLM cost*, and a cache hit costs nothing.
+
+This is the right posture for a personal-scale deployment where re-reading your own already-generated reports shouldn't trigger 429s. Trade-off: a determined attacker who has burned 3 tokens can still hit the cache lookup endpoint indefinitely. For the current single-user use case that's fine — cache lookups are sub-millisecond indexed SELECTs and there's exactly one user.
+
+**If/when this goes public-multi-user**, flipping back to "every request consumes a token" is a one-line change: add `dependencies=[Depends(enforce_research_rate_limit)]` to the `@router.post` decorator in [`app/api/v1/routers/research.py`](app/api/v1/routers/research.py) and remove the explicit `await enforce_research_rate_limit(request)` call inside the route. Tests `test_cache_hits_do_not_consume_rate_limit_tokens` and `test_rate_limit_runs_after_cache_miss_only` would need to be deleted or inverted.
+
+History: implemented "every request" first (PR #29), flipped to "post-cache" in the follow-up PR after the live verification showed the every-request behavior was wrong for personal use. Both behaviors are tested in this commit's history if a future maintainer needs to compare.
 
 ### Anti-hallucination disciplines (non-negotiable Phase 2 success criteria)
 
@@ -174,7 +228,16 @@ No license file yet. Treat as all-rights-reserved until one lands.
 
 - **Phase 1 — Core Infrastructure** ✅ *(complete)*
   FastAPI + Alembic + tests + real yfinance ingest + RSI/SMA technicals + Fly + Neon + push-to-deploy.
-- **Phase 2 — AI Equity Research Assistant** *(in progress)*
-  Eval harness + citation-enforcing schema + LLM client with cost-tier routing → tool registry build-out (`fetch_news`, `fetch_fundamentals`, `fetch_edgar`, `parse_filing`, `fetch_earnings`, `fetch_macro`, `fetch_peers`, `search_history` via pgvector RAG, `compute_options`) → `POST /v1/research/{symbol}` with single-agent default + optional supervisor mode. Per-symbol cache + rate limiting before any public exposure. See [ADR 0003](docs/adr/0003-pivot-equity-research.md).
-- **Future scope** *(deliberately deferred)*
-  Reddit / r/wallstreetbets sentiment, web frontend, Discord bot, real-time scheduled ingest, auth + per-user cost caps. See [tasks/todo.md](tasks/todo.md) for the full deferred list.
+- **Phase 2 — AI Equity Research Assistant** ✅ *(substantively complete)*
+  - 2.0 Foundations: citation-enforcing schema, LLM client with cost-tier routing, eval harness with rubric (structure / factuality / latency).
+  - 2.1 Tool registry: `fetch_news`, `fetch_fundamentals`, `fetch_peers`, `fetch_edgar`, `parse_filing` (Form 4 + 13F + 10-K business + 10-K risks YoY diff), `fetch_earnings`, `fetch_macro` — 9 of 9 active tools shipped.
+  - 2.2 Agent + endpoint: `POST /v1/research/{symbol}` with deterministic-everything-except-prose architecture; same-day cache (default 7-day window); per-IP rate limit (default 3/hour). Real-LLM golden eval at factuality 0.97.
+  - 2.2d / 2.3 (deferred): LLM-driven section composition + supervisor mode for multi-symbol queries — only land if the rubric shows the deterministic catalog is too rigid. No signal that this is needed yet.
+- **Phase 3 — stretch / future scope** *(deliberately deferred)*
+  - `search_history` (pgvector RAG over stored news + filings, time-weighted)
+  - `compute_options` (yfinance option_chain + daily IV snapshot job, IV percentile + implied move)
+  - Web frontend / Discord client
+  - Auth + per-user cost caps + horizontal-scale rate limit (Redis swap-in)
+  - Reddit / r/wallstreetbets sentiment (only if a recurring eval query justifies it)
+
+See [tasks/todo.md](tasks/todo.md) for the granular tracker, [design_doc.md](design_doc.md) for system design, and [ADR 0003](docs/adr/0003-pivot-equity-research.md) for the v1→v2 pivot rationale.

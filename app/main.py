@@ -10,7 +10,9 @@ from app.api.v1.routers import (
     symbol,
 )
 from app.api.v1.routers.health import router as health_router
+from app.core.cors import configure_cors
 from app.core.errors import add_problem_handlers
+from app.core.settings import settings
 
 app = FastAPI(
     title="Market Analysis Agent API",
@@ -18,6 +20,11 @@ app = FastAPI(
     docs_url="/docs",
     openapi_url="/openapi.json",
 )
+
+# CORS for the React frontend (Phase 3). No-op when FRONTEND_ORIGIN is
+# unset — installs CORSMiddleware allowlisting exactly one origin
+# otherwise. See app/core/cors.py for the why.
+configure_cors(app, origin=settings.FRONTEND_ORIGIN)
 
 # RFC 7807 error responses
 add_problem_handlers(app)

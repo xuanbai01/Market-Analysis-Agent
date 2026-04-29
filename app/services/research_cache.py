@@ -42,7 +42,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.observability import log_external_call
 from app.db.models.research_reports import ResearchReportRow
-from app.schemas.research import ResearchReport
+from app.schemas.research import (
+    Confidence,
+    ResearchReport,
+    ResearchReportSummary,
+)
 
 
 async def lookup_recent(
@@ -94,6 +98,68 @@ async def lookup_recent(
             }
         )
         return ResearchReport.model_validate(row.report_json)
+
+
+async def list_recent(
+    session: AsyncSession,
+    *,
+    limit: int,
+    offset: int,
+    symbol: str | None = None,
+) -> list[ResearchReportSummary]:
+    """Return cached reports newest-first, with optional symbol filter.
+
+    Used by ``GET /v1/research`` (Phase 3.0 A3) to power the dashboard
+    sidebar. Returns the 5-field summary shape — never the full
+    ``ResearchReport`` blob — so the list endpoint stays cheap even
+    with many rows.
+
+    The summary's ``overall_confidence`` is read out of the JSONB
+    payload via Postgres ``->`` operator so we don't pull the whole
+    report blob just to extract one string. Falls back to
+    ``Confidence.LOW`` if the field is missing (defensive — older
+    rows shouldn't be missing it).
+    """
+    with log_external_call(
+        "db.research_cache.list",
+        {"limit": limit, "offset": offset, "symbol": symbol},
+    ) as call:
+        # `report_json -> 'overall_confidence'` returns a JSONB scalar
+        # (still in JSONB form). `->>` would return text directly;
+        # we prefer that for cleanness.
+        confidence_col = ResearchReportRow.report_json["overall_confidence"].astext
+        stmt = select(
+            ResearchReportRow.symbol,
+            ResearchReportRow.focus,
+            ResearchReportRow.report_date,
+            ResearchReportRow.generated_at,
+            confidence_col.label("overall_confidence"),
+        )
+        if symbol:
+            stmt = stmt.where(ResearchReportRow.symbol == symbol)
+        stmt = (
+            stmt.order_by(ResearchReportRow.generated_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        rows = (await session.execute(stmt)).all()
+
+        summaries = [
+            ResearchReportSummary(
+                symbol=r.symbol,
+                focus=r.focus,
+                report_date=r.report_date,
+                generated_at=r.generated_at,
+                overall_confidence=(
+                    Confidence(r.overall_confidence)
+                    if r.overall_confidence in {c.value for c in Confidence}
+                    else Confidence.LOW
+                ),
+            )
+            for r in rows
+        ]
+        call.record_output({"count": len(summaries)})
+        return summaries
 
 
 async def upsert(

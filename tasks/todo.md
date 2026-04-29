@@ -6,7 +6,42 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
--
+- Phase 3.0 — Frontend prereqs (PR A): shared-secret auth dep + CORS middleware + `GET /v1/research` list endpoint
+
+## Phase 3 — Frontend (React + Vercel) + auth gate
+
+> **Why React over a Streamlit MVP:** the user is React-bound either way, so the Streamlit step is pure detour (~1 day of throwaway code, no unique learnings vs raw `curl | jq` for UX discovery). Going straight to React saves the rebuild. **Why shared-password vs real auth:** ~30 min vs 1–2 days, single user (you), going semi-public. Structured as a single FastAPI dependency + a single React auth context so it can swap to Clerk/magic-link in a day when multi-user lands.
+
+### 3.0 Backend prereqs (PR A) — must land before frontend
+
+One PR, three commits:
+
+- [ ] **A1 — Shared-secret auth dep** — `app/core/auth.py::require_shared_secret`. Validates `Authorization: Bearer <secret>` against `settings.BACKEND_SHARED_SECRET` via `hmac.compare_digest`. When `BACKEND_SHARED_SECRET` is unset (default), the dep is a pass-through — local dev keeps working without a token. Wire to `/v1/research/*` only (other routes can stay open until they need protecting). Tests: 401 on missing/wrong header, 200 on right header, pass-through when secret is unset.
+- [ ] **A2 — CORS middleware** — `app/main.py` reads `settings.FRONTEND_ORIGIN: str | None`. When set, install `CORSMiddleware` with that origin (single origin, not `*`), allow methods `GET, POST, OPTIONS`, allow headers `Authorization, Content-Type`. Credentials disabled (we use bearer tokens, not cookies). Tests: preflight `OPTIONS` returns the right `Access-Control-Allow-*` headers when set, no CORS headers when unset.
+- [ ] **A3 — `GET /v1/research`** — Paginated list of past reports for the dashboard. Returns `list[ResearchReportSummary]` (symbol, focus, report_date, generated_at, overall_confidence) — NOT the full report blob. Query params: `limit` (default 20, max 100), `offset` (default 0), `symbol` (optional filter). Backed by a new `research_cache.list_recent(session, *, limit, offset, symbol=None)`. Order by `generated_at DESC`. Auth-protected via the A1 dep. Tests: empty DB → `[]`, multiple reports ordered desc, symbol filter works, pagination works, 401 without auth header when secret is set.
+
+Settings additions: `BACKEND_SHARED_SECRET: str = ""` (empty = auth disabled), `FRONTEND_ORIGIN: str = ""` (empty = CORS disabled). `.env.example` updated.
+
+### 3.1 Frontend MVP (PR B)
+
+- [ ] **`frontend/`** — Vite + React 18 + TypeScript + Tailwind + TanStack Query + Zod (mirrors `ResearchReport` schema for runtime validation).
+- [ ] **Login screen** — single password field → POST a probe to `/v1/research/AAPL` with the bearer token; on 200 (or 401), persist the token to `localStorage` and route to dashboard.
+- [ ] **Dashboard** — symbol input + focus dropdown (full / earnings) + refresh toggle. Submit → loading state with the "first generation takes ~30s, repeat reads <1s" copy.
+- [ ] **Report renderer** — sections rendered as cards: title + confidence badge + summary prose + claims as a footnoted table (description / value / source link). 429 → "rate limit hit, retry in N seconds" banner. 503 → "synth unavailable, try again" banner.
+- [ ] **Past reports list** — sidebar driven by `GET /v1/research?limit=20`. Click a row → re-fetch the full report.
+- [ ] **Vercel deploy** — push-to-deploy from this repo's `frontend/` subdir. Env vars: `VITE_BACKEND_URL`, `VITE_SHARED_SECRET` (or have user paste at login screen).
+
+### 3.2 Prod test + docs sweep (PR C)
+
+- [ ] **Dogfood** the deployed Vercel + Fly stack against 5–10 real symbols across both focuses. Note UX rough edges, fix the high-impact ones.
+- [ ] **README** — new "Frontend" section with screenshots, deploy instructions, env-var reference.
+- [ ] **`design_doc.md`** — add the React + Vercel architecture row, update the data-flow diagram.
+- [ ] **`CLAUDE.md`** — update "Current state" to reflect frontend, add `frontend/` to repo structure.
+- [ ] **ADR 0004** — record the React-over-Streamlit and shared-password-over-real-auth decisions with the trade-offs that will trigger a revisit.
+
+### 3.3 (Deferred) — what was the old "Phase 3" plan
+
+The previous Phase 3 sketch (pgvector RAG / `search_history`, `compute_options`) doesn't fit what we're trying to achieve right now. To be re-scoped after the frontend ships and we have real-user feedback on what the agent's actually missing.
 
 ## Phase 2 — v2 Equity Research Assistant
 
@@ -35,9 +70,13 @@ Active sprint for the Market Analysis Agent.
 
 ### 2.2 Agent + endpoint
 
-- [ ] **`POST /v1/research/{symbol}`** — single-agent default mode. Takes `focus` (`earnings | technical | full`) + `include_sentiment`. The triage call picks tools; synth call composes the report. Strict structured output. Per-section `confidence`. Audit trail of tool calls captured.
-- [ ] **Per-symbol response cache** — same-day requests return cached unless `?refresh=true`. Cache in `research_reports` table keyed on `(symbol, focus, date)`.
-- [ ] **Rate limit middleware** on `/v1/research/*` — N reports / hour / IP. Slowapi or hand-rolled.
+- [x] **`POST /v1/research/{symbol}`** (PR #26) — deterministic-everything-except-prose architecture. Static `Focus → sections → tools → claim builders` registry; orchestrator runs tools in parallel, isolates failures, calls Sonnet for prose-only with forced `SectionSummaries` schema; confidence stamped programmatically. 7 sections (`full`) or 3 sections (`earnings`). Real-LLM golden eval at factuality 0.97. **LLM-driven section composition deferred to 2.2d** if eval shows the static catalog is too rigid.
+- [x] **Same-day response cache** (PR #28) — `research_reports` table (Alembic 0003) keyed on `(symbol, focus, report_date)` in `settings.TZ`. JSONB stores serialized `ResearchReport`; lookup is time-windowed via `generated_at` so the 168-hour default is configurable per env without schema change. `?refresh=true` overwrites the same-day row. Failed orchestrations not cached.
+- [x] **Rate limit** on `/v1/research/*` (PRs #29 + this PR) — in-memory per-IP token bucket, default 3/hour (`RESEARCH_RATE_LIMIT_PER_HOUR`). X-Forwarded-For aware. **Runs *after* the cache lookup**, so cache hits are free; only synthesis-bound requests (cache miss or `?refresh=true`) consume tokens. Returns 429 + `Retry-After` on deny. See README §"Rate limit posture" for the trade-off.
+
+### 2.2d Optional — LLM-driven section composition (only if eval needs it)
+
+- [ ] **LLM triage replaces the static SECTION_TO_CLAIM_KEYS map.** Phase 2.2d kicks in if the rubric shows the deterministic catalog is too rigid (e.g. consistently misses sector-specific framings the LLM would produce). Currently no signal that this is needed.
 
 ### 2.3 Optional — supervisor mode (only if a real query needs it)
 

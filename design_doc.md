@@ -143,8 +143,8 @@ Non-negotiable. Every Phase 2 PR is gated on these.
 | Symbols | `GET /v1/symbols`, `POST /v1/symbols` | ✅ |
 | News | `GET /v1/news`, `GET /v1/news/{id}`, `POST /v1/news/ingest` | ✅ |
 | Market | `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history`, `POST /v1/market/{symbol}/ingest` | ✅ |
-| Research | `POST /v1/research/{symbol}` | planned (Phase 2.2) |
-| Analysis / Reports / Forecasts | placeholders | return 501 |
+| Research | `POST /v1/research/{symbol}?focus={full,earnings}&refresh={false,true}` | ✅ (PRs #26 + #28 + #29) — same-day cache + per-IP rate limit |
+| Analysis / Reports / Forecasts | legacy v1 placeholders | return 501 — to be removed or redirected to `/v1/research` |
 
 Errors are RFC 7807 problem+json via [`app/core/errors.py`](app/core/errors.py).
 
@@ -158,7 +158,7 @@ Errors are RFC 7807 problem+json via [`app/core/errors.py`](app/core/errors.py).
 | NewsAPI dev tier | $0 | 100 req/day. Yahoo RSS fills the gap. |
 | **Estimated total** | **$5–15** | Well inside the $50–80 design budget |
 
-Hard rate limit on `/v1/research/*` lands before public exposure to bound LLM cost.
+Hard rate limit on `/v1/research/*` shipped in PR #29 + the post-cache refinement: in-memory per-IP token bucket (default 3/hour, env-tunable). Runs *after* the cache lookup so cache hits are free — only synthesis-bound requests consume tokens. Bounds LLM cost without 429ing legitimate re-reads of already-generated reports. See README §"Rate limit posture" for the trade-off.
 
 ## Security
 
@@ -173,14 +173,15 @@ Auth, real rate limiting, and per-user cost caps land only when the project has 
 
 **Phase 1 — Core infrastructure (done).** FastAPI scaffold, async DB stack, Alembic, yfinance ingest, RSI + SMA technicals, observability, RFC 7807, deploy to Fly + Neon, CI with Gitleaks + Claude PR review.
 
-**Phase 2 — Equity research assistant (in progress).**
+**Phase 2 — Equity research assistant (substantially done).**
 
-- 2.0 Foundations ✅ — research schemas, LLM client, eval harness skeleton.
-- 2.1 Tool registry — 9/11 done. Remaining: `search_history` (pgvector) and `compute_options` (daily IV snapshot job). See [tasks/todo.md](tasks/todo.md).
-- 2.2 Agent + `POST /v1/research/{symbol}` — gating tools (`fetch_edgar` + `parse_filing` + `fetch_macro`) all merged; this is the next major sprint.
-- 2.3 Optional supervisor mode — only if eval shows multi-agent gives a factuality / structure win over single-agent. Cut otherwise.
+- 2.0 Foundations ✅ — research schemas, LLM client with cost-tier routing, eval harness with rubric (structure + factuality + latency).
+- 2.1 Tool registry ✅ — 9/9 active tools shipped. `search_history` (pgvector) and `compute_options` (daily IV snapshot) deliberately deferred to Phase 3 per the roadmap below.
+- 2.2 Agent + `POST /v1/research/{symbol}` ✅ — deterministic-everything-except-prose architecture (PR #26); same-day cache (PR #28); per-IP rate limit (PR #29 + post-cache refinement). Real-LLM golden eval at factuality 0.97.
+- 2.2d LLM-driven section composition — deferred. Will land if the rubric shows the static `SECTION_TO_CLAIM_KEYS` map is too rigid for sector-specific framings. No signal that this is needed yet.
+- 2.3 Optional supervisor mode — deferred. Will land if eval shows multi-agent gives a factuality / structure win over single-agent. Cut otherwise.
 
-**Phase 3+ (future).** pgvector RAG (`search_history`), options daily snapshots (`compute_options`), small web frontend, auth + per-user cost caps, Reddit sentiment (only if a recurring query justifies it).
+**Phase 3+ (future).** pgvector RAG (`search_history`), options daily snapshots (`compute_options`), small web frontend, auth + per-user cost caps, Reddit sentiment (only if a recurring query justifies it). Horizontal-scale rate-limit (Redis swap-in for the in-process bucket) lands here too if/when traffic warrants it.
 
 ## Risks
 

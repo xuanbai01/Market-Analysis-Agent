@@ -33,35 +33,93 @@ ET reads the same row a request at 9am ET the next morning UTC writes.
 ## Rate limiting
 
 Per-IP token bucket via ``enforce_research_rate_limit``. Default is
-3 reports/hour/IP (env: ``RESEARCH_RATE_LIMIT_PER_HOUR``). The cache
-in 2.2b means a repeat ``refresh=false`` request costs nothing, so
-the limit only kicks in for genuinely new (symbol, focus)
-combinations or ``?refresh=true`` calls. Returns 429 + Retry-After
-on deny. Set the env var to 0 to disable.
+3 reports/hour/IP (env: ``RESEARCH_RATE_LIMIT_PER_HOUR``).
+
+**The check runs AFTER the cache lookup, not before.** Cache hits do
+NOT consume tokens — only cache misses and ``?refresh=true`` calls do.
+The reasoning: the rate limit exists to bound *LLM cost*, and a cache
+hit costs nothing. A user re-reading their already-generated report
+should not be told they've hit a quota.
+
+Trade-off: a determined attacker who has already burned 3 tokens can
+still hit cache lookups indefinitely. For a personal-scale deployment
+this is fine — cache lookups are sub-millisecond indexed SELECTs and
+there's exactly one user. If/when this goes public-multi-user, flip
+the dependency back to ``dependencies=[Depends(...)]`` on the route
+decorator (Phase 3 decision; see README §"Rate limit posture").
+
+Returns 429 + Retry-After on deny. Set the env var to 0 to disable
+entirely.
 """
 from __future__ import annotations
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import enforce_research_rate_limit, get_session
+from app.core.auth import require_shared_secret
 from app.core.settings import settings
-from app.schemas.research import ResearchReport
+from app.schemas.research import ResearchReport, ResearchReportSummary
 from app.services import research_cache, research_orchestrator
 from app.services.research_tool_registry import Focus
 
 router = APIRouter()
 
 
+@router.get(
+    "/research",
+    response_model=list[ResearchReportSummary],
+    dependencies=[Depends(require_shared_secret)],
+)
+async def list_research(
+    limit: int = Query(
+        20,
+        ge=1,
+        le=100,
+        description=(
+            "Page size. Capped at 100 so a single response stays cheap; "
+            "the dashboard typically renders 20."
+        ),
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Skip the first N rows. Combine with ``limit`` to paginate.",
+    ),
+    symbol: str | None = Query(
+        None,
+        max_length=16,
+        description=(
+            "Optional ticker filter. Uppercased before lookup so "
+            "``?symbol=aapl`` finds AAPL rows."
+        ),
+    ),
+    session: AsyncSession = Depends(get_session),
+) -> list[ResearchReportSummary]:
+    """List cached research reports newest-first for the dashboard sidebar.
+
+    Lightweight metadata only — symbol, focus, report_date, generated_at,
+    overall_confidence. Clicks on a row fetch the full report via
+    ``POST /v1/research/{symbol}`` which hits the same-day cache.
+    """
+    return await research_cache.list_recent(
+        session,
+        limit=limit,
+        offset=offset,
+        symbol=symbol.upper() if symbol else None,
+    )
+
+
 @router.post(
     "/research/{symbol}",
     response_model=ResearchReport,
-    dependencies=[Depends(enforce_research_rate_limit)],
+    dependencies=[Depends(require_shared_secret)],
 )
 async def research(
+    request: Request,
     symbol: str,
     focus: Focus = Query(
         Focus.FULL,
@@ -78,16 +136,18 @@ async def research(
             "If true, skip the same-day cache lookup and force a fresh "
             "synthesis. The fresh report still upserts into the cache, "
             "overwriting any same-day row. Use sparingly — every "
-            "refresh=true call is a paid LLM round trip."
+            "refresh=true call consumes a rate-limit token AND is a "
+            "paid LLM round trip."
         ),
     ),
     session: AsyncSession = Depends(get_session),
 ) -> ResearchReport:
     """Generate (or re-serve) a structured research report for a ticker.
 
-    Cost on cache hit: ~10 ms (one DB SELECT). Cost on miss:
-    one Sonnet synthesis (~$0.05–$0.15) plus tool fan-out latency
-    dominated by EDGAR (~5 s cold cache, sub-second warm).
+    Cost on cache hit: ~10 ms (one DB SELECT, no token consumed).
+    Cost on miss: one rate-limit token + one Sonnet synthesis
+    (~$0.05–$0.15) plus tool fan-out latency dominated by EDGAR
+    (~5 s cold cache, sub-second warm).
     """
     target = symbol.upper()
 
@@ -97,6 +157,9 @@ async def research(
     tz = ZoneInfo(settings.TZ)
     report_date = datetime.now(tz).date()
 
+    # Cache lookup runs first, unconditionally (cache hits are free —
+    # no LLM cost, no token consumed). Only cache misses or explicit
+    # ?refresh=true requests reach the rate limiter and the orchestrator.
     if not refresh:
         cached = await research_cache.lookup_recent(
             session,
@@ -106,6 +169,11 @@ async def research(
         )
         if cached is not None:
             return cached
+
+    # Cache miss (or refresh forced) → about to spend an LLM call.
+    # Rate-limit gate goes here, after we've confirmed we'd actually
+    # be paying for the synthesis.
+    await enforce_research_rate_limit(request)
 
     try:
         report = await research_orchestrator.compose_research_report(

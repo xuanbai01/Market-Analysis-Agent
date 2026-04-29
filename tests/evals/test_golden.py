@@ -22,11 +22,11 @@ hiding real hallucinations.
 """
 from __future__ import annotations
 
-import os
 import time
 
 import pytest
 
+from app.core.settings import settings
 from app.services.research_orchestrator import compose_research_report
 from app.services.research_tool_registry import Focus
 from tests.evals.golden import GOLDEN_CASES
@@ -38,6 +38,11 @@ from tests.evals.rubric import grade
 # Express both as a *single* placeholder test rather than parametrizing
 # over an empty list (pytest's ``parametrize([], ids=...)`` call still
 # evaluates the ids callback once and errors on the empty parameter).
+#
+# The skipif checks ``settings.ANTHROPIC_API_KEY`` (the same source the
+# LLM client reads) rather than ``os.environ`` directly — that way
+# ``.env``-based config works without also exporting the env var to
+# the shell.
 if not GOLDEN_CASES:
 
     def test_golden_cases_pending() -> None:
@@ -46,8 +51,9 @@ if not GOLDEN_CASES:
 else:
 
     @pytest.mark.skipif(
-        not os.environ.get("ANTHROPIC_API_KEY"),
-        reason="ANTHROPIC_API_KEY not set; skipping live LLM eval suite",
+        not settings.ANTHROPIC_API_KEY,
+        reason="ANTHROPIC_API_KEY not set (in env or .env); "
+               "skipping live LLM eval suite",
     )
     @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: f"{c.symbol}-{c.focus}")
     async def test_golden_case(case) -> None:

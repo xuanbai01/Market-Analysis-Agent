@@ -38,6 +38,12 @@ from app.schemas.research import ResearchReport
 # "12.3" (the source claim might be stored either way).
 _NUMBER_RE = re.compile(r"\b(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\b")
 
+# ISO dates ("2026-01-29") are stripped whole. Without this, the year
+# regex below would only catch "2026" and leave "01" / "29" to be
+# extracted as 1.0 / 29.0 — false positives that aren't financial
+# claims at all. Order matters: strip dates BEFORE bare years.
+_ISO_DATE_RE = re.compile(r"\b\d{4}-\d{1,2}-\d{1,2}\b")
+
 # Years mentioned in passing ("Q3 2026 results", "FY2025 guidance") are
 # almost never numerical claims — strip them before factuality scoring.
 _YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
@@ -85,8 +91,9 @@ def score_structure(report_dict: dict) -> StructureScore:
 
 
 def _extract_numbers(text: str) -> list[float]:
-    """Pull decimal numbers out of prose, dropping obvious year noise."""
-    cleaned = _YEAR_RE.sub(" ", text)
+    """Pull decimal numbers out of prose, dropping obvious date / year noise."""
+    cleaned = _ISO_DATE_RE.sub(" ", text)
+    cleaned = _YEAR_RE.sub(" ", cleaned)
     out: list[float] = []
     for match in _NUMBER_RE.finditer(cleaned):
         raw = match.group(0).replace(",", "")
@@ -97,15 +104,74 @@ def _extract_numbers(text: str) -> list[float]:
     return out
 
 
-def _claim_numeric_values(report: ResearchReport) -> set[float]:
-    """All numeric claim values across the report, for fast lookup."""
-    out: set[float] = set()
+def _claim_numeric_values(report: ResearchReport) -> list[float]:
+    """All numeric claim values across the report. List, not set: order
+    is irrelevant for matching but duplicates are allowed (a claim value
+    of 0 repeated across sections is still one matchable value)."""
+    out: list[float] = []
     for section in report.sections:
         for claim in section.claims:
             v = claim.value
             if isinstance(v, int | float) and not isinstance(v, bool):
-                out.add(float(v))
+                out.append(float(v))
     return out
+
+
+def _matches_claim(prose_n: float, claim_v: float, tolerance: float) -> bool:
+    """Check ``prose_n`` against ``claim_v`` under finance display rules.
+
+    Beyond direct numeric match (within ``tolerance``), also accept:
+
+    1. **Sign-flip.** Prose like "a reduction of 714 chars" implicitly
+       carries the sign that's stored in the claim (-714). Accept
+       absolute-value matches.
+    2. **Fraction → percentage.** A gross margin claim of 0.47325 will
+       be written as "47.33%" — the LLM is doing standard finance
+       display, not hallucinating. Accept 100×fraction matches with a
+       proportionally scaled tolerance.
+    3. **Scaled units.** A market cap of 3,972,863,098,880 will be
+       written as "$3.97 trillion"; shares short of 134,422,787 as
+       "134.4 million". Accept matches when ``claim_v`` divided by
+       1e6, 1e9, or 1e12 lands inside ``tolerance`` of ``prose_n``.
+
+    Each rule covers a real pattern observed in Sonnet's research-
+    report prose. Skipping any of them produces false positives that
+    swamp genuine hallucinations.
+    """
+    # Direct match.
+    if abs(prose_n - claim_v) <= tolerance:
+        return True
+
+    # Sign-flip ("reduction of 714" cites a -714 char delta).
+    if abs(abs(prose_n) - abs(claim_v)) <= tolerance:
+        return True
+
+    # Fraction <-> percentage. 0.47325 → "47.33%" with tolerance scaled
+    # to 100× since the comparison is in the percentage-magnitude space.
+    pct_tolerance = tolerance * 100
+    if abs(prose_n - claim_v * 100) <= pct_tolerance:
+        return True
+    if abs(prose_n - abs(claim_v) * 100) <= pct_tolerance:
+        return True
+
+    # Scaled units: trillions, billions, millions. Only meaningful for
+    # values large enough that the scaling makes sense (≥ 1e6). LLMs
+    # typically round to 1 decimal place when displaying scaled units
+    # ("$3.97 trillion", "134.4 million"), so use a wider tolerance for
+    # these matches than for raw / fraction matches. 0.1 covers
+    # one-decimal-place rounding without admitting fabricated values:
+    # at scaled-unit magnitudes, "3.5 billion" vs "3.6 billion" still
+    # fails (diff = 0.1 = tolerance, edge case) — anything sloppier
+    # than that is a real miscount worth flagging.
+    if abs(claim_v) >= 1e6:
+        scaled_tolerance = 0.1
+        for scale in (1e12, 1e9, 1e6):
+            if abs(prose_n - claim_v / scale) <= scaled_tolerance:
+                return True
+            if abs(prose_n - abs(claim_v) / scale) <= scaled_tolerance:
+                return True
+
+    return False
 
 
 def score_factuality(
@@ -115,9 +181,10 @@ def score_factuality(
 ) -> FactualityScore:
     """
     For every decimal number in any ``summary`` prose, check whether it
-    matches (within ``tolerance``) some Claim.value in the report. If a
-    section has no summary or no claims, it contributes nothing — the
-    factuality check is per-number, not per-section.
+    matches some Claim.value in the report — under direct, sign-flip,
+    fraction-percentage, or scaled-unit equivalence (see
+    ``_matches_claim``). If a section has no summary or no claims, it
+    contributes nothing; the check is per-number, not per-section.
     """
     claim_values = _claim_numeric_values(report)
     found: list[float] = []
@@ -128,7 +195,7 @@ def score_factuality(
             continue
         for n in _extract_numbers(section.summary):
             found.append(n)
-            if not any(abs(n - v) <= tolerance for v in claim_values):
+            if not any(_matches_claim(n, v, tolerance) for v in claim_values):
                 unmatched.append(n)
 
     if not found:

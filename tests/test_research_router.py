@@ -552,13 +552,15 @@ async def test_rate_limit_uses_first_x_forwarded_for_hop(
     assert resp.status_code == 429
 
 
-async def test_rate_limit_runs_before_cache_lookup(
+async def test_rate_limit_runs_after_cache_miss_only(
     research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A 429'd request must NOT touch the cache or orchestrator.
+    """The 429 path: the rate limiter only fires on cache misses.
 
-    The dependency runs before the route handler, so a denied
-    request bypasses both the cache lookup AND any synthesis cost.
+    Both requests do a cache lookup (cache lookups are free). The
+    first finds nothing → rate limit allows → orchestrator runs →
+    upsert. The second finds nothing again → rate limit DENIES →
+    no orchestrator, no upsert.
     """
     _enable_rate_limit(monkeypatch, capacity=1)
     cache_lookups = _patch_cache_lookup(monkeypatch, returns=None)
@@ -568,11 +570,62 @@ async def test_rate_limit_runs_before_cache_lookup(
     headers = {"x-forwarded-for": "10.0.0.50"}
     # Burn the one token.
     await research_client.post("/v1/research/AAPL", headers=headers)
-    # The 2nd request is rate-limited.
+    # The 2nd request is rate-limited at the post-cache gate.
     resp = await research_client.post("/v1/research/AAPL", headers=headers)
 
     assert resp.status_code == 429
-    # Exactly one of each ran (the first, allowed request).
-    assert len(cache_lookups) == 1
+    # Both requests touched the cache (cache lookups are free).
+    assert len(cache_lookups) == 2
+    # Only the allowed request reached the orchestrator + upsert.
     assert len(orch_calls) == 1
     assert len(cache_upserts) == 1
+
+
+async def test_cache_hits_do_not_consume_rate_limit_tokens(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Repeat reads of an already-cached report must not 429 the user.
+
+    capacity=1 + 10 cache hits → all 200, because cache hits never
+    reach the rate limiter. Anti-regression: this is the whole reason
+    we moved the rate limit check after the cache lookup.
+    """
+    _enable_rate_limit(monkeypatch, capacity=1)
+    # Cache always returns a hit.
+    _patch_cache_lookup(monkeypatch, returns=_stub_report())
+    orch_calls = _patch_orchestrator(monkeypatch, _stub_report())
+    upserts = _patch_cache_upsert(monkeypatch)
+
+    headers = {"x-forwarded-for": "10.0.0.60"}
+    for _ in range(10):
+        resp = await research_client.post("/v1/research/AAPL", headers=headers)
+        assert resp.status_code == 200
+
+    # No orchestrator runs, no upserts (every request was a cache hit).
+    assert orch_calls == []
+    assert upserts == []
+
+
+async def test_refresh_true_consumes_rate_limit_token(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``?refresh=true`` skips the cache, forces a synthesis, AND
+    consumes a rate-limit token. The third refresh from the same IP
+    with capacity=2 should 429."""
+    _enable_rate_limit(monkeypatch, capacity=2)
+    # Even with a cache hit available, refresh=true bypasses lookup.
+    _patch_cache_lookup(monkeypatch, returns=_stub_report())
+    _patch_orchestrator(monkeypatch, _stub_report())
+    _patch_cache_upsert(monkeypatch)
+
+    headers = {"x-forwarded-for": "10.0.0.70"}
+    for _ in range(2):
+        resp = await research_client.post(
+            "/v1/research/AAPL?refresh=true", headers=headers
+        )
+        assert resp.status_code == 200
+
+    resp = await research_client.post(
+        "/v1/research/AAPL?refresh=true", headers=headers
+    )
+    assert resp.status_code == 429

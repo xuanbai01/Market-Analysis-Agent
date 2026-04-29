@@ -35,9 +35,13 @@ Active sprint for the Market Analysis Agent.
 
 ### 2.2 Agent + endpoint
 
-- [ ] **`POST /v1/research/{symbol}`** — single-agent default mode. Takes `focus` (`earnings | technical | full`) + `include_sentiment`. The triage call picks tools; synth call composes the report. Strict structured output. Per-section `confidence`. Audit trail of tool calls captured.
-- [ ] **Per-symbol response cache** — same-day requests return cached unless `?refresh=true`. Cache in `research_reports` table keyed on `(symbol, focus, date)`.
-- [ ] **Rate limit middleware** on `/v1/research/*` — N reports / hour / IP. Slowapi or hand-rolled.
+- [x] **`POST /v1/research/{symbol}`** (PR #26) — deterministic-everything-except-prose architecture. Static `Focus → sections → tools → claim builders` registry; orchestrator runs tools in parallel, isolates failures, calls Sonnet for prose-only with forced `SectionSummaries` schema; confidence stamped programmatically. 7 sections (`full`) or 3 sections (`earnings`). Real-LLM golden eval at factuality 0.97. **LLM-driven section composition deferred to 2.2d** if eval shows the static catalog is too rigid.
+- [x] **Same-day response cache** (PR #28) — `research_reports` table (Alembic 0003) keyed on `(symbol, focus, report_date)` in `settings.TZ`. JSONB stores serialized `ResearchReport`; lookup is time-windowed via `generated_at` so the 168-hour default is configurable per env without schema change. `?refresh=true` overwrites the same-day row. Failed orchestrations not cached.
+- [x] **Rate limit** on `/v1/research/*` (PRs #29 + this PR) — in-memory per-IP token bucket, default 3/hour (`RESEARCH_RATE_LIMIT_PER_HOUR`). X-Forwarded-For aware. **Runs *after* the cache lookup**, so cache hits are free; only synthesis-bound requests (cache miss or `?refresh=true`) consume tokens. Returns 429 + `Retry-After` on deny. See README §"Rate limit posture" for the trade-off.
+
+### 2.2d Optional — LLM-driven section composition (only if eval needs it)
+
+- [ ] **LLM triage replaces the static SECTION_TO_CLAIM_KEYS map.** Phase 2.2d kicks in if the rubric shows the deterministic catalog is too rigid (e.g. consistently misses sector-specific framings the LLM would produce). Currently no signal that this is needed.
 
 ### 2.3 Optional — supervisor mode (only if a real query needs it)
 

@@ -1,0 +1,416 @@
+"""
+Tests for ``app.services.research_cache``.
+
+DB-bound (uses the per-test session + tx-rollback fixture from conftest).
+Two operations: ``lookup_recent`` reads the most-recent row inside a
+time window, ``upsert`` writes / overwrites by (symbol, focus, date) PK.
+"""
+from __future__ import annotations
+
+from datetime import UTC, date, datetime, timedelta
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models.research_reports import ResearchReportRow
+from app.schemas.research import (
+    Claim,
+    Confidence,
+    ResearchReport,
+    Section,
+    Source,
+)
+from app.services.research_cache import lookup_recent, upsert
+
+# ── Fixtures ──────────────────────────────────────────────────────────
+
+
+def _src() -> Source:
+    return Source(tool="test.tool", fetched_at=datetime.now(UTC))
+
+
+def _build_report(
+    *, symbol: str = "AAPL", confidence: Confidence = Confidence.HIGH
+) -> ResearchReport:
+    """Minimal but valid ResearchReport for round-trip tests."""
+    return ResearchReport(
+        symbol=symbol,
+        generated_at=datetime.now(UTC),
+        sections=[
+            Section(
+                title="Valuation",
+                claims=[
+                    Claim(description="Trailing P/E", value=28.5, source=_src()),
+                ],
+                summary="Trades at 28.5x trailing earnings.",
+                confidence=confidence,
+            ),
+        ],
+        overall_confidence=confidence,
+        tool_calls_audit=["fetch_fundamentals: ok"],
+    )
+
+
+# ── upsert ────────────────────────────────────────────────────────────
+
+
+async def test_upsert_writes_a_new_row(db_session: AsyncSession) -> None:
+    report = _build_report()
+    await upsert(
+        db_session,
+        symbol="AAPL",
+        focus="full",
+        report_date=date(2026, 4, 29),
+        report=report,
+    )
+    await db_session.flush()
+
+    rows = (
+        await db_session.execute(
+            ResearchReportRow.__table__.select().where(
+                ResearchReportRow.symbol == "AAPL"
+            )
+        )
+    ).all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.symbol == "AAPL"
+    assert row.focus == "full"
+    assert row.report_date == date(2026, 4, 29)
+    assert row.report_json["symbol"] == "AAPL"
+    assert row.report_json["sections"][0]["title"] == "Valuation"
+
+
+async def test_upsert_overwrites_same_day_row(db_session: AsyncSession) -> None:
+    """Same (symbol, focus, report_date) — the second upsert replaces
+    the first. This is what ?refresh=true relies on."""
+    first = _build_report()
+    first.sections[0].claims[0].value = 28.5  # type: ignore[misc]
+
+    await upsert(
+        db_session,
+        symbol="AAPL",
+        focus="full",
+        report_date=date(2026, 4, 29),
+        report=first,
+    )
+    await db_session.flush()
+
+    second = _build_report()
+    # Mutate so we can prove the second write wins.
+    second.sections[0].summary = "Updated prose after refresh."
+    await upsert(
+        db_session,
+        symbol="AAPL",
+        focus="full",
+        report_date=date(2026, 4, 29),
+        report=second,
+    )
+    await db_session.flush()
+
+    rows = (
+        await db_session.execute(ResearchReportRow.__table__.select())
+    ).all()
+    assert len(rows) == 1, "same-day refresh should overwrite, not duplicate"
+    assert (
+        rows[0].report_json["sections"][0]["summary"]
+        == "Updated prose after refresh."
+    )
+
+
+async def test_upsert_distinguishes_focus(db_session: AsyncSession) -> None:
+    """Different focus values → different rows (focus is in the PK)."""
+    rep = _build_report()
+    await upsert(
+        db_session, symbol="AAPL", focus="full",
+        report_date=date(2026, 4, 29), report=rep,
+    )
+    await upsert(
+        db_session, symbol="AAPL", focus="earnings",
+        report_date=date(2026, 4, 29), report=rep,
+    )
+    await db_session.flush()
+
+    rows = (
+        await db_session.execute(ResearchReportRow.__table__.select())
+    ).all()
+    assert {(r.symbol, r.focus) for r in rows} == {
+        ("AAPL", "full"),
+        ("AAPL", "earnings"),
+    }
+
+
+# ── lookup_recent ─────────────────────────────────────────────────────
+
+
+async def test_lookup_recent_returns_none_when_empty(
+    db_session: AsyncSession,
+) -> None:
+    result = await lookup_recent(
+        db_session, symbol="AAPL", focus="full", max_age_hours=168
+    )
+    assert result is None
+
+
+async def test_lookup_recent_returns_row_within_window(
+    db_session: AsyncSession,
+) -> None:
+    """Row generated 1 hour ago must be returned by a 168-hour lookup."""
+    report = _build_report()
+    # Force generated_at to a known recent timestamp.
+    report = report.model_copy(
+        update={"generated_at": datetime.now(UTC) - timedelta(hours=1)}
+    )
+    await upsert(
+        db_session,
+        symbol="AAPL",
+        focus="full",
+        report_date=date.today(),
+        report=report,
+    )
+    await db_session.flush()
+
+    result = await lookup_recent(
+        db_session, symbol="AAPL", focus="full", max_age_hours=168
+    )
+    assert result is not None
+    assert isinstance(result, ResearchReport)
+    assert result.symbol == "AAPL"
+    assert result.sections[0].title == "Valuation"
+
+
+async def test_lookup_recent_excludes_rows_older_than_window(
+    db_session: AsyncSession,
+) -> None:
+    """A row from 200 hours ago does not satisfy a 168-hour window."""
+    old_when = datetime.now(UTC) - timedelta(hours=200)
+    old_report = _build_report().model_copy(update={"generated_at": old_when})
+
+    await upsert(
+        db_session,
+        symbol="AAPL",
+        focus="full",
+        report_date=(datetime.now(UTC) - timedelta(days=10)).date(),
+        report=old_report,
+    )
+    await db_session.flush()
+
+    result = await lookup_recent(
+        db_session, symbol="AAPL", focus="full", max_age_hours=168
+    )
+    assert result is None
+
+
+async def test_lookup_recent_returns_most_recent_when_multiple_rows(
+    db_session: AsyncSession,
+) -> None:
+    """If two rows fall inside the window, return the freshest."""
+    older_when = datetime.now(UTC) - timedelta(hours=72)
+    newer_when = datetime.now(UTC) - timedelta(hours=2)
+
+    older = _build_report().model_copy(update={"generated_at": older_when})
+    newer = _build_report().model_copy(update={"generated_at": newer_when})
+    # Mark the newer one so we can identify it on read-back.
+    newer.sections[0].summary = "freshest"
+
+    await upsert(
+        db_session, symbol="AAPL", focus="full",
+        report_date=date.today() - timedelta(days=3), report=older,
+    )
+    await upsert(
+        db_session, symbol="AAPL", focus="full",
+        report_date=date.today(), report=newer,
+    )
+    await db_session.flush()
+
+    result = await lookup_recent(
+        db_session, symbol="AAPL", focus="full", max_age_hours=168
+    )
+    assert result is not None
+    assert result.sections[0].summary == "freshest"
+
+
+async def test_lookup_recent_filters_by_symbol_and_focus(
+    db_session: AsyncSession,
+) -> None:
+    """Cross-symbol / cross-focus rows must NOT be returned."""
+    report = _build_report().model_copy(
+        update={"generated_at": datetime.now(UTC) - timedelta(hours=1)}
+    )
+    nvda_report = _build_report(symbol="NVDA").model_copy(
+        update={"generated_at": datetime.now(UTC) - timedelta(hours=1)}
+    )
+
+    # Wrong symbol
+    await upsert(
+        db_session, symbol="NVDA", focus="full",
+        report_date=date.today(), report=nvda_report,
+    )
+    # Wrong focus
+    await upsert(
+        db_session, symbol="AAPL", focus="earnings",
+        report_date=date.today(), report=report,
+    )
+    await db_session.flush()
+
+    result = await lookup_recent(
+        db_session, symbol="AAPL", focus="full", max_age_hours=168
+    )
+    assert result is None
+
+
+async def test_lookup_recent_zero_window_returns_none(
+    db_session: AsyncSession,
+) -> None:
+    """max_age_hours=0 means 'cache disabled'. Always miss."""
+    report = _build_report().model_copy(update={"generated_at": datetime.now(UTC)})
+    await upsert(
+        db_session, symbol="AAPL", focus="full",
+        report_date=date.today(), report=report,
+    )
+    await db_session.flush()
+
+    result = await lookup_recent(
+        db_session, symbol="AAPL", focus="full", max_age_hours=0
+    )
+    assert result is None
+
+
+# ── Round-trip integrity ──────────────────────────────────────────────
+
+
+async def test_round_trip_preserves_full_report_shape(
+    db_session: AsyncSession,
+) -> None:
+    """A complex report serialized → JSONB → deserialized still validates
+    as a ResearchReport with all its claims, sources, and confidence."""
+    src1 = Source(
+        tool="yfinance.fundamentals",
+        fetched_at=datetime(2026, 4, 28, 12, 0, tzinfo=UTC),
+        url="https://finance.yahoo.com/quote/AAPL",
+        detail="Ticker.info[trailingPE]",
+    )
+    src2 = Source(
+        tool="sec.ten_k_risks_diff",
+        fetched_at=datetime(2026, 4, 27, 9, 30, tzinfo=UTC),
+        detail="0000320193-25-000079 vs 0000320193-24-000123",
+    )
+    report = ResearchReport(
+        symbol="AAPL",
+        generated_at=datetime(2026, 4, 29, 14, 5, tzinfo=UTC),
+        sections=[
+            Section(
+                title="Valuation",
+                claims=[
+                    Claim(description="Trailing P/E", value=33.92, source=src1),
+                    Claim(description="Forward P/E", value=28.62, source=src1),
+                ],
+                summary="Trades at 33.92x trailing.",
+                confidence=Confidence.HIGH,
+            ),
+            Section(
+                title="Risk Factors",
+                claims=[
+                    Claim(description="Added paragraphs", value=35, source=src2),
+                ],
+                summary="35 newly added risk paragraphs.",
+                confidence=Confidence.MEDIUM,
+            ),
+        ],
+        overall_confidence=Confidence.MEDIUM,
+        tool_calls_audit=["fetch_fundamentals: ok", "extract_10k_risks_diff: ok"],
+    )
+
+    await upsert(
+        db_session,
+        symbol="AAPL",
+        focus="full",
+        report_date=date(2026, 4, 29),
+        report=report,
+    )
+    await db_session.flush()
+
+    result = await lookup_recent(
+        db_session, symbol="AAPL", focus="full", max_age_hours=168
+    )
+
+    assert result is not None
+    assert result.symbol == "AAPL"
+    assert len(result.sections) == 2
+    assert result.sections[0].claims[0].source.url == "https://finance.yahoo.com/quote/AAPL"
+    assert result.sections[1].claims[0].value == 35
+    assert result.sections[1].confidence == Confidence.MEDIUM
+    assert result.overall_confidence == Confidence.MEDIUM
+    assert result.tool_calls_audit == [
+        "fetch_fundamentals: ok",
+        "extract_10k_risks_diff: ok",
+    ]
+
+
+# ── Observability ─────────────────────────────────────────────────────
+
+
+async def test_lookup_logs_external_call_with_hit_outcome(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    report = _build_report().model_copy(
+        update={"generated_at": datetime.now(UTC) - timedelta(hours=1)}
+    )
+    await upsert(
+        db_session, symbol="AAPL", focus="full",
+        report_date=date.today(), report=report,
+    )
+    await db_session.flush()
+
+    with caplog.at_level(logging.INFO, logger="app.external"):
+        await lookup_recent(
+            db_session, symbol="AAPL", focus="full", max_age_hours=168
+        )
+
+    rec = next(
+        r for r in caplog.records
+        if r.name == "app.external" and r.service_id == "db.research_cache.lookup"
+    )
+    assert rec.input_summary == {
+        "symbol": "AAPL", "focus": "full", "max_age_hours": 168,
+    }
+    assert rec.output_summary["hit"] is True
+
+
+async def test_lookup_logs_miss_outcome(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="app.external"):
+        await lookup_recent(
+            db_session, symbol="AAPL", focus="full", max_age_hours=168
+        )
+
+    rec = next(
+        r for r in caplog.records
+        if r.name == "app.external" and r.service_id == "db.research_cache.lookup"
+    )
+    assert rec.output_summary["hit"] is False
+
+
+async def test_upsert_logs_external_call(
+    db_session: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="app.external"):
+        await upsert(
+            db_session, symbol="AAPL", focus="full",
+            report_date=date.today(), report=_build_report(),
+        )
+        await db_session.flush()
+
+    rec = next(
+        r for r in caplog.records
+        if r.name == "app.external" and r.service_id == "db.research_cache.upsert"
+    )
+    assert rec.input_summary["symbol"] == "AAPL"
+    assert rec.input_summary["focus"] == "full"

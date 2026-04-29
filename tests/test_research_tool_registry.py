@@ -20,7 +20,6 @@ from app.services.research_tool_registry import (
     tools_for,
 )
 
-
 # ── Claim-builder helpers ─────────────────────────────────────────────
 
 

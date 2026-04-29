@@ -41,6 +41,17 @@ class Settings(BaseSettings):
     # series_list) with None-valued data claims rather than 500ing.
     # Mirrors the NEWSAPI_KEY graceful-degradation pattern.
     FRED_API_KEY: str = ""
+    # Research-report cache window. The /v1/research/{symbol} endpoint
+    # caches successful reports in ``research_reports``; subsequent
+    # requests within this many hours re-serve the cached row instead
+    # of paying for a fresh LLM round trip. Default 168 (7 days)
+    # matches the natural refresh cadence of equity-research data:
+    # quality / capital-allocation / 10-K-derived metrics change
+    # quarterly or annually, and the price-anchored bits (valuation,
+    # peer P/Es, 10Y yield) being a few days stale is fine for
+    # long-term diligence. ``?refresh=true`` always bypasses the
+    # cache. See ADR / 2.2b plan for the trade-off discussion.
+    RESEARCH_CACHE_MAX_AGE_HOURS: int = 168
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

@@ -32,6 +32,9 @@ from app.db.models.base import Base
 from app.db.models.candles import Candle  # noqa: F401  -- registers on Base.metadata
 from app.db.models.news import NewsItemModel  # noqa: F401  -- registers on Base.metadata
 from app.db.models.news_symbols import NewsSymbol  # noqa: F401  -- registers on Base.metadata
+from app.db.models.research_reports import (
+    ResearchReportRow,  # noqa: F401  -- registers on Base.metadata
+)
 from app.db.models.symbols import Symbol  # noqa: F401  -- registers on Base.metadata
 from app.main import app
 

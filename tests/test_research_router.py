@@ -323,9 +323,12 @@ async def test_empty_symbol_returns_404_or_422(
 
     resp = await research_client.post("/v1/research/")
 
-    # FastAPI returns 404 (no route) or 405 (wrong method on root) — both
-    # are acceptable; the point is "not 200".
-    assert resp.status_code in (404, 405, 422)
+    # FastAPI's trailing-slash auto-redirect returns 307 once the
+    # ``GET /v1/research`` list endpoint exists (Phase 3.0 A3) — the
+    # path normalizes onto a real route, just one that requires GET.
+    # 404 / 405 / 422 stay accepted for older configurations. The
+    # point is "not 200 from the POST happy path".
+    assert resp.status_code in (307, 404, 405, 422)
 
 
 # ── Same-day cache integration (Phase 2.2b) ──────────────────────────

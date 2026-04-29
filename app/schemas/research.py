@@ -16,7 +16,7 @@ this schema is meant to enforce.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -125,6 +125,29 @@ class ResearchReport(BaseModel):
 # the call returns, the orchestrator matches summaries to sections by
 # title; unknown titles are dropped, missing titles get a fallback
 # summary.
+
+
+# ── List-endpoint summary shape (Phase 3.0 A3) ───────────────────────
+#
+# ``GET /v1/research`` returns a paginated list of past reports for the
+# dashboard sidebar. The full ``ResearchReport`` blob would be wasteful
+# (every page render would ship dozens of cached reports' full
+# sections + claims trees over the wire). This summary carries only
+# the 5 fields the sidebar actually renders — clicks fetch the full
+# report via ``POST /v1/research/{symbol}`` which hits the same-day
+# cache and returns instantly.
+
+
+class ResearchReportSummary(BaseModel):
+    """Lightweight cache-row metadata for the dashboard list view."""
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str = Field(min_length=1, max_length=16)
+    focus: str = Field(min_length=1, max_length=16)
+    report_date: date
+    generated_at: datetime
+    overall_confidence: Confidence
 
 
 class SectionSummary(BaseModel):

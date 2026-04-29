@@ -1,0 +1,566 @@
+"""
+Tests for ``app.services.research_orchestrator.compose_research_report``.
+
+Strategy: mock both layers the orchestrator depends on:
+
+1. ``TOOL_DISPATCH`` — patched per-test to substitute a fake async
+   callable for any of the six real tools. Lets us exercise the
+   fan-out, error isolation, and per-section claim assembly without
+   any network or DB.
+2. ``llm.synth_call`` — patched to return a hand-crafted
+   ``SectionSummaries`` so we never hit Anthropic in unit tests.
+   Real-LLM exercise lives in ``tests/evals/test_golden.py``.
+
+Both mocks are scoped per test via ``monkeypatch``; nothing leaks.
+"""
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import pytest
+
+from app.schemas.research import (
+    Claim,
+    Confidence,
+    ResearchReport,
+    SectionSummaries,
+    SectionSummary,
+    Source,
+)
+from app.schemas.ten_k import Extracted10KSection, Risk10KDiff
+from app.services import research_orchestrator as orch_module
+from app.services.research_orchestrator import compose_research_report
+from app.services.research_tool_registry import Focus
+
+# ── Tool output factories ─────────────────────────────────────────────
+
+
+def _claim(description: str, value: object, *, age_days: int = 1) -> Claim:
+    return Claim(
+        description=description,
+        value=value,  # type: ignore[arg-type]
+        source=Source(
+            tool="test.tool",
+            fetched_at=datetime.now(UTC) - timedelta(days=age_days),
+        ),
+    )
+
+
+def _fundamentals_output() -> dict[str, Claim]:
+    """All 15 fundamentals claims, fully populated."""
+    keys = [
+        "trailing_pe", "forward_pe", "p_s", "ev_ebitda", "peg",
+        "roe", "gross_margin", "profit_margin", "gross_margin_trend_1y",
+        "dividend_yield", "buyback_yield", "sbc_pct_revenue",
+        "short_ratio", "shares_short", "market_cap",
+    ]
+    return {k: _claim(k.replace("_", " ").title(), 1.5) for k in keys}
+
+
+def _earnings_output() -> dict[str, Claim]:
+    return {f"q{i}.eps_actual": _claim(f"Q{i} EPS", 1.0 + i * 0.1) for i in range(1, 5)}
+
+
+def _peers_output() -> dict[str, Claim]:
+    return {
+        "sector": _claim("Sector", "megacap_tech"),
+        "peers_list": _claim("Peers", "MSFT, GOOGL"),
+        "MSFT.trailing_pe": _claim("MSFT P/E", 26.6),
+    }
+
+
+def _macro_output() -> dict[str, Claim]:
+    return {
+        "sector": _claim("Sector", "megacap_tech"),
+        "DGS10.value": _claim("10Y yield", 4.32),
+    }
+
+
+def _risks_diff_output() -> Risk10KDiff:
+    """Recent fixture so the freshness rule doesn't cap confidence at MEDIUM.
+
+    Real 10-Ks are filed annually so Risk Factors *will* be MEDIUM in
+    production — that's correct behavior. These tests are about
+    orchestration mechanics; freshness rules are tested separately in
+    test_research_confidence.py.
+    """
+    fresh = datetime.now(UTC) - timedelta(days=2)
+    section = Extracted10KSection(
+        symbol="AAPL",
+        accession="0000320193-25-000079",
+        filed_at=fresh,
+        section_id="Item 1A",
+        section_title="Risk Factors",
+        text="x" * 68_000,
+        char_count=68_000,
+        primary_doc_url="https://www.sec.gov/foo",
+    )
+    prior = Extracted10KSection(
+        symbol="AAPL",
+        accession="0000320193-24-000123",
+        filed_at=fresh - timedelta(days=365),
+        section_id="Item 1A",
+        section_title="Risk Factors",
+        text="x" * 68_700,
+        char_count=68_700,
+        primary_doc_url="https://www.sec.gov/foo-prior",
+    )
+    return Risk10KDiff(
+        symbol="AAPL",
+        current=section,
+        prior=prior,
+        added_paragraphs=["new"],
+        removed_paragraphs=[],
+        kept_paragraph_count=80,
+        char_delta=-700,
+    )
+
+
+def _business_output() -> Extracted10KSection:
+    """Recent fixture; see _risks_diff_output rationale."""
+    return Extracted10KSection(
+        symbol="AAPL",
+        accession="0000320193-25-000079",
+        filed_at=datetime.now(UTC) - timedelta(days=2),
+        section_id="Item 1",
+        section_title="Business",
+        text="b" * 16_000,
+        char_count=16_000,
+        primary_doc_url="https://www.sec.gov/foo",
+    )
+
+
+# ── Mock plumbing ─────────────────────────────────────────────────────
+
+
+def _patch_tools(
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, Any],
+) -> None:
+    """Replace tool callables in the dispatch dict.
+
+    Each override value can be either an async callable (signature
+    ``async def f(symbol) -> Any``) or a plain object that's wrapped
+    so the dispatch invocation returns it. ``Exception`` instances are
+    raised when the (mock) tool is called.
+    """
+    new_dispatch: dict[str, Any] = {}
+    for name, override in overrides.items():
+        if callable(override) and hasattr(override, "__await__"):
+            new_dispatch[name] = override
+        elif callable(override):
+            new_dispatch[name] = override
+        else:
+            new_dispatch[name] = _wrap_const(override)
+    monkeypatch.setattr(orch_module, "TOOL_DISPATCH", new_dispatch)
+
+
+def _wrap_const(value: Any):
+    """Build an async callable that returns ``value``, or raises if it's an exception."""
+    async def _fn(_symbol: str) -> Any:
+        if isinstance(value, Exception):
+            raise value
+        return value
+    return _fn
+
+
+def _patch_synth(
+    monkeypatch: pytest.MonkeyPatch,
+    summaries: SectionSummaries | Exception,
+) -> list[dict[str, Any]]:
+    """Replace ``llm.synth_call`` with a stub that returns ``summaries``.
+
+    Returns a list that captures every call's kwargs so tests can
+    assert what the orchestrator actually asked for.
+    """
+    captured: list[dict[str, Any]] = []
+
+    async def _fake_synth(prompt: str, schema: type, **kwargs: Any) -> Any:
+        captured.append({"prompt": prompt, "schema": schema, **kwargs})
+        if isinstance(summaries, Exception):
+            raise summaries
+        return summaries
+
+    monkeypatch.setattr(orch_module.llm, "synth_call", _fake_synth)
+    return captured
+
+
+def _summaries_for(*titles: str, prose: str = "Summary text.") -> SectionSummaries:
+    return SectionSummaries(
+        sections=[SectionSummary(title=t, summary=prose) for t in titles]
+    )
+
+
+# ── Happy paths ───────────────────────────────────────────────────────
+
+
+async def test_full_focus_assembles_seven_sections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    summaries = _summaries_for(
+        "Valuation", "Quality", "Capital Allocation",
+        "Earnings", "Peers", "Risk Factors", "Macro",
+    )
+    _patch_synth(monkeypatch, summaries)
+
+    report = await compose_research_report("aapl", Focus.FULL)
+
+    assert isinstance(report, ResearchReport)
+    assert report.symbol == "AAPL"  # uppercased
+    assert [s.title for s in report.sections] == [
+        "Valuation", "Quality", "Capital Allocation",
+        "Earnings", "Peers", "Risk Factors", "Macro",
+    ]
+    # All sections populated → HIGH per section, HIGH overall
+    assert all(s.confidence == Confidence.HIGH for s in report.sections)
+    assert report.overall_confidence == Confidence.HIGH
+
+
+async def test_earnings_focus_assembles_three_sections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    _patch_synth(monkeypatch, _summaries_for("Earnings", "Valuation", "Risk Factors"))
+
+    report = await compose_research_report("AAPL", Focus.EARNINGS)
+
+    assert [s.title for s in report.sections] == [
+        "Earnings", "Valuation", "Risk Factors",
+    ]
+
+
+async def test_summary_text_threaded_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    summaries = SectionSummaries(
+        sections=[
+            SectionSummary(title="Valuation", summary="Apple trades at 33x earnings."),
+            SectionSummary(title="Quality", summary="ROE is exceptional."),
+            SectionSummary(title="Capital Allocation", summary="Mostly buybacks."),
+            SectionSummary(title="Earnings", summary="Q1 beat consensus."),
+            SectionSummary(title="Peers", summary="Trades premium to peers."),
+            SectionSummary(title="Risk Factors", summary="One new risk added."),
+            SectionSummary(title="Macro", summary="Rate-sensitive."),
+        ]
+    )
+    _patch_synth(monkeypatch, summaries)
+
+    report = await compose_research_report("AAPL", Focus.FULL)
+
+    by_title = {s.title: s.summary for s in report.sections}
+    assert by_title["Valuation"] == "Apple trades at 33x earnings."
+    assert by_title["Risk Factors"] == "One new risk added."
+
+
+# ── Failure isolation ────────────────────────────────────────────────
+
+
+async def test_one_tool_failure_isolated_to_its_sections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """fetch_peers raising must not break Valuation / Quality / etc.
+
+    fetch_peers feeds only the Peers section in full mode; that
+    section ends up with [] claims and LOW confidence; the other
+    sections are unaffected.
+    """
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": RuntimeError("yfinance is down"),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    report = await compose_research_report("AAPL", Focus.FULL)
+
+    by_title = {s.title: s for s in report.sections}
+    # Peers tanked
+    assert by_title["Peers"].claims == []
+    assert by_title["Peers"].confidence == Confidence.LOW
+    # The other 6 are HIGH (fully populated, fresh)
+    for title in [
+        "Valuation", "Quality", "Capital Allocation",
+        "Earnings", "Risk Factors", "Macro",
+    ]:
+        assert by_title[title].confidence == Confidence.HIGH
+    # Overall is the floor
+    assert report.overall_confidence == Confidence.LOW
+
+
+async def test_fundamentals_failure_drops_three_sections_to_low(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """fetch_fundamentals feeds 3 sections — its failure cascades to all 3."""
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": ConnectionError("yfinance unreachable"),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    report = await compose_research_report("AAPL", Focus.FULL)
+
+    by_title = {s.title: s for s in report.sections}
+    assert by_title["Valuation"].confidence == Confidence.LOW
+    assert by_title["Quality"].confidence == Confidence.LOW
+    assert by_title["Capital Allocation"].confidence == Confidence.LOW
+    assert by_title["Earnings"].confidence == Confidence.HIGH
+    assert by_title["Peers"].confidence == Confidence.HIGH
+
+
+async def test_all_tools_fail_returns_all_low_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every tool errors → every section LOW, overall LOW, but synth still runs."""
+    err = RuntimeError("upstream down")
+    _patch_tools(
+        monkeypatch,
+        {n: err for n in [
+            "fetch_fundamentals", "fetch_earnings", "fetch_peers",
+            "fetch_macro", "extract_10k_risks_diff", "extract_10k_business",
+        ]},
+    )
+    _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    report = await compose_research_report("AAPL", Focus.FULL)
+
+    assert all(s.confidence == Confidence.LOW for s in report.sections)
+    assert all(s.claims == [] for s in report.sections)
+    assert report.overall_confidence == Confidence.LOW
+
+
+# ── Synth-output handling ────────────────────────────────────────────
+
+
+async def test_synth_missing_section_falls_back_to_default_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    # Synth omits "Macro"
+    summaries = SectionSummaries(
+        sections=[
+            SectionSummary(title=t, summary=f"text for {t}")
+            for t in [
+                "Valuation", "Quality", "Capital Allocation",
+                "Earnings", "Peers", "Risk Factors",
+            ]
+        ]
+    )
+    _patch_synth(monkeypatch, summaries)
+
+    report = await compose_research_report("AAPL", Focus.FULL)
+
+    macro = next(s for s in report.sections if s.title == "Macro")
+    # Fallback summary is non-empty and clearly indicates absence.
+    assert macro.summary
+    assert "macro" in macro.summary.lower() or "summary unavailable" in macro.summary.lower()
+
+
+async def test_synth_unknown_title_silently_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Synth hallucinates a section title we didn't ask for → ignore it."""
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    summaries = SectionSummaries(
+        sections=[
+            SectionSummary(title="Valuation", summary="ok"),
+            SectionSummary(title="Quality", summary="ok"),
+            SectionSummary(title="Capital Allocation", summary="ok"),
+            SectionSummary(title="Earnings", summary="ok"),
+            SectionSummary(title="Peers", summary="ok"),
+            SectionSummary(title="Risk Factors", summary="ok"),
+            SectionSummary(title="Macro", summary="ok"),
+            SectionSummary(title="ESG Analysis", summary="hallucinated"),
+        ]
+    )
+    _patch_synth(monkeypatch, summaries)
+
+    report = await compose_research_report("AAPL", Focus.FULL)
+
+    titles = [s.title for s in report.sections]
+    assert "ESG Analysis" not in titles
+    assert len(report.sections) == 7
+
+
+# ── Audit trail + observability ──────────────────────────────────────
+
+
+async def test_tool_calls_audit_records_every_invoked_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    report = await compose_research_report("AAPL", Focus.FULL)
+
+    # Six tool names — order doesn't matter, presence does.
+    audit_names = {entry.split(":")[0].strip() for entry in report.tool_calls_audit}
+    assert audit_names == {
+        "fetch_fundamentals", "fetch_earnings", "fetch_peers",
+        "fetch_macro", "extract_10k_risks_diff", "extract_10k_business",
+    }
+
+
+async def test_tool_calls_audit_marks_failed_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": RuntimeError("boom"),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    report = await compose_research_report("AAPL", Focus.FULL)
+
+    # The failed tool's audit entry mentions its outcome.
+    peers_entry = next(
+        e for e in report.tool_calls_audit if e.startswith("fetch_peers")
+    )
+    assert "error" in peers_entry.lower() or "fail" in peers_entry.lower()
+    assert "RuntimeError" in peers_entry
+
+
+# ── Symbol normalization ─────────────────────────────────────────────
+
+
+async def test_symbol_uppercased_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[str] = []
+
+    async def _capture(symbol: str) -> dict[str, Claim]:
+        seen.append(symbol)
+        return _fundamentals_output()
+
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _capture,
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    await compose_research_report("aapl", Focus.FULL)
+
+    assert "AAPL" in seen

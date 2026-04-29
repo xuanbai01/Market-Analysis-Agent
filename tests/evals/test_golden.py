@@ -1,32 +1,42 @@
 """
-Real-LLM golden-question tests. Skipped unless ``ANTHROPIC_API_KEY`` is
-set so they don't burn cost on every push. Currently no cases — the
-list grows as tools come online.
+Real-LLM golden-question tests. Skipped unless ``ANTHROPIC_API_KEY``
+is set so the cost burn is opt-in rather than charged on every push.
 
 Run manually:
 
     ANTHROPIC_API_KEY=... uv run pytest tests/evals/test_golden.py -v
 
-Once we have golden cases, this file will:
-  1. Call the agent for each case.
-  2. Grade the result via ``rubric.grade``.
-  3. Assert factuality.score >= 0.95 and structure.valid.
-  4. Report latency and unmatched numbers in the test output for
-     post-mortem.
+For each case:
+  1. Call ``compose_research_report(symbol, focus)`` end-to-end.
+     Real Anthropic API + real tool fan-out (yfinance, SEC EDGAR,
+     FRED). Wall-clock ~10–30 seconds per case.
+  2. Run the rubric scorers (structure + factuality + latency).
+  3. Assert ``structure.valid`` and ``factuality.score >= 0.95``.
+  4. Print latency + unmatched numbers for post-mortem on flaky cases.
+
+The factuality threshold (0.95, not 1.0) is deliberate: the rubric is
+a regex over prose and produces occasional false positives (a "2026
+guidance" number, a confidence-interval footnote). Tighten when the
+prompt and rubric are stable; for now, 5% slack absorbs noise without
+hiding real hallucinations.
 """
 from __future__ import annotations
 
 import os
+import time
 
 import pytest
 
+from app.services.research_orchestrator import compose_research_report
+from app.services.research_tool_registry import Focus
 from tests.evals.golden import GOLDEN_CASES
+from tests.evals.rubric import grade
 
 # Two reasons to skip golden evals:
 #   - no ANTHROPIC_API_KEY → can't call the model at all
 #   - no GOLDEN_CASES yet  → nothing to test
 # Express both as a *single* placeholder test rather than parametrizing
-# over an empty list (pytest's `parametrize([], ids=...)` call still
+# over an empty list (pytest's ``parametrize([], ids=...)`` call still
 # evaluates the ids callback once and errors on the empty parameter).
 if not GOLDEN_CASES:
 
@@ -39,8 +49,40 @@ else:
         not os.environ.get("ANTHROPIC_API_KEY"),
         reason="ANTHROPIC_API_KEY not set; skipping live LLM eval suite",
     )
-    @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: c.symbol)
+    @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: f"{c.symbol}-{c.focus}")
     async def test_golden_case(case) -> None:
-        # Skeleton — fills in once the agent endpoint exists. Calls the
-        # agent for `case.symbol`, grades the result, asserts factuality.
-        pytest.skip("Agent endpoint not yet implemented (Phase 2.2)")
+        focus = Focus(case.focus)
+
+        start = time.perf_counter()
+        report = await compose_research_report(case.symbol, focus)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+
+        result = grade(report, elapsed_ms)
+
+        # Structural correctness: the report is a valid ResearchReport
+        # by construction (it's a Pydantic model coming out of the
+        # orchestrator), but `grade` runs the validation again as a
+        # belt-and-suspenders check against schema drift.
+        assert result.structure.valid, (
+            f"{case.symbol}/{case.focus}: structure invalid — "
+            f"{result.structure.errors}"
+        )
+
+        # Factuality: every decimal number in any section's summary
+        # should appear in that section's claim values. <0.95 means
+        # the model fabricated numbers — a real regression worth
+        # failing the test loudly.
+        assert result.factuality.score >= 0.95, (
+            f"{case.symbol}/{case.focus}: factuality {result.factuality.score:.2f}, "
+            f"unmatched numbers in prose: {result.factuality.unmatched_numbers}"
+        )
+
+        # Print latency for the operator. No assertion: cold-cache runs
+        # legitimately take 20+ seconds because of the EDGAR 10-K fetch.
+        print(
+            f"\n{case.symbol}/{case.focus}: "
+            f"latency={elapsed_ms:.0f} ms, "
+            f"sections={len(report.sections)}, "
+            f"overall={report.overall_confidence.value}, "
+            f"factuality={result.factuality.score:.3f}"
+        )

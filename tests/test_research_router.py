@@ -22,7 +22,9 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from app.api.v1 import dependencies as deps_module
 from app.api.v1.dependencies import get_session
+from app.core import settings as settings_module
 from app.main import app
 from app.schemas.research import (
     Claim,
@@ -41,10 +43,16 @@ async def research_client(
 ) -> AsyncIterator[AsyncClient]:
     """ASGI client wired straight to the FastAPI app — no DB.
 
-    Defaults: cache always misses, upsert is a no-op. Tests can
-    override either via the ``_patch_cache`` helper. The session
-    dependency is overridden to yield None — none of the cache
-    functions dereference it under these mocks.
+    Defaults: cache always misses, upsert is a no-op, rate limit
+    disabled. Tests that exercise rate limiting opt in via the
+    ``_enable_rate_limit`` helper. The session dependency is
+    overridden to yield None — none of the cache functions
+    dereference it under these mocks.
+
+    Rate limiting is disabled (RESEARCH_RATE_LIMIT_PER_HOUR=0) at
+    fixture entry, AND the module-level bucket is reset, so test
+    state doesn't leak between cases. Without this, the 4th test in
+    a run would 429 against a stale shared bucket.
 
     ``raise_app_exceptions=False`` lets unhandled exceptions render
     as 500 problem+json from the global handler in app.core.errors
@@ -63,6 +71,11 @@ async def research_client(
     app.dependency_overrides[get_session] = _no_session
     monkeypatch.setattr(cache_module, "lookup_recent", _miss)
     monkeypatch.setattr(cache_module, "upsert", _noop_upsert)
+    # Disable rate limiting + drop any leftover bucket from a prior test.
+    monkeypatch.setattr(
+        settings_module.settings, "RESEARCH_RATE_LIMIT_PER_HOUR", 0
+    )
+    deps_module.reset_research_rate_limit_for_tests()
 
     try:
         transport = ASGITransport(app=app, raise_app_exceptions=False)
@@ -70,6 +83,22 @@ async def research_client(
             yield ac
     finally:
         app.dependency_overrides.pop(get_session, None)
+        # Also reset on teardown so a test that turned rate limiting
+        # on doesn't leave a hot bucket for the next test.
+        deps_module.reset_research_rate_limit_for_tests()
+
+
+def _enable_rate_limit(monkeypatch: pytest.MonkeyPatch, capacity: int) -> None:
+    """Turn on rate limiting at ``capacity`` per hour for one test.
+
+    Mutates ``settings.RESEARCH_RATE_LIMIT_PER_HOUR`` and resets the
+    module-level bucket so the change takes effect on the next
+    request. ``monkeypatch`` reverts the setting at test teardown.
+    """
+    monkeypatch.setattr(
+        settings_module.settings, "RESEARCH_RATE_LIMIT_PER_HOUR", capacity
+    )
+    deps_module.reset_research_rate_limit_for_tests()
 
 
 def _stub_report(symbol: str = "AAPL") -> ResearchReport:
@@ -409,3 +438,141 @@ async def test_cache_focus_is_keyed_separately(
     await research_client.post("/v1/research/AAPL?focus=earnings")
 
     assert [lookup["focus"] for lookup in lookups] == ["full", "earnings"]
+
+
+# ── Rate limiting (Phase 2.2c) ───────────────────────────────────────
+
+
+async def test_rate_limit_allows_up_to_capacity(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Capacity 3 → 3 successive requests succeed."""
+    _enable_rate_limit(monkeypatch, capacity=3)
+    _patch_orchestrator(monkeypatch, _stub_report())
+
+    for i in range(3):
+        resp = await research_client.post(
+            "/v1/research/AAPL", headers={"x-forwarded-for": "10.0.0.1"}
+        )
+        assert resp.status_code == 200, f"request {i}: {resp.json()}"
+
+
+async def test_rate_limit_returns_429_with_retry_after(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The (capacity+1)th request from the same IP is rejected with
+    429 and a Retry-After header."""
+    _enable_rate_limit(monkeypatch, capacity=2)
+    _patch_orchestrator(monkeypatch, _stub_report())
+
+    headers = {"x-forwarded-for": "10.0.0.2"}
+    for _ in range(2):
+        resp = await research_client.post("/v1/research/AAPL", headers=headers)
+        assert resp.status_code == 200
+
+    resp = await research_client.post("/v1/research/AAPL", headers=headers)
+
+    assert resp.status_code == 429
+    assert resp.headers["content-type"].startswith("application/problem+json")
+    assert "Retry-After" in resp.headers
+    # Capacity 2 / hour → ~30-min wait for the next token. Loosely
+    # bound; the exact value depends on test wall-clock timing.
+    retry_after = int(resp.headers["Retry-After"])
+    assert 1 <= retry_after <= 3600
+    body = resp.json()
+    # The HTTPException handler renders the detail string into `title`
+    # (see app/core/errors.py).
+    assert "Rate limit exceeded" in body["title"]
+
+
+async def test_rate_limit_independent_per_ip(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Draining IP-A's bucket must not affect IP-B."""
+    _enable_rate_limit(monkeypatch, capacity=1)
+    _patch_orchestrator(monkeypatch, _stub_report())
+
+    # IP-A burns its one token.
+    resp = await research_client.post(
+        "/v1/research/AAPL", headers={"x-forwarded-for": "10.0.0.10"}
+    )
+    assert resp.status_code == 200
+    resp = await research_client.post(
+        "/v1/research/AAPL", headers={"x-forwarded-for": "10.0.0.10"}
+    )
+    assert resp.status_code == 429
+
+    # IP-B has its own untouched bucket.
+    resp = await research_client.post(
+        "/v1/research/AAPL", headers={"x-forwarded-for": "10.0.0.20"}
+    )
+    assert resp.status_code == 200
+
+
+async def test_rate_limit_disabled_when_setting_is_zero(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RESEARCH_RATE_LIMIT_PER_HOUR=0 means no limit — many requests OK.
+
+    The fixture already sets the limit to 0; this test just verifies
+    that 100 calls in a row from the same IP all succeed. Catches a
+    regression where capacity=0 accidentally meant "deny all" at the
+    dependency layer instead of "skip the dependency".
+    """
+    _patch_orchestrator(monkeypatch, _stub_report())
+
+    headers = {"x-forwarded-for": "10.0.0.30"}
+    for _ in range(10):
+        resp = await research_client.post("/v1/research/AAPL", headers=headers)
+        assert resp.status_code == 200
+
+
+async def test_rate_limit_uses_first_x_forwarded_for_hop(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Multi-hop XFF: only the first IP (originating client) is the key.
+
+    Without this, two users behind the same Fly proxy would share a
+    bucket because all requests would carry the same proxy IP last.
+    """
+    _enable_rate_limit(monkeypatch, capacity=1)
+    _patch_orchestrator(monkeypatch, _stub_report())
+
+    # Two requests with the same originating IP but different proxy
+    # chains — second one must 429 (same client, draining same bucket).
+    chain_a = "10.0.0.40, 198.51.100.1"
+    chain_b = "10.0.0.40, 198.51.100.2"
+    resp = await research_client.post(
+        "/v1/research/AAPL", headers={"x-forwarded-for": chain_a}
+    )
+    assert resp.status_code == 200
+    resp = await research_client.post(
+        "/v1/research/AAPL", headers={"x-forwarded-for": chain_b}
+    )
+    assert resp.status_code == 429
+
+
+async def test_rate_limit_runs_before_cache_lookup(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 429'd request must NOT touch the cache or orchestrator.
+
+    The dependency runs before the route handler, so a denied
+    request bypasses both the cache lookup AND any synthesis cost.
+    """
+    _enable_rate_limit(monkeypatch, capacity=1)
+    cache_lookups = _patch_cache_lookup(monkeypatch, returns=None)
+    orch_calls = _patch_orchestrator(monkeypatch, _stub_report())
+    cache_upserts = _patch_cache_upsert(monkeypatch)
+
+    headers = {"x-forwarded-for": "10.0.0.50"}
+    # Burn the one token.
+    await research_client.post("/v1/research/AAPL", headers=headers)
+    # The 2nd request is rate-limited.
+    resp = await research_client.post("/v1/research/AAPL", headers=headers)
+
+    assert resp.status_code == 429
+    # Exactly one of each ran (the first, allowed request).
+    assert len(cache_lookups) == 1
+    assert len(orch_calls) == 1
+    assert len(cache_upserts) == 1

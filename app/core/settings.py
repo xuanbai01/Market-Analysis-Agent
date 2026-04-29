@@ -52,6 +52,16 @@ class Settings(BaseSettings):
     # long-term diligence. ``?refresh=true`` always bypasses the
     # cache. See ADR / 2.2b plan for the trade-off discussion.
     RESEARCH_CACHE_MAX_AGE_HOURS: int = 168
+    # Per-IP rate limit on /v1/research/{symbol}. 3 reports/hour is the
+    # default — covers a research-pace usage pattern (a handful of
+    # symbols looked up over a working session) while bounding the
+    # damage if the URL leaks. The cache (Phase 2.2b) means a repeat
+    # ?refresh=false request costs nothing, so the limit only kicks
+    # in for genuinely new (symbol, focus) combinations or
+    # ?refresh=true calls. Set to 0 to disable rate limiting entirely
+    # (useful for tests and single-user dev). In-memory token bucket
+    # keyed on X-Forwarded-For (when present) or direct connection IP.
+    RESEARCH_RATE_LIMIT_PER_HOUR: int = 3
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

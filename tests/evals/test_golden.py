@@ -23,6 +23,7 @@ hiding real hallucinations.
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import pytest
 
@@ -77,14 +78,9 @@ else:
         # Factuality: every decimal number in any section's summary
         # should appear in that section's claim values. <0.95 means
         # the model fabricated numbers — a real regression worth
-        # failing the test loudly.
-        assert result.factuality.score >= 0.95, (
-            f"{case.symbol}/{case.focus}: factuality {result.factuality.score:.2f}, "
-            f"unmatched numbers in prose: {result.factuality.unmatched_numbers}"
-        )
-
-        # Print latency for the operator. No assertion: cold-cache runs
-        # legitimately take 20+ seconds because of the EDGAR 10-K fetch.
+        # failing the test loudly. Always print latency + section
+        # summaries so factuality misses are diagnosable from the
+        # test output alone (no need to re-run with a debugger).
         print(
             f"\n{case.symbol}/{case.focus}: "
             f"latency={elapsed_ms:.0f} ms, "
@@ -92,3 +88,35 @@ else:
             f"overall={report.overall_confidence.value}, "
             f"factuality={result.factuality.score:.3f}"
         )
+        if result.factuality.score < 0.95:
+            _dump_report_for_diagnosis(report, result.factuality.unmatched_numbers)
+
+        assert result.factuality.score >= 0.95, (
+            f"{case.symbol}/{case.focus}: factuality {result.factuality.score:.2f}, "
+            f"unmatched numbers in prose: {result.factuality.unmatched_numbers}"
+        )
+
+
+def _dump_report_for_diagnosis(report: Any, unmatched: list[float]) -> None:
+    """Print every section's summary + claim values when factuality fails.
+
+    Lets a human read the prose alongside the available claim values and
+    decide whether the model fabricated, paraphrased, or the rubric
+    over-flagged. Prints to stdout so pytest with ``-s`` surfaces it.
+    """
+    unmatched_set = {round(n, 2) for n in unmatched}
+    print("\n" + "=" * 72)
+    print(f"  DIAGNOSTIC DUMP — {report.symbol} (factuality miss)")
+    print("=" * 72)
+    print(f"  Unmatched numbers: {sorted(unmatched_set)}")
+    print()
+    for section in report.sections:
+        print(f"── {section.title}  [confidence={section.confidence.value}]")
+        print(f"   Summary: {section.summary}")
+        if section.claims:
+            print(f"   Claims ({len(section.claims)}):")
+            for c in section.claims:
+                print(f"     - {c.description} = {c.value!r}")
+        else:
+            print("   Claims: (none)")
+        print()

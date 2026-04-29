@@ -60,6 +60,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import enforce_research_rate_limit, get_session
+from app.core.auth import require_shared_secret
 from app.core.settings import settings
 from app.schemas.research import ResearchReport
 from app.services import research_cache, research_orchestrator
@@ -68,7 +69,11 @@ from app.services.research_tool_registry import Focus
 router = APIRouter()
 
 
-@router.post("/research/{symbol}", response_model=ResearchReport)
+@router.post(
+    "/research/{symbol}",
+    response_model=ResearchReport,
+    dependencies=[Depends(require_shared_secret)],
+)
 async def research(
     request: Request,
     symbol: str,

@@ -62,6 +62,25 @@ class Settings(BaseSettings):
     # (useful for tests and single-user dev). In-memory token bucket
     # keyed on X-Forwarded-For (when present) or direct connection IP.
     RESEARCH_RATE_LIMIT_PER_HOUR: int = 3
+    # Shared-password gate for /v1/research/* (Phase 3.0). When this
+    # value is empty, the auth dependency is a pass-through — local dev
+    # and the existing test suite keep working without a token. When
+    # set (production: Fly secret), every request to a protected route
+    # must carry ``Authorization: Bearer <secret>``. Constant-time
+    # compared via ``hmac.compare_digest``. This is intentionally a
+    # single shared secret (not per-user auth) — sized for personal /
+    # small-group use; swap for Clerk / magic-link when multi-user
+    # accounts land. See ADR 0004 for the trade-off.
+    BACKEND_SHARED_SECRET: str = ""
+    # CORS allowlist origin for the frontend (Phase 3.0). When empty,
+    # CORS middleware is not installed (same-origin only). When set,
+    # exactly one origin is allowlisted (e.g.
+    # ``https://market-agent.vercel.app``) — never ``*`` because the
+    # frontend sends an Authorization header which CORS treats as a
+    # credential-adjacent surface. Allow-methods is GET/POST/OPTIONS,
+    # allow-headers is Authorization/Content-Type, allow-credentials
+    # is False (we use bearer tokens, not cookies).
+    FRONTEND_ORIGIN: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

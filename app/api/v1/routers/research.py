@@ -62,11 +62,55 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.dependencies import enforce_research_rate_limit, get_session
 from app.core.auth import require_shared_secret
 from app.core.settings import settings
-from app.schemas.research import ResearchReport
+from app.schemas.research import ResearchReport, ResearchReportSummary
 from app.services import research_cache, research_orchestrator
 from app.services.research_tool_registry import Focus
 
 router = APIRouter()
+
+
+@router.get(
+    "/research",
+    response_model=list[ResearchReportSummary],
+    dependencies=[Depends(require_shared_secret)],
+)
+async def list_research(
+    limit: int = Query(
+        20,
+        ge=1,
+        le=100,
+        description=(
+            "Page size. Capped at 100 so a single response stays cheap; "
+            "the dashboard typically renders 20."
+        ),
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Skip the first N rows. Combine with ``limit`` to paginate.",
+    ),
+    symbol: str | None = Query(
+        None,
+        max_length=16,
+        description=(
+            "Optional ticker filter. Uppercased before lookup so "
+            "``?symbol=aapl`` finds AAPL rows."
+        ),
+    ),
+    session: AsyncSession = Depends(get_session),
+) -> list[ResearchReportSummary]:
+    """List cached research reports newest-first for the dashboard sidebar.
+
+    Lightweight metadata only — symbol, focus, report_date, generated_at,
+    overall_confidence. Clicks on a row fetch the full report via
+    ``POST /v1/research/{symbol}`` which hits the same-day cache.
+    """
+    return await research_cache.list_recent(
+        session,
+        limit=limit,
+        offset=offset,
+        symbol=symbol.upper() if symbol else None,
+    )
 
 
 @router.post(

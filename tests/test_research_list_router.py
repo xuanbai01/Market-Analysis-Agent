@@ -15,11 +15,9 @@ default lets requests through.
 """
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
-import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 

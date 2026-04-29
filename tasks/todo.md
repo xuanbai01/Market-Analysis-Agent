@@ -2,99 +2,85 @@
 
 Active sprint for the Market Analysis Agent.
 
-> **Scope:** v2 per [`docs/adr/0003-pivot-equity-research.md`](../docs/adr/0003-pivot-equity-research.md). The v2 product is the **AI Equity Research Assistant**: on-demand structured reports, single agent + tools by default, free data only, citation discipline non-negotiable. Phase 1 infrastructure (FastAPI, async SQLAlchemy, Postgres on Neon, Fly.io, Alembic, observability, tests, deploy pipeline) is complete and reused as-is.
+> **Scope:** v2 per [ADR 0003](../docs/adr/0003-pivot-equity-research.md). The v2 product is the **AI Equity Research Assistant**: on-demand structured reports, single agent + tools by default, free data only, citation discipline non-negotiable. Phase 1 infrastructure (FastAPI, async SQLAlchemy, Postgres on Neon, Fly.io, Alembic, observability, tests, deploy pipeline) is complete and reused as-is.
+>
+> **Product shape:** [ADR 0004](../docs/adr/0004-visual-first-product-shape.md) — visual-first, delta-driven. Multi-year history rendered as charts; LLM commentary stays short and stays at genuinely judgment-dependent moments. **Not** chasing Morningstar-depth analyst narrative.
 
 ## In progress
 
-- Phase 3.0 — Frontend prereqs (PR A): shared-secret auth dep + CORS middleware + `GET /v1/research` list endpoint
+- Phase 3 — Visual-first depth (just kicking off)
 
-## Phase 3 — Frontend (React + Vercel) + auth gate
+## Phase 3 — Visual-first depth (active)
 
-> **Why React over a Streamlit MVP:** the user is React-bound either way, so the Streamlit step is pure detour (~1 day of throwaway code, no unique learnings vs raw `curl | jq` for UX discovery). Going straight to React saves the rebuild. **Why shared-password vs real auth:** ~30 min vs 1–2 days, single user (you), going semi-public. Structured as a single FastAPI dependency + a single React auth context so it can swap to Clerk/magic-link in a day when multi-user lands.
+> **Why this is Phase 3:** dogfooding the v1 report against several names surfaced a clear gap — point-in-time numbers without historical context feel shallow even when the underlying data is comprehensive. The fix isn't more LLM prose (per ADR 0003 anti-hallucination disciplines, prose stays short and citation-bound); the fix is multi-year history surfaced as charts. See [ADR 0004](../docs/adr/0004-visual-first-product-shape.md).
+>
+> **What this is NOT:** a chase of Morningstar-depth analyst narrative. No multi-year DCF projections, no fair-value estimates, no 5-page bull/bear essays. Those land (in attenuated form) in Phase 4, after the data foundation is right.
+>
+> **Frontend deploy status:** held until Phase 3 ships. PR #32 (frontend MVP) is merged on `main` and locally tested but not Vercel-deployed. The frontend will pick up history rendering as part of this phase rather than ship a deploy that immediately needs an upgrade.
 
-### 3.0 Backend prereqs (PR A) — must land before frontend
+### 3.1 Schema — `Claim.history`
 
-One PR, three commits:
+- [ ] **`ClaimHistoryPoint`** — Pydantic model: `{period: str, value: float}`. `period` is a string (e.g. `"2024-Q4"`, `"2024-12"`, `"2024"`) — different tools emit different granularities; the rendering layer reads them as opaque labels. `value` is a number (no `ClaimValue` union — only numeric points are charted).
+- [ ] **`Claim.history: list[ClaimHistoryPoint] = Field(default_factory=list)`** — added to `app/schemas/research.py`. Default empty so existing claims and existing cache rows round-trip unchanged. Ordered oldest-to-newest by convention; the renderer doesn't sort.
+- [ ] **Mirror in `frontend/src/lib/schemas.ts`** — Zod schema gets the same optional field; existing reports parse unchanged.
+- [ ] **Round-trip test** — write a `Claim` with history → JSONB → read back → unchanged. Empty history round-trips as empty.
 
-- [ ] **A1 — Shared-secret auth dep** — `app/core/auth.py::require_shared_secret`. Validates `Authorization: Bearer <secret>` against `settings.BACKEND_SHARED_SECRET` via `hmac.compare_digest`. When `BACKEND_SHARED_SECRET` is unset (default), the dep is a pass-through — local dev keeps working without a token. Wire to `/v1/research/*` only (other routes can stay open until they need protecting). Tests: 401 on missing/wrong header, 200 on right header, pass-through when secret is unset.
-- [ ] **A2 — CORS middleware** — `app/main.py` reads `settings.FRONTEND_ORIGIN: str | None`. When set, install `CORSMiddleware` with that origin (single origin, not `*`), allow methods `GET, POST, OPTIONS`, allow headers `Authorization, Content-Type`. Credentials disabled (we use bearer tokens, not cookies). Tests: preflight `OPTIONS` returns the right `Access-Control-Allow-*` headers when set, no CORS headers when unset.
-- [ ] **A3 — `GET /v1/research`** — Paginated list of past reports for the dashboard. Returns `list[ResearchReportSummary]` (symbol, focus, report_date, generated_at, overall_confidence) — NOT the full report blob. Query params: `limit` (default 20, max 100), `offset` (default 0), `symbol` (optional filter). Backed by a new `research_cache.list_recent(session, *, limit, offset, symbol=None)`. Order by `generated_at DESC`. Auth-protected via the A1 dep. Tests: empty DB → `[]`, multiple reports ordered desc, symbol filter works, pagination works, 401 without auth header when secret is set.
+### 3.2 Tool extensions (one PR per tool, one commit per tool's history field)
 
-Settings additions: `BACKEND_SHARED_SECRET: str = ""` (empty = auth disabled), `FRONTEND_ORIGIN: str = ""` (empty = CORS disabled). `.env.example` updated.
+The pattern: each builder learns to populate `Claim.history` for the metrics where yfinance / FRED / derived computation gives us a series. Builders that can't (e.g. peer-comparison single-snapshot metrics) leave history empty.
 
-### 3.1 Frontend MVP (PR B)
+- [ ] **`fetch_fundamentals` history** — yfinance `Ticker.quarterly_financials`, `quarterly_balance_sheet`, `quarterly_cashflow` give ~5 years of quarters. Add history for: revenue, net income, gross margin, operating margin, EPS, ROE. Wrap the new yfinance call in `log_external_call`. Defensive about NaN / missing quarters (skip the point, don't fail the tool).
+- [ ] **`fetch_earnings` history** — already pulls earnings dates; extend lookback from 4 quarters to ~20. Beat / miss flags become a binary time series. Forward-consensus EPS gets a history field reflecting analyst-revision drift if `Ticker.earnings_estimate` exposes it cheaply; cut otherwise.
+- [ ] **`fetch_macro` history** — FRED already returns series-level data. Surface the last ~24–60 months on each macro claim's history (sector-dependent — short rates need higher cadence than ISM PMI).
+- [ ] **`fetch_valuation_history` (new derived tool)** — combines `fetch_fundamentals` history + price history into rolling P/E, P/S, EV/EBITDA over time. Gives "AAPL trades at 28x today vs a 5-year median of 26x." Pure compute; no new external call. Decide whether this is its own tool or inlines into `fetch_fundamentals`'s builder.
+- [ ] **Price-and-technicals history** — we already have OHLCV in `candles`; surface ~5y closing prices on a price-history claim, plus rolling SMA/RSI as charts. Reuse `app.services.technicals` rather than adding a new tool.
+- [ ] **Peers** stay as point-in-time scatter (peer-comp gets a *visualization* upgrade in 3.3 but not a history field — comparing 5y trends across 5 peers is a different chart shape, defer).
 
-- [ ] **`frontend/`** — Vite + React 18 + TypeScript + Tailwind + TanStack Query + Zod (mirrors `ResearchReport` schema for runtime validation).
-- [ ] **Login screen** — single password field → POST a probe to `/v1/research/AAPL` with the bearer token; on 200 (or 401), persist the token to `localStorage` and route to dashboard.
-- [ ] **Dashboard** — symbol input + focus dropdown (full / earnings) + refresh toggle. Submit → loading state with the "first generation takes ~30s, repeat reads <1s" copy.
-- [ ] **Report renderer** — sections rendered as cards: title + confidence badge + summary prose + claims as a footnoted table (description / value / source link). 429 → "rate limit hit, retry in N seconds" banner. 503 → "synth unavailable, try again" banner.
-- [ ] **Past reports list** — sidebar driven by `GET /v1/research?limit=20`. Click a row → re-fetch the full report.
-- [ ] **Vercel deploy** — push-to-deploy from this repo's `frontend/` subdir. Env vars: `VITE_BACKEND_URL`, `VITE_SHARED_SECRET` (or have user paste at login screen).
+### 3.3 Frontend visualization
 
-### 3.2 Prod test + docs sweep (PR C)
+- [ ] **`Sparkline` component** — Recharts `LineChart` configured for inline density (~80×24 px). No axes, no legend, no tooltip on the inline variant. Renders any `Claim.history` of length ≥ 2.
+- [ ] **`ClaimRow` integration** — in `ReportRenderer`, the "Value" cell renders `formatClaimValue(value) | <Sparkline history={claim.history} />` when history is present. Mobile width drops the sparkline gracefully.
+- [ ] **`SectionChart` component** — bigger chart for sections that warrant a top-level visualization (price + SMA overlay; fundamentals trend; macro series). One `SectionChart` per section max. Picks the right "headline" claim per section by builder convention (e.g. Valuation → Trailing P/E, Quality → Gross Margin, Earnings → EPS).
+- [ ] **`PeerScatter` component** — for the Peers section, render the peer-comparison matrix as a 2-D scatter (e.g. P/E on x, gross margin on y). Color-code the subject vs peers. Single chart replaces the table for the Peers section (or augments it — a11y consideration: keep the table for screen readers).
+- [ ] **Recharts dependency** — `npm install recharts`. Tree-shaken bundle adds ~30 KB gzipped. Verify build still under 100 KB gz.
 
-- [ ] **Dogfood** the deployed Vercel + Fly stack against 5–10 real symbols across both focuses. Note UX rough edges, fix the high-impact ones.
-- [ ] **README** — new "Frontend" section with screenshots, deploy instructions, env-var reference.
-- [ ] **`design_doc.md`** — add the React + Vercel architecture row, update the data-flow diagram.
-- [ ] **`CLAUDE.md`** — update "Current state" to reflect frontend, add `frontend/` to repo structure.
-- [ ] **ADR 0004** — record the React-over-Streamlit and shared-password-over-real-auth decisions with the trade-offs that will trigger a revisit.
+### 3.4 Eval rubric extension
 
-### 3.3 (Deferred) — what was the old "Phase 3" plan
+- [ ] **`_matches_claim` reads history** — when checking a number from prose against claim values, also check `claim.history[*].value`. A summary that says "EPS rose from 1.46 to 2.18" passes if both numbers appear anywhere in the referenced claim's history.
+- [ ] **New golden case** with a history-bearing claim — verifies the rubric extension is exercised in CI, not just unit-tested.
 
-The previous Phase 3 sketch (pgvector RAG / `search_history`, `compute_options`) doesn't fit what we're trying to achieve right now. To be re-scoped after the frontend ships and we have real-user feedback on what the agent's actually missing.
+### 3.5 Frontend deploy (after 3.1–3.4 land)
 
-## Phase 2 — v2 Equity Research Assistant
+- [ ] **Vercel deploy** — push-to-deploy from `frontend/`. Set `VITE_BACKEND_URL`, set backend `FRONTEND_ORIGIN`, set `BACKEND_SHARED_SECRET` on both sides. README's "Deploying to Vercel" section already covers this.
+- [ ] **Dogfood** the deployed stack against 5–10 real symbols. Note UX rough edges; fix the high-impact ones in a follow-up.
+- [ ] **README + design_doc + CLAUDE.md** sweep — current state reflects Phase 3, screenshots, deploy URL.
 
-### 2.0 Foundations (must land first — gate every later PR)
+## Phase 4 — Narrative layer (deferred; after Phase 3 ships)
 
-- [x] **Eval harness skeleton** — `tests/evals/` with rubric (structure/factuality/latency), `GoldenCase` shape, and rubric unit tests on every PR. Real-LLM golden tests live in `test_golden.py` and skip without `ANTHROPIC_API_KEY`. Cases populate as tools come online.
-- [x] **Citation-enforcing structured-output schema** — `app/schemas/research.py` with `Source { tool, fetched_at, url }`, `Claim { description, value, source }`, `Section { claims, summary, confidence }`, `ResearchReport`. Every numeric fact in `summary` prose must appear in `claims` (rubric-enforced).
-- [x] **LLM client + cost-tier routing** — `app/services/llm.py` with `triage_call` (Haiku 4.5) + `synth_call` (Sonnet 4.6), both forced-schema tool use, both wrapped in `log_external_call`. Prompt caching enabled on system blocks. `ANTHROPIC_API_KEY` added to `.env.example` and `app.core.settings`.
-- [ ] **Set `ANTHROPIC_API_KEY` as a Fly secret** before any tool PR ships: `fly secrets set 'ANTHROPIC_API_KEY=sk-ant-...'`
+> Phase 4 is intentionally deferred until Phase 3 ships and is dogfooded. With multi-year history in place, the LLM has trends to argue *from* — bull/bear cases become substantive instead of generic. Without Phase 3 first, Phase 4 is just longer-winded versions of today's summaries (per ADR 0004 §"Option 4 rejected").
 
-### 2.1 Tool registry build-out (one PR per tool)
+- [ ] **Bulls Say / Bears Say** sections — explicit bullet lists with `claim_refs: list[str]` per argument so the rubric can enforce "every bullet cites at least one Claim." Schema work + LLM prompt work + rubric extension all required.
+- [ ] **What Changed** section — surfaces quarter-over-quarter and year-over-year deltas mechanically (from Phase 3 history). LLM writes 1–2 sentence framing per delta.
+- [ ] **Catalyst awareness** — wire `fetch_news` (already exists, not in reports today) and earnings dates into a "Coming up" / "Recent" framing. News claims need symbol-tagging upgrades for confidence (already partially done in `app.services.symbol_tagger`).
+- [ ] **`?focus=thesis`** — new focus mode oriented around the bull/bear case for active investing decisions, complementing existing `full` (broad diligence) and `earnings` (event-driven).
 
-- [x] **`fetch_news`** (PR #13) — NewsAPI dev tier + Yahoo Finance per-ticker RSS. Provider-registry pattern matching `data_ingestion.py`. `news_symbols` join table (Alembic 0002) with composite PK + cascading FKs; symbol tagging via `app.services.symbol_tagger` (cashtag / ticker word-boundary / company-name first token, case-insensitive). Upsert via `ON CONFLICT DO UPDATE`. Provider failures isolated. `POST /v1/news/ingest` accepts optional `{"symbol": ...}`; `GET /v1/news?symbol=` filters via the join.
-- [x] **`fetch_fundamentals`** (PR #14) — yfinance.info + financials/cashflow → valuation (P/E, P/S, EV/EBITDA, PEG), quality (ROE, gross/profit margin, gross-margin YoY trend), capital allocation (dividend yield, buyback yield, SBC % revenue), short interest, market cap. One tool, one round trip, flat `dict[str, Claim]`. ROIC + multi-year history + sector-relative versions deferred to follow-ups.
-- [x] **`fetch_peers`** (PR #15) — curated `_TICKER_TO_SECTOR` map (~50 large-caps × 10 sectors) with `yfinance.info["industry"]` fallback. Returns sector + 3–5 peers + 4-metric comparison matrix (trailing P/E, P/S, EV/EBITDA, gross margin) per peer + per-metric medians. Per-peer `.info` failures isolated; single `log_external_call` wraps the whole fan-out.
-- [x] **`fetch_edgar`** (PR #17) — generic SEC EDGAR filing fetcher. Given `(symbol, form_type, recent_n)` returns metadata + raw text. Disk-cached between requests, accession-indexed. Polite-crawl: SEC `User-Agent` + ≤10 req/sec (provider sleeps 0.15s between calls). 13F-HR added in PR #22 with `cik=` bypass for institution filings.
-- [x] **`parse_filing`** — purpose-built parsers built on `fetch_edgar`:
-    - [x] `form_4` (PR #19) — insider transactions, cluster summary (10 Claims: net P/S, top buyer/seller, cluster window, etc.)
-    - [x] `13f` (PR #22) — institutional ownership changes via curated 19-asset-manager whitelist + CUSIP filtering; aggregator returns 8 Claims (top holders, position deltas, share count).
-    - [x] `10k_risks_diff` — current Item 1A vs prior year. Mechanical paragraph-level diff with fuzzy match (default 0.6 similarity) so cosmetic edits don't get flagged as new risks; agent reads only the small `added_paragraphs` list to compose "what's new in risks" with high-confidence citations.
-    - [x] `10k_business` (PR #21) — Item 1 (Business) and Item 1A (Risk Factors) regex extraction over BS4-flattened text with longest-match heuristic; returns `Extracted10KSection` for the agent to summarize at synth time.
-- [x] **`fetch_earnings`** (PR #18) — last 4Q EPS history + forward consensus from `yfinance.Ticker.earnings_dates` / `.earnings_estimate`; beat-rate + magnitude. 21 Claims.
-- [x] **`fetch_macro`** (PR #20) — FRED API with sector→series map (semis: DGS10 + ISM PMI; banks: yield curve + NIM; consumer: retail sales + UMCSENT; etc.). Sector resolution extracted into `app/services/sectors.py`.
-- [ ] **`search_history`** — pgvector RAG over our stored news + filings. Time-weighted (`semantic × exp(-λ × hours_since)`). Adds the `vector` extension to Neon and an `embeddings` column to relevant tables via Alembic.
-- [ ] **`compute_options`** — yfinance `option_chain` for nearest expiry → IV percentile (snapshot daily, build the history ourselves), term structure, implied move from at-the-money straddle. Daily snapshot job needed; Alembic migration for `option_iv_history` table.
-
-### 2.2 Agent + endpoint
-
-- [x] **`POST /v1/research/{symbol}`** (PR #26) — deterministic-everything-except-prose architecture. Static `Focus → sections → tools → claim builders` registry; orchestrator runs tools in parallel, isolates failures, calls Sonnet for prose-only with forced `SectionSummaries` schema; confidence stamped programmatically. 7 sections (`full`) or 3 sections (`earnings`). Real-LLM golden eval at factuality 0.97. **LLM-driven section composition deferred to 2.2d** if eval shows the static catalog is too rigid.
-- [x] **Same-day response cache** (PR #28) — `research_reports` table (Alembic 0003) keyed on `(symbol, focus, report_date)` in `settings.TZ`. JSONB stores serialized `ResearchReport`; lookup is time-windowed via `generated_at` so the 168-hour default is configurable per env without schema change. `?refresh=true` overwrites the same-day row. Failed orchestrations not cached.
-- [x] **Rate limit** on `/v1/research/*` (PRs #29 + this PR) — in-memory per-IP token bucket, default 3/hour (`RESEARCH_RATE_LIMIT_PER_HOUR`). X-Forwarded-For aware. **Runs *after* the cache lookup**, so cache hits are free; only synthesis-bound requests (cache miss or `?refresh=true`) consume tokens. Returns 429 + `Retry-After` on deny. See README §"Rate limit posture" for the trade-off.
-
-### 2.2d Optional — LLM-driven section composition (only if eval needs it)
-
-- [ ] **LLM triage replaces the static SECTION_TO_CLAIM_KEYS map.** Phase 2.2d kicks in if the rubric shows the deterministic catalog is too rigid (e.g. consistently misses sector-specific framings the LLM would produce). Currently no signal that this is needed.
-
-### 2.3 Optional — supervisor mode (only if a real query needs it)
-
-- [ ] **Specialist sub-agents** — Research, Technical, Sentiment, Earnings. Activated by a `?supervisor=true` flag for multi-symbol or comparative queries.
-- [ ] **ADR 0004** documenting when supervisor mode adds value vs single agent. Cut it if the eval harness shows no factuality / structure benefit.
-
-## Cross-cutting (do alongside, not blocked on Phase 2)
+## Cross-cutting (do alongside, not blocked on Phase 3)
 
 - [ ] Turn on branch protection for `main` and add `ANTHROPIC_API_KEY` as a repo secret for the AI PR review job
 - [ ] `.python-version` already pinned; verify it's respected by CI's uv setup
+- [ ] **Set `ANTHROPIC_API_KEY` as a Fly secret** — needed before `/v1/research/*` works in prod: `fly secrets set 'ANTHROPIC_API_KEY=sk-ant-...'`
+- [ ] **Local-dev CORS** — `.env.example` should recommend `FRONTEND_ORIGIN=http://localhost:5173` as the obvious local-dev value. Currently empty-by-default trips up every fresh-clone session that runs the frontend against the backend.
 
-## Future scope (revisit later, deliberately not Phase 2)
+## Future scope (deliberately deferred — revisit when there's a concrete trigger)
 
-- [ ] **Reddit / r/wallstreetbets sentiment** — real signal is narrow (high-retail-attention names only), noise is high. Revisit if a specific recurring eval query genuinely benefits from it. ADR 0003 cuts this from must-have.
-- [ ] Discord bot client — was original v1 vision; deferred indefinitely.
-- [ ] Real-time / 15-min scheduled ingest, Celery, Redis — cut by ADR 0003.
-- [ ] Auth + per-user cost caps + abuse logging — only when we have real users.
-- [ ] Web frontend — small dashboard for browsing past reports + triggering new ones.
+- [ ] **`search_history`** — pgvector RAG over stored news + filings. Was the original "Phase 3" sketch in ADR 0003. Demoted by ADR 0004 because it doesn't address the perceived-shallowness gap. Revisit if a recurring eval query genuinely benefits from semantic search across our corpus.
+- [ ] **`compute_options`** — yfinance options chain → IV percentile, implied move. Was the other half of the original "Phase 3" sketch. Demoted similarly. Revisit if Phase 4's Catalyst section needs implied-move framing.
+- [ ] **LLM-driven section composition** (was 2.2d) — replace the static `SECTION_TO_CLAIM_KEYS` map with LLM triage. No signal yet that the deterministic catalog is too rigid.
+- [ ] **Supervisor mode** (was 2.3) — multi-symbol comparative queries via specialist sub-agents. No signal that it adds factuality / structure benefit over the single-agent default.
+- [ ] **Reddit / r/wallstreetbets sentiment** — narrow signal, high noise. Per ADR 0003 cut from must-have.
+- [ ] **Discord bot client** — was original v1 vision; deferred indefinitely.
+- [ ] **Real-time / 15-min scheduled ingest, Celery, Redis** — cut by ADR 0003.
+- [ ] **Real auth + per-user cost caps + abuse logging** — only when there are real users. Phase 3.0's shared-secret gate is enough until then.
 
 ## Done
 
@@ -112,6 +98,32 @@ The previous Phase 3 sketch (pgvector RAG / `search_history`, `compute_options`)
     - [x] Fly.io + Neon deploy plumbing (`fly.toml`, GitHub Actions deploy workflow, runbook)
     - [x] Live deploy verified: `/v1/health` ✓, `/v1/symbols` ✓, `/v1/market/NVDA/ingest` returns 251 bars, technicals populate end-to-end
     - [x] [ADR 0003](../docs/adr/0003-pivot-equity-research.md) — Pivot to AI Equity Research Assistant
+
+- [x] Phase 2 — v2 Equity Research Assistant
+    - [x] **2.0 Foundations** — eval harness skeleton (`tests/evals/` + rubric + `GoldenCase`); citation-enforcing structured-output schema (`app/schemas/research.py`); LLM client + cost-tier routing (Haiku triage + Sonnet synth, both forced-schema, both `log_external_call`-wrapped, prompt caching on system blocks).
+    - [x] **2.1 Tool registry** — 9/9 active tools shipped:
+        - [x] `fetch_news` (PR #13) — NewsAPI dev tier + Yahoo per-ticker RSS, symbol tagging, `news_symbols` join
+        - [x] `fetch_fundamentals` (PR #14) — yfinance valuation + quality + capital allocation + short interest + market cap
+        - [x] `fetch_peers` (PR #15) — curated sector map + yfinance fallback, 4-metric peer matrix
+        - [x] `fetch_edgar` (PR #17) — generic SEC filing fetcher with disk cache + polite-crawl
+        - [x] `parse_filing` — `form_4` (PR #19), `13f` (PR #22), `10k_business` (PR #21), `10k_risks_diff`
+        - [x] `fetch_earnings` (PR #18) — last 4Q EPS history + forward consensus + beat-rate (history extends in 3.2)
+        - [x] `fetch_macro` (PR #20) — FRED with sector→series map (history extends in 3.2)
+    - [x] **2.2 Agent + endpoint** — `POST /v1/research/{symbol}` (PR #26, deterministic-everything-except-prose); same-day cache (PR #28); per-IP rate limit (PR #29 + post-cache refinement). Real-LLM golden eval at factuality 0.97.
+
+- [x] Phase 3.0 — Frontend backend prereqs (PR #31)
+    - [x] **A1 — Shared-secret auth dep** (`app/core/auth.py::require_shared_secret`) — `Authorization: Bearer <BACKEND_SHARED_SECRET>` with `hmac.compare_digest`. No-op when secret is empty (default).
+    - [x] **A2 — CORS middleware** (`app/core/cors.py::configure_cors`) — single-origin allowlist (never `*`), wired into `app/main.py` from `settings.FRONTEND_ORIGIN`.
+    - [x] **A3 — `GET /v1/research`** list endpoint — paginated `ResearchReportSummary[]` for the dashboard sidebar; uses Postgres `->>` JSONB operator for cheap `overall_confidence` extraction.
+    - 30 new tests; 426 passing in the full suite.
+
+- [x] Phase 3.1 — Frontend MVP (PR #32) *(merged; deploy held pending Phase 3 visual-depth work per ADR 0004)*
+    - [x] **`frontend/`** — Vite + React 18 + TS + Tailwind + TanStack Query + Zod
+    - [x] **LoginScreen** with `probeAuth` against `GET /v1/research?limit=1`
+    - [x] **Dashboard** with form, report renderer, past-reports sidebar, status-code-aware error banners
+    - [x] **Vitest** smoke tests for Zod schemas + format helper + auth localStorage round-trip
+    - [x] **`vercel.json`** + `frontend/README.md` deploy walkthrough
+    - 19 vitest tests passing; production build 253 KB / 75 KB gzipped.
 
 ## Blocked / waiting
 

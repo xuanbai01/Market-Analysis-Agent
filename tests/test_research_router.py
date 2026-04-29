@@ -1,15 +1,16 @@
 """
 Tests for ``POST /v1/research/{symbol}``.
 
-The router itself is thin — parse query, call orchestrator, return
-the schema. The orchestrator is mocked at the router's import
-boundary so these tests exercise routing, query validation, error
-mapping, and response shape, NOT the orchestration logic (covered
-in test_research_orchestrator.py).
+The router is a thin coordinator: cache lookup → orchestrator (on
+miss) → cache write. All three are mocked at module boundaries so
+these tests exercise routing, query validation, error mapping, the
+cache-flow control logic, and response shape — NOT the orchestration
+logic (covered in test_research_orchestrator.py) or the cache repo
+itself (covered in test_research_cache.py).
 
-The shared ``client`` fixture in conftest is DB-bound; this router
-doesn't touch the DB, so we wire a local ASGI client that skips the
-DB session setup. Keeps the test independent of postgres availability.
+The shared ``client`` fixture in conftest is DB-bound; we wire a
+local ASGI client that overrides ``get_session`` to yield None and
+mocks the cache module so tests don't need postgres available.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from app.api.v1.dependencies import get_session
 from app.main import app
 from app.schemas.research import (
     Claim,
@@ -29,22 +31,45 @@ from app.schemas.research import (
     Section,
     Source,
 )
+from app.services import research_cache as cache_module
 from app.services import research_orchestrator as orch_module
 
 
 @pytest_asyncio.fixture
-async def research_client() -> AsyncIterator[AsyncClient]:
+async def research_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[AsyncClient]:
     """ASGI client wired straight to the FastAPI app — no DB.
 
-    ``raise_app_exceptions=False`` lets unhandled exceptions get
-    converted to 500 problem+json responses by the global handler in
-    app.core.errors, which is what we want to assert on. With the
-    default (raise=True) the test client just re-raises into the
-    test, masking the actual response shape.
+    Defaults: cache always misses, upsert is a no-op. Tests can
+    override either via the ``_patch_cache`` helper. The session
+    dependency is overridden to yield None — none of the cache
+    functions dereference it under these mocks.
+
+    ``raise_app_exceptions=False`` lets unhandled exceptions render
+    as 500 problem+json from the global handler in app.core.errors
+    rather than re-raising into the test runner.
     """
-    transport = ASGITransport(app=app, raise_app_exceptions=False)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+
+    async def _no_session() -> AsyncIterator[None]:
+        yield None
+
+    async def _miss(*_args: Any, **_kw: Any) -> None:
+        return None
+
+    async def _noop_upsert(*_args: Any, **_kw: Any) -> None:
+        return None
+
+    app.dependency_overrides[get_session] = _no_session
+    monkeypatch.setattr(cache_module, "lookup_recent", _miss)
+    monkeypatch.setattr(cache_module, "upsert", _noop_upsert)
+
+    try:
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+    finally:
+        app.dependency_overrides.pop(get_session, None)
 
 
 def _stub_report(symbol: str = "AAPL") -> ResearchReport:
@@ -82,6 +107,43 @@ def _patch_orchestrator(
         return response
 
     monkeypatch.setattr(orch_module, "compose_research_report", _fake)
+    return captured
+
+
+def _patch_cache_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    returns: ResearchReport | None,
+) -> list[dict[str, Any]]:
+    """Replace ``research_cache.lookup_recent`` with a stub.
+
+    Returns a call log so tests can assert on (symbol, focus,
+    max_age_hours). The default fixture sets lookup to always-miss;
+    use this to inject a hit.
+    """
+    captured: list[dict[str, Any]] = []
+
+    async def _fake(session: Any, **kwargs: Any) -> ResearchReport | None:
+        captured.append(kwargs)
+        return returns
+
+    monkeypatch.setattr(cache_module, "lookup_recent", _fake)
+    return captured
+
+
+def _patch_cache_upsert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[dict[str, Any]]:
+    """Replace ``research_cache.upsert`` with a recorder.
+
+    Returns a list that captures every upsert call's kwargs so tests
+    can assert what got written.
+    """
+    captured: list[dict[str, Any]] = []
+
+    async def _fake(session: Any, **kwargs: Any) -> None:
+        captured.append(kwargs)
+
+    monkeypatch.setattr(cache_module, "upsert", _fake)
     return captured
 
 
@@ -235,3 +297,115 @@ async def test_empty_symbol_returns_404_or_422(
     # FastAPI returns 404 (no route) or 405 (wrong method on root) — both
     # are acceptable; the point is "not 200".
     assert resp.status_code in (404, 405, 422)
+
+
+# ── Same-day cache integration (Phase 2.2b) ──────────────────────────
+
+
+async def test_cache_hit_skips_orchestrator(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cache lookup returns a row → orchestrator must NOT be called."""
+    cached = _stub_report()
+    cached.sections[0].summary = "Cached summary, served from DB."
+    _patch_cache_lookup(monkeypatch, returns=cached)
+
+    orch_calls = _patch_orchestrator(monkeypatch, _stub_report())  # would crash if hit
+    upserts = _patch_cache_upsert(monkeypatch)
+
+    resp = await research_client.post("/v1/research/AAPL")
+
+    assert resp.status_code == 200
+    assert resp.json()["sections"][0]["summary"] == "Cached summary, served from DB."
+    assert orch_calls == [], "orchestrator must not run on a cache hit"
+    assert upserts == [], "upsert must not run on a cache hit (we'd be writing the same row)"
+
+
+async def test_cache_miss_runs_orchestrator_and_upserts(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cache lookup returns None → orchestrator runs, fresh report is upserted."""
+    fresh = _stub_report()
+    fresh.sections[0].summary = "Fresh from Sonnet."
+    _patch_orchestrator(monkeypatch, fresh)
+    upserts = _patch_cache_upsert(monkeypatch)
+
+    resp = await research_client.post("/v1/research/AAPL")
+
+    assert resp.status_code == 200
+    assert resp.json()["sections"][0]["summary"] == "Fresh from Sonnet."
+    assert len(upserts) == 1
+    assert upserts[0]["symbol"] == "AAPL"
+    assert upserts[0]["focus"] == "full"
+    # The upserted report is the one we just synthesized.
+    assert upserts[0]["report"].sections[0].summary == "Fresh from Sonnet."
+
+
+async def test_refresh_skips_lookup_and_writes(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``?refresh=true`` skips the lookup but still upserts the fresh report."""
+    cached = _stub_report()
+    cached.sections[0].summary = "Stale cached summary."
+    lookups = _patch_cache_lookup(monkeypatch, returns=cached)
+
+    fresh = _stub_report()
+    fresh.sections[0].summary = "Force-refreshed summary."
+    _patch_orchestrator(monkeypatch, fresh)
+    upserts = _patch_cache_upsert(monkeypatch)
+
+    resp = await research_client.post("/v1/research/AAPL?refresh=true")
+
+    assert resp.status_code == 200
+    assert resp.json()["sections"][0]["summary"] == "Force-refreshed summary."
+    # Lookup must not have run when refresh=true.
+    assert lookups == [], "refresh=true must skip the cache lookup"
+    # The fresh report still gets written to the cache.
+    assert len(upserts) == 1
+
+
+async def test_cache_lookup_uses_settings_max_age_hours(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The router threads ``settings.RESEARCH_CACHE_MAX_AGE_HOURS`` to lookup."""
+    from app.core import settings as settings_module
+
+    monkeypatch.setattr(settings_module.settings, "RESEARCH_CACHE_MAX_AGE_HOURS", 24)
+    lookups = _patch_cache_lookup(monkeypatch, returns=None)
+    _patch_orchestrator(monkeypatch, _stub_report())
+
+    await research_client.post("/v1/research/AAPL?focus=earnings")
+
+    assert lookups[0]["max_age_hours"] == 24
+    assert lookups[0]["focus"] == "earnings"
+
+
+async def test_orchestrator_failure_does_not_upsert(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If synthesis raises, no row is written to the cache.
+
+    We don't want a transient LLM-down state poisoned into the cache.
+    Next request retries cleanly.
+    """
+    _patch_orchestrator(monkeypatch, RuntimeError("ANTHROPIC_API_KEY missing"))
+    upserts = _patch_cache_upsert(monkeypatch)
+
+    resp = await research_client.post("/v1/research/AAPL")
+
+    assert resp.status_code == 503
+    assert upserts == [], "must not cache failed orchestrations"
+
+
+async def test_cache_focus_is_keyed_separately(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cache key includes ``focus`` — full vs earnings are distinct."""
+    lookups = _patch_cache_lookup(monkeypatch, returns=None)
+    _patch_orchestrator(monkeypatch, _stub_report())
+    _patch_cache_upsert(monkeypatch)
+
+    await research_client.post("/v1/research/AAPL?focus=full")
+    await research_client.post("/v1/research/AAPL?focus=earnings")
+
+    assert [lookup["focus"] for lookup in lookups] == ["full", "earnings"]

@@ -1,15 +1,15 @@
 # Financial Market Analysis Agent — Design
 
-> **Status:** v2 — **AI Equity Research Assistant**. Live at <https://market-analysis-agent.fly.dev>. Pivoted from the v1 "real-time multi-agent platform" vision in [ADR 0003](docs/adr/0003-pivot-equity-research.md). This doc is the single source of truth for current scope, architecture, and roadmap. The v1 design lives in git history.
+> **Status:** v2 — **AI Equity Research Assistant**. Live at <https://market-analysis-agent.fly.dev>. Pivoted from the v1 "real-time multi-agent platform" vision in [ADR 0003](docs/adr/0003-pivot-equity-research.md). Report shape settled as **visual-first, delta-driven** in [ADR 0004](docs/adr/0004-visual-first-product-shape.md) — multi-year time series rendered as charts, LLM commentary stays short and stays at judgment-dependent moments. This doc is the single source of truth for current scope, architecture, and roadmap. The v1 design lives in git history.
 
 ## Goal
 
-Given a US-equity ticker, return a fully-cited structured research report — valuation, quality, capital allocation, technicals, news, earnings, peers, macro, insider/institutional flows, risk-factor delta. The agent calls free-data tools, the schema enforces citations, the eval harness gates regressions.
+Given a US-equity ticker, return a fully-cited structured research report — valuation, quality, capital allocation, technicals, news, earnings, peers, macro, insider/institutional flows, risk-factor delta — with multi-year time series surfaced as charts on every metric we have history for. The agent calls free-data tools, the schema enforces citations, the eval harness gates regressions.
 
 Two real workflows the system serves:
 
 1. **Long-term value diligence** — main-account research before adding or trimming a position.
-2. **Options education with quantitative grounding** — IV percentile, implied move, term structure (when `compute_options` lands).
+2. **Catalyst-aware position sizing** — knowing what just changed (10-K risk-factor diffs, EPS trend, peer outliers, recent material news) before sizing into or out of a name.
 
 Cost target: **$5–15 / month all-in** (free-tier infra + free data + cost-tier-routed LLM). The original $50–80/mo design budget is wide enough to absorb a Sonnet-only synth tier without breaking.
 
@@ -114,8 +114,10 @@ Tools live in `app/services/<tool>.py`. Each follows the same shape: provider-re
 | `parse_filing` | Form 4 / 13F / 10-K Business / 10-K risks YoY diff | ✅ (PRs #19, #21, #22, #23) |
 | `fetch_earnings` | yfinance earnings dates + consensus + beat-rate | ✅ (PR #18) |
 | `fetch_macro` | FRED API + sector→series map | ✅ (PR #20) |
-| `search_history` | pgvector RAG over stored news + filings | next |
-| `compute_options` | yfinance option_chain → IV percentile, implied move | needs daily snapshot job |
+| `search_history` | pgvector RAG over stored news + filings | indefinitely deferred (ADR 0004) |
+| `compute_options` | yfinance option_chain → IV percentile, implied move | indefinitely deferred (ADR 0004) |
+
+**Tool extensions in Phase 3 (active).** Existing tools learn to return multi-year history alongside their point-in-time values: `fetch_fundamentals` (quarterly via yfinance), `fetch_earnings` (~20 quarters), `fetch_macro` (FRED series), plus a new derived `fetch_valuation_history` (rolling P/E / P/S / EV/EBITDA from price + financials). Backwards-compatible — the new history is an optional field on `Claim`. See [ADR 0004](docs/adr/0004-visual-first-product-shape.md) §"Phase 3" for the full plan.
 
 Active sprint tracking: [tasks/todo.md](tasks/todo.md).
 
@@ -173,15 +175,27 @@ Auth, real rate limiting, and per-user cost caps land only when the project has 
 
 **Phase 1 — Core infrastructure (done).** FastAPI scaffold, async DB stack, Alembic, yfinance ingest, RSI + SMA technicals, observability, RFC 7807, deploy to Fly + Neon, CI with Gitleaks + Claude PR review.
 
-**Phase 2 — Equity research assistant (substantially done).**
+**Phase 2 — Equity research assistant (done).**
 
 - 2.0 Foundations ✅ — research schemas, LLM client with cost-tier routing, eval harness with rubric (structure + factuality + latency).
-- 2.1 Tool registry ✅ — 9/9 active tools shipped. `search_history` (pgvector) and `compute_options` (daily IV snapshot) deliberately deferred to Phase 3 per the roadmap below.
+- 2.1 Tool registry ✅ — 9/9 active tools shipped (point-in-time; histories extend in Phase 3).
 - 2.2 Agent + `POST /v1/research/{symbol}` ✅ — deterministic-everything-except-prose architecture (PR #26); same-day cache (PR #28); per-IP rate limit (PR #29 + post-cache refinement). Real-LLM golden eval at factuality 0.97.
-- 2.2d LLM-driven section composition — deferred. Will land if the rubric shows the static `SECTION_TO_CLAIM_KEYS` map is too rigid for sector-specific framings. No signal that this is needed yet.
-- 2.3 Optional supervisor mode — deferred. Will land if eval shows multi-agent gives a factuality / structure win over single-agent. Cut otherwise.
 
-**Phase 3+ (future).** pgvector RAG (`search_history`), options daily snapshots (`compute_options`), small web frontend, auth + per-user cost caps, Reddit sentiment (only if a recurring query justifies it). Horizontal-scale rate-limit (Redis swap-in for the in-process bucket) lands here too if/when traffic warrants it.
+**Phase 3.0 — Frontend backend prereqs (done, PR #31).** Shared-secret bearer auth dep (`/v1/research/*`), CORS middleware (single-origin allowlist via `FRONTEND_ORIGIN`), `GET /v1/research` paginated list endpoint for the dashboard sidebar. 30 new tests; full suite at 426 passing.
+
+**Phase 3.1 — Frontend MVP (done, PR #32; deploy held).** React + Vite + TS + Tailwind + TanStack Query + Zod. Login screen, dashboard, report renderer, past-reports sidebar. 19 vitest tests; production build 75 KB gzipped. Vercel deploy held until Phase 3 visual-depth work ships per ADR 0004 — shipping the dashboard against today's text-only report would just need an immediate upgrade.
+
+**Phase 3 — Visual-first depth (active).** Per [ADR 0004](docs/adr/0004-visual-first-product-shape.md):
+
+- 3.1 Schema — `Claim.history?: list[ClaimHistoryPoint]` (period + value), backwards-compatible.
+- 3.2 Tool extensions — `fetch_fundamentals`, `fetch_earnings`, `fetch_macro` learn to populate history from yfinance's quarterly tables, FRED series, and earnings-date history. New derived `fetch_valuation_history` for rolling P/E / P/S / EV/EBITDA over time.
+- 3.3 Frontend visualization — Recharts. `Sparkline` inline next to history-bearing claims, `SectionChart` for top-level visualizations (price+SMA, fundamentals trend, macro series), `PeerScatter` for the Peers section.
+- 3.4 Eval rubric extension — `_matches_claim` reads `claim.history[*].value` so prose like "EPS rose from 1.46 to 2.18" passes when both numbers are in the referenced claim's history.
+- 3.5 Frontend deploy — Vercel + Fly secrets + dogfood + docs sweep.
+
+**Phase 4 — Narrative layer (deferred until Phase 3 ships).** Per ADR 0004: explicit Bulls Say / Bears Say with `claim_refs` enforcement, a What Changed delta section (mechanical from Phase 3 history), catalyst awareness wiring `fetch_news` into reports, new `?focus=thesis` mode. Lands only after Phase 3 dogfooding confirms the data foundation is right; without Phase 3 first, Phase 4 is just longer-winded versions of today's summaries.
+
+**Indefinitely deferred (future scope).** `search_history` (pgvector RAG over stored news + filings), `compute_options` (yfinance options + daily IV snapshot), Reddit sentiment, real auth + per-user cost caps + Redis-backed horizontal rate limit. None of these address the perceived-shallowness gap that motivated the Phase 3/4 reshuffle; revisit when there's a concrete trigger.
 
 ## Risks
 

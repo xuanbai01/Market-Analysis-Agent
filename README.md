@@ -4,15 +4,17 @@ An **AI Equity Research Assistant**. POST a ticker, get back a structured analys
 
 Live: <https://market-analysis-agent.fly.dev/docs>
 
-> **Status — Phase 1 + Phase 2 substantively done.** The agent endpoint `POST /v1/research/{symbol}` is live, with a 7-day same-day cache and per-IP rate limit. Real-LLM golden eval passes at factuality ≥ 0.97. Phase 1 (FastAPI + async SQLAlchemy, Postgres on Neon, Fly.io deploy, Alembic, real yfinance ingest, RSI/SMA technicals, RFC 7807 errors, A09 external-call logging, push-to-deploy) shipped first; Phase 2 added the agent layer, 9 free-data tools, citation-enforcing schema, eval harness, cost-tier-routed LLM client. **378 tests passing.** Optional follow-ups (LLM-driven section composition, supervisor mode, pgvector RAG, options snapshots) deliberately deferred — see [design_doc.md](design_doc.md) §Roadmap.
+> **Status — Phase 1 + Phase 2 done; Phase 3 active (visual-first depth).** The agent endpoint `POST /v1/research/{symbol}` is live, with a 7-day same-day cache and per-IP rate limit. Real-LLM golden eval passes at factuality ≥ 0.97. Frontend (React + Vite + TS) shipped to `main` (PRs #31 + #32) but **deploy held until Phase 3 lands** — dogfooding showed point-in-time numbers without historical context feel shallow even with citation-backed data. Phase 3 adds multi-year history rendered as charts; the LLM commentary stays short and stays at judgment-dependent moments. See [ADR 0004](docs/adr/0004-visual-first-product-shape.md) for the rationale and [tasks/todo.md](tasks/todo.md) for the granular plan. **426 tests passing on the backend, 19 on the frontend.**
 
 ## What this is (and isn't)
 
 | | |
 |---|---|
-| **Is** | A FastAPI backend that exposes one primary endpoint — `POST /v1/research/{symbol}` — returning a Pydantic-typed structured research report. Single agent + well-designed tools by default; optional supervisor mode for multi-symbol comparisons. |
+| **Is** | A FastAPI backend exposing one primary endpoint — `POST /v1/research/{symbol}` — returning a Pydantic-typed structured research report. Single agent + well-designed tools, deterministic section composition, LLM only writes the per-section summary prose under a forced schema. React + Vite frontend renders the report as cards + (Phase 3) charts. |
 | **Is** | Built deliberately on **free data only** — yfinance, SEC EDGAR, NewsAPI free tier, FRED — and free-tier infrastructure (Neon Postgres + Fly.io). Real cost: ~$0–5/mo. |
-| **Isn't** | A real-time market platform. The original v1 vision (15-min news firehose, Discord bot, multi-agent-as-architecture) was [explicitly cut](docs/adr/0003-pivot-equity-research.md) in favour of depth-over-freshness and the modern *single-agent + tools* pattern. |
+| **Is** | **Visual-first, delta-driven** per [ADR 0004](docs/adr/0004-visual-first-product-shape.md). Multi-year history rendered as charts; LLM commentary stays short and stays at judgment-dependent moments (e.g. 10-K risk-factor changes). |
+| **Isn't** | A real-time market platform. The original v1 vision (15-min news firehose, Discord bot, multi-agent-as-architecture) was [explicitly cut](docs/adr/0003-pivot-equity-research.md) in favour of depth-over-freshness. |
+| **Isn't** | A Morningstar-shaped analyst note. Multi-year DCF projections, fair-value estimates, capital-allocation letter grades, 5-page bull/bear essays — all explicitly out of scope (ADR 0004 §"Option 1 rejected"). The toolkit (free data + LLM) is the wrong shape for those. |
 | **Isn't** | A trading signal generator. Reports are research-style synthesis, not buy/sell recommendations. Every claim cites its source so a human can verify before acting. |
 
 ## Quickstart
@@ -127,8 +129,8 @@ POST /v1/research/{symbol}?focus=full
 | `parse_filing` | Form 4 cluster, 13F holdings, 10-K Item 1, 10-K risks YoY diff | ✅ |
 | `fetch_earnings` | yfinance earnings dates + consensus | ✅ |
 | `fetch_macro` | FRED API + sector→series map | ✅ (graceful no-op without `FRED_API_KEY`) |
-| `search_history` | pgvector RAG | 🟡 Phase 3 |
-| `compute_options` | yfinance options + daily IV snapshots | 🟡 Phase 3 |
+| `search_history` | pgvector RAG | ⏸ deferred (ADR 0004) |
+| `compute_options` | yfinance options + daily IV snapshots | ⏸ deferred (ADR 0004) |
 
 - **Language:** Python 3.11, FastAPI 0.115, SQLAlchemy 2.0 (async + asyncpg)
 - **DB:** Postgres 15 (Docker locally; Neon free tier in prod). pgvector lands when `search_history` does.
@@ -228,16 +230,19 @@ No license file yet. Treat as all-rights-reserved until one lands.
 
 - **Phase 1 — Core Infrastructure** ✅ *(complete)*
   FastAPI + Alembic + tests + real yfinance ingest + RSI/SMA technicals + Fly + Neon + push-to-deploy.
-- **Phase 2 — AI Equity Research Assistant** ✅ *(substantively complete)*
+- **Phase 2 — AI Equity Research Assistant** ✅ *(complete)*
   - 2.0 Foundations: citation-enforcing schema, LLM client with cost-tier routing, eval harness with rubric (structure / factuality / latency).
-  - 2.1 Tool registry: `fetch_news`, `fetch_fundamentals`, `fetch_peers`, `fetch_edgar`, `parse_filing` (Form 4 + 13F + 10-K business + 10-K risks YoY diff), `fetch_earnings`, `fetch_macro` — 9 of 9 active tools shipped.
+  - 2.1 Tool registry: 9/9 active tools shipped. Histories extend in Phase 3.
   - 2.2 Agent + endpoint: `POST /v1/research/{symbol}` with deterministic-everything-except-prose architecture; same-day cache (default 7-day window); per-IP rate limit (default 3/hour). Real-LLM golden eval at factuality 0.97.
-  - 2.2d / 2.3 (deferred): LLM-driven section composition + supervisor mode for multi-symbol queries — only land if the rubric shows the deterministic catalog is too rigid. No signal that this is needed yet.
-- **Phase 3 — stretch / future scope** *(deliberately deferred)*
-  - `search_history` (pgvector RAG over stored news + filings, time-weighted)
-  - `compute_options` (yfinance option_chain + daily IV snapshot job, IV percentile + implied move)
-  - Web frontend / Discord client
-  - Auth + per-user cost caps + horizontal-scale rate limit (Redis swap-in)
-  - Reddit / r/wallstreetbets sentiment (only if a recurring eval query justifies it)
+- **Phase 3.0 — Frontend backend prereqs** ✅ *(PR #31 merged)*
+  Shared-secret bearer auth dep, CORS middleware, `GET /v1/research` paginated list endpoint.
+- **Phase 3.1 — Frontend MVP** ✅ *(PR #32 merged; deploy held)*
+  React + Vite + TS dashboard. Deploy held until Phase 3 visual-depth ships per [ADR 0004](docs/adr/0004-visual-first-product-shape.md) — shipping the dashboard against today's text-only report would just need an immediate upgrade.
+- **Phase 3 — Visual-first depth** 🔄 *(active)*
+  Per [ADR 0004](docs/adr/0004-visual-first-product-shape.md): multi-year history surfaced as charts. `Claim.history?` schema extension. `fetch_fundamentals` / `fetch_earnings` / `fetch_macro` return ~5y of quarterly / monthly history. New derived `fetch_valuation_history` for rolling P/E / P/S / EV/EBITDA. Frontend gets sparklines (inline), section-level charts, peer-comp scatter. Eval rubric extends to read `claim.history`.
+- **Phase 4 — Narrative layer** 🔜 *(deferred until Phase 3 ships)*
+  Explicit Bulls Say / Bears Say with `claim_refs` enforcement. What Changed delta section (mechanical from Phase 3 history). Catalyst awareness wiring `fetch_news` into reports. New `?focus=thesis` mode.
+- **Indefinitely deferred (future scope)** ⏸
+  `search_history` (pgvector RAG), `compute_options` (yfinance + daily IV snapshot), Reddit sentiment, real auth + per-user cost caps + Redis-backed horizontal rate limit. None address the perceived-shallowness gap that motivated the Phase 3/4 reshuffle; revisit when there's a concrete trigger.
 
-See [tasks/todo.md](tasks/todo.md) for the granular tracker, [design_doc.md](design_doc.md) for system design, and [ADR 0003](docs/adr/0003-pivot-equity-research.md) for the v1→v2 pivot rationale.
+See [tasks/todo.md](tasks/todo.md) for the granular tracker, [design_doc.md](design_doc.md) for system design, [ADR 0003](docs/adr/0003-pivot-equity-research.md) for the v1→v2 pivot, and [ADR 0004](docs/adr/0004-visual-first-product-shape.md) for the report-shape decision.

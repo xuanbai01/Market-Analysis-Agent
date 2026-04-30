@@ -4,55 +4,65 @@ Read this before opening source files. The [design_doc.md](../design_doc.md) at 
 
 ## Project Overview
 
-A production-grade **Financial Market Analysis Agent** that aggregates real-time market data, news, and sentiment to produce market insights and trading strategies. Uses a RAG architecture with time-weighted relevance scoring and multi-agent orchestration. Target operating cost: **$50–80 / month**.
+The **AI Equity Research Assistant** — a FastAPI backend that exposes one primary endpoint (`POST /v1/research/{symbol}`) returning a Pydantic-typed citation-backed structured research report, plus a React + Vite + TypeScript frontend that renders it. Single agent + well-designed tools, free data only, citation discipline non-negotiable. Visual-first, delta-driven product shape per [ADR 0004](adr/0004-visual-first-product-shape.md).
+
+The original v1 vision (real-time multi-agent platform with scheduled news firehose, Discord bot, Pinecone vector store, Polygon paid feed) was [explicitly cut](adr/0003-pivot-equity-research.md) in favour of depth-over-freshness on free data.
+
+Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + Anthropic per-call billing under cost-tier routing).
 
 ## Tech Stack
 
 | Layer | Technology | Status |
 |---|---|---|
-| Language | Python 3.11 | ✅ |
-| Web framework | FastAPI 0.115 | ✅ |
+| Language | Python 3.11 (backend), TypeScript 5.6 (frontend) | ✅ |
+| Backend framework | FastAPI 0.115 | ✅ |
 | ORM | SQLAlchemy 2.0 (async) + asyncpg | ✅ |
 | Config | pydantic-settings | ✅ |
-| Database | PostgreSQL 15 (local Docker; Supabase in prod) | ✅ local |
-| Task queue | Celery + Redis | 🟡 planned |
-| Vector store | Pinecone (free tier) or Qdrant | 🟡 planned |
-| Cache | Redis (Upstash free tier) | 🟡 planned |
-| Agent framework | LangChain | 🟡 planned |
-| LLM | OpenAI GPT-4o-mini (primary), Claude Haiku (fallback) | 🟡 planned |
-| Embeddings | OpenAI text-embedding-3-small | 🟡 planned |
-| Market data | Polygon.io (primary), yfinance (fallback) | 🟡 planned |
-| News | NewsAPI + Benzinga + RSS + Reddit | 🟡 planned |
-| Hosting | Railway.com | 🟡 planned |
-| Tests | pytest + pytest-asyncio | 🟡 not yet present |
-| Lint | ruff | 🟡 configured in pyproject, not enforced |
-| CI | GitHub Actions | ✅ (backend tests + Gitleaks + Claude review) |
+| Database | PostgreSQL 15 (Docker locally; Neon free tier in prod) | ✅ |
+| Schema migrations | Alembic 1.13 (async mode) | ✅ |
+| LLM | Anthropic — Claude Haiku 4.5 (triage; currently unused) + Claude Sonnet 4.6 (synth) | ✅ |
+| Market data | yfinance | ✅ |
+| News | NewsAPI free tier + Yahoo per-ticker RSS | ✅ |
+| Filings | SEC EDGAR (with disk cache + polite-crawl) | ✅ |
+| Macro | FRED API | ✅ |
+| Hosting | Fly.io (auto-stop machines) + Neon (Postgres) + Vercel (frontend) | ✅ backend, 🟡 frontend deploy held |
+| Frontend stack | Vite + React 18 + Tailwind + TanStack Query + Zod | ✅ |
+| Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ 426 backend / 19 frontend |
+| Lint | ruff (backend), ESLint (frontend) | ✅ |
+| CI | GitHub Actions (tests + Gitleaks + Claude PR review) + push-to-deploy | ✅ |
+
+**Indefinitely deferred per [ADR 0004](adr/0004-visual-first-product-shape.md):** pgvector (`search_history`), yfinance options chain (`compute_options`), Redis (no horizontal-scale rate limit need yet), Celery (no scheduled work).
 
 ## Repository Structure
 
 ```
 /
 ├── app/                         # FastAPI application
-│   ├── main.py                  # App factory, router mounting, error handlers
-│   ├── core/                    # settings, logging, error handling (RFC 7807)
+│   ├── main.py                  # App factory, router mounting, CORS, error handlers
+│   ├── core/                    # settings, auth, cors, errors, observability
 │   ├── api/v1/
-│   │   ├── dependencies.py      # FastAPI DI (DB session)
-│   │   └── routers/             # one file per route group
+│   │   ├── dependencies.py      # DB session, rate limit
+│   │   └── routers/             # health, symbols, news, market, research (the v2 surface)
 │   ├── db/
 │   │   ├── session.py           # async engine + sessionmaker
-│   │   └── models/              # SQLAlchemy models (Base, Symbol, NewsItemModel, Candle)
-│   ├── schemas/                 # Pydantic request/response models
-│   └── services/                # business logic + repositories
-├── alembic/                     # schema migrations (async mode)
-│   ├── env.py                   # reads DATABASE_URL from app.core.settings
-│   └── versions/                # 0001_baseline.py creates all 3 tables + seeds NVDA/SPY
-├── docs/                        # this directory (PRD, ADRs, testing, etc.)
-├── tasks/                       # todo.md, lessons.md
-├── design_doc.md                # long-form system design (read this first)
+│   │   └── models/              # Symbol, NewsItemModel, NewsSymbol, Candle, ResearchReportRow
+│   ├── schemas/                 # Pydantic request/response (research.py is the v2 schema)
+│   └── services/                # tools (fetch_*, parse_*), orchestrator, cache, rate_limit, llm
+├── alembic/versions/            # 0001 baseline, 0002 news_symbols, 0003 research_reports
+├── frontend/                    # Vite + React dashboard (Phase 3.1)
+│   ├── src/
+│   │   ├── components/          # LoginScreen, Dashboard, ReportRenderer, etc.
+│   │   └── lib/                 # Zod schemas, API client, auth helpers, format helpers
+│   └── vercel.json              # Vercel deploy config
+├── tests/                       # pytest-asyncio; per-test SAVEPOINT rollback. Plus tests/evals/ (rubric + golden)
+├── docs/                        # this directory (architecture, security, testing, commands, ADRs)
+├── tasks/                       # active sprint (todo.md) + lessons learned
+├── scripts/                     # smoke.py — exercises each tool against live providers
+├── design_doc.md                # long-form system design (read first)
+├── fly.toml
 ├── Dockerfile
-├── docker-compose.yml           # postgres + api
-├── pyproject.toml
-└── CLAUDE.md
+├── docker-compose.yml
+└── pyproject.toml
 ```
 
 ## Layering Rule
@@ -60,21 +70,37 @@ A production-grade **Financial Market Analysis Agent** that aggregates real-time
 Route handler → Service (or repository) → Model/DB. Never put business logic in a route. Never return an ORM object directly from a route; pass through a Pydantic response schema.
 
 ```
-FastAPI router  ─▶  services/<domain>_repository.py or <domain>_service.py
+FastAPI router  ─▶  services/<domain>_<role>.py
                          │
                          ▶  db/models/<domain>.py  (SQLAlchemy)
-                         ▶  external providers (yfinance, Polygon, NewsAPI, LLMs)
+                         ▶  external providers (yfinance, EDGAR, FRED, Anthropic)
+```
+
+For the v2 research endpoint specifically:
+
+```
+POST /v1/research/{symbol}
+  └▶ research_cache.lookup_recent       (free; pre-rate-limit)
+  └▶ enforce_research_rate_limit         (only on cache miss)
+  └▶ research_orchestrator.compose_research_report
+       ├▶ tool fan-out (asyncio.gather, return_exceptions=True)
+       │    fetch_fundamentals / fetch_earnings / fetch_peers /
+       │    fetch_macro / extract_10k_business / extract_10k_risks_diff
+       ├▶ deterministic claim builders   (per-section, code picks claims, not LLM)
+       ├▶ llm.synth_call                 (Sonnet writes summary prose under forced schema)
+       └▶ research_confidence.score_section  (programmatic, not LLM-set)
+  └▶ research_cache.upsert
 ```
 
 ## Data Model (current)
 
 | Entity | Fields | Notes |
 |---|---|---|
-| `symbols` | `symbol` (PK, varchar 16), `name` (varchar 128, nullable) | Seeded with NVDA, SPY in the baseline migration. |
-| `news_items` | `id` (PK, varchar 64), `ts` (timestamptz), `title`, `url`, `source` | Indexed on `ts DESC`. No symbol tagging yet despite the API exposing a `symbols` field. |
-| `candles` | composite PK `(symbol, ts, interval)`; `open`, `high`, `low`, `close` (numeric 18/6), `volume` (bigint) | `symbol` has FK → `symbols.symbol` with `ON DELETE CASCADE`. Indexed on `(symbol, interval, ts DESC)` for fast "latest bar" lookups. Append-only; supersede rather than update on restatement. |
-
-**Not yet modeled** (from design doc): news embeddings, user sessions, query history, portfolio positions, strategy backtests.
+| `symbols` | `symbol` (PK, varchar 16), `name` (varchar 128, nullable) | Seeded with NVDA, SPY. |
+| `news_items` | `id` (PK, varchar 64), `ts` (timestamptz), `title`, `url`, `source` | Indexed on `ts DESC`. |
+| `news_symbols` | composite PK `(news_id, symbol)` | Join table for symbol-tagged news. Cascading FKs both directions. |
+| `candles` | composite PK `(symbol, ts, interval)`; OHLCV + volume | FK → `symbols`. Indexed `(symbol, interval, ts DESC)`. Append-only. |
+| `research_reports` | composite PK `(symbol, focus, report_date)`; `report_json` (JSONB), `generated_at` (timestamptz) | Same-day cache. JSONB stores serialized `ResearchReport`. Lookup is time-windowed via `generated_at` (configurable via `RESEARCH_CACHE_MAX_AGE_HOURS`). |
 
 ## Routes (current)
 
@@ -82,40 +108,31 @@ FastAPI router  ─▶  services/<domain>_repository.py or <domain>_service.py
 |---|---|---|
 | Health | `GET /v1/health` | ✅ real (pings DB) |
 | Symbols | `GET /v1/symbols`, `POST /v1/symbols` | ✅ real |
-| News | `POST /v1/news/ingest`, `GET /v1/news`, `GET /v1/news/{id}` | GET is real; ingest is a no-op |
-| Market | `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ real (yfinance ingest + upsert → `candles`; latest + date-range history queries) |
-| Analysis | `POST /v1/analysis` | ❌ 501 |
-| Reports | `GET /v1/reports/daily/latest` | ❌ 501 |
-| Forecasts | `GET /v1/forecasts/{symbol}` | ❌ 501 |
+| News | `POST /v1/news/ingest`, `GET /v1/news`, `GET /v1/news/{id}` | ✅ real (NewsAPI + Yahoo RSS, symbol-tagged) |
+| Market | `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ real (yfinance ingest + upsert + technicals) |
+| **Research** | **`POST /v1/research/{symbol}?focus={full,earnings}&refresh={false,true}`** | ✅ **the v2 primary endpoint.** Auth-gated when `BACKEND_SHARED_SECRET` is set. Per-IP rate limit. |
+| Research list | `GET /v1/research?limit=20&offset=0&symbol=...` | ✅ paginated `ResearchReportSummary[]` for the dashboard sidebar |
+| Legacy | `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ 501 (legacy v1 stubs; will be removed or redirected to `/v1/research`) |
 
-Errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](../app/core/errors.py).
+Errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](../app/core/errors.py). The handler propagates `HTTPException.headers` so `Retry-After` (429) and `WWW-Authenticate` (401) survive the wrap.
 
-## External Integrations (planned)
+## External Integrations (current)
 
 | Service | Purpose | Failure mode |
 |---|---|---|
-| Polygon.io | Real-time OHLCV | Fall back to yfinance |
-| yfinance | Fallback OHLCV | Log + degrade (return last cached) |
-| NewsAPI | News articles | Skip this poll cycle, retry next tick |
-| OpenAI GPT-4o-mini | Analysis + strategy synthesis | Fall back to Claude Haiku |
-| OpenAI embeddings | Vector store writes | Queue for retry; do not block ingest |
-| Pinecone | Vector store for RAG | Degrade to keyword search |
-| Redis | Cache + Celery broker | Fail open on cache miss |
+| yfinance | OHLCV, fundamentals, peers, earnings | Defensive `_safe_loc` lookups; missing fields become `None`-valued claims with stable shape |
+| SEC EDGAR | Filings (10-K, Form 4, 13F-HR) | Disk-cached; SEC `User-Agent` mandatory; 0.15s sleep between requests for polite-crawl |
+| NewsAPI | News articles | Optional — skipped silently when `NEWSAPI_KEY` empty |
+| FRED | Macro series | Optional — `fetch_macro` emits metadata claims with None values when `FRED_API_KEY` empty |
+| Anthropic Claude | Synth (Sonnet 4.6); triage (Haiku 4.5) wired but currently unused | `RuntimeError` → 503 problem+json (key not configured / provider down) |
 
-Every external call **must** be logged (service id, input shape, output shape, latency, timestamp). See [security.md](security.md#a09) for why this is non-negotiable.
+Every external call is logged via `log_external_call` (service id, input/output summary, latency ms, timestamp, outcome). See [security.md §A09](security.md#a09) for why.
 
 ## Architecture Decisions
 
-Big choices go into short ADRs under [docs/adr/](adr/). Ones we know we'll need to write:
+ADRs in [docs/adr/](adr/):
 
-- `0001` — FastAPI + async SQLAlchemy over Flask/Django (performance + type hints)
-- `0002` — GPT-4o-mini as primary LLM vs GPT-4 (200× cheaper, ≥90% quality for this task)
-- `0003` — Pinecone free tier vs self-hosted Qdrant (managed reliability vs zero cost)
-- `0004` — Railway.com vs AWS/GCP (simplicity, predictable pricing)
-- `0005` — Time-weighted RAG retrieval formula and λ choice
-
-## Open Questions
-
-- When to introduce Celery vs keep ingestion in-process? Trigger: once any ingest endpoint takes >500ms or needs scheduling.
-- Will the Discord bot sit in this repo or a separate one? Design doc implies co-located; revisit when bot work starts.
-- Where does user/session data live? Supabase Auth or roll our own? No users yet, so deferred.
+- [0001](adr/0001-stack-choice.md) — FastAPI + async SQLAlchemy over Flask/Django.
+- [0002](adr/0002-deployment.md) — Deploy to Fly.io + Postgres on Neon.
+- [0003](adr/0003-pivot-equity-research.md) — Pivot from v1 (real-time multi-agent platform) to v2 (AI Equity Research Assistant).
+- [0004](adr/0004-visual-first-product-shape.md) — **Read this before proposing report-shape changes.** Visual-first, delta-driven; not chasing Morningstar-narrative depth.

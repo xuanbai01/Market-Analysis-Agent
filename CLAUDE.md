@@ -2,11 +2,11 @@
 
 Guidance for Claude Code (claude.ai/code) when working in this repository.
 
-> **Product context:** this repo is a **Financial Market Analysis Agent** — a FastAPI backend that aggregates market data, news, and sentiment to produce analysis, forecasts, and trading strategies via a multi-agent RAG pipeline. Discord is one of several planned client surfaces, not the product.
+> **Product context:** this repo is the **AI Equity Research Assistant** — a FastAPI backend exposing `POST /v1/research/{symbol}` that returns a Pydantic-typed citation-backed research report, plus a React + Vite frontend that renders it. Single agent + well-designed tools, free data only, citation discipline non-negotiable. **Visual-first, delta-driven** product shape (charts > prose). The original v1 vision (real-time multi-agent platform, Discord bot) was cut by [ADR 0003](docs/adr/0003-pivot-equity-research.md); the report-shape decision (no Morningstar-narrative chase) is in [ADR 0004](docs/adr/0004-visual-first-product-shape.md).
 >
 > **System design:** [`design_doc.md`](design_doc.md) (root) is the source of truth for scope, budget, stack, and roadmap. Read it before making non-trivial changes.
 > **Active tasks:** `tasks/todo.md`. Lessons: `tasks/lessons.md`.
-> **Architecture Decision Records:** `docs/adr/`.
+> **Architecture Decision Records:** `docs/adr/` — **read [ADR 0003](docs/adr/0003-pivot-equity-research.md) and [ADR 0004](docs/adr/0004-visual-first-product-shape.md) before proposing report-shape changes.**
 
 ## How this file works
 
@@ -28,13 +28,18 @@ The `@imports` below pull in modular docs — one concern per file — so a sing
 
 ---
 
-## Current state (Story 1 scaffolding)
+## Current state
 
-- FastAPI app under `app/` with v1 routers mounted in [app/main.py](app/main.py).
-- **Working:** `/v1/health`, `/v1/symbols` (GET/POST), `/v1/news` (list + detail).
-- **Stubbed (returns fake data or 501):** `/v1/market/*`, `/v1/analysis`, `/v1/reports/daily/latest`, `/v1/forecasts/{symbol}`.
-- **Ingestion:** [app/services/data_ingestion.py](app/services/data_ingestion.py) is a no-op.
-- **DB:** Postgres via async SQLAlchemy 2.0 + asyncpg. Schema managed by Alembic — see [alembic/versions/](alembic/versions/). Tables: `symbols`, `news_items`, `candles`.
-- **Infra:** local dev via `docker-compose up`. No Redis, Celery, vector DB, LangChain, or Discord bot yet (all on the roadmap).
+- **Phase 1 done:** FastAPI scaffold, async SQLAlchemy 2.0 + asyncpg, Alembic, real yfinance ingest, RSI/SMA technicals, RFC 7807 errors, A09 external-call logging, Fly.io + Neon deploy, push-to-deploy via GitHub Actions.
+- **Phase 2 done:** `POST /v1/research/{symbol}` is the primary endpoint. Citation-enforcing schema (`Source` / `Claim` / `Section` / `ResearchReport`). 9 free-data tools (`fetch_news`, `fetch_fundamentals`, `fetch_peers`, `fetch_edgar`, `parse_filing` × 4, `fetch_earnings`, `fetch_macro`). Cost-tier-routed LLM client (Haiku triage + Sonnet synth, currently synth-only). Same-day cache (default 7-day window). Per-IP rate limit (default 3/hour, post-cache). Real-LLM golden eval at factuality 0.97.
+- **Phase 3.0 done (PR #31):** shared-secret bearer auth dep on `/v1/research/*` (`BACKEND_SHARED_SECRET`), CORS middleware (`FRONTEND_ORIGIN`), `GET /v1/research` paginated list.
+- **Phase 3.1 done (PR #32; deploy held):** React + Vite + TS frontend under `frontend/`. Login screen, dashboard, report renderer, past-reports sidebar. Vercel deploy held until Phase 3 visual-depth ships.
+- **Phase 3 active (visual-first depth):** see `tasks/todo.md`. Adds `Claim.history?: list[ClaimHistoryPoint]` to schema; extends `fetch_fundamentals` / `fetch_earnings` / `fetch_macro` to populate quarterly/monthly history; adds Recharts-based `Sparkline` / `SectionChart` / `PeerScatter` to the frontend.
+- **Phase 4 deferred:** narrative layer (Bulls / Bears with `claim_refs`, What Changed, catalyst awareness). Lands only after Phase 3 dogfooding.
+- **Indefinitely deferred** per ADR 0004: `search_history` (pgvector RAG), `compute_options` (yfinance + IV snapshots), Reddit sentiment, real auth + per-user cost caps. None address the perceived-shallowness gap; revisit when there's a concrete trigger.
 
-When making changes, prefer filling in stubs (market repo, ingestion, technicals) over adding new surface area unless the PRD/roadmap asks for it.
+**Tables today:** `symbols`, `news_items`, `news_symbols`, `candles`, `research_reports`. pgvector + `embeddings` columns are not added until/unless `search_history` un-defers.
+
+**Stubs / 501s:** `/v1/analysis`, `/v1/reports/daily/latest`, `/v1/forecasts/{symbol}` are legacy v1 routes — they'll be removed or redirected to `/v1/research` when convenient. Don't fill them in; prefer adding to `/v1/research`'s shape via the Phase 3/4 roadmap.
+
+When making changes, prefer extending the existing shape (new claims, new history fields, new sections in the static `SECTION_TO_CLAIM_KEYS` registry) over adding parallel surfaces. The deterministic-everything-except-prose architecture is the discipline — read [`app/services/research_orchestrator.py`](app/services/research_orchestrator.py) before proposing structural changes.

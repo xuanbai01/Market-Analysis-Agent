@@ -25,23 +25,36 @@ Active sprint for the Market Analysis Agent.
 - [ ] **Mirror in `frontend/src/lib/schemas.ts`** — Zod schema gets the same optional field; existing reports parse unchanged.
 - [ ] **Round-trip test** — write a `Claim` with history → JSONB → read back → unchanged. Empty history round-trips as empty.
 
-### 3.2 Tool extensions (one PR per tool, one commit per tool's history field)
+### 3.2 Tool extensions — Tier 1 (yfinance only, one PR per tool)
+
+> **Concrete chart catalog** in [ADR 0004 §"Phase 3 — Concrete chart catalog"](../docs/adr/0004-visual-first-product-shape.md). Each PR below maps to one row in that catalog's Tier 1 table.
 
 The pattern: each builder learns to populate `Claim.history` for the metrics where yfinance / FRED / derived computation gives us a series. Builders that can't (e.g. peer-comparison single-snapshot metrics) leave history empty.
 
-- [ ] **`fetch_fundamentals` history** — yfinance `Ticker.quarterly_financials`, `quarterly_balance_sheet`, `quarterly_cashflow` give ~5 years of quarters. Add history for: revenue, net income, gross margin, operating margin, EPS, ROE. Wrap the new yfinance call in `log_external_call`. Defensive about NaN / missing quarters (skip the point, don't fail the tool).
+- [ ] **`fetch_fundamentals` history** — yfinance `Ticker.quarterly_financials`, `quarterly_balance_sheet`, `quarterly_cashflow` give ~5 years of quarters. Add history for:
+    - Per-share metrics: revenue, op income, gross profit, net income, EPS, FCF, OCF (all ÷ `sharesOutstanding`)
+    - Margin trends: gross / operating / net / FCF as % of revenue
+    - Capital efficiency: ROE, ROIC
+    - Cash flow components: OCF / CapEx / SBC / FCF (stacked over time)
+    - Balance sheet trend: cash + ST investments + total debt; total assets vs total liabilities
+    Wrap each new yfinance call in `log_external_call`. Defensive about NaN / missing quarters (skip the point, don't fail the tool). YoY growth derived from history at render time, not stored separately.
 - [ ] **`fetch_earnings` history** — already pulls earnings dates; extend lookback from 4 quarters to ~20. Beat / miss flags become a binary time series. Forward-consensus EPS gets a history field reflecting analyst-revision drift if `Ticker.earnings_estimate` exposes it cheaply; cut otherwise.
 - [ ] **`fetch_macro` history** — FRED already returns series-level data. Surface the last ~24–60 months on each macro claim's history (sector-dependent — short rates need higher cadence than ISM PMI).
-- [ ] **`fetch_valuation_history` (new derived tool)** — combines `fetch_fundamentals` history + price history into rolling P/E, P/S, EV/EBITDA over time. Gives "AAPL trades at 28x today vs a 5-year median of 26x." Pure compute; no new external call. Decide whether this is its own tool or inlines into `fetch_fundamentals`'s builder.
+- [ ] **`fetch_valuation_history` (new derived tool)** — combines `fetch_fundamentals` history + price history into rolling P/E, EV/EBIT, EV/EBITDA, P/S over time, plus 5–10Y median band. Gives "AAPL trades at 28x today vs a 5Y median of 26x" — the most-cited gap from dogfooding. Pure compute; no new external call.
+- [ ] **`fetch_dividends_history` (new tool, conditional)** — yfinance `Ticker.dividends` for quarterly history; combined with price history for yield. Renders only when company is a dividend payer. Cheap to add since the source is one line.
 - [ ] **Price-and-technicals history** — we already have OHLCV in `candles`; surface ~5y closing prices on a price-history claim, plus rolling SMA/RSI as charts. Reuse `app.services.technicals` rather than adding a new tool.
+- [ ] **News in report** — wire `fetch_news` (already exists, currently unused in reports) into the orchestrator. Last ~10 symbol-filtered items as a Claim list with timestamps + URLs. Zero new acquisition cost.
 - [ ] **Peers** stay as point-in-time scatter (peer-comp gets a *visualization* upgrade in 3.3 but not a history field — comparing 5y trends across 5 peers is a different chart shape, defer).
 
 ### 3.3 Frontend visualization
 
 - [ ] **`Sparkline` component** — Recharts `LineChart` configured for inline density (~80×24 px). No axes, no legend, no tooltip on the inline variant. Renders any `Claim.history` of length ≥ 2.
 - [ ] **`ClaimRow` integration** — in `ReportRenderer`, the "Value" cell renders `formatClaimValue(value) | <Sparkline history={claim.history} />` when history is present. Mobile width drops the sparkline gracefully.
-- [ ] **`SectionChart` component** — bigger chart for sections that warrant a top-level visualization (price + SMA overlay; fundamentals trend; macro series). One `SectionChart` per section max. Picks the right "headline" claim per section by builder convention (e.g. Valuation → Trailing P/E, Quality → Gross Margin, Earnings → EPS).
-- [ ] **`PeerScatter` component** — for the Peers section, render the peer-comparison matrix as a 2-D scatter (e.g. P/E on x, gross margin on y). Color-code the subject vs peers. Single chart replaces the table for the Peers section (or augments it — a11y consideration: keep the table for screen readers).
+- [ ] **`SectionChart` component** — bigger chart for sections that warrant a top-level visualization (price + SMA overlay; fundamentals trend; macro series; valuation-with-median-band). One `SectionChart` per section max. Picks the right "headline" claim per section by builder convention (e.g. Valuation → Trailing P/E with median band, Quality → Gross Margin, Earnings → EPS).
+- [ ] **`StackedBarChart`** for the cash-flow-components view (OCF / CapEx / SBC / FCF) and the balance-sheet trend (Cash + ST Inv + Debt).
+- [ ] **`PeerScatter` component** — for the Peers section, render the peer-comparison matrix as a 2-D scatter (e.g. P/E on x, gross margin on y). Color-code the subject vs peers. Augments the existing table (a11y: keep the table for screen readers).
+- [ ] **`DividendsCard` component** *(conditional)* — quarterly dividends bar + yield line, dual-axis. Renders only when a dividend-history claim is present.
+- [ ] **`NewsList` component** — last ~10 items: source, title, timestamp, link out. Plain list; no sentiment shading (we don't compute it).
 - [ ] **Recharts dependency** — `npm install recharts`. Tree-shaken bundle adds ~30 KB gzipped. Verify build still under 100 KB gz.
 
 ### 3.4 Eval rubric extension
@@ -52,8 +65,18 @@ The pattern: each builder learns to populate `Claim.history` for the metrics whe
 ### 3.5 Frontend deploy (after 3.1–3.4 land)
 
 - [ ] **Vercel deploy** — push-to-deploy from `frontend/`. Set `VITE_BACKEND_URL`, set backend `FRONTEND_ORIGIN`, set `BACKEND_SHARED_SECRET` on both sides. README's "Deploying to Vercel" section already covers this.
-- [ ] **Dogfood** the deployed stack against 5–10 real symbols. Note UX rough edges; fix the high-impact ones in a follow-up.
+- [ ] **Dogfood** the deployed stack against 5–10 real symbols. Note UX rough edges; fix the high-impact ones in a follow-up. **Decision gate for 3.6:** if the segment-level granularity (revenue / op income by reportable segment + by geography) is repeatedly missed during dogfooding, escalate to 3.6. If Tier 1 is enough, leave 3.6 deferred.
 - [ ] **README + design_doc + CLAUDE.md** sweep — current state reflects Phase 3, screenshots, deploy URL.
+
+### 3.6 Tool extensions — Tier 2 (EDGAR XBRL, conditional)
+
+> **Conditional gate:** lands only if 3.5 dogfooding shows the segment view is still missed after Tier 1 ships. Tier 1 alone is the bulk of the perceived-shallowness fix; Tier 2 adds breadth where Tier 1 added depth.
+
+- [ ] **XBRL parser** — pick `python-xbrl` or `arelle`; reuse `fetch_edgar`'s polite-crawl + disk-cache infrastructure. One-time effort; pays for itself across all SEC filers.
+- [ ] **`fetch_segments` (new tool)** — parses `us-gaap:SegmentReportingDisclosure` from the latest 10-K + every 10-Q since. Returns revenue + operating income time series per reportable segment.
+- [ ] **`fetch_geographic_revenue` (new tool)** — parses geographic-disaggregation tags. Returns revenue time series by region (US / Taiwan / China / etc., per the company's reporting structure — no normalization).
+- [ ] **`fetch_rpo_history` (new tool, conditional)** — `us-gaap:RevenueRemainingPerformanceObligation` + `RemainingPerformanceObligationExpectedTimingOfSatisfactionPercentage` for the NTM%. Renders only when the company reports it (mostly SaaS / subscription / defense).
+- [ ] **Frontend additions** — `SegmentDonut` (TTM share) + `SegmentTimeSeries` (per-segment trend chart), `GeographyDonut` + `GeographyTimeSeries`, `RPOCard` (conditional). Mirror profitviz's Tier 2 layouts; skip the polish.
 
 ## Phase 4 — Narrative layer (deferred; after Phase 3 ships)
 

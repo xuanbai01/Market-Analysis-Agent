@@ -27,6 +27,8 @@ import pytest
 
 from app.schemas.research import ClaimHistoryPoint
 from app.services.fundamentals_history import (
+    _nopat_series,
+    _ttm_sum,
     build_fundamentals_history,
     format_period,
 )
@@ -475,3 +477,257 @@ def test_balance_sheet_misalignment_with_financials_uses_intersection() -> None:
     ]
     # Non-BS metrics still populate fully.
     assert len(out["revenue_per_share"]) == 4
+
+
+# ── Phase 3.2.D: TTM helpers + ROE/ROIC histories ────────────────────
+
+
+def _quarterly_with_eq_and_ic_8q() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """8 quarters of synthetic financials + balance sheet — enough for
+    TTM math (which loses 3 quarters to the rolling-window warm-up)."""
+    cols = [
+        # newest -> oldest
+        pd.Timestamp("2024-12-31"),
+        pd.Timestamp("2024-09-30"),
+        pd.Timestamp("2024-06-30"),
+        pd.Timestamp("2024-03-31"),
+        pd.Timestamp("2023-12-31"),
+        pd.Timestamp("2023-09-30"),
+        pd.Timestamp("2023-06-30"),
+        pd.Timestamp("2023-03-31"),
+    ]
+    fin = pd.DataFrame(
+        [
+            # Revenue, GP, Op Inc, NI, Diluted Avg Shares
+            [100, 90, 80, 70, 60, 55, 50, 45],
+            [70, 60, 50, 45, 40, 36, 32, 28],
+            [30, 25, 20, 18, 15, 13, 12, 10],
+            [10, 8, 6, 5, 4, 3, 3, 2],
+            [1000, 1000, 1010, 1020, 1030, 1040, 1050, 1060],
+        ],
+        index=[
+            "Total Revenue",
+            "Gross Profit",
+            "Operating Income",
+            "Net Income",
+            "Diluted Average Shares",
+        ],
+        columns=cols,
+    )
+    bs = pd.DataFrame(
+        [
+            # Stockholders Equity, Invested Capital
+            [50.0, 48.0, 46.0, 44.0, 42.0, 40.0, 38.0, 36.0],
+            [80.0, 78.0, 76.0, 74.0, 72.0, 70.0, 68.0, 66.0],
+        ],
+        index=["Stockholders Equity", "Invested Capital"],
+        columns=cols,
+    )
+    return fin, bs
+
+
+# ── _ttm_sum ─────────────────────────────────────────────────────────
+
+
+def test_ttm_sum_rolling_4q() -> None:
+    """TTM at quarter Q is the sum of Q + 3 prior quarters. The first 3
+    quarters of the input have no full window and emit NaN (caller drops
+    them via _ratio_history's NaN handling)."""
+    cols = [
+        pd.Timestamp("2024-12-31"),
+        pd.Timestamp("2024-09-30"),
+        pd.Timestamp("2024-06-30"),
+        pd.Timestamp("2024-03-31"),
+        pd.Timestamp("2023-12-31"),
+    ]
+    # newest-first: 5, 4, 3, 2, 1
+    s = pd.Series([5.0, 4.0, 3.0, 2.0, 1.0], index=cols)
+
+    ttm = _ttm_sum(s)
+
+    # _ttm_sum returns oldest-first sorted, with NaN for warm-up.
+    # Oldest 3 quarters lack a full 4Q window -> NaN.
+    # Q4 2024 (newest): 1+2+3+4+5? No wait — 4Q window ending at Q4 2024
+    # is {Q1, Q2, Q3, Q4 2024}. With sorted order [1, 2, 3, 4, 5] (Q4-2023 first),
+    # rolling window 4 would be NaN at Q4-2023, Q1, Q2, Q3 of 2024 (need 4 prior),
+    # then valid at Q4-2023+Q1+Q2+Q3 (waiting for 4 in window).
+    # Actually pandas rolling with window=4 gives the value at the position
+    # that COMPLETES the window. So at position 3 (Q1 2024), the window
+    # is [1, 2, 3, 4] -> sum 10. At position 4 (Q4 2024 newest), window is
+    # [2, 3, 4, 5] -> sum 14.
+    sorted_index = sorted(cols)  # oldest -> newest
+    # Trace:
+    #   sorted: Q4-23 (1), Q1-24 (2), Q2-24 (3), Q3-24 (4), Q4-24 (5)
+    #   window=4 first valid position is index 3 (Q3-24): sum 1+2+3+4=10
+    #   next at index 4 (Q4-24): sum 2+3+4+5=14
+    assert ttm.loc[sorted_index[0]] != ttm.loc[sorted_index[0]]  # NaN check
+    assert ttm.loc[sorted_index[3]] == pytest.approx(10.0)
+    assert ttm.loc[sorted_index[4]] == pytest.approx(14.0)
+
+
+def test_ttm_sum_propagates_nan() -> None:
+    """A single NaN in a 4Q window kills that TTM point."""
+    cols = [
+        pd.Timestamp("2024-12-31"),
+        pd.Timestamp("2024-09-30"),
+        pd.Timestamp("2024-06-30"),
+        pd.Timestamp("2024-03-31"),
+        pd.Timestamp("2023-12-31"),
+    ]
+    s = pd.Series([5.0, float("nan"), 3.0, 2.0, 1.0], index=cols)
+
+    ttm = _ttm_sum(s)
+
+    sorted_index = sorted(cols)
+    # The NaN at Q3-24 falls into 2 windows: ending at Q3-24 (NaN) and
+    # ending at Q4-24 (NaN). Both should be NaN.
+    val_q3_24 = ttm.loc[sorted_index[3]]
+    val_q4_24 = ttm.loc[sorted_index[4]]
+    assert pd.isna(val_q3_24)
+    assert pd.isna(val_q4_24)
+
+
+def test_ttm_sum_none_returns_none() -> None:
+    """Defensive: None input passes through cleanly."""
+    assert _ttm_sum(None) is None
+
+
+def test_ttm_sum_short_series_all_nan() -> None:
+    """Fewer than 4 quarters -> can't compute any TTM. Returns Series
+    with all NaN (which _ratio_history then drops, yielding empty
+    history)."""
+    cols = [
+        pd.Timestamp("2024-12-31"),
+        pd.Timestamp("2024-09-30"),
+        pd.Timestamp("2024-06-30"),
+    ]
+    s = pd.Series([3.0, 2.0, 1.0], index=cols)
+
+    ttm = _ttm_sum(s)
+
+    assert ttm.isna().all()
+
+
+# ── _nopat_series ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("op_income,expected", [(100.0, 79.0), (50.0, 39.5), (0.0, 0.0)])
+def test_nopat_series_applies_flat_tax(op_income: float, expected: float) -> None:
+    """NOPAT = Op Income × (1 − 0.21). Flat 21% US corporate rate per
+    Phase 3.2.D plan; documented in Source.detail."""
+    cols = [pd.Timestamp("2024-12-31")]
+    s = pd.Series([op_income], index=cols)
+
+    nopat = _nopat_series(s)
+
+    assert nopat.iloc[0] == pytest.approx(expected)
+
+
+def test_nopat_series_none_returns_none() -> None:
+    assert _nopat_series(None) is None
+
+
+# ── ROE history ──────────────────────────────────────────────────────
+
+
+def test_roe_history_is_ttm_ni_over_equity() -> None:
+    """ROE per quarter = TTM Net Income / Stockholders Equity at that quarter.
+    With 8 quarters of input, we get 5 TTM points (lose 3 to warm-up)."""
+    fin, bs = _quarterly_with_eq_and_ic_8q()
+
+    out = build_fundamentals_history(
+        fin, _cashflow_4q(), bs
+    )
+
+    roe = out["roe"]
+    # 8 input quarters, lose first 3 to warm-up -> 5 ROE points.
+    assert len(roe) == 5
+    # Newest quarter Q4-2024: TTM NI = 10+8+6+5 = 29. Equity = 50. ROE = 0.58.
+    assert roe[-1].period == "2024-Q4"
+    assert roe[-1].value == pytest.approx(29.0 / 50.0)
+
+
+def test_roe_empty_when_equity_missing() -> None:
+    """Without Stockholders Equity row, no ROE history."""
+    fin, bs = _quarterly_with_eq_and_ic_8q()
+    bs_missing_eq = bs.drop(index="Stockholders Equity")
+
+    out = build_fundamentals_history(fin, _cashflow_4q(), bs_missing_eq)
+
+    assert out["roe"] == []
+
+
+def test_roe_empty_when_balance_sheet_missing() -> None:
+    """Without quarterly_balance_sheet at all, no ROE history."""
+    fin, _ = _quarterly_with_eq_and_ic_8q()
+
+    out = build_fundamentals_history(fin, _cashflow_4q(), None)
+
+    assert out["roe"] == []
+
+
+# ── ROIC history ─────────────────────────────────────────────────────
+
+
+def test_roic_history_is_ttm_nopat_over_invested_capital() -> None:
+    """ROIC per quarter = TTM (Op Income × 0.79) / Invested Capital."""
+    fin, bs = _quarterly_with_eq_and_ic_8q()
+
+    out = build_fundamentals_history(fin, _cashflow_4q(), bs)
+
+    roic = out["roic"]
+    assert len(roic) == 5
+    # Newest quarter Q4-2024: TTM Op Inc = 30+25+20+18 = 93. NOPAT = 93*0.79 = 73.47.
+    # Invested Capital = 80. ROIC = 73.47 / 80 = 0.9184.
+    assert roic[-1].period == "2024-Q4"
+    assert roic[-1].value == pytest.approx(93.0 * 0.79 / 80.0)
+
+
+def test_roic_empty_when_invested_capital_missing() -> None:
+    """yfinance doesn't always expose Invested Capital. Degrade to []
+    rather than try to manually compute (multiple conventions in finance
+    literature; pick a single source of truth)."""
+    fin, bs = _quarterly_with_eq_and_ic_8q()
+    bs_no_ic = bs.drop(index="Invested Capital")
+
+    out = build_fundamentals_history(fin, _cashflow_4q(), bs_no_ic)
+
+    assert out["roic"] == []
+
+
+def test_roic_empty_when_operating_income_missing() -> None:
+    """Without Op Income, NOPAT can't be computed."""
+    fin, bs = _quarterly_with_eq_and_ic_8q()
+    fin_no_oi = fin.drop(index="Operating Income")
+
+    out = build_fundamentals_history(fin_no_oi, _cashflow_4q(), bs)
+
+    assert out["roic"] == []
+
+
+def test_ttm_metrics_handle_short_history_gracefully() -> None:
+    """4 quarters of data produces exactly 1 TTM point (the newest)."""
+    fin, bs = _quarterly_with_eq_and_ic_8q()
+    # Slice to 4 quarters only.
+    fin_4q = fin.iloc[:, :4]
+    bs_4q = bs.iloc[:, :4]
+
+    out = build_fundamentals_history(fin_4q, _cashflow_4q(), bs_4q)
+
+    assert len(out["roe"]) == 1
+    assert len(out["roic"]) == 1
+    # Both should be the newest quarter's TTM.
+    assert out["roe"][0].period == "2024-Q4"
+    assert out["roic"][0].period == "2024-Q4"
+
+
+def test_ttm_metrics_empty_when_only_three_quarters() -> None:
+    """3 quarters can't produce a TTM (window=4 needs 4 quarters)."""
+    fin, bs = _quarterly_with_eq_and_ic_8q()
+    fin_3q = fin.iloc[:, :3]
+    bs_3q = bs.iloc[:, :3]
+
+    out = build_fundamentals_history(fin_3q, _cashflow_4q(), bs_3q)
+
+    assert out["roe"] == []
+    assert out["roic"] == []

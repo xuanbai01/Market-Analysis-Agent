@@ -32,9 +32,8 @@ def _claim(description: str, value: object) -> Claim:
 
 
 def _make_fundamentals_output() -> dict[str, Claim]:
-    """All fundamentals keys (Phase 3.2.B+C: 28 total = 22 from 3.2.A +
-    2 cash-flow-component + 4 balance-sheet trend claims), every value
-    populated."""
+    """All fundamentals keys (Phase 3.2.D: 29 total — 28 from 3.2.B+C
+    plus the new ROIC claim), every value populated."""
     return {
         # Valuation
         "trailing_pe": _claim("Trailing P/E", 28.5),
@@ -72,6 +71,8 @@ def _make_fundamentals_output() -> dict[str, Claim]:
         # Capital allocation (Phase 3.2.B — cash flow components)
         "capex_per_share": _claim("Capital expenditure per share", 0.005),
         "sbc_per_share": _claim("Stock-based compensation per share", 0.004),
+        # Quality (Phase 3.2.D — ROIC TTM)
+        "roic": _claim("Return on invested capital (TTM)", 0.92),
     }
 
 
@@ -170,11 +171,11 @@ def test_valuation_builder_takes_only_valuation_keys() -> None:
 
 
 def test_quality_builder_takes_only_quality_keys() -> None:
-    """Phase 3.2.B+C: Quality section now contains 15 claims —
-    11 from 3.2.A (legacy + per-share growth + margin trends) plus
-    4 balance-sheet trend metrics. The visual layer renders sparklines
-    next to history-bearing rows; the section's prose stays bounded
-    at 2-4 sentences regardless of metric count."""
+    """Phase 3.2.D: Quality section grows to 16 claims with the new
+    ROIC TTM. 15 from 3.2.B+C (legacy + per-share growth + margin
+    trends + balance-sheet trend) plus 1 ROIC. The visual layer
+    renders sparklines next to history-bearing rows; the section's
+    prose stays bounded at 2-4 sentences regardless of metric count."""
     fundamentals = _make_fundamentals_output()
     outputs = {"fetch_fundamentals": fundamentals}
 
@@ -201,9 +202,11 @@ def test_quality_builder_takes_only_quality_keys() -> None:
         "Total debt per share",
         "Total assets per share",
         "Total liabilities per share",
+        # Phase 3.2.D — ROIC TTM
+        "Return on invested capital (TTM)",
     }
     assert expected_quality <= descriptions
-    assert len(claims) == 15, "Quality section should have 15 claims"
+    assert len(claims) == 16, "Quality section should have 16 claims"
     assert "Trailing P/E" not in descriptions
     assert "Market cap" not in descriptions
     # Capital-allocation cash-flow components don't bleed in.

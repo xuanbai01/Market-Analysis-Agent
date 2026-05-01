@@ -86,6 +86,8 @@ CLAIM_KEYS: tuple[str, ...] = (
     # Capital allocation (Phase 3.2.B — cash flow components, history-bearing)
     "capex_per_share",
     "sbc_per_share",
+    # Quality (Phase 3.2.D — TTM capital efficiency, history-bearing)
+    "roic",
     # Trend (legacy single-value YoY delta — kept alongside history)
     "gross_margin_trend_1y",
 )
@@ -117,6 +119,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "total_liabilities_per_share": "Total liabilities per share",
     "capex_per_share": "Capital expenditure per share",
     "sbc_per_share": "Stock-based compensation per share",
+    "roic": "Return on invested capital (TTM)",
     "dividend_yield": "Forward dividend yield",
     "short_ratio": "Short interest, days-to-cover",
     "shares_short": "Shares sold short",
@@ -178,6 +181,10 @@ _DETAILS: dict[str, str] = {
     ),
     "sbc_per_share": (
         "computed: quarterly_cashflow.StockBasedCompensation / DilutedAverageShares"
+    ),
+    "roic": (
+        "computed: TTM(OperatingIncome*(1-0.21)) / quarterly_balance_sheet.InvestedCapital"
+        " — flat 21% US corporate tax rate"
     ),
     "dividend_yield": "info.dividendYield",
     "short_ratio": "info.shortRatio",
@@ -344,6 +351,11 @@ def _fetch_yfinance_fundamentals(
         "total_debt_per_share",
         "total_assets_per_share",
         "total_liabilities_per_share",
+        # 3.2.D — roic has no info source; snapshot = latest TTM.
+        # roe is intentionally NOT in this list — its snapshot comes
+        # from info.returnOnEquity (a TTM number too) and only its
+        # .history field is added by the orchestrator.
+        "roic",
     ):
         raw[key] = latest_value(history_map.get(key, []))
 

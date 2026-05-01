@@ -100,6 +100,10 @@ _QUALITY_KEYS = (
     "total_debt_per_share",
     "total_assets_per_share",
     "total_liabilities_per_share",
+    # Phase 3.2.D — ROIC TTM (history-bearing). Capital-efficiency read.
+    # ``roe`` already in this section as a legacy point-in-time claim
+    # that gains a history field this PR.
+    "roic",
 )
 _CAPITAL_ALLOCATION_KEYS = (
     "dividend_yield",

@@ -83,6 +83,61 @@ Non-goals for Phase 3:
 - No forward projections.
 - No new tools (`search_history`, `compute_options`).
 
+### Phase 3 — Concrete chart catalog (profitviz-derived)
+
+The Phase 3 plan above describes the *shape* of the change ("history + charts"). This section pins down *which charts*, anchored to a real reference: <https://profitviz.com/NVDA>. Profitviz is the closest commercial analogue to the visual-first lane this ADR commits to. Borrowing their content catalog (not their UX polish) saves us re-inventing what's already a battle-tested set of fundamentals views.
+
+**Tiering principle.** Every chart slots into one of three tiers based on data-source reality:
+
+- **Tier 1 — yfinance-only.** Source is `yfinance.Ticker.quarterly_*` tables we already touch. Schema + chart-rendering work, no new data acquisition. Closes the bulk of the perceived-shallowness gap on its own. Lands as Phase 3.2 + 3.3.
+- **Tier 2 — EDGAR XBRL parsing.** Segment + geography breakdowns require parsing 10-K/10-Q segment-disclosure footnotes (`us-gaap:SegmentReportingDisclosure`, `dei:EntityReportingCurrencyISOCode`-scoped revenue, etc.). Reusable across all SEC filers, structured, but ~3–5 days of one-time parser work. Lands as Phase 3.6, **conditional on Tier 1 dogfooding** showing the segment view is still missed.
+- **Tier 3 — Conditional surface.** Only renders when the underlying data exists for the company. Examples: dividend history (only div-payers), Remaining Performance Obligations (mostly SaaS / subscription names). No-op for companies that don't report it.
+- **Skip.** Cosmetic / interactive-density features that profitviz has and we deliberately don't match.
+
+#### Tier 1 — yfinance-only (Phase 3.2 + 3.3)
+
+| Chart | Source | Notes |
+|---|---|---|
+| **Per-share quarterly history** — Revenue, Net Income, Op. Income, Gross Profit, FCF, OCF, EPS | `quarterly_financials` / `quarterly_cashflow` ÷ `sharesOutstanding` | Six sparklines per report. Core "is the business growing?" read. |
+| **Margin trends** — Gross / Operating / Net / FCF margin over time | Derived from above | Four sparklines. "Is this getting more profitable?" |
+| **Valuation history with median band** — P/E, EV/EBIT, EV/EBITDA vs 5–10Y median | Derived from price history × financial-statement history | Answers "is this expensive vs its own history" — the most cited gap from dogfooding |
+| **Capital efficiency over time** — ROE, ROIC | Balance sheet + income statement, derived | Value-diligence staples |
+| **Cash flow component breakdown** — OCF / CapEx / SBC / FCF stacked over time | `quarterly_cashflow` | Explains FCF *quality*, not just FCF magnitude |
+| **Balance sheet trend** — Cash + ST Investments + Total Debt; Total Assets vs Total Liabilities | `quarterly_balance_sheet` | Financial-strength read |
+| **Quarterly dividends + dividend yield + dividend growth** *(Tier 3 conditional)* | `Ticker.dividends` + price | Renders only when company pays a dividend |
+| **News in report** — last ~10 items, symbol-filtered | `fetch_news` (already exists, currently unused in reports) | Zero new acquisition cost; just surface it |
+| **YoY growth on every history-bearing metric** | Derived | Free with the rest |
+
+This list maps cleanly to one PR per source-tool extension:
+
+- `fetch_fundamentals` → revenue / op income / gross profit / net income / EPS / margins / ROE / ROIC histories
+- `fetch_earnings` → 4Q → ~20Q lookback
+- `fetch_macro` → series histories (was point-in-time)
+- New `fetch_valuation_history` → derived rolling P/E / EV/EBIT / EV/EBITDA with median bands
+- New `fetch_dividends_history` → conditional on dividend payer
+- News surfaced in `research_orchestrator` (no new tool)
+
+#### Tier 2 — EDGAR XBRL (Phase 3.6, conditional)
+
+| Chart | Source | Verdict |
+|---|---|---|
+| **Revenue by reportable segment** time series (e.g. NVDA: Data Center / Gaming / Pro Viz / Auto / OEM) | XBRL `us-gaap:SegmentReportingDisclosure` from 10-K/10-Q | Most-impactful Tier 2 chart. "Where's the actual growth coming from?" |
+| **Revenue by geography** time series (e.g. US / Taiwan / China / Other) | XBRL geographic-disaggregation tags | Geopolitical-exposure read |
+| **Operating income by segment** | XBRL segment income tags | "Where's the *profit* actually coming from?" — different answer than where revenue comes from |
+| **Remaining Performance Obligations (RPO + NTM%)** *(Tier 3 conditional)* | XBRL `us-gaap:RevenueRemainingPerformanceObligation` | Renders only when the company reports it (SaaS, defense contractors, etc.) |
+
+**Why conditional, not part of 3.2:** Tier 1 alone closes the bulk of the perceived-shallowness gap (per-share trends + margin trends + valuation-vs-history are exactly what was missing). XBRL parsing is real one-time work and adds complexity. Ship Tier 1, dogfood, then decide whether segment-level granularity is genuinely needed or whether the appetite for it was satisfied by the Tier 1 trends.
+
+If we *do* go to Tier 2, the parser pays for itself across all SEC filers — it's not a per-ticker investment.
+
+#### Skip (deliberate non-goals)
+
+- **Aesthetic polish** — profitviz uses heavy CSS gradients, smooth animations, custom tooltip designs. We use Recharts defaults. Substance > polish for portfolio framing.
+- **Interactive density** — profitviz puts ~30 charts on one page with multiple selector axes (5Y / 10Y / MAX, Per Share / TTM / Annual, Revenue / NI / Op Inc / Gross / FCF / OCF tabs). We render all relevant sparklines per section, no selectors. Information-dense without being overwhelming, and avoids state we'd otherwise have to manage.
+- **5Y / 10Y / MAX selectors** — default to 5Y for everything. Longer windows are rarely actionable for value-diligence and create noise on the chart.
+- **TTM toggle** — pick the right cadence per metric (quarterly for fundamentals, monthly for macro, daily for price). User doesn't choose.
+- **Top-of-page metric tabs** (Revenue / NI / Op Inc / Gross / FCF / OCF) — render all sparklines, no tabs. Tabs hide information and add interaction the user shouldn't need.
+
 ### Phase 4 — Narrative layer (deferred; lands after Phase 3 ships)
 
 What it would add (subject to refinement when we get there):

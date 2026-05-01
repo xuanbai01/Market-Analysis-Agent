@@ -556,11 +556,10 @@ def test_ttm_sum_rolling_4q() -> None:
     # is [1, 2, 3, 4] -> sum 10. At position 4 (Q4 2024 newest), window is
     # [2, 3, 4, 5] -> sum 14.
     sorted_index = sorted(cols)  # oldest -> newest
-    expected_q1_2024 = 1 + 2 + 3 + 4  # window of [Q4-23, Q1-24, Q2-24, Q3-24]?
-    # Hmm let me trace:
-    # sorted: Q4-23 (1), Q1-24 (2), Q2-24 (3), Q3-24 (4), Q4-24 (5)
-    # window=4 first valid position is index 3 (Q3-24) with sum 1+2+3+4=10
-    # next at index 4 (Q4-24) with sum 2+3+4+5=14
+    # Trace:
+    #   sorted: Q4-23 (1), Q1-24 (2), Q2-24 (3), Q3-24 (4), Q4-24 (5)
+    #   window=4 first valid position is index 3 (Q3-24): sum 1+2+3+4=10
+    #   next at index 4 (Q4-24): sum 2+3+4+5=14
     assert ttm.loc[sorted_index[0]] != ttm.loc[sorted_index[0]]  # NaN check
     assert ttm.loc[sorted_index[3]] == pytest.approx(10.0)
     assert ttm.loc[sorted_index[4]] == pytest.approx(14.0)

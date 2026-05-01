@@ -49,9 +49,18 @@ from typing import Any
 
 from app.schemas.research import ClaimHistoryPoint
 
+# Phase 3.2.D — flat US corporate tax rate used for NOPAT computation.
+# Per-quarter Tax Provision / Pretax Income gives nonsense in loss /
+# credit quarters (negative effective rate, NaN, etc.); a flat rate is
+# simpler, chart-readable, and an industry-standard analyst shortcut.
+# When/if international names land, swap for info["effectiveTaxRate"]
+# with this as a fallback.
+DEFAULT_TAX_RATE: float = 0.21
+
+
 # Claim keys this helper produces history for. Spans Phase 3.2.A
-# (per-share growth + margins) and 3.2.B+C (cash flow components +
-# balance sheet trend).
+# (per-share growth + margins), 3.2.B+C (cash flow components +
+# balance sheet trend), and 3.2.D (ROE + ROIC TTM).
 HISTORY_KEYS: tuple[str, ...] = (
     # 3.2.A — per-share growth
     "revenue_per_share",
@@ -72,6 +81,11 @@ HISTORY_KEYS: tuple[str, ...] = (
     "total_debt_per_share",
     "total_assets_per_share",
     "total_liabilities_per_share",
+    # Phase 3.2.D — TTM capital efficiency. ``roe`` extends the existing
+    # info-derived snapshot with quarterly history; ``roic`` is a new
+    # claim with no info source (snapshot = history[-1]).
+    "roe",
+    "roic",
 )
 
 
@@ -166,6 +180,38 @@ def _ratio_history(numerator: Any, denominator: Any) -> list[ClaimHistoryPoint]:
     return points
 
 
+def _ttm_sum(series: Any) -> Any:
+    """Trailing-12-month rolling sum over a quarterly Series.
+
+    yfinance returns columns most-recent-first; we sort ascending before
+    rolling so the window goes oldest -> newest. The first 3 quarters
+    have no full 4-quarter window and emit NaN; ``_ratio_history``
+    drops those when building the chartable list. ``min_periods=4``
+    enforces the strict-window semantics (no partial-window sums).
+
+    A single NaN within a window propagates to the window's TTM (also
+    NaN), so a missing-quarter point invalidates the 4 windows that
+    would have included it. This is correct — a fabricated TTM with
+    one missing input would lie about the trend.
+    """
+    if series is None:
+        return None
+
+    sorted_series = series.sort_index()
+    return sorted_series.rolling(window=4, min_periods=4).sum()
+
+
+def _nopat_series(operating_income: Any, tax_rate: float = DEFAULT_TAX_RATE) -> Any:
+    """Net Operating Profit After Tax = Op Income × (1 − tax rate).
+
+    Flat tax rate (default 21%) over per-quarter Tax Provision /
+    Pretax Income — see ``DEFAULT_TAX_RATE`` for the rationale.
+    """
+    if operating_income is None:
+        return None
+    return operating_income * (1.0 - tax_rate)
+
+
 def build_fundamentals_history(
     quarterly_financials: Any,
     quarterly_cashflow: Any,
@@ -207,6 +253,12 @@ def build_fundamentals_history(
     total_liabilities = _row_or_none(
         quarterly_balance_sheet, "Total Liabilities Net Minority Interest"
     )
+    stockholders_equity = _row_or_none(
+        quarterly_balance_sheet, "Stockholders Equity"
+    )
+    invested_capital = _row_or_none(
+        quarterly_balance_sheet, "Invested Capital"
+    )
 
     # Per-share metrics — all need diluted_shares as denominator.
     if diluted_shares is not None:
@@ -247,6 +299,16 @@ def build_fundamentals_history(
     out["operating_margin"] = _ratio_history(operating_income, revenue)
     out["profit_margin"] = _ratio_history(net_income, revenue)
     out["fcf_margin"] = _ratio_history(free_cash_flow, revenue)
+
+    # Phase 3.2.D — TTM ROE + ROIC. Both need a 4-quarter window of
+    # income-statement data plus a point-in-time balance-sheet
+    # denominator. The first 3 quarters of input lose their TTM
+    # numerator to the warm-up; ``_ratio_history`` drops those NaNs.
+    if net_income is not None and stockholders_equity is not None:
+        out["roe"] = _ratio_history(_ttm_sum(net_income), stockholders_equity)
+    if operating_income is not None and invested_capital is not None:
+        nopat = _nopat_series(operating_income)
+        out["roic"] = _ratio_history(_ttm_sum(nopat), invested_capital)
 
     return out
 

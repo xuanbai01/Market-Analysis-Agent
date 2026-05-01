@@ -32,7 +32,8 @@ def _claim(description: str, value: object) -> Claim:
 
 
 def _make_fundamentals_output() -> dict[str, Claim]:
-    """All 15 fundamentals keys, every value populated."""
+    """All fundamentals keys (Phase 3.2.A: 22 total = 15 legacy + 7 new
+    history-bearing per-share / margin claims), every value populated."""
     return {
         # Valuation
         "trailing_pe": _claim("Trailing P/E", 28.5),
@@ -40,11 +41,19 @@ def _make_fundamentals_output() -> dict[str, Claim]:
         "p_s": _claim("P/S", 7.2),
         "ev_ebitda": _claim("EV/EBITDA", 21.0),
         "peg": _claim("PEG", 2.1),
-        # Quality
+        # Quality (legacy)
         "roe": _claim("ROE", 0.45),
         "gross_margin": _claim("Gross margin", 0.46),
         "profit_margin": _claim("Profit margin", 0.25),
         "gross_margin_trend_1y": _claim("Gross-margin YoY trend", 0.005),
+        # Quality (Phase 3.2.A — per-share growth + margin trends)
+        "revenue_per_share": _claim("Revenue per share", 0.10),
+        "gross_profit_per_share": _claim("Gross profit per share", 0.07),
+        "operating_income_per_share": _claim("Operating income per share", 0.03),
+        "fcf_per_share": _claim("Free cash flow per share", 0.02),
+        "ocf_per_share": _claim("Operating cash flow per share", 0.025),
+        "operating_margin": _claim("Operating margin", 0.30),
+        "fcf_margin": _claim("Free cash flow margin", 0.20),
         # Capital allocation
         "dividend_yield": _claim("Dividend yield", 0.005),
         "short_ratio": _claim("Short ratio", 1.2),
@@ -150,13 +159,34 @@ def test_valuation_builder_takes_only_valuation_keys() -> None:
 
 
 def test_quality_builder_takes_only_quality_keys() -> None:
+    """Phase 3.2.A: Quality section now contains 11 claims — 4 legacy
+    (ROE / margins / trend) + 7 per-share growth + margin trends. The
+    visual layer renders sparklines next to history-bearing rows; the
+    section's prose stays bounded at 2-4 sentences."""
     fundamentals = _make_fundamentals_output()
     outputs = {"fetch_fundamentals": fundamentals}
 
     claims = _spec(Focus.FULL, "Quality").builder(outputs)
     descriptions = {c.description for c in claims}
 
-    assert {"ROE", "Gross margin", "Profit margin", "Gross-margin YoY trend"} <= descriptions
+    expected_quality = {
+        # Legacy
+        "ROE",
+        "Gross margin",
+        "Profit margin",
+        "Gross-margin YoY trend",
+        # Phase 3.2.A — per-share growth
+        "Revenue per share",
+        "Gross profit per share",
+        "Operating income per share",
+        "Free cash flow per share",
+        "Operating cash flow per share",
+        # Phase 3.2.A — margin trends
+        "Operating margin",
+        "Free cash flow margin",
+    }
+    assert expected_quality <= descriptions
+    assert len(claims) == 11, "Quality section should have 11 claims"
     assert "Trailing P/E" not in descriptions
     assert "Market cap" not in descriptions
 

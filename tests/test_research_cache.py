@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.research_reports import ResearchReportRow
 from app.schemas.research import (
     Claim,
+    ClaimHistoryPoint,
     Confidence,
     ResearchReport,
     Section,
@@ -345,6 +346,143 @@ async def test_round_trip_preserves_full_report_shape(
         "fetch_fundamentals: ok",
         "extract_10k_risks_diff: ok",
     ]
+
+
+# ── Phase 3.1: Claim.history round-trips through JSONB ───────────────
+
+
+async def test_claim_history_round_trips_through_jsonb(
+    db_session: AsyncSession,
+) -> None:
+    """A Claim with a populated ``history`` survives upsert -> lookup
+    unchanged. This is the contract the frontend Sparkline reads off
+    of — any drift in JSONB serialization here breaks the chart layer.
+    """
+    src = Source(
+        tool="yfinance.fundamentals",
+        fetched_at=datetime(2026, 4, 28, 12, 0, tzinfo=UTC),
+    )
+    history_bearing = Claim(
+        description="EPS",
+        value=2.18,
+        source=src,
+        history=[
+            ClaimHistoryPoint(period="2023-Q4", value=1.46),
+            ClaimHistoryPoint(period="2024-Q1", value=1.71),
+            ClaimHistoryPoint(period="2024-Q2", value=1.89),
+            ClaimHistoryPoint(period="2024-Q3", value=2.05),
+            ClaimHistoryPoint(period="2024-Q4", value=2.18),
+        ],
+    )
+    history_less = Claim(
+        description="P/E",
+        value=28.5,
+        source=src,
+        # No history -- mixed-shape report
+    )
+
+    report = ResearchReport(
+        symbol="AAPL",
+        generated_at=datetime(2026, 4, 29, 14, 5, tzinfo=UTC),
+        sections=[
+            Section(
+                title="Earnings",
+                claims=[history_bearing],
+                summary="EPS rose from 1.46 to 2.18 over the last 5 quarters.",
+                confidence=Confidence.HIGH,
+            ),
+            Section(
+                title="Valuation",
+                claims=[history_less],
+                summary="Trades at 28.5x.",
+                confidence=Confidence.HIGH,
+            ),
+        ],
+        overall_confidence=Confidence.HIGH,
+    )
+
+    await upsert(
+        db_session,
+        symbol="AAPL",
+        focus="full",
+        report_date=date(2026, 4, 29),
+        report=report,
+    )
+    await db_session.flush()
+
+    restored = await lookup_recent(
+        db_session, symbol="AAPL", focus="full", max_age_hours=168
+    )
+
+    assert restored is not None
+    # History-bearing claim survives.
+    earnings_claim = restored.sections[0].claims[0]
+    assert len(earnings_claim.history) == 5
+    assert earnings_claim.history[0].period == "2023-Q4"
+    assert earnings_claim.history[0].value == 1.46
+    assert earnings_claim.history[-1].period == "2024-Q4"
+    assert earnings_claim.history[-1].value == 2.18
+    # History-less claim still works (defaults to empty list).
+    valuation_claim = restored.sections[1].claims[0]
+    assert valuation_claim.history == []
+
+
+async def test_legacy_cache_row_without_history_key_still_parses(
+    db_session: AsyncSession,
+) -> None:
+    """Backwards-compat: a row written before Phase 3.1 has no
+    ``history`` key in the serialized claim. ``ResearchReport.model_validate``
+    must accept it and fill in [].
+
+    We simulate this by writing a raw JSONB payload that omits ``history``,
+    then reading it back through ``lookup_recent``.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.db.models.research_reports import ResearchReportRow
+
+    legacy_report_json = {
+        "symbol": "AAPL",
+        "generated_at": "2026-04-29T14:05:00+00:00",
+        "sections": [
+            {
+                "title": "Valuation",
+                "claims": [
+                    {
+                        "description": "P/E",
+                        "value": 28.5,
+                        "source": {
+                            "tool": "yfinance.info",
+                            "fetched_at": "2026-04-29T14:00:00+00:00",
+                        },
+                        # NOTE: no "history" key -- legacy shape
+                    },
+                ],
+                "summary": "Trades at 28.5x.",
+                "confidence": "high",
+            },
+        ],
+        "overall_confidence": "high",
+        "tool_calls_audit": [],
+    }
+
+    stmt = pg_insert(ResearchReportRow).values(
+        symbol="AAPL",
+        focus="full",
+        report_date=date(2026, 4, 29),
+        report_json=legacy_report_json,
+        generated_at=datetime(2026, 4, 29, 14, 5, tzinfo=UTC),
+    )
+    await db_session.execute(stmt)
+    await db_session.flush()
+
+    restored = await lookup_recent(
+        db_session, symbol="AAPL", focus="full", max_age_hours=168
+    )
+    assert restored is not None
+    # Legacy shape parsed cleanly; the missing history defaulted to [].
+    assert restored.sections[0].claims[0].history == []
+    assert restored.sections[0].claims[0].value == 28.5
 
 
 # ── Observability ─────────────────────────────────────────────────────

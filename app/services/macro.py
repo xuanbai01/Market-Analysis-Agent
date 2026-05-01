@@ -1,8 +1,9 @@
 """
 Macro context tool. Given a ticker, resolve to sector via the shared
 ``app.services.sectors`` resolver, look up a curated FRED series set
-for that sector, fetch the latest observation per series, return as
-flat ``dict[str, Claim]``.
+for that sector, fetch ~36 monthly observations per series, return as
+flat ``dict[str, Claim]`` where the ``<id>.value`` claim carries
+``Claim.history`` for sparkline rendering.
 
 Why curated sector→series rather than a generic "give me FRED data"
 tool: the agent's question is "what's the macro context for this
@@ -11,14 +12,36 @@ long-duration tech wants the 10Y yield" judgement here, in code
 that's reviewable and testable, beats expecting the LLM to pick the
 right series at synth time.
 
-Why latest value only (no history): the synth call composes one
-paragraph of context; "10Y at 4.32% as of 2024-10-25" is enough for
-the prose. Period-over-period change calculations are deferred —
-the agent can do that math when we expose history if it ever needs
-to.
+## Phase 3.2.F shape change
+
+Pre-3.2.F the provider returned ``{series_id: {"value", "date"}}`` —
+one observation per series. After 3.2.F it returns
+``(snapshot, history_map)`` matching the fundamentals/earnings provider
+contract; the ``<id>.value`` claim attaches the per-series history,
+``<id>.date`` and ``<id>.label`` stay history-less (date is a single
+label, label is static metadata).
+
+Snapshot consistency is preserved by construction: the snapshot value
+is always ``history[-1].value`` (newest monthly point), so the
+headline number and the sparkline's right endpoint agree.
+
+## Why monthly aggregation
+
+FRED supports a ``frequency=m`` parameter that aggregates daily series
+(DGS10, DCOILWTICO, …) into monthly observations server-side. For
+already-monthly series (UMCSENT, MANEMP, RSAFS, UNRATE, CPIAUCSL) it's
+a no-op. One per-series HTTP call still returns the full ~36-month
+history — no client-side bucketing, no per-day quota burn.
+
+The semantic shift: pre-3.2.F a daily series' "latest value" was the
+most-recent daily observation; after 3.2.F it's the most-recent
+**monthly** observation. For sparkline rendering this is the only
+internally-consistent choice (otherwise the headline diverges from the
+chart's right endpoint), and "the 10Y averaged 4.32% in October" is a
+natural enough framing for a research-report headline.
 
 Graceful degradation when ``FRED_API_KEY`` is unset: the production
-provider early-returns ``{}`` (no HTTP), and the service stamps
+provider early-returns ``({}, {})`` (no HTTP), and the service stamps
 None-valued data Claims while still emitting the metadata Claims
 (``sector``, ``series_list``, per-series ``.label``). Mirrors the
 NEWSAPI_KEY pattern in ``news_ingestion``.
@@ -45,8 +68,8 @@ the agent infers from the yield curve.
 ## Excluded for v1
 
 - Period-over-period change (YoY, MoM). Add when an eval case asks
-  for "how much has X moved" specifically.
-- Multi-period series history. One observation per series.
+  for "how much has X moved" specifically; the renderer can derive
+  the trend visually from the sparkline now that history is plumbed.
 - ISM PMI, NIM, custom-computed indicators (yield curve = DGS10−DGS2).
   The agent does the subtraction at synth time.
 - Custom sector mappings beyond what ``app.services.sectors``
@@ -64,8 +87,13 @@ import httpx
 
 from app.core.observability import log_external_call
 from app.core.settings import settings
-from app.schemas.research import Claim, ClaimValue, Source
+from app.schemas.research import Claim, ClaimHistoryPoint, ClaimValue, Source
 from app.services.sectors import resolve_sector
+
+# How many monthly observations to ask FRED for per series. ~3 years
+# is a good sparkline depth — enough to see a cycle, short enough to
+# stay readable at the small width this renders at.
+MACRO_HISTORY_LIMIT_MONTHS: int = 36
 
 
 @dataclass(frozen=True)
@@ -126,30 +154,98 @@ DEFAULT_SERIES: list[FredSeries] = [
 ]
 
 
-# Provider signature: (series_ids) -> {series_id: {"value": float, "date": str}}.
+# Provider signature: (series_ids) -> (snapshot, history_map).
+#
+# - snapshot[id] = {"value": float, "date": str} — newest monthly obs
+# - history_map[id] = list[ClaimHistoryPoint], oldest → newest
+#
 # Sync — httpx.get blocks; the async entry point hands it to to_thread.
-MacroProvider = Callable[[list[str]], dict[str, dict[str, Any]]]
+# Mirrors fundamentals + earnings provider tuple shape so a future
+# refactor that unifies them is mechanical.
+MacroProvider = Callable[
+    [list[str]],
+    tuple[
+        dict[str, dict[str, Any]],
+        dict[str, list[ClaimHistoryPoint]],
+    ],
+]
 
 
 # ── Production provider — FRED HTTP ───────────────────────────────────
 
 
-_FRED_RATE_LIMIT_SLEEP_SECONDS = 0.0  # FRED's 120 req/min limit is generous
+def _format_macro_period(date_str: str) -> str:
+    """Render FRED's ``YYYY-MM-DD`` date as ``YYYY-MM`` for chart labels.
 
-
-def _fetch_fred_observations(series_ids: list[str]) -> dict[str, dict[str, Any]]:
+    FRED returns the first day of the month for monthly observations
+    (e.g. ``"2024-10-01"``); we strip the day for compact sparkline
+    tooltips. On any unexpected format we return the input verbatim
+    rather than crashing — chart renderer tolerates arbitrary period
+    strings, and we'd rather show a slightly-ugly label than blank
+    out a real data point.
     """
-    Pull the latest observation for each series id from FRED.
+    if len(date_str) >= 7 and date_str[4] == "-":
+        return date_str[:7]
+    return date_str
 
-    Returns ``{}`` (no HTTP fired) when ``FRED_API_KEY`` is unset —
+
+def _parse_observations(
+    observations: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, list[ClaimHistoryPoint]]:
+    """Split FRED's desc-sorted observations into (snapshot, history).
+
+    FRED returns ``"."`` for missing observations and stringified numbers
+    otherwise. Drop missing rows from history; never let one become the
+    snapshot. Returns ``(None, [])`` when no rows are valid.
+    """
+    valid_rows: list[tuple[str, float]] = []
+    for row in observations:
+        raw = row.get("value")
+        if raw is None or raw == ".":
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        date = row.get("date", "") or ""
+        valid_rows.append((date, value))
+
+    if not valid_rows:
+        return None, []
+
+    # FRED's response is newest-first (sort_order=desc). Snapshot picks
+    # from the front; history reverses for the oldest-first chart
+    # convention.
+    newest_date, newest_value = valid_rows[0]
+    snapshot = {"value": newest_value, "date": newest_date}
+    history = [
+        ClaimHistoryPoint(period=_format_macro_period(d), value=v)
+        for d, v in reversed(valid_rows)
+    ]
+    return snapshot, history
+
+
+def _fetch_fred_observations(
+    series_ids: list[str],
+) -> tuple[dict[str, dict[str, Any]], dict[str, list[ClaimHistoryPoint]]]:
+    """
+    Pull ~36 monthly observations per series from FRED.
+
+    Returns ``({}, {})`` (no HTTP fired) when ``FRED_API_KEY`` is unset —
     callers degrade gracefully. One per-series HTTP call is fine within
-    FRED's 120 req/min cap; if that ever bites, batch via the
-    ``series/observations`` endpoint with ``observation_start`` filters.
-    """
-    if not settings.FRED_API_KEY:
-        return {}
+    FRED's 120 req/min cap.
 
-    out: dict[str, dict[str, Any]] = {}
+    Each call uses ``frequency=m`` for monthly aggregation: daily series
+    (DGS10 etc.) collapse to per-month observations server-side; already-
+    monthly series pass through unchanged. ``aggregation_method=avg`` is
+    FRED's default, so we omit it.
+    """
+    snapshot_out: dict[str, dict[str, Any]] = {}
+    history_out: dict[str, list[ClaimHistoryPoint]] = {}
+
+    if not settings.FRED_API_KEY:
+        return snapshot_out, history_out
+
     for sid in series_ids:
         try:
             resp = httpx.get(
@@ -159,7 +255,8 @@ def _fetch_fred_observations(series_ids: list[str]) -> dict[str, dict[str, Any]]
                     "api_key": settings.FRED_API_KEY,
                     "file_type": "json",
                     "sort_order": "desc",
-                    "limit": 1,
+                    "limit": MACRO_HISTORY_LIMIT_MONTHS,
+                    "frequency": "m",
                 },
                 timeout=10.0,
             )
@@ -170,20 +267,13 @@ def _fetch_fred_observations(series_ids: list[str]) -> dict[str, dict[str, Any]]
             continue
 
         observations = data.get("observations", [])
-        if not observations:
+        snapshot, history = _parse_observations(observations)
+        if snapshot is None:
             continue
-        latest = observations[0]
-        # FRED returns "." for missing observations and stringified
-        # numbers otherwise. Coerce; on any failure, skip the series.
-        raw_value = latest.get("value")
-        if raw_value is None or raw_value == ".":
-            continue
-        try:
-            value = float(raw_value)
-        except (TypeError, ValueError):
-            continue
-        out[sid] = {"value": value, "date": latest.get("date", "")}
-    return out
+        snapshot_out[sid] = snapshot
+        history_out[sid] = history
+
+    return snapshot_out, history_out
 
 
 PROVIDERS: dict[str, MacroProvider] = {
@@ -211,7 +301,8 @@ async def fetch_macro(
     Stable shape: ``sector`` + ``series_list`` + per-resolved-series
     ``<id>.value`` / ``.date`` / ``.label`` keys, even when
     ``FRED_API_KEY`` is unset (data values land as None, label is
-    always present from the static map).
+    always present from the static map). The ``<id>.value`` claim
+    carries ``Claim.history`` for ~36 monthly points when available.
     """
     if provider not in PROVIDERS:
         raise ValueError(
@@ -229,9 +320,14 @@ async def fetch_macro(
         service_id,
         {"symbol": target, "provider": provider},
     ) as call:
-        observations = await asyncio.to_thread(fetch, series_ids)
+        snapshot, history_map = await asyncio.to_thread(fetch, series_ids)
+        history_count = sum(1 for sid in series_ids if history_map.get(sid))
         call.record_output(
-            {"sector": sector, "series_count": len(series)}
+            {
+                "sector": sector,
+                "series_count": len(series),
+                "history_populated_count": history_count,
+            }
         )
 
     fetched_at = datetime.now(UTC)
@@ -240,7 +336,8 @@ async def fetch_macro(
         fetched_at=fetched_at,
         sector=sector,
         series=series,
-        observations=observations,
+        snapshot=snapshot,
+        history_map=history_map,
     )
 
 
@@ -250,9 +347,15 @@ def _build_claims(
     fetched_at: datetime,
     sector: str | None,
     series: list[FredSeries],
-    observations: dict[str, dict[str, Any]],
+    snapshot: dict[str, dict[str, Any]],
+    history_map: dict[str, list[ClaimHistoryPoint]],
 ) -> dict[str, Claim]:
-    """Stamp Source + Claim objects over the resolved sector + per-series data."""
+    """Stamp Source + Claim objects over the resolved sector + per-series data.
+
+    Only ``<id>.value`` is history-bearing — that's where the sparkline
+    renders. ``<id>.date`` is a single label and ``<id>.label`` is
+    static metadata; both ship with empty history.
+    """
     out: dict[str, Claim] = {}
 
     out["sector"] = Claim(
@@ -275,7 +378,7 @@ def _build_claims(
     )
 
     for s in series:
-        obs = observations.get(s.id) or {}
+        obs = snapshot.get(s.id) or {}
         value: ClaimValue = obs.get("value")
         date_str: ClaimValue = obs.get("date") or None
         out[f"{s.id}.value"] = Claim(
@@ -286,6 +389,7 @@ def _build_claims(
                 fetched_at=fetched_at,
                 detail=f"FRED series:{s.id}",
             ),
+            history=history_map.get(s.id, []),
         )
         out[f"{s.id}.date"] = Claim(
             description=f"{s.label} observation date",

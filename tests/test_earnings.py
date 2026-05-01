@@ -43,7 +43,6 @@ from app.services.earnings import (
     fetch_earnings,
 )
 
-
 # ── Fixtures ─────────────────────────────────────────────────────────
 
 

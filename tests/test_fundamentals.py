@@ -71,6 +71,9 @@ def _fake_raw(**overrides: Any) -> dict[str, Any]:
         "total_debt_per_share": 0.20,
         "total_assets_per_share": 3.00,
         "total_liabilities_per_share": 1.20,
+        # Phase 3.2.D — ROIC TTM (Quality section). roe stays in the
+        # legacy block above; this is the new derived metric.
+        "roic": 0.92,
     }
     # Sanity: the fixture must list every advertised key, otherwise tests
     # silently miss whichever key was added without updating the fixture.
@@ -736,3 +739,123 @@ def test_yfinance_balance_sheet_metrics_none_when_frame_missing(
     assert raw["total_liabilities_per_share"] is None
     assert history["cash_and_st_investments_per_share"] == []
     assert history["total_debt_per_share"] == []
+
+
+# ── Phase 3.2.D: ROE + ROIC TTM histories ────────────────────────────
+
+
+def _quarterly_financials_8q() -> pd.DataFrame:
+    """8 quarters — TTM metrics need 4 prior quarters of warm-up."""
+    cols = [
+        pd.Timestamp("2024-12-31"),
+        pd.Timestamp("2024-09-30"),
+        pd.Timestamp("2024-06-30"),
+        pd.Timestamp("2024-03-31"),
+        pd.Timestamp("2023-12-31"),
+        pd.Timestamp("2023-09-30"),
+        pd.Timestamp("2023-06-30"),
+        pd.Timestamp("2023-03-31"),
+    ]
+    return pd.DataFrame(
+        [
+            [100, 90, 80, 70, 60, 55, 50, 45],
+            [70, 60, 50, 45, 40, 36, 32, 28],
+            [30, 25, 20, 18, 15, 13, 12, 10],
+            [10, 8, 6, 5, 4, 3, 3, 2],
+            [1000, 1000, 1010, 1020, 1030, 1040, 1050, 1060],
+        ],
+        index=[
+            "Total Revenue",
+            "Gross Profit",
+            "Operating Income",
+            "Net Income",
+            "Diluted Average Shares",
+        ],
+        columns=cols,
+    )
+
+
+def _quarterly_balance_sheet_8q() -> pd.DataFrame:
+    cols = [
+        pd.Timestamp("2024-12-31"),
+        pd.Timestamp("2024-09-30"),
+        pd.Timestamp("2024-06-30"),
+        pd.Timestamp("2024-03-31"),
+        pd.Timestamp("2023-12-31"),
+        pd.Timestamp("2023-09-30"),
+        pd.Timestamp("2023-06-30"),
+        pd.Timestamp("2023-03-31"),
+    ]
+    return pd.DataFrame(
+        [
+            [50.0, 48.0, 46.0, 44.0, 42.0, 40.0, 38.0, 36.0],
+            [80.0, 78.0, 76.0, 74.0, 72.0, 70.0, 68.0, 66.0],
+        ],
+        index=["Stockholders Equity", "Invested Capital"],
+        columns=cols,
+    )
+
+
+def test_yfinance_attaches_ttm_history_to_existing_roe_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 3.2.D: the existing ``roe`` claim's snapshot stays from
+    info.returnOnEquity, but it now gets a TTM-based quarterly history
+    attached. Mirrors the gross_margin / profit_margin pattern."""
+    _patch_yfinance(
+        monkeypatch,
+        info={"returnOnEquity": 0.55},
+        quarterly_financials=_quarterly_financials_8q(),
+        quarterly_balance_sheet=_quarterly_balance_sheet_8q(),
+    )
+
+    raw, history = _fetch_yfinance_fundamentals("NVDA")
+
+    # Snapshot still from info.
+    assert raw["roe"] == 0.55
+    # 8 quarters of NI/Equity -> 5 TTM ROE points after warm-up.
+    assert "roe" in history
+    assert len(history["roe"]) == 5
+
+
+def test_yfinance_returns_roic_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 3.2.D: roic is a NEW history-bearing claim. Snapshot value
+    is the latest TTM ROIC (= history[-1].value); no info source."""
+    _patch_yfinance(
+        monkeypatch,
+        info={},
+        quarterly_financials=_quarterly_financials_8q(),
+        quarterly_balance_sheet=_quarterly_balance_sheet_8q(),
+    )
+
+    raw, history = _fetch_yfinance_fundamentals("NVDA")
+
+    assert "roic" in history
+    assert len(history["roic"]) == 5
+    # Snapshot matches history[-1] by construction.
+    assert raw["roic"] == pytest.approx(history["roic"][-1].value)
+    # Q4-2024: TTM Op Inc = 93, NOPAT = 93*0.79, IC = 80, ROIC = 0.9184.
+    assert raw["roic"] == pytest.approx(93.0 * 0.79 / 80.0)
+
+
+def test_yfinance_roic_none_when_invested_capital_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No Invested Capital row -> roic snapshot is None and history empty.
+    Other metrics (incl. ROE) still populate when their sources are present."""
+    bs = _quarterly_balance_sheet_8q().drop(index="Invested Capital")
+    _patch_yfinance(
+        monkeypatch,
+        info={"returnOnEquity": 0.55},
+        quarterly_financials=_quarterly_financials_8q(),
+        quarterly_balance_sheet=bs,
+    )
+
+    raw, history = _fetch_yfinance_fundamentals("NVDA")
+
+    assert raw["roic"] is None
+    assert history["roic"] == []
+    # ROE survives because Stockholders Equity still present.
+    assert len(history["roe"]) == 5

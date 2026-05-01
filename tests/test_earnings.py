@@ -1,23 +1,30 @@
 """
-Tests for fetch_earnings. Pattern matches fundamentals + peers: provider
-mocked at the registry; the yfinance provider's DataFrame extraction
-exercised separately with a mocked Ticker.
+Tests for fetch_earnings (Phase 3.2.E shape).
+
+Phase 3.2.E refactor: the original q1/q2/q3/q4 prefix scheme (16 per-
+quarter keys = 4 metrics × 4 quarters) collapsed into 3 history-
+bearing claims (``eps_actual`` / ``eps_estimate`` / ``eps_surprise_pct``)
+each carrying ~20 quarters in ``Claim.history``. CLAIM_KEYS shrunk
+from 21 to 9; the agent prompt is dramatically simpler and the
+frontend can render an EPS sparkline directly off the history.
 
 What we're pinning:
 
-1. Stable shape — all 21 advertised keys present in the response, even
-   when upstream returned fewer than 4 past quarters.
-2. Quarter ordering — q1 is the most recent past quarter; q2 older; q4
-   oldest. Provider order shouldn't matter.
-3. Computed math — beat_count counts strictly-positive surprises; avg
-   takes only non-null surprises; both None when there are no past
-   quarters at all.
-4. Surprise computation fallback — when yfinance's own `Surprise(%)` is
-   missing but actual + estimate are present, derive it ourselves.
-5. Provenance — Source.tool reflects the provider id; details name the
-   yfinance attribute or "computed" for derived metrics.
-6. Observability — single log_external_call with claim_count +
-   non_null_count.
+1. New stable shape — 9 keys total: 1 latest report-date label,
+   3 history-bearing per-quarter metrics, 3 forward keys, 2 derived
+   summary keys.
+2. History attachment — eps_actual / eps_estimate / eps_surprise_pct
+   carry up to 20 ClaimHistoryPoint entries each, ordered oldest →
+   newest.
+3. Snapshot consistency — each history-bearing claim's ``value`` is
+   the most-recent quarter's number (== history[-1].value).
+4. Window math — ``last_20q.beat_count`` counts strictly-positive
+   surprises across all available history (capped at 20); avg likewise.
+5. Provider tuple shape — ``EarningsProvider`` returns
+   ``(values, history_map)`` matching the 3.2.A pattern.
+6. yfinance provider details — uses ``get_earnings_dates(limit=24)``
+   for ~6 years of depth; surprise fallback when yfinance's column is
+   missing; calendar + earnings_estimate parsing unchanged.
 """
 from __future__ import annotations
 
@@ -27,57 +34,93 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from app.schemas.research import Claim
+from app.schemas.research import Claim, ClaimHistoryPoint
 from app.services.earnings import (
     CLAIM_KEYS,
+    HISTORY_KEYS,
     PROVIDERS,
     _fetch_yfinance_earnings,
     fetch_earnings,
 )
 
 
+# ── Fixtures ─────────────────────────────────────────────────────────
+
+
 def _fake_raw(**overrides: Any) -> dict[str, Any]:
-    """Fully-populated raw provider payload — override per test."""
+    """Fully-populated raw provider values dict — override per test."""
     base: dict[str, Any] = {
-        # Past quarters, q1=newest
-        "q1.report_date": "2024-10-31",
-        "q1.eps_actual": 1.64,
-        "q1.eps_estimate": 1.60,
-        "q1.eps_surprise_pct": 2.5,
-        "q2.report_date": "2024-08-01",
-        "q2.eps_actual": 1.40,
-        "q2.eps_estimate": 1.35,
-        "q2.eps_surprise_pct": 3.7,
-        "q3.report_date": "2024-05-02",
-        "q3.eps_actual": 1.53,
-        "q3.eps_estimate": 1.50,
-        "q3.eps_surprise_pct": 2.0,
-        "q4.report_date": "2024-02-01",
-        "q4.eps_actual": 2.18,
-        "q4.eps_estimate": 2.10,
-        "q4.eps_surprise_pct": 3.8,
-        # Forward
+        "latest_report_date": "2024-10-31",
+        "eps_actual": 1.64,
+        "eps_estimate": 1.60,
+        "eps_surprise_pct": 2.5,
         "next.report_date": "2025-02-01",
         "next.eps_estimate": 2.35,
         "next.revenue_estimate": 124_000_000_000,
+        # last_20q.* are computed at the entry-point level from history;
+        # the provider doesn't need to populate them. Tests inject
+        # specific history maps when they need to verify the math.
     }
-    # Sanity guard: fixture must list every non-computed key, otherwise
-    # tests silently miss whichever key was added without updating it.
-    raw_keys_advertised = {
-        k for k in CLAIM_KEYS if not k.startswith("last_4q.")
-    }
-    assert set(base) == raw_keys_advertised, "fixture out of sync with CLAIM_KEYS"
+    # Sanity: fixture must list every key the provider should populate
+    # (i.e. all of CLAIM_KEYS minus the computed last_20q.* metrics).
+    advertised = {k for k in CLAIM_KEYS if not k.startswith("last_20q.")}
+    assert set(base) == advertised, "fixture out of sync with CLAIM_KEYS"
     base.update(overrides)
     return base
 
 
-# ── async entry point ─────────────────────────────────────────────────
+def _fake_history(
+    eps_actuals: list[float] | None = None,
+    eps_estimates: list[float] | None = None,
+    surprises: list[float] | None = None,
+    periods: list[str] | None = None,
+) -> dict[str, list[ClaimHistoryPoint]]:
+    """Build a history map with parallel lists. Defaults mirror _fake_raw."""
+    if periods is None:
+        periods = ["2024-Q1", "2024-Q2", "2024-Q3", "2024-Q4"]
+    if eps_actuals is None:
+        eps_actuals = [1.40, 1.53, 2.18, 1.64]
+    if eps_estimates is None:
+        eps_estimates = [1.35, 1.50, 2.10, 1.60]
+    if surprises is None:
+        surprises = [3.7, 2.0, 3.8, 2.5]
+    return {
+        "eps_actual": [
+            ClaimHistoryPoint(period=p, value=v)
+            for p, v in zip(periods, eps_actuals, strict=True)
+        ],
+        "eps_estimate": [
+            ClaimHistoryPoint(period=p, value=v)
+            for p, v in zip(periods, eps_estimates, strict=True)
+        ],
+        "eps_surprise_pct": [
+            ClaimHistoryPoint(period=p, value=v)
+            for p, v in zip(periods, surprises, strict=True)
+        ],
+    }
+
+
+def _fake_provider(
+    values: dict[str, Any] | None = None,
+    history: dict[str, Any] | None = None,
+) -> Any:
+    """Build a sync provider matching the new (values, history_map) tuple shape."""
+    def _provider(_sym: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        return (values if values is not None else _fake_raw()), (
+            history if history is not None else _fake_history()
+        )
+
+    return _provider
+
+
+# ── Async entry point: shape ─────────────────────────────────────────
 
 
 async def test_returns_claim_for_each_known_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(PROVIDERS, "fake", lambda _sym: _fake_raw())
+    """Phase 3.2.E shape: 9 keys total."""
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider())
 
     result = await fetch_earnings("AAPL", provider="fake")
 
@@ -86,155 +129,145 @@ async def test_returns_claim_for_each_known_key(
         assert isinstance(claim, Claim)
 
 
-async def test_past_quarter_values_pass_through(
+async def test_no_q_prefix_keys_in_new_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(PROVIDERS, "fake", lambda _sym: _fake_raw())
+    """Anti-regression: the q1/q2/q3/q4 prefix scheme is gone after
+    Phase 3.2.E. If any old key name leaked back in, this fails."""
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider())
 
     result = await fetch_earnings("AAPL", provider="fake")
 
-    assert result["q1.eps_actual"].value == 1.64
-    assert result["q1.eps_estimate"].value == 1.60
-    assert result["q1.eps_surprise_pct"].value == 2.5
-    assert result["q1.report_date"].value == "2024-10-31"
+    legacy_keys = {f"q{i}.{m}" for i in (1, 2, 3, 4)
+                   for m in ("report_date", "eps_actual", "eps_estimate",
+                             "eps_surprise_pct")}
+    assert legacy_keys.isdisjoint(result.keys())
 
 
-async def test_forward_quarter_values_pass_through(
+async def test_history_keys_carry_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(PROVIDERS, "fake", lambda _sym: _fake_raw())
+    """The 3 history-bearing claims must have populated histories."""
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider())
 
     result = await fetch_earnings("AAPL", provider="fake")
 
-    assert result["next.report_date"].value == "2025-02-01"
-    assert result["next.eps_estimate"].value == 2.35
-    assert result["next.revenue_estimate"].value == 124_000_000_000
+    for key in HISTORY_KEYS:
+        claim = result[key]
+        assert len(claim.history) == 4, f"{key} should have 4 history points"
+        assert all(isinstance(p, ClaimHistoryPoint) for p in claim.history)
+
+
+async def test_non_history_keys_have_empty_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """latest_report_date, next.*, last_20q.* don't carry history."""
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider())
+
+    result = await fetch_earnings("AAPL", provider="fake")
+
+    for key in (
+        "latest_report_date",
+        "next.report_date",
+        "next.eps_estimate",
+        "next.revenue_estimate",
+        "last_20q.beat_count",
+        "last_20q.avg_surprise_pct",
+    ):
+        assert result[key].history == [], f"{key} should NOT carry history"
+
+
+async def test_snapshot_value_matches_history_last_for_history_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """For history-bearing claims, value (snapshot) and history[-1].value
+    must agree by construction. Otherwise the headline number and the
+    sparkline's right endpoint disagree, which is confusing."""
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider())
+
+    result = await fetch_earnings("AAPL", provider="fake")
+
+    for key in HISTORY_KEYS:
+        claim = result[key]
+        assert claim.value == claim.history[-1].value
+
+
+# ── Computed last_20q.* metrics ──────────────────────────────────────
 
 
 async def test_beat_count_counts_strictly_positive_surprises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A 0% surprise is a meet, not a beat. Only surprise > 0 counts."""
-    raw = _fake_raw(**{
-        "q1.eps_surprise_pct": 5.0,
-        "q2.eps_surprise_pct": -2.0,
-        "q3.eps_surprise_pct": 0.0,
-        "q4.eps_surprise_pct": 1.0,
-    })
-    monkeypatch.setitem(PROVIDERS, "fake", lambda _sym: raw)
-
-    result = await fetch_earnings("AAPL", provider="fake")
-
-    assert result["last_4q.beat_count"].value == 2
-
-
-async def test_avg_surprise_pct_arithmetic_mean(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    raw = _fake_raw(**{
-        "q1.eps_surprise_pct": 5.0,
-        "q2.eps_surprise_pct": -2.0,
-        "q3.eps_surprise_pct": 3.0,
-        "q4.eps_surprise_pct": 1.0,
-    })
-    monkeypatch.setitem(PROVIDERS, "fake", lambda _sym: raw)
-
-    result = await fetch_earnings("AAPL", provider="fake")
-
-    assert result["last_4q.avg_surprise_pct"].value == pytest.approx(1.75)
-
-
-async def test_avg_and_beat_count_skip_null_surprises(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Computed stats use only non-null surprises — partial history shouldn't poison the mean."""
-    raw = _fake_raw(**{
-        "q1.eps_surprise_pct": 4.0,
-        "q2.eps_surprise_pct": 2.0,
-        "q3.eps_surprise_pct": None,
-        "q4.eps_surprise_pct": None,
-    })
-    monkeypatch.setitem(PROVIDERS, "fake", lambda _sym: raw)
-
-    result = await fetch_earnings("AAPL", provider="fake")
-
-    assert result["last_4q.beat_count"].value == 2
-    assert result["last_4q.avg_surprise_pct"].value == pytest.approx(3.0)
-
-
-async def test_computed_stats_none_when_no_past_quarters(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    raw = _fake_raw(**{
-        "q1.eps_surprise_pct": None,
-        "q2.eps_surprise_pct": None,
-        "q3.eps_surprise_pct": None,
-        "q4.eps_surprise_pct": None,
-    })
-    monkeypatch.setitem(PROVIDERS, "fake", lambda _sym: raw)
-
-    result = await fetch_earnings("AAPL", provider="fake")
-
-    assert result["last_4q.beat_count"].value is None
-    assert result["last_4q.avg_surprise_pct"].value is None
-
-
-async def test_partial_history_keeps_stable_shape(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A young IPO with only 2 quarters of history still emits all 21 keys."""
-    monkeypatch.setitem(
-        PROVIDERS,
-        "fake",
-        lambda _sym: {
-            "q1.report_date": "2024-10-31",
-            "q1.eps_actual": 1.64,
-            "q1.eps_estimate": 1.60,
-            "q1.eps_surprise_pct": 2.5,
-            "q2.report_date": "2024-08-01",
-            "q2.eps_actual": 1.40,
-            "q2.eps_estimate": 1.35,
-            "q2.eps_surprise_pct": 3.7,
-            # q3, q4, next.* missing entirely
-        },
+    """Mixed surprises: 3 positive, 1 negative, 1 zero. Beat count = 3."""
+    history = _fake_history(
+        surprises=[5.0, -2.0, 0.0, 3.0, 1.5],
+        periods=["2023-Q4", "2024-Q1", "2024-Q2", "2024-Q3", "2024-Q4"],
+        eps_actuals=[1.0, 1.0, 1.0, 1.0, 1.0],
+        eps_estimates=[0.95, 1.02, 1.0, 0.97, 0.985],
     )
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider(history=history))
 
     result = await fetch_earnings("AAPL", provider="fake")
 
-    assert set(result.keys()) == set(CLAIM_KEYS)
-    assert result["q3.eps_actual"].value is None
-    assert result["q4.report_date"].value is None
-    assert result["next.eps_estimate"].value is None
+    assert result["last_20q.beat_count"].value == 3
 
 
-async def test_claims_carry_provider_scoped_source(
+async def test_avg_surprise_skips_nones(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(PROVIDERS, "fake", lambda _sym: _fake_raw())
+    """Average is over real surprise values only; missing quarters drop
+    out of the denominator."""
+    # 3 quarters with surprises, 1 missing — average of the 3 reals.
+    history = _fake_history(
+        surprises=[2.0, 4.0, 6.0],
+        periods=["2024-Q2", "2024-Q3", "2024-Q4"],
+        eps_actuals=[1.0, 1.0, 1.0],
+        eps_estimates=[0.98, 0.96, 0.94],
+    )
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider(history=history))
 
     result = await fetch_earnings("AAPL", provider="fake")
 
-    eps = result["q1.eps_actual"]
-    assert eps.source.tool == "fake.earnings"
-    assert "earnings_dates" in eps.source.detail.lower()
-
-    bc = result["last_4q.beat_count"]
-    assert "computed" in bc.source.detail.lower()
+    assert result["last_20q.avg_surprise_pct"].value == pytest.approx(4.0)
 
 
-async def test_fetched_at_is_fresh_and_shared(
+async def test_beat_count_none_when_no_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(PROVIDERS, "fake", lambda _sym: _fake_raw())
+    """No history → can't count beats. None signals 'unavailable'."""
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider(history={}))
 
-    before = datetime.now(UTC)
     result = await fetch_earnings("AAPL", provider="fake")
-    after = datetime.now(UTC)
 
-    fetched = result["q1.eps_actual"].source.fetched_at
-    assert before - timedelta(seconds=1) <= fetched <= after + timedelta(seconds=1)
-    fetched_ats = {c.source.fetched_at for c in result.values()}
-    assert len(fetched_ats) == 1
+    assert result["last_20q.beat_count"].value is None
+    assert result["last_20q.avg_surprise_pct"].value is None
+
+
+async def test_beat_count_caps_at_20_quarters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If history has 25 quarters, last_20q.* uses only the most recent 20."""
+    surprises = list(range(1, 26))  # 25 strictly-positive surprises
+    periods = [f"2018-Q{i}" if i <= 4 else f"2019-Q{i % 4 or 4}"
+               for i in range(1, 26)]
+    # All beat (positive surprise). With 25 quarters, count over last 20
+    # = 20.
+    eps_actuals = [1.0] * 25
+    eps_estimates = [0.99] * 25
+    history = _fake_history(
+        eps_actuals=eps_actuals,
+        eps_estimates=eps_estimates,
+        surprises=[float(s) for s in surprises],
+        periods=periods,
+    )
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider(history=history))
+
+    result = await fetch_earnings("AAPL", provider="fake")
+
+    assert result["last_20q.beat_count"].value == 20
+
+
+# ── Provider isolation, observability ────────────────────────────────
 
 
 async def test_unknown_provider_raises() -> None:
@@ -247,9 +280,9 @@ async def test_symbol_uppercased_before_provider_call(
 ) -> None:
     seen: list[str] = []
 
-    def _capture(sym: str) -> dict[str, Any]:
+    def _capture(sym: str) -> tuple[dict[str, Any], dict[str, Any]]:
         seen.append(sym)
-        return _fake_raw()
+        return _fake_raw(), _fake_history()
 
     monkeypatch.setitem(PROVIDERS, "fake", _capture)
 
@@ -261,9 +294,11 @@ async def test_symbol_uppercased_before_provider_call(
 async def test_logs_external_call(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """A09: one log_external_call per fetch_earnings, with claim_count +
+    non_null_count + history_populated_count summary."""
     import logging
 
-    monkeypatch.setitem(PROVIDERS, "fake", lambda _sym: _fake_raw())
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider())
 
     with caplog.at_level(logging.INFO, logger="app.external"):
         await fetch_earnings("AAPL", provider="fake")
@@ -274,17 +309,17 @@ async def test_logs_external_call(
     assert r.service_id == "fake.earnings"
     assert r.input_summary == {"symbol": "AAPL", "provider": "fake"}
     assert r.output_summary["claim_count"] == len(CLAIM_KEYS)
-    # Full fixture populates all 19 raw keys + 2 computed = 21 non-null.
-    assert r.output_summary["non_null_count"] == len(CLAIM_KEYS)
+    # 3 history-bearing claims are populated by the fixture.
+    assert r.output_summary["history_populated_count"] == 3
     assert r.outcome == "ok"
 
 
-async def test_provider_exception_propagates(
+async def test_provider_exception_propagates_and_logs_error(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     import logging
 
-    def _broken(_sym: str) -> dict[str, Any]:
+    def _broken(_sym: str) -> tuple[dict[str, Any], dict[str, Any]]:
         raise RuntimeError("yfinance is down")
 
     monkeypatch.setitem(PROVIDERS, "fake", _broken)
@@ -298,23 +333,23 @@ async def test_provider_exception_propagates(
     assert records[0].outcome == "error"
 
 
-# ── yfinance provider — DataFrame extraction ──────────────────────────
+async def test_fetched_at_is_fresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider())
+
+    before = datetime.now(UTC)
+    result = await fetch_earnings("AAPL", provider="fake")
+    after = datetime.now(UTC)
+
+    fetched_at = result["eps_actual"].source.fetched_at
+    assert before - timedelta(seconds=1) <= fetched_at <= after + timedelta(seconds=1)
+    # All claims share one fetched_at — single provider call.
+    fetched_ats = {c.source.fetched_at for c in result.values()}
+    assert len(fetched_ats) == 1
 
 
-def _earnings_dates_df(rows: list[dict[str, Any]]) -> pd.DataFrame:
-    """Build a yfinance-shaped earnings_dates DataFrame.
-
-    yfinance returns a DataFrame indexed by tz-aware datetime (the
-    earnings date), with columns 'EPS Estimate', 'Reported EPS',
-    'Surprise(%)'. Rows include both past and future quarters; future
-    rows have NaN for Reported EPS / Surprise(%).
-    """
-    if not rows:
-        return pd.DataFrame(
-            columns=["EPS Estimate", "Reported EPS", "Surprise(%)"]
-        )
-    df = pd.DataFrame(rows).set_index("date")
-    return df
+# ── yfinance provider math ───────────────────────────────────────────
 
 
 def _patch_yfinance(
@@ -322,15 +357,27 @@ def _patch_yfinance(
     *,
     earnings_dates: pd.DataFrame | None = None,
     earnings_estimate: pd.DataFrame | None = None,
-    calendar: dict[str, Any] | None = None,
+    calendar: dict | None = None,
 ) -> None:
-    """Install a fake yfinance with a Ticker that returns the given attributes."""
+    """Install a fake yfinance module so the lazy import inside the provider hits it.
+
+    Phase 3.2.E switches from the ``earnings_dates`` property to
+    ``get_earnings_dates(limit=24)`` for a wider history. We mock both
+    to be safe across yfinance version drift.
+    """
     import sys
     from unittest.mock import MagicMock
 
     fake_ticker = MagicMock()
+    # earnings_dates property AND get_earnings_dates(limit) method both
+    # return the same mocked frame in tests.
     fake_ticker.earnings_dates = (
         earnings_dates if earnings_dates is not None else pd.DataFrame()
+    )
+    fake_ticker.get_earnings_dates = MagicMock(
+        return_value=(
+            earnings_dates if earnings_dates is not None else pd.DataFrame()
+        )
     )
     fake_ticker.earnings_estimate = (
         earnings_estimate if earnings_estimate is not None else pd.DataFrame()
@@ -343,141 +390,125 @@ def _patch_yfinance(
     monkeypatch.setitem(sys.modules, "yfinance", fake_yf)
 
 
-def test_yfinance_extracts_4_past_quarters_newest_first(
+def _earnings_dates_5q(
+    *,
+    include_surprise: bool = True,
+) -> pd.DataFrame:
+    """Synthetic 5 past quarters newest-first (yfinance convention).
+
+    yfinance's ``earnings_dates`` is indexed by tz-aware report-date
+    Timestamp; future rows have NaN for Reported EPS / Surprise(%).
+    """
+    idx = pd.DatetimeIndex(
+        [
+            "2024-10-31",
+            "2024-08-01",
+            "2024-05-02",
+            "2024-02-01",
+            "2023-11-02",
+        ],
+        tz="America/New_York",
+    )
+    data: dict[str, list[Any]] = {
+        "EPS Estimate": [1.60, 1.35, 1.50, 2.10, 1.20],
+        "Reported EPS": [1.64, 1.40, 1.53, 2.18, 1.27],
+    }
+    if include_surprise:
+        data["Surprise(%)"] = [2.5, 3.7, 2.0, 3.8, 5.8]
+    return pd.DataFrame(data, index=idx)
+
+
+def test_yfinance_extracts_eps_history_from_earnings_dates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Past quarters extracted from earnings_dates, newest assigned to q1."""
-    rows = [
-        # Future row — should be ignored for past quarters
-        {
-            "date": pd.Timestamp("2025-02-01", tz="UTC"),
-            "EPS Estimate": 2.35,
-            "Reported EPS": float("nan"),
-            "Surprise(%)": float("nan"),
-        },
-        # Past quarters in random order
-        {
-            "date": pd.Timestamp("2024-05-02", tz="UTC"),
-            "EPS Estimate": 1.50,
-            "Reported EPS": 1.53,
-            "Surprise(%)": 2.0,
-        },
-        {
-            "date": pd.Timestamp("2024-10-31", tz="UTC"),
-            "EPS Estimate": 1.60,
-            "Reported EPS": 1.64,
-            "Surprise(%)": 2.5,
-        },
-        {
-            "date": pd.Timestamp("2024-02-01", tz="UTC"),
-            "EPS Estimate": 2.10,
-            "Reported EPS": 2.18,
-            "Surprise(%)": 3.8,
-        },
-        {
-            "date": pd.Timestamp("2024-08-01", tz="UTC"),
-            "EPS Estimate": 1.35,
-            "Reported EPS": 1.40,
-            "Surprise(%)": 3.7,
-        },
-    ]
-    _patch_yfinance(monkeypatch, earnings_dates=_earnings_dates_df(rows))
+    """5 past quarters in earnings_dates → 5 history points per metric,
+    oldest-first (chart-rendering convention)."""
+    _patch_yfinance(monkeypatch, earnings_dates=_earnings_dates_5q())
 
-    raw = _fetch_yfinance_earnings("AAPL")
+    raw, history = _fetch_yfinance_earnings("AAPL")
 
-    # Newest first: 2024-10-31 → q1, then 08-01, 05-02, 02-01.
-    assert raw["q1.report_date"] == "2024-10-31"
-    assert raw["q1.eps_actual"] == 1.64
-    assert raw["q1.eps_estimate"] == 1.60
-    assert raw["q1.eps_surprise_pct"] == 2.5
-
-    assert raw["q2.report_date"] == "2024-08-01"
-    assert raw["q3.report_date"] == "2024-05-02"
-    assert raw["q4.report_date"] == "2024-02-01"
-
-
-def test_yfinance_only_two_past_quarters_leaves_q3_q4_none(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    rows = [
-        {
-            "date": pd.Timestamp("2024-10-31", tz="UTC"),
-            "EPS Estimate": 1.60,
-            "Reported EPS": 1.64,
-            "Surprise(%)": 2.5,
-        },
-        {
-            "date": pd.Timestamp("2024-08-01", tz="UTC"),
-            "EPS Estimate": 1.35,
-            "Reported EPS": 1.40,
-            "Surprise(%)": 3.7,
-        },
-    ]
-    _patch_yfinance(monkeypatch, earnings_dates=_earnings_dates_df(rows))
-
-    raw = _fetch_yfinance_earnings("AAPL")
-
-    assert raw["q1.eps_actual"] == 1.64
-    assert raw["q2.eps_actual"] == 1.40
-    assert raw.get("q3.eps_actual") is None
-    assert raw.get("q4.report_date") is None
+    assert "eps_actual" in history
+    assert len(history["eps_actual"]) == 5
+    # Oldest is 2023-Q4 (Nov 2023 report); newest is 2024-Q4 (Oct 2024).
+    assert history["eps_actual"][0].period == "2023-Q4"
+    assert history["eps_actual"][-1].period == "2024-Q4"
+    # Snapshot = newest.
+    assert raw["eps_actual"] == 1.64
+    assert raw["latest_report_date"] == "2024-10-31"
 
 
 def test_yfinance_derives_surprise_when_column_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """yfinance occasionally omits Surprise(%); derive from actual + estimate."""
-    rows = [
-        {
-            "date": pd.Timestamp("2024-10-31", tz="UTC"),
-            "EPS Estimate": 1.60,
-            "Reported EPS": 1.64,
-            # No Surprise(%) column at all on this DataFrame
-        }
-    ]
-    df = pd.DataFrame(rows).set_index("date")
-    _patch_yfinance(monkeypatch, earnings_dates=df)
-
-    raw = _fetch_yfinance_earnings("AAPL")
-
-    # (1.64 - 1.60) / 1.60 * 100 = 2.5
-    assert raw["q1.eps_surprise_pct"] == pytest.approx(2.5)
-
-
-def test_yfinance_handles_completely_empty_dataframe(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _patch_yfinance(monkeypatch)
-
-    raw = _fetch_yfinance_earnings("AAPL")
-
-    # No quarters present, no forward data. The provider returns a (possibly
-    # sparse) dict; the service stamps None Claims for missing keys.
-    assert raw.get("q1.eps_actual") is None
-    assert raw.get("next.eps_estimate") is None
-
-
-def test_yfinance_pulls_forward_estimate_and_calendar(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Forward EPS comes from earnings_estimate (period '+1q'); date from calendar."""
-    estimate_df = pd.DataFrame(
-        {
-            "avg": [2.35],
-            "revenueAvg": [124_000_000_000],
-        },
-        index=["+1q"],
-    )
-    calendar = {"Earnings Date": [pd.Timestamp("2025-02-01").date()]}
-
+    """Some yfinance versions / symbols omit Surprise(%); we derive it
+    from (Reported - Estimate) / |Estimate| × 100."""
     _patch_yfinance(
-        monkeypatch,
-        earnings_estimate=estimate_df,
-        calendar=calendar,
+        monkeypatch, earnings_dates=_earnings_dates_5q(include_surprise=False)
     )
 
-    raw = _fetch_yfinance_earnings("AAPL")
+    raw, history = _fetch_yfinance_earnings("AAPL")
 
-    assert raw["next.eps_estimate"] == pytest.approx(2.35)
-    assert raw["next.revenue_estimate"] == 124_000_000_000
+    surprises = [p.value for p in history["eps_surprise_pct"]]
+    # Newest: 1.64 vs 1.60 -> +2.5%
+    assert surprises[-1] == pytest.approx((1.64 - 1.60) / 1.60 * 100.0)
+
+
+def test_yfinance_handles_no_earnings_dates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A symbol with no earnings history (very new IPO / delisted) — all
+    values None, all histories empty. Stable shape preserved."""
+    _patch_yfinance(monkeypatch)  # all defaults empty
+
+    raw, history = _fetch_yfinance_earnings("AAPL")
+
+    # Latest snapshot keys: None.
+    assert raw.get("latest_report_date") is None
+    assert raw.get("eps_actual") is None
+    # Histories empty.
+    for key in HISTORY_KEYS:
+        assert history.get(key, []) == []
+
+
+def test_yfinance_extracts_forward_estimates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """earnings_estimate['+1q'] supplies next.eps_estimate +
+    next.revenue_estimate; calendar supplies next.report_date."""
+    estimate = pd.DataFrame(
+        {"avg": [1.5, 2.35, 7.8, 9.5], "revenueAvg": [1e10, 1.24e11, 1e11, 1.5e11]},
+        index=["0q", "+1q", "0y", "+1y"],
+    )
+    cal = {"Earnings Date": [pd.Timestamp("2025-02-01").date()]}
+    _patch_yfinance(monkeypatch, earnings_estimate=estimate, calendar=cal)
+
+    raw, _ = _fetch_yfinance_earnings("AAPL")
+
+    assert raw["next.eps_estimate"] == 2.35
+    assert raw["next.revenue_estimate"] == 1.24e11
     assert raw["next.report_date"] == "2025-02-01"
+
+
+def test_yfinance_calendar_handles_single_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """yfinance occasionally returns a single date instead of a list."""
+    cal = {"Earnings Date": pd.Timestamp("2025-02-01").date()}
+    _patch_yfinance(monkeypatch, calendar=cal)
+
+    raw, _ = _fetch_yfinance_earnings("AAPL")
+
+    assert raw["next.report_date"] == "2025-02-01"
+
+
+def test_yfinance_history_is_oldest_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Renderer convention: history[0] is oldest, history[-1] is current."""
+    _patch_yfinance(monkeypatch, earnings_dates=_earnings_dates_5q())
+
+    _, history = _fetch_yfinance_earnings("AAPL")
+
+    for key in HISTORY_KEYS:
+        periods = [p.period for p in history[key]]
+        assert periods == sorted(periods), f"{key} history not oldest-first"

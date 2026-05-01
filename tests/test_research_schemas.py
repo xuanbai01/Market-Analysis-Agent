@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from app.schemas.research import (
     Claim,
+    ClaimHistoryPoint,
     Confidence,
     ResearchReport,
     Section,
@@ -162,6 +163,132 @@ def test_report_rejects_empty_symbol() -> None:
             symbol="",
             generated_at=datetime.now(UTC),
         )
+
+
+# ── ClaimHistoryPoint + Claim.history (Phase 3.1) ────────────────────
+
+
+def test_claim_history_point_constructs() -> None:
+    """The atomic time-series unit: period label + numeric value."""
+    p = ClaimHistoryPoint(period="2024-Q4", value=2.18)
+    assert p.period == "2024-Q4"
+    assert p.value == 2.18
+
+
+def test_claim_history_point_is_frozen() -> None:
+    """History points are value objects — mutating one mid-flight is a bug."""
+    p = ClaimHistoryPoint(period="2024-Q4", value=2.18)
+    with pytest.raises(ValidationError):
+        p.value = 99.0  # type: ignore[misc]
+
+
+def test_claim_history_point_rejects_empty_period() -> None:
+    with pytest.raises(ValidationError):
+        ClaimHistoryPoint(period="", value=1.0)
+
+
+def test_claim_history_point_value_must_be_numeric() -> None:
+    """Strings/booleans/null don't sparkline; only floats are charted."""
+    with pytest.raises(ValidationError):
+        ClaimHistoryPoint(period="2024-Q4", value="2.18")  # type: ignore[arg-type]
+
+
+def test_claim_history_defaults_to_empty_list() -> None:
+    """Existing claims (no history field) construct unchanged — backwards-compat."""
+    c = Claim(description="P/E", value=28.5, source=_src())
+    assert c.history == []
+
+
+def test_claim_accepts_populated_history() -> None:
+    c = Claim(
+        description="EPS",
+        value=2.18,
+        source=_src(),
+        history=[
+            ClaimHistoryPoint(period="2023-Q4", value=1.46),
+            ClaimHistoryPoint(period="2024-Q1", value=1.71),
+            ClaimHistoryPoint(period="2024-Q2", value=1.89),
+            ClaimHistoryPoint(period="2024-Q3", value=2.05),
+            ClaimHistoryPoint(period="2024-Q4", value=2.18),
+        ],
+    )
+    assert len(c.history) == 5
+    assert c.history[0].period == "2023-Q4"
+    assert c.history[-1].value == 2.18
+
+
+def test_claim_with_history_round_trips_through_json() -> None:
+    """The cache layer round-trips via model_dump → JSONB → model_validate.
+    A history-bearing Claim must survive that path unchanged."""
+    original = Claim(
+        description="EPS",
+        value=2.18,
+        source=_src(),
+        history=[
+            ClaimHistoryPoint(period="2024-Q3", value=2.05),
+            ClaimHistoryPoint(period="2024-Q4", value=2.18),
+        ],
+    )
+    blob = original.model_dump_json()
+    restored = Claim.model_validate_json(blob)
+    assert restored == original
+    assert len(restored.history) == 2
+
+
+def test_claim_without_history_serializes_with_empty_list() -> None:
+    """``default_factory=list`` means the field is always present in
+    serialization, never missing — keeps the JSONB shape stable.
+    """
+    c = Claim(description="P/E", value=28.5, source=_src())
+    blob = c.model_dump()
+    assert blob["history"] == []
+
+
+def test_existing_cache_payload_without_history_still_parses() -> None:
+    """Backwards-compat: a cached row written before Phase 3.1 has no
+    ``history`` key. Validation must accept it and fill in []."""
+    legacy_payload = {
+        "description": "P/E",
+        "value": 28.5,
+        "source": {
+            "tool": "yfinance.info",
+            "fetched_at": "2026-04-25T12:00:00+00:00",
+        },
+        # NOTE: no "history" key — pre-Phase-3.1 shape
+    }
+    c = Claim.model_validate(legacy_payload)
+    assert c.history == []
+
+
+def test_full_report_with_history_round_trips() -> None:
+    """The whole-report round-trip the cache layer relies on."""
+    report = ResearchReport(
+        symbol="NVDA",
+        generated_at=datetime(2026, 4, 25, 12, 0, tzinfo=UTC),
+        sections=[
+            Section(
+                title="Earnings",
+                claims=[
+                    Claim(
+                        description="EPS",
+                        value=2.18,
+                        source=_src(),
+                        history=[
+                            ClaimHistoryPoint(period="2024-Q3", value=2.05),
+                            ClaimHistoryPoint(period="2024-Q4", value=2.18),
+                        ],
+                    ),
+                ],
+                summary="EPS rose from 2.05 to 2.18 quarter over quarter.",
+                confidence=Confidence.HIGH,
+            ),
+        ],
+        overall_confidence=Confidence.HIGH,
+    )
+    blob = report.model_dump_json()
+    restored = ResearchReport.model_validate_json(blob)
+    assert restored == report
+    assert restored.sections[0].claims[0].history[0].period == "2024-Q3"
 
 
 def test_json_schema_for_llm_tool_use() -> None:

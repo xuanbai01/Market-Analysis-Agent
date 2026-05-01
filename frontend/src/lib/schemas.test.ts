@@ -10,6 +10,8 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  ClaimHistoryPointSchema,
+  ClaimSchema,
   ResearchReportSchema,
   ResearchReportSummariesSchema,
   ResearchReportSummarySchema,
@@ -147,5 +149,75 @@ describe("ResearchReportSummarySchema", () => {
 
   it("array form parses an empty list", () => {
     expect(ResearchReportSummariesSchema.parse([])).toEqual([]);
+  });
+});
+
+// ── Phase 3.1: Claim.history ─────────────────────────────────────────
+
+describe("ClaimHistoryPointSchema", () => {
+  it("parses a quarterly point", () => {
+    const p = ClaimHistoryPointSchema.parse({
+      period: "2024-Q4",
+      value: 2.18,
+    });
+    expect(p.period).toBe("2024-Q4");
+    expect(p.value).toBe(2.18);
+  });
+
+  it("rejects a non-numeric value (only floats sparkline)", () => {
+    expect(() =>
+      ClaimHistoryPointSchema.parse({ period: "2024-Q4", value: "2.18" }),
+    ).toThrow();
+  });
+
+  it("rejects an empty period label", () => {
+    expect(() =>
+      ClaimHistoryPointSchema.parse({ period: "", value: 2.18 }),
+    ).toThrow();
+  });
+});
+
+describe("ClaimSchema with history", () => {
+  const validSource = {
+    tool: "yfinance.fundamentals",
+    fetched_at: "2026-04-29T14:00:00+00:00",
+  };
+
+  it("parses a claim with populated history", () => {
+    const claim = ClaimSchema.parse({
+      description: "EPS",
+      value: 2.18,
+      source: validSource,
+      history: [
+        { period: "2024-Q3", value: 2.05 },
+        { period: "2024-Q4", value: 2.18 },
+      ],
+    });
+    expect(claim.history).toHaveLength(2);
+    expect(claim.history[0].period).toBe("2024-Q3");
+    expect(claim.history[1].value).toBe(2.18);
+  });
+
+  it("defaults history to [] when the field is missing", () => {
+    // Backwards-compat: a Claim payload from before Phase 3.1 has no
+    // ``history`` key. Zod fills in the default so the renderer can
+    // always read ``claim.history`` without optional-chaining.
+    const claim = ClaimSchema.parse({
+      description: "P/E",
+      value: 28.5,
+      source: validSource,
+    });
+    expect(claim.history).toEqual([]);
+  });
+
+  it("rejects a history with a non-numeric value", () => {
+    expect(() =>
+      ClaimSchema.parse({
+        description: "EPS",
+        value: 2.18,
+        source: validSource,
+        history: [{ period: "2024-Q4", value: "two-eighteen" }],
+      }),
+    ).toThrow();
   });
 });

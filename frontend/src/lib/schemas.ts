@@ -37,10 +37,27 @@ export const ClaimValueSchema = z.union([
 ]);
 export type ClaimValue = z.infer<typeof ClaimValueSchema>;
 
+// One point in a Claim's time series. ``period`` is an opaque string
+// label (``"2024-Q4"`` / ``"2024-12"`` / ``"2024"``) — different tools
+// emit different cadences and the renderer doesn't parse them. ``value``
+// is strictly numeric: only floats sparkline, so strings/bools/null are
+// rejected at the parse boundary (mirrors the backend's
+// ClaimHistoryPoint validator).
+export const ClaimHistoryPointSchema = z.object({
+  period: z.string().min(1).max(32),
+  value: z.number(),
+});
+export type ClaimHistoryPoint = z.infer<typeof ClaimHistoryPointSchema>;
+
 export const ClaimSchema = z.object({
   description: z.string().min(1),
   value: ClaimValueSchema,
   source: SourceSchema,
+  // Phase 3.1: optional time series alongside the point-in-time value.
+  // Defaults to [] so a Claim payload from before Phase 3.1 (no
+  // "history" key) parses unchanged. Frontend renders a sparkline when
+  // ``history.length >= 2``, skips it otherwise.
+  history: z.array(ClaimHistoryPointSchema).default([]),
 });
 export type Claim = z.infer<typeof ClaimSchema>;
 

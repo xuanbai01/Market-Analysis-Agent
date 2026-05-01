@@ -18,8 +18,9 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Confidence(str, Enum):
@@ -54,6 +55,49 @@ class Source(BaseModel):
 ClaimValue = float | int | str | bool | None
 
 
+class ClaimHistoryPoint(BaseModel):
+    """
+    One point in a Claim's time series — a period label and a numeric
+    value. Used by Phase 3 to render sparklines and section charts
+    next to point-in-time claim values (per ADR 0004).
+
+    ``period`` is an opaque string emitted by the tool that produced
+    the history (``"2024-Q4"``, ``"2024-12"``, ``"2024"``, …).
+    Different tools emit different granularities; the rendering layer
+    treats it as a label, never parses it.
+
+    ``value`` is intentionally a plain ``float`` (not the broader
+    ``ClaimValue`` union). Strings, booleans, and nulls aren't
+    chartable — when a tool can't produce a numeric history point, it
+    omits the point rather than emitting None. This keeps the
+    rendering layer's contract narrow.
+
+    Frozen because history points are value objects — once a point
+    has been recorded, mutating it mid-flight would silently corrupt
+    a chart.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    period: str = Field(min_length=1, max_length=32)
+    value: float
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _value_must_be_numeric(cls, v: Any) -> Any:
+        # Pydantic 2 by default coerces ``"2.18"`` -> ``2.18`` for a
+        # ``float`` field; we reject strings explicitly so a bug in a
+        # tool doesn't smuggle text into a chart series. Booleans also
+        # rejected — ``bool`` is an ``int`` subtype in Python and would
+        # otherwise pass numeric validation as 0.0 / 1.0, which is
+        # never meaningful as a history point.
+        if isinstance(v, bool):
+            raise ValueError("value must be numeric, not a boolean")
+        if isinstance(v, str):
+            raise ValueError("value must be numeric, not a string")
+        return v
+
+
 class Claim(BaseModel):
     """
     One factual statement in a report. ``description`` is the
@@ -61,11 +105,21 @@ class Claim(BaseModel):
     the data point, ``source`` is where it came from. The structured
     output schema is the only way the agent can include a number — there
     is no free-form prose path that bypasses this.
+
+    ``history`` (Phase 3.1) is an optional time series of
+    ``ClaimHistoryPoint``s for the same metric over prior periods.
+    Defaults to ``[]`` so existing claims and existing cache rows
+    round-trip unchanged. Tools that can produce a series (e.g.
+    ``fetch_fundamentals`` reading yfinance's quarterly tables)
+    populate it; tools that can't (e.g. peer-comparison snapshots)
+    leave it empty. The frontend renders a sparkline when
+    ``history`` has ≥ 2 points and skips it otherwise.
     """
 
     description: str = Field(min_length=1, max_length=200)
     value: ClaimValue
     source: Source
+    history: list[ClaimHistoryPoint] = Field(default_factory=list)
 
 
 class Section(BaseModel):

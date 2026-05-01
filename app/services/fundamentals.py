@@ -41,7 +41,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.core.observability import log_external_call
-from app.schemas.research import Claim, ClaimValue, Source
+from app.schemas.research import Claim, ClaimHistoryPoint, ClaimValue, Source
+from app.services.fundamentals_history import (
+    HISTORY_KEYS,
+    build_fundamentals_history,
+    latest_value,
+)
 
 # ── Stable claim contract ─────────────────────────────────────────────
 # Order matters only for deterministic iteration in tests / logs; the
@@ -53,10 +58,19 @@ CLAIM_KEYS: tuple[str, ...] = (
     "p_s",
     "ev_ebitda",
     "peg",
-    # Quality
+    # Quality (legacy point-in-time)
     "roe",
     "gross_margin",
     "profit_margin",
+    # Quality (Phase 3.2.A — per-share growth, history-bearing)
+    "revenue_per_share",
+    "gross_profit_per_share",
+    "operating_income_per_share",
+    "fcf_per_share",
+    "ocf_per_share",
+    # Quality (Phase 3.2.A — margin trends, history-bearing)
+    "operating_margin",
+    "fcf_margin",
     # Capital allocation + sentiment
     "dividend_yield",
     "short_ratio",
@@ -64,7 +78,7 @@ CLAIM_KEYS: tuple[str, ...] = (
     "market_cap",
     "buyback_yield",
     "sbc_pct_revenue",
-    # Trend
+    # Trend (legacy single-value YoY delta — kept alongside history)
     "gross_margin_trend_1y",
 )
 
@@ -80,6 +94,13 @@ _DESCRIPTIONS: dict[str, str] = {
     "roe": "Return on equity",
     "gross_margin": "Gross margin",
     "profit_margin": "Net profit margin",
+    "revenue_per_share": "Revenue per share",
+    "gross_profit_per_share": "Gross profit per share",
+    "operating_income_per_share": "Operating income per share",
+    "fcf_per_share": "Free cash flow per share",
+    "ocf_per_share": "Operating cash flow per share",
+    "operating_margin": "Operating margin",
+    "fcf_margin": "Free cash flow margin",
     "dividend_yield": "Forward dividend yield",
     "short_ratio": "Short interest, days-to-cover",
     "shares_short": "Shares sold short",
@@ -101,6 +122,27 @@ _DETAILS: dict[str, str] = {
     "roe": "info.returnOnEquity",
     "gross_margin": "info.grossMargins",
     "profit_margin": "info.profitMargins",
+    "revenue_per_share": (
+        "computed: quarterly_financials.TotalRevenue / DilutedAverageShares"
+    ),
+    "gross_profit_per_share": (
+        "computed: quarterly_financials.GrossProfit / DilutedAverageShares"
+    ),
+    "operating_income_per_share": (
+        "computed: quarterly_financials.OperatingIncome / DilutedAverageShares"
+    ),
+    "fcf_per_share": (
+        "computed: quarterly_cashflow.FreeCashFlow / DilutedAverageShares"
+    ),
+    "ocf_per_share": (
+        "computed: quarterly_cashflow.OperatingCashFlow / DilutedAverageShares"
+    ),
+    "operating_margin": (
+        "computed: quarterly_financials.OperatingIncome / TotalRevenue"
+    ),
+    "fcf_margin": (
+        "computed: quarterly_cashflow.FreeCashFlow / quarterly_financials.TotalRevenue"
+    ),
     "dividend_yield": "info.dividendYield",
     "short_ratio": "info.shortRatio",
     "shares_short": "info.sharesShort",
@@ -130,9 +172,19 @@ _INFO_KEYS: dict[str, str] = {
 }
 
 
-# Provider signature: (symbol) -> {claim_key: value | None}. Sync —
-# yfinance is blocking; the async entry point hands it to ``to_thread``.
-FundamentalsProvider = Callable[[str], dict[str, ClaimValue | None]]
+# Provider signature (Phase 3.2.A): (symbol) -> (values, history_map).
+# - values: {claim_key: ClaimValue | None}, point-in-time snapshot.
+# - history_map: {claim_key: list[ClaimHistoryPoint]}, sparkline data.
+# Sync — yfinance is blocking; the async entry point hands it to
+# ``to_thread``. The two-element shape lets one provider call produce
+# both the snapshot and the history without duplicate yfinance fetches.
+FundamentalsProvider = Callable[
+    [str],
+    tuple[
+        dict[str, ClaimValue | None],
+        dict[str, list[ClaimHistoryPoint]],
+    ],
+]
 
 
 def _safe_loc(df: Any, row_label: str, col_idx: int = 0) -> float | None:
@@ -161,12 +213,23 @@ def _safe_loc(df: Any, row_label: str, col_idx: int = 0) -> float | None:
         return None
 
 
-def _fetch_yfinance_fundamentals(symbol: str) -> dict[str, ClaimValue | None]:
+def _fetch_yfinance_fundamentals(
+    symbol: str,
+) -> tuple[
+    dict[str, ClaimValue | None], dict[str, list[ClaimHistoryPoint]]
+]:
     """
-    Pull ``.info``, ``.financials``, ``.cashflow`` from yfinance once,
-    then read or compute every claim. yfinance is imported lazily so the
-    test suite can swap in a fake module without paying the
-    pandas/numpy import cost.
+    Pull ``.info``, ``.financials``, ``.cashflow``, ``.quarterly_financials``,
+    ``.quarterly_cashflow`` from yfinance once, then read or compute every
+    claim's point-in-time value AND its quarterly history (Phase 3.2.A).
+    yfinance is imported lazily so the test suite can swap in a fake
+    module without paying the pandas/numpy import cost.
+
+    Returns ``(raw_values, history_map)``. The history map is computed
+    via ``app.services.fundamentals_history.build_fundamentals_history``;
+    point-in-time values for the new history-bearing claims are taken
+    as ``history[-1].value`` (latest quarter) so the snapshot and the
+    sparkline's last point always agree.
     """
     import yfinance  # noqa: PLC0415
 
@@ -174,6 +237,14 @@ def _fetch_yfinance_fundamentals(symbol: str) -> dict[str, ClaimValue | None]:
     info: dict[str, Any] = getattr(ticker, "info", {}) or {}
     financials = getattr(ticker, "financials", None)
     cashflow = getattr(ticker, "cashflow", None)
+    quarterly_financials = getattr(ticker, "quarterly_financials", None)
+    quarterly_cashflow = getattr(ticker, "quarterly_cashflow", None)
+
+    # Build the history map first — its latest values feed the snapshot
+    # for new claims, keeping snapshot and history[-1] consistent.
+    history_map = build_fundamentals_history(
+        quarterly_financials, quarterly_cashflow
+    )
 
     raw: dict[str, ClaimValue | None] = {}
 
@@ -211,7 +282,23 @@ def _fetch_yfinance_fundamentals(symbol: str) -> dict[str, ClaimValue | None]:
     else:
         raw["gross_margin_trend_1y"] = None
 
-    return raw
+    # 5. Phase 3.2.A snapshot values for the new history-bearing claims.
+    #    Snapshot = latest quarter (history[-1].value). For the two
+    #    legacy claims that gained .history (gross_margin / profit_margin),
+    #    we keep the .info-derived snapshot — it's the user-facing TTM
+    #    figure. The sparkline shows quarterly drift around it.
+    for key in (
+        "revenue_per_share",
+        "gross_profit_per_share",
+        "operating_income_per_share",
+        "fcf_per_share",
+        "ocf_per_share",
+        "operating_margin",
+        "fcf_margin",
+    ):
+        raw[key] = latest_value(history_map.get(key, []))
+
+    return raw, history_map
 
 
 PROVIDERS: dict[str, FundamentalsProvider] = {
@@ -248,10 +335,18 @@ async def fetch_fundamentals(
     with log_external_call(
         service_id, {"symbol": target, "provider": provider}
     ) as call:
-        raw = await asyncio.to_thread(fetch, target)
+        raw, history_map = await asyncio.to_thread(fetch, target)
         non_null = sum(1 for k in CLAIM_KEYS if raw.get(k) is not None)
+        history_count = sum(1 for k in HISTORY_KEYS if history_map.get(k))
         call.record_output(
-            {"claim_count": len(CLAIM_KEYS), "non_null_count": non_null}
+            {
+                "claim_count": len(CLAIM_KEYS),
+                "non_null_count": non_null,
+                # How many history-bearing claims actually got history
+                # populated. Useful for spotting yfinance drift in
+                # the observability stream.
+                "history_populated_count": history_count,
+            }
         )
 
     fetched_at = datetime.now(UTC)
@@ -265,5 +360,6 @@ async def fetch_fundamentals(
                 fetched_at=fetched_at,
                 detail=_DETAILS[key],
             ),
+            history=history_map.get(key, []),
         )
     return out

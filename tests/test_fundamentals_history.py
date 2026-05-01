@@ -31,7 +31,6 @@ from app.services.fundamentals_history import (
     format_period,
 )
 
-
 # ── format_period ────────────────────────────────────────────────────
 
 
@@ -184,7 +183,7 @@ def test_none_dataframes_returns_all_empty_histories() -> None:
 
 def test_empty_dataframes_returns_all_empty_histories() -> None:
     out = build_fundamentals_history(pd.DataFrame(), pd.DataFrame())
-    for key, history in out.items():
+    for history in out.values():
         assert history == []
 
 

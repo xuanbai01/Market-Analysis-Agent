@@ -71,12 +71,30 @@ class SectionSpec:
 
 
 # ── Per-section claim-key splits for fetch_fundamentals ──────────────
-# fetch_fundamentals returns 15 flat keys. We split them across three
-# sections so each section's prose is bounded and themed. Order within
-# each list is the display order in the report.
+# fetch_fundamentals returns 22 flat keys (Phase 3.2.A: 15 legacy + 7
+# history-bearing per-share / margin claims). We split them across
+# three sections so each section's prose is bounded and themed. Order
+# within each list is the display order in the report.
 
 _VALUATION_KEYS = ("trailing_pe", "forward_pe", "p_s", "ev_ebitda", "peg")
-_QUALITY_KEYS = ("roe", "gross_margin", "profit_margin", "gross_margin_trend_1y")
+_QUALITY_KEYS = (
+    # Legacy point-in-time
+    "roe",
+    "gross_margin",
+    "profit_margin",
+    "gross_margin_trend_1y",
+    # Phase 3.2.A — per-share growth (history-bearing). Visual layer
+    # renders sparklines next to these. Section's prose stays at
+    # 2-4 sentences regardless of metric count.
+    "revenue_per_share",
+    "gross_profit_per_share",
+    "operating_income_per_share",
+    "fcf_per_share",
+    "ocf_per_share",
+    # Phase 3.2.A — margin trends (history-bearing).
+    "operating_margin",
+    "fcf_margin",
+)
 _CAPITAL_ALLOCATION_KEYS = (
     "dividend_yield",
     "buyback_yield",

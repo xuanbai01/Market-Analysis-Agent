@@ -109,11 +109,15 @@ def _cashflow_4q() -> pd.DataFrame:
 
 
 def test_returns_all_advertised_keys_when_data_complete() -> None:
-    """Every history-bearing claim key gets a populated history when the
-    underlying frames cover all quarters."""
+    """Every 3.2.A history-bearing claim key gets a populated history
+    when the underlying frames cover all quarters. Keys outside the
+    3.2.A set (3.2.B + 3.2.C metrics from later phases) are present in
+    the output dict but populate empty here because their source rows
+    aren't in the basic fixture.
+    """
     out = build_fundamentals_history(_financials_4q(), _cashflow_4q())
 
-    expected_keys = {
+    phase_3_2_a_keys = {
         "revenue_per_share",
         "gross_profit_per_share",
         "operating_income_per_share",
@@ -124,9 +128,12 @@ def test_returns_all_advertised_keys_when_data_complete() -> None:
         "gross_margin",
         "profit_margin",
     }
-    assert set(out.keys()) == expected_keys
-    for key in expected_keys:
+    # All 3.2.A keys present and populated.
+    for key in phase_3_2_a_keys:
+        assert key in out, f"{key} missing from output"
         assert len(out[key]) == 4, f"{key} should have 4 quarters"
+    # The full key set is a superset (3.2.B + 3.2.C add more).
+    assert phase_3_2_a_keys <= set(out.keys())
 
 
 def test_revenue_per_share_math_and_order() -> None:
@@ -266,3 +273,205 @@ def test_missing_row_labels_yield_empty_history_for_that_metric() -> None:
     # Unrelated metrics still populate.
     assert len(out["revenue_per_share"]) == 4
     assert len(out["operating_margin"]) == 4
+
+
+# ── Phase 3.2.B+C: cash flow components + balance sheet trend ────────
+
+
+def _cashflow_4q_with_components() -> pd.DataFrame:
+    """Cashflow including SBC + CapEx for the components stack."""
+    cols = [
+        pd.Timestamp("2024-12-31"),
+        pd.Timestamp("2024-09-30"),
+        pd.Timestamp("2024-06-30"),
+        pd.Timestamp("2024-03-31"),
+    ]
+    return pd.DataFrame(
+        [
+            [25.0, 22.0, 18.0, 15.0],     # Operating Cash Flow
+            [-5.0, -4.0, -3.0, -2.0],     # Capital Expenditure (negative)
+            [20.0, 18.0, 15.0, 13.0],     # Free Cash Flow
+            [4.0, 3.5, 3.0, 2.5],         # Stock Based Compensation (positive)
+        ],
+        index=[
+            "Operating Cash Flow",
+            "Capital Expenditure",
+            "Free Cash Flow",
+            "Stock Based Compensation",
+        ],
+        columns=cols,
+    )
+
+
+def _balance_sheet_4q() -> pd.DataFrame:
+    """Synthetic balance sheet with the rows Phase 3.2.C consumes."""
+    cols = [
+        pd.Timestamp("2024-12-31"),
+        pd.Timestamp("2024-09-30"),
+        pd.Timestamp("2024-06-30"),
+        pd.Timestamp("2024-03-31"),
+    ]
+    return pd.DataFrame(
+        [
+            [800.0, 750.0, 700.0, 650.0],  # Cash + ST Inv
+            [200.0, 220.0, 240.0, 250.0],  # Total Debt
+            [3000.0, 2800.0, 2600.0, 2400.0],  # Total Assets
+            [1200.0, 1150.0, 1100.0, 1050.0],  # Total Liabilities Net Minority Interest
+        ],
+        index=[
+            "Cash Cash Equivalents And Short Term Investments",
+            "Total Debt",
+            "Total Assets",
+            "Total Liabilities Net Minority Interest",
+        ],
+        columns=cols,
+    )
+
+
+def test_three_frame_signature_returns_six_more_keys() -> None:
+    """Phase 3.2.B+C: build_fundamentals_history accepts a third
+    quarterly_balance_sheet param and returns 6 additional history keys
+    on top of the 9 from 3.2.A."""
+    out = build_fundamentals_history(
+        _financials_4q(), _cashflow_4q_with_components(), _balance_sheet_4q()
+    )
+
+    new_keys = {
+        # 3.2.B — cash flow components
+        "capex_per_share",
+        "sbc_per_share",
+        # 3.2.C — balance sheet trend
+        "cash_and_st_investments_per_share",
+        "total_debt_per_share",
+        "total_assets_per_share",
+        "total_liabilities_per_share",
+    }
+    assert new_keys <= set(out.keys())
+    for key in new_keys:
+        assert len(out[key]) == 4, f"{key} should have 4 quarters"
+
+
+def test_capex_per_share_is_absolute_value() -> None:
+    """yfinance reports Capital Expenditure as a negative cash outflow.
+    For the cash-flow-components stacked bar, the chart shows magnitude;
+    feeding it negative numbers would render below the axis. Take abs()."""
+    out = build_fundamentals_history(
+        _financials_4q(), _cashflow_4q_with_components(), _balance_sheet_4q()
+    )
+
+    capex = out["capex_per_share"]
+    # Q4: |-5| / 1000 = 0.005
+    assert capex[-1] == ClaimHistoryPoint(period="2024-Q4", value=0.005)
+    # All values should be non-negative regardless of sign in the source.
+    assert all(p.value >= 0 for p in capex)
+
+
+def test_sbc_per_share_passes_signed_value_through() -> None:
+    """SBC is reported as positive in yfinance (non-cash addback).
+    No abs() needed; it's already in the right sign for the chart."""
+    out = build_fundamentals_history(
+        _financials_4q(), _cashflow_4q_with_components(), _balance_sheet_4q()
+    )
+
+    sbc = out["sbc_per_share"]
+    assert sbc[-1] == ClaimHistoryPoint(period="2024-Q4", value=4.0 / 1000.0)
+
+
+def test_balance_sheet_per_share_metrics() -> None:
+    out = build_fundamentals_history(
+        _financials_4q(), _cashflow_4q_with_components(), _balance_sheet_4q()
+    )
+
+    cash = out["cash_and_st_investments_per_share"]
+    debt = out["total_debt_per_share"]
+    assets = out["total_assets_per_share"]
+    liab = out["total_liabilities_per_share"]
+
+    # Q4 2024: Diluted Avg Shares = 1000.
+    assert cash[-1] == ClaimHistoryPoint(period="2024-Q4", value=800.0 / 1000.0)
+    assert debt[-1] == ClaimHistoryPoint(period="2024-Q4", value=200.0 / 1000.0)
+    assert assets[-1] == ClaimHistoryPoint(period="2024-Q4", value=3000.0 / 1000.0)
+    assert liab[-1] == ClaimHistoryPoint(period="2024-Q4", value=1200.0 / 1000.0)
+
+
+def test_balance_sheet_history_oldest_first() -> None:
+    """Same convention as the rest: history[0] is oldest, history[-1] newest."""
+    out = build_fundamentals_history(
+        _financials_4q(), _cashflow_4q_with_components(), _balance_sheet_4q()
+    )
+
+    debt = out["total_debt_per_share"]
+    assert [p.period for p in debt] == [
+        "2024-Q1",
+        "2024-Q2",
+        "2024-Q3",
+        "2024-Q4",
+    ]
+
+
+def test_missing_balance_sheet_yields_empty_bs_histories() -> None:
+    """No balance sheet -> all BS-trend keys empty. Other histories still
+    populate from financials + cashflow."""
+    out = build_fundamentals_history(
+        _financials_4q(), _cashflow_4q_with_components(), None
+    )
+
+    assert out["cash_and_st_investments_per_share"] == []
+    assert out["total_debt_per_share"] == []
+    assert out["total_assets_per_share"] == []
+    assert out["total_liabilities_per_share"] == []
+    # Non-BS histories should still populate.
+    assert len(out["revenue_per_share"]) == 4
+    assert len(out["capex_per_share"]) == 4
+    assert len(out["sbc_per_share"]) == 4
+
+
+def test_balance_sheet_param_optional_for_backwards_compat() -> None:
+    """Calling build_fundamentals_history with the old 2-arg signature
+    must still work — produces the original 9 history keys, plus the
+    6 new ones empty."""
+    out = build_fundamentals_history(_financials_4q(), _cashflow_4q())
+
+    # 3.2.A keys still populate.
+    assert len(out["revenue_per_share"]) == 4
+    assert len(out["gross_margin"]) == 4
+    # 3.2.B + 3.2.C keys present in the dict but empty (no BS, no SBC row
+    # in the basic cashflow fixture).
+    assert "capex_per_share" in out
+    assert "cash_and_st_investments_per_share" in out
+    assert out["cash_and_st_investments_per_share"] == []
+
+
+def test_balance_sheet_misalignment_with_financials_uses_intersection() -> None:
+    """quarterly_balance_sheet may cover slightly different quarters than
+    quarterly_financials (e.g. fiscal-year-end timing). _ratio_history's
+    intersection logic handles it; the shorter coverage shows up in the
+    history list length."""
+    fin = _financials_4q()  # Q1-Q4 2024
+    # Balance sheet only has Q3 + Q4 2024.
+    bs_cols = [pd.Timestamp("2024-12-31"), pd.Timestamp("2024-09-30")]
+    bs = pd.DataFrame(
+        [
+            [800.0, 750.0],
+            [200.0, 220.0],
+            [3000.0, 2800.0],
+            [1200.0, 1150.0],
+        ],
+        index=[
+            "Cash Cash Equivalents And Short Term Investments",
+            "Total Debt",
+            "Total Assets",
+            "Total Liabilities Net Minority Interest",
+        ],
+        columns=bs_cols,
+    )
+
+    out = build_fundamentals_history(fin, _cashflow_4q_with_components(), bs)
+
+    # BS metrics should only have 2 points (intersection with shares).
+    assert [p.period for p in out["total_debt_per_share"]] == [
+        "2024-Q3",
+        "2024-Q4",
+    ]
+    # Non-BS metrics still populate fully.
+    assert len(out["revenue_per_share"]) == 4

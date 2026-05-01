@@ -63,6 +63,14 @@ def _fake_raw(**overrides: Any) -> dict[str, Any]:
         "ocf_per_share": 0.025,
         "operating_margin": 0.30,
         "fcf_margin": 0.20,
+        # Phase 3.2.B — cash flow components (Capital Allocation section)
+        "capex_per_share": 0.005,
+        "sbc_per_share": 0.004,
+        # Phase 3.2.C — balance sheet trend (Quality section)
+        "cash_and_st_investments_per_share": 0.80,
+        "total_debt_per_share": 0.20,
+        "total_assets_per_share": 3.00,
+        "total_liabilities_per_share": 1.20,
     }
     # Sanity: the fixture must list every advertised key, otherwise tests
     # silently miss whichever key was added without updating the fixture.
@@ -272,6 +280,7 @@ def _patch_yfinance(
     cashflow: pd.DataFrame | None = None,
     quarterly_financials: pd.DataFrame | None = None,
     quarterly_cashflow: pd.DataFrame | None = None,
+    quarterly_balance_sheet: pd.DataFrame | None = None,
 ) -> None:
     """Install a fake yfinance module so the lazy import inside the provider hits it.
 
@@ -279,6 +288,9 @@ def _patch_yfinance(
     required to populate ``Claim.history``. They default to empty
     DataFrames so existing tests (which only care about the legacy
     point-in-time fields) keep working without per-test fan-out.
+
+    Phase 3.2.C: ``quarterly_balance_sheet`` likewise — required for BS
+    trend histories, default empty.
     """
     import sys
     from unittest.mock import MagicMock
@@ -292,6 +304,11 @@ def _patch_yfinance(
     )
     fake_ticker.quarterly_cashflow = (
         quarterly_cashflow if quarterly_cashflow is not None else pd.DataFrame()
+    )
+    fake_ticker.quarterly_balance_sheet = (
+        quarterly_balance_sheet
+        if quarterly_balance_sheet is not None
+        else pd.DataFrame()
     )
 
     fake_yf = MagicMock()
@@ -516,7 +533,10 @@ def test_yfinance_returns_history_for_history_bearing_claims(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Provider's tuple's second element is the history map. The 9
-    history-bearing claims each carry a list ordered oldest-to-newest."""
+    Phase 3.2.A history-bearing claims each carry a list ordered
+    oldest-to-newest. Other keys (3.2.B + 3.2.C) are present in the
+    map but empty because the basic fixture doesn't include their
+    source rows."""
     _patch_yfinance(
         monkeypatch,
         info={},
@@ -526,7 +546,7 @@ def test_yfinance_returns_history_for_history_bearing_claims(
 
     _, history = _fetch_yfinance_fundamentals("NVDA")
 
-    history_keys = {
+    phase_3_2_a_keys = {
         "revenue_per_share",
         "gross_profit_per_share",
         "operating_income_per_share",
@@ -537,8 +557,9 @@ def test_yfinance_returns_history_for_history_bearing_claims(
         "gross_margin",
         "profit_margin",
     }
-    assert set(history.keys()) == history_keys
-    for key, hist in history.items():
+    assert phase_3_2_a_keys <= set(history.keys())
+    for key in phase_3_2_a_keys:
+        hist = history[key]
         assert len(hist) == 4, f"{key} should have 4 quarters"
         assert hist[0].period == "2024-Q1"
         assert hist[-1].period == "2024-Q4"
@@ -588,3 +609,130 @@ async def test_no_history_provided_means_empty_history_on_every_claim(
 
     for claim in result.values():
         assert claim.history == []
+
+
+# ── Phase 3.2.B+C: cash flow components + balance sheet trend ────────
+
+
+def _qcf_with_components_4q() -> pd.DataFrame:
+    """Cashflow with the rows Phase 3.2.B consumes."""
+    cols = [
+        pd.Timestamp("2024-12-31"),
+        pd.Timestamp("2024-09-30"),
+        pd.Timestamp("2024-06-30"),
+        pd.Timestamp("2024-03-31"),
+    ]
+    return pd.DataFrame(
+        [
+            [25.0, 22.0, 18.0, 15.0],
+            [-5.0, -4.0, -3.0, -2.0],
+            [20.0, 18.0, 15.0, 13.0],
+            [4.0, 3.5, 3.0, 2.5],
+        ],
+        index=[
+            "Operating Cash Flow",
+            "Capital Expenditure",
+            "Free Cash Flow",
+            "Stock Based Compensation",
+        ],
+        columns=cols,
+    )
+
+
+def _qbs_4q() -> pd.DataFrame:
+    cols = [
+        pd.Timestamp("2024-12-31"),
+        pd.Timestamp("2024-09-30"),
+        pd.Timestamp("2024-06-30"),
+        pd.Timestamp("2024-03-31"),
+    ]
+    return pd.DataFrame(
+        [
+            [800.0, 750.0, 700.0, 650.0],
+            [200.0, 220.0, 240.0, 250.0],
+            [3000.0, 2800.0, 2600.0, 2400.0],
+            [1200.0, 1150.0, 1100.0, 1050.0],
+        ],
+        index=[
+            "Cash Cash Equivalents And Short Term Investments",
+            "Total Debt",
+            "Total Assets",
+            "Total Liabilities Net Minority Interest",
+        ],
+        columns=cols,
+    )
+
+
+def test_yfinance_returns_capex_and_sbc_per_share_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 3.2.B: capex_per_share + sbc_per_share appear in the
+    history map, computed from quarterly_cashflow rows."""
+    _patch_yfinance(
+        monkeypatch,
+        info={},
+        quarterly_financials=_quarterly_financials_4q(),
+        quarterly_cashflow=_qcf_with_components_4q(),
+    )
+
+    raw, history = _fetch_yfinance_fundamentals("NVDA")
+
+    assert "capex_per_share" in history
+    assert "sbc_per_share" in history
+    assert len(history["capex_per_share"]) == 4
+    assert len(history["sbc_per_share"]) == 4
+    # Snapshot uses absolute value for CapEx (chart displays magnitude).
+    assert raw["capex_per_share"] == pytest.approx(5.0 / 1000.0)
+    assert raw["sbc_per_share"] == pytest.approx(4.0 / 1000.0)
+
+
+def test_yfinance_returns_balance_sheet_per_share_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 3.2.C: 4 balance-sheet per-share metrics appear in the
+    history map, computed from quarterly_balance_sheet rows."""
+    _patch_yfinance(
+        monkeypatch,
+        info={},
+        quarterly_financials=_quarterly_financials_4q(),
+        quarterly_balance_sheet=_qbs_4q(),
+    )
+
+    raw, history = _fetch_yfinance_fundamentals("NVDA")
+
+    bs_keys = {
+        "cash_and_st_investments_per_share",
+        "total_debt_per_share",
+        "total_assets_per_share",
+        "total_liabilities_per_share",
+    }
+    for key in bs_keys:
+        assert key in history, f"{key} missing from history map"
+        assert len(history[key]) == 4
+    # Snapshot values match the latest quarter.
+    assert raw["cash_and_st_investments_per_share"] == pytest.approx(0.80)
+    assert raw["total_debt_per_share"] == pytest.approx(0.20)
+    assert raw["total_assets_per_share"] == pytest.approx(3.00)
+    assert raw["total_liabilities_per_share"] == pytest.approx(1.20)
+
+
+def test_yfinance_balance_sheet_metrics_none_when_frame_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A symbol where yfinance doesn't return quarterly_balance_sheet —
+    BS metrics should be None / [] without raising."""
+    _patch_yfinance(
+        monkeypatch,
+        info={},
+        quarterly_financials=_quarterly_financials_4q(),
+        # quarterly_balance_sheet defaults to empty DataFrame
+    )
+
+    raw, history = _fetch_yfinance_fundamentals("NVDA")
+
+    assert raw["cash_and_st_investments_per_share"] is None
+    assert raw["total_debt_per_share"] is None
+    assert raw["total_assets_per_share"] is None
+    assert raw["total_liabilities_per_share"] is None
+    assert history["cash_and_st_investments_per_share"] == []
+    assert history["total_debt_per_share"] == []

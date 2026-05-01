@@ -71,6 +71,11 @@ CLAIM_KEYS: tuple[str, ...] = (
     # Quality (Phase 3.2.A — margin trends, history-bearing)
     "operating_margin",
     "fcf_margin",
+    # Quality (Phase 3.2.C — balance sheet trend, history-bearing)
+    "cash_and_st_investments_per_share",
+    "total_debt_per_share",
+    "total_assets_per_share",
+    "total_liabilities_per_share",
     # Capital allocation + sentiment
     "dividend_yield",
     "short_ratio",
@@ -78,6 +83,9 @@ CLAIM_KEYS: tuple[str, ...] = (
     "market_cap",
     "buyback_yield",
     "sbc_pct_revenue",
+    # Capital allocation (Phase 3.2.B — cash flow components, history-bearing)
+    "capex_per_share",
+    "sbc_per_share",
     # Trend (legacy single-value YoY delta — kept alongside history)
     "gross_margin_trend_1y",
 )
@@ -101,6 +109,14 @@ _DESCRIPTIONS: dict[str, str] = {
     "ocf_per_share": "Operating cash flow per share",
     "operating_margin": "Operating margin",
     "fcf_margin": "Free cash flow margin",
+    "cash_and_st_investments_per_share": (
+        "Cash + short-term investments per share"
+    ),
+    "total_debt_per_share": "Total debt per share",
+    "total_assets_per_share": "Total assets per share",
+    "total_liabilities_per_share": "Total liabilities per share",
+    "capex_per_share": "Capital expenditure per share",
+    "sbc_per_share": "Stock-based compensation per share",
     "dividend_yield": "Forward dividend yield",
     "short_ratio": "Short interest, days-to-cover",
     "shares_short": "Shares sold short",
@@ -142,6 +158,26 @@ _DETAILS: dict[str, str] = {
     ),
     "fcf_margin": (
         "computed: quarterly_cashflow.FreeCashFlow / quarterly_financials.TotalRevenue"
+    ),
+    "cash_and_st_investments_per_share": (
+        "computed: quarterly_balance_sheet.CashCashEquivalentsAndShortTermInvestments"
+        " / DilutedAverageShares"
+    ),
+    "total_debt_per_share": (
+        "computed: quarterly_balance_sheet.TotalDebt / DilutedAverageShares"
+    ),
+    "total_assets_per_share": (
+        "computed: quarterly_balance_sheet.TotalAssets / DilutedAverageShares"
+    ),
+    "total_liabilities_per_share": (
+        "computed: quarterly_balance_sheet.TotalLiabilitiesNetMinorityInterest"
+        " / DilutedAverageShares"
+    ),
+    "capex_per_share": (
+        "computed: |quarterly_cashflow.CapitalExpenditure| / DilutedAverageShares"
+    ),
+    "sbc_per_share": (
+        "computed: quarterly_cashflow.StockBasedCompensation / DilutedAverageShares"
     ),
     "dividend_yield": "info.dividendYield",
     "short_ratio": "info.shortRatio",
@@ -239,11 +275,14 @@ def _fetch_yfinance_fundamentals(
     cashflow = getattr(ticker, "cashflow", None)
     quarterly_financials = getattr(ticker, "quarterly_financials", None)
     quarterly_cashflow = getattr(ticker, "quarterly_cashflow", None)
+    quarterly_balance_sheet = getattr(
+        ticker, "quarterly_balance_sheet", None
+    )
 
     # Build the history map first — its latest values feed the snapshot
     # for new claims, keeping snapshot and history[-1] consistent.
     history_map = build_fundamentals_history(
-        quarterly_financials, quarterly_cashflow
+        quarterly_financials, quarterly_cashflow, quarterly_balance_sheet
     )
 
     raw: dict[str, ClaimValue | None] = {}
@@ -282,12 +321,14 @@ def _fetch_yfinance_fundamentals(
     else:
         raw["gross_margin_trend_1y"] = None
 
-    # 5. Phase 3.2.A snapshot values for the new history-bearing claims.
-    #    Snapshot = latest quarter (history[-1].value). For the two
-    #    legacy claims that gained .history (gross_margin / profit_margin),
-    #    we keep the .info-derived snapshot — it's the user-facing TTM
-    #    figure. The sparkline shows quarterly drift around it.
+    # 5. Phase 3.2.A/B/C snapshot values for the new history-bearing
+    #    claims. Snapshot = latest quarter (history[-1].value). For the
+    #    two legacy claims that gained .history (gross_margin /
+    #    profit_margin), we keep the .info-derived snapshot — it's the
+    #    user-facing TTM figure. The sparkline shows quarterly drift
+    #    around it.
     for key in (
+        # 3.2.A
         "revenue_per_share",
         "gross_profit_per_share",
         "operating_income_per_share",
@@ -295,6 +336,14 @@ def _fetch_yfinance_fundamentals(
         "ocf_per_share",
         "operating_margin",
         "fcf_margin",
+        # 3.2.B
+        "capex_per_share",
+        "sbc_per_share",
+        # 3.2.C
+        "cash_and_st_investments_per_share",
+        "total_debt_per_share",
+        "total_assets_per_share",
+        "total_liabilities_per_share",
     ):
         raw[key] = latest_value(history_map.get(key, []))
 

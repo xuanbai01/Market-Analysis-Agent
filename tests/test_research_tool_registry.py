@@ -32,8 +32,9 @@ def _claim(description: str, value: object) -> Claim:
 
 
 def _make_fundamentals_output() -> dict[str, Claim]:
-    """All fundamentals keys (Phase 3.2.A: 22 total = 15 legacy + 7 new
-    history-bearing per-share / margin claims), every value populated."""
+    """All fundamentals keys (Phase 3.2.B+C: 28 total = 22 from 3.2.A +
+    2 cash-flow-component + 4 balance-sheet trend claims), every value
+    populated."""
     return {
         # Valuation
         "trailing_pe": _claim("Trailing P/E", 28.5),
@@ -54,6 +55,13 @@ def _make_fundamentals_output() -> dict[str, Claim]:
         "ocf_per_share": _claim("Operating cash flow per share", 0.025),
         "operating_margin": _claim("Operating margin", 0.30),
         "fcf_margin": _claim("Free cash flow margin", 0.20),
+        # Quality (Phase 3.2.C — balance sheet trend)
+        "cash_and_st_investments_per_share": _claim(
+            "Cash + short-term investments per share", 0.80
+        ),
+        "total_debt_per_share": _claim("Total debt per share", 0.20),
+        "total_assets_per_share": _claim("Total assets per share", 3.00),
+        "total_liabilities_per_share": _claim("Total liabilities per share", 1.20),
         # Capital allocation
         "dividend_yield": _claim("Dividend yield", 0.005),
         "short_ratio": _claim("Short ratio", 1.2),
@@ -61,6 +69,9 @@ def _make_fundamentals_output() -> dict[str, Claim]:
         "market_cap": _claim("Market cap", 3_500_000_000_000),
         "buyback_yield": _claim("Buyback yield", 0.04),
         "sbc_pct_revenue": _claim("SBC % revenue", 0.07),
+        # Capital allocation (Phase 3.2.B — cash flow components)
+        "capex_per_share": _claim("Capital expenditure per share", 0.005),
+        "sbc_per_share": _claim("Stock-based compensation per share", 0.004),
     }
 
 
@@ -159,10 +170,11 @@ def test_valuation_builder_takes_only_valuation_keys() -> None:
 
 
 def test_quality_builder_takes_only_quality_keys() -> None:
-    """Phase 3.2.A: Quality section now contains 11 claims — 4 legacy
-    (ROE / margins / trend) + 7 per-share growth + margin trends. The
-    visual layer renders sparklines next to history-bearing rows; the
-    section's prose stays bounded at 2-4 sentences."""
+    """Phase 3.2.B+C: Quality section now contains 15 claims —
+    11 from 3.2.A (legacy + per-share growth + margin trends) plus
+    4 balance-sheet trend metrics. The visual layer renders sparklines
+    next to history-bearing rows; the section's prose stays bounded
+    at 2-4 sentences regardless of metric count."""
     fundamentals = _make_fundamentals_output()
     outputs = {"fetch_fundamentals": fundamentals}
 
@@ -184,14 +196,25 @@ def test_quality_builder_takes_only_quality_keys() -> None:
         # Phase 3.2.A — margin trends
         "Operating margin",
         "Free cash flow margin",
+        # Phase 3.2.C — balance sheet trend
+        "Cash + short-term investments per share",
+        "Total debt per share",
+        "Total assets per share",
+        "Total liabilities per share",
     }
     assert expected_quality <= descriptions
-    assert len(claims) == 11, "Quality section should have 11 claims"
+    assert len(claims) == 15, "Quality section should have 15 claims"
     assert "Trailing P/E" not in descriptions
     assert "Market cap" not in descriptions
+    # Capital-allocation cash-flow components don't bleed in.
+    assert "Capital expenditure per share" not in descriptions
+    assert "Stock-based compensation per share" not in descriptions
 
 
 def test_capital_allocation_builder_takes_only_cap_alloc_keys() -> None:
+    """Phase 3.2.B: Capital Allocation grows from 6 to 8 claims with
+    cash flow components (CapEx/share, SBC/share) joining the existing
+    yield + market-cap mix."""
     fundamentals = _make_fundamentals_output()
     outputs = {"fetch_fundamentals": fundamentals}
 
@@ -199,14 +222,22 @@ def test_capital_allocation_builder_takes_only_cap_alloc_keys() -> None:
     descriptions = {c.description for c in claims}
 
     expected = {
+        # Legacy
         "Dividend yield",
         "Buyback yield",
         "SBC % revenue",
         "Short ratio",
         "Shares short",
         "Market cap",
+        # Phase 3.2.B — cash flow components
+        "Capital expenditure per share",
+        "Stock-based compensation per share",
     }
     assert expected <= descriptions
+    assert len(claims) == 8, "Capital Allocation section should have 8 claims"
+    # Quality and BS-trend metrics don't bleed in.
+    assert "Revenue per share" not in descriptions
+    assert "Total debt per share" not in descriptions
     assert "Trailing P/E" not in descriptions
 
 

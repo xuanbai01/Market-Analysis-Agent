@@ -71,10 +71,10 @@ class SectionSpec:
 
 
 # ── Per-section claim-key splits for fetch_fundamentals ──────────────
-# fetch_fundamentals returns 22 flat keys (Phase 3.2.A: 15 legacy + 7
-# history-bearing per-share / margin claims). We split them across
-# three sections so each section's prose is bounded and themed. Order
-# within each list is the display order in the report.
+# fetch_fundamentals returns 28 flat keys (Phase 3.2.B+C: 22 from 3.2.A
+# + 2 cash-flow-component + 4 balance-sheet trend claims). We split
+# them across three sections so each section's prose is bounded and
+# themed. Order within each list is the display order in the report.
 
 _VALUATION_KEYS = ("trailing_pe", "forward_pe", "p_s", "ev_ebitda", "peg")
 _QUALITY_KEYS = (
@@ -94,6 +94,12 @@ _QUALITY_KEYS = (
     # Phase 3.2.A — margin trends (history-bearing).
     "operating_margin",
     "fcf_margin",
+    # Phase 3.2.C — balance sheet trend (history-bearing). Financial-
+    # strength read; lives in Quality alongside ROE / margins.
+    "cash_and_st_investments_per_share",
+    "total_debt_per_share",
+    "total_assets_per_share",
+    "total_liabilities_per_share",
 )
 _CAPITAL_ALLOCATION_KEYS = (
     "dividend_yield",
@@ -102,6 +108,11 @@ _CAPITAL_ALLOCATION_KEYS = (
     "short_ratio",
     "shares_short",
     "market_cap",
+    # Phase 3.2.B — cash flow components (history-bearing). "What does
+    # management do with the cash" lives here alongside the existing
+    # yield + buyback metrics.
+    "capex_per_share",
+    "sbc_per_share",
 )
 
 

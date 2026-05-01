@@ -533,7 +533,10 @@ def test_yfinance_returns_history_for_history_bearing_claims(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Provider's tuple's second element is the history map. The 9
-    history-bearing claims each carry a list ordered oldest-to-newest."""
+    Phase 3.2.A history-bearing claims each carry a list ordered
+    oldest-to-newest. Other keys (3.2.B + 3.2.C) are present in the
+    map but empty because the basic fixture doesn't include their
+    source rows."""
     _patch_yfinance(
         monkeypatch,
         info={},
@@ -543,7 +546,7 @@ def test_yfinance_returns_history_for_history_bearing_claims(
 
     _, history = _fetch_yfinance_fundamentals("NVDA")
 
-    history_keys = {
+    phase_3_2_a_keys = {
         "revenue_per_share",
         "gross_profit_per_share",
         "operating_income_per_share",
@@ -554,8 +557,9 @@ def test_yfinance_returns_history_for_history_bearing_claims(
         "gross_margin",
         "profit_margin",
     }
-    assert set(history.keys()) == history_keys
-    for key, hist in history.items():
+    assert phase_3_2_a_keys <= set(history.keys())
+    for key in phase_3_2_a_keys:
+        hist = history[key]
         assert len(hist) == 4, f"{key} should have 4 quarters"
         assert hist[0].period == "2024-Q1"
         assert hist[-1].period == "2024-Q4"

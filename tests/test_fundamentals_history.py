@@ -109,11 +109,15 @@ def _cashflow_4q() -> pd.DataFrame:
 
 
 def test_returns_all_advertised_keys_when_data_complete() -> None:
-    """Every history-bearing claim key gets a populated history when the
-    underlying frames cover all quarters."""
+    """Every 3.2.A history-bearing claim key gets a populated history
+    when the underlying frames cover all quarters. Keys outside the
+    3.2.A set (3.2.B + 3.2.C metrics from later phases) are present in
+    the output dict but populate empty here because their source rows
+    aren't in the basic fixture.
+    """
     out = build_fundamentals_history(_financials_4q(), _cashflow_4q())
 
-    expected_keys = {
+    phase_3_2_a_keys = {
         "revenue_per_share",
         "gross_profit_per_share",
         "operating_income_per_share",
@@ -124,9 +128,12 @@ def test_returns_all_advertised_keys_when_data_complete() -> None:
         "gross_margin",
         "profit_margin",
     }
-    assert set(out.keys()) == expected_keys
-    for key in expected_keys:
+    # All 3.2.A keys present and populated.
+    for key in phase_3_2_a_keys:
+        assert key in out, f"{key} missing from output"
         assert len(out[key]) == 4, f"{key} should have 4 quarters"
+    # The full key set is a superset (3.2.B + 3.2.C add more).
+    assert phase_3_2_a_keys <= set(out.keys())
 
 
 def test_revenue_per_share_math_and_order() -> None:

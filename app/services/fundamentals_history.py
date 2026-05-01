@@ -49,19 +49,29 @@ from typing import Any
 
 from app.schemas.research import ClaimHistoryPoint
 
-# Claim keys this helper produces history for. Mirrors the new keys
-# added in Phase 3.2.A plus the two legacy keys (gross_margin,
-# profit_margin) that gain a history field this PR.
+# Claim keys this helper produces history for. Spans Phase 3.2.A
+# (per-share growth + margins) and 3.2.B+C (cash flow components +
+# balance sheet trend).
 HISTORY_KEYS: tuple[str, ...] = (
+    # 3.2.A — per-share growth
     "revenue_per_share",
     "gross_profit_per_share",
     "operating_income_per_share",
     "fcf_per_share",
     "ocf_per_share",
+    # 3.2.A — margin trends (incl. existing claims that gained history)
     "operating_margin",
     "fcf_margin",
     "gross_margin",
     "profit_margin",
+    # 3.2.B — cash flow components (joins Capital Allocation section)
+    "capex_per_share",
+    "sbc_per_share",
+    # 3.2.C — balance sheet trend (joins Quality section)
+    "cash_and_st_investments_per_share",
+    "total_debt_per_share",
+    "total_assets_per_share",
+    "total_liabilities_per_share",
 )
 
 
@@ -159,8 +169,13 @@ def _ratio_history(numerator: Any, denominator: Any) -> list[ClaimHistoryPoint]:
 def build_fundamentals_history(
     quarterly_financials: Any,
     quarterly_cashflow: Any,
+    quarterly_balance_sheet: Any = None,
 ) -> dict[str, list[ClaimHistoryPoint]]:
-    """Compute all Phase 3.2.A histories from yfinance's quarterly frames.
+    """Compute all Phase 3.2 histories from yfinance's quarterly frames.
+
+    The ``quarterly_balance_sheet`` parameter is optional (defaults to
+    None) so callers from before Phase 3.2.C work unchanged — they just
+    get the four balance-sheet histories empty.
 
     Always returns a dict with every key in ``HISTORY_KEYS``; missing-
     data metrics get ``[]``. The caller's iteration is constant-shape
@@ -180,6 +195,18 @@ def build_fundamentals_history(
         quarterly_cashflow, "Operating Cash Flow"
     )
     free_cash_flow = _row_or_none(quarterly_cashflow, "Free Cash Flow")
+    capex = _row_or_none(quarterly_cashflow, "Capital Expenditure")
+    sbc = _row_or_none(quarterly_cashflow, "Stock Based Compensation")
+
+    cash_and_st_inv = _row_or_none(
+        quarterly_balance_sheet,
+        "Cash Cash Equivalents And Short Term Investments",
+    )
+    total_debt = _row_or_none(quarterly_balance_sheet, "Total Debt")
+    total_assets = _row_or_none(quarterly_balance_sheet, "Total Assets")
+    total_liabilities = _row_or_none(
+        quarterly_balance_sheet, "Total Liabilities Net Minority Interest"
+    )
 
     # Per-share metrics — all need diluted_shares as denominator.
     if diluted_shares is not None:
@@ -194,6 +221,24 @@ def build_fundamentals_history(
             operating_cash_flow, diluted_shares
         )
         out["fcf_per_share"] = _ratio_history(free_cash_flow, diluted_shares)
+        # Phase 3.2.B — cash flow components.
+        # CapEx: yfinance reports as negative outflow; chart shows
+        # magnitude, so abs() before the divide. Series.abs() is
+        # element-wise; NaN stays NaN.
+        if capex is not None:
+            out["capex_per_share"] = _ratio_history(capex.abs(), diluted_shares)
+        out["sbc_per_share"] = _ratio_history(sbc, diluted_shares)
+        # Phase 3.2.C — balance sheet per-share metrics.
+        out["cash_and_st_investments_per_share"] = _ratio_history(
+            cash_and_st_inv, diluted_shares
+        )
+        out["total_debt_per_share"] = _ratio_history(total_debt, diluted_shares)
+        out["total_assets_per_share"] = _ratio_history(
+            total_assets, diluted_shares
+        )
+        out["total_liabilities_per_share"] = _ratio_history(
+            total_liabilities, diluted_shares
+        )
 
     # Margin metrics — same-frame divisions where possible. ``revenue``
     # comes from quarterly_financials; for cross-frame margins

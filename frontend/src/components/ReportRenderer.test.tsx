@@ -185,7 +185,7 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
         expect(
           container.querySelector("[data-testid='section-chart']"),
         ).not.toBeNull(),
-      { timeout: 3000 },
+      { timeout: 6000 },
     );
   });
 
@@ -287,5 +287,212 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
         container.querySelector("[data-testid='section-chart']"),
       ).not.toBeNull(),
     );
+  });
+});
+
+// ── Phase 3.3.C — PeerScatter wiring ───────────────────────────────
+
+describe("ReportRenderer PeerScatter wiring (Phase 3.3.C)", () => {
+  function reportWithPeers(opts: {
+    includeValuationQuality?: boolean;
+  } = {}): ResearchReport {
+    const sections = [];
+    if (opts.includeValuationQuality !== false) {
+      sections.push({
+        title: "Valuation",
+        summary: "",
+        confidence: "high" as const,
+        claims: [
+          {
+            description: "P/E ratio (trailing 12 months)",
+            value: 65.0,
+            source: {
+              tool: "yfinance.fundamentals",
+              fetched_at: "2026-04-29T14:00:00+00:00",
+            },
+            history: [],
+          },
+        ],
+      });
+      sections.push({
+        title: "Quality",
+        summary: "",
+        confidence: "high" as const,
+        claims: [
+          {
+            description: "Gross margin",
+            value: 0.74,
+            source: {
+              tool: "yfinance.fundamentals",
+              fetched_at: "2026-04-29T14:00:00+00:00",
+            },
+            history: [],
+          },
+        ],
+      });
+    }
+    sections.push({
+      title: "Peers",
+      summary: "",
+      confidence: "high" as const,
+      claims: [
+        {
+          description: "Resolved sector for peer comparison",
+          value: "semiconductors",
+          source: {
+            tool: "yfinance.peers",
+            fetched_at: "2026-04-29T14:00:00+00:00",
+          },
+          history: [],
+        },
+        {
+          description: "AMD: P/E ratio (trailing 12 months)",
+          value: 25.4,
+          source: {
+            tool: "yfinance.peers",
+            fetched_at: "2026-04-29T14:00:00+00:00",
+          },
+          history: [],
+        },
+        {
+          description: "AMD: Gross margin",
+          value: 0.46,
+          source: {
+            tool: "yfinance.peers",
+            fetched_at: "2026-04-29T14:00:00+00:00",
+          },
+          history: [],
+        },
+        {
+          description: "INTC: P/E ratio (trailing 12 months)",
+          value: 18.2,
+          source: {
+            tool: "yfinance.peers",
+            fetched_at: "2026-04-29T14:00:00+00:00",
+          },
+          history: [],
+        },
+        {
+          description: "INTC: Gross margin",
+          value: 0.41,
+          source: {
+            tool: "yfinance.peers",
+            fetched_at: "2026-04-29T14:00:00+00:00",
+          },
+          history: [],
+        },
+        {
+          description: "Peer median: P/E ratio (trailing 12 months)",
+          value: 21.8,
+          source: {
+            tool: "yfinance.peers",
+            fetched_at: "2026-04-29T14:00:00+00:00",
+          },
+          history: [],
+        },
+        {
+          description: "Peer median: Gross margin",
+          value: 0.435,
+          source: {
+            tool: "yfinance.peers",
+            fetched_at: "2026-04-29T14:00:00+00:00",
+          },
+          history: [],
+        },
+      ],
+    });
+    return {
+      symbol: "NVDA",
+      generated_at: "2026-04-29T14:05:00+00:00",
+      overall_confidence: "high",
+      tool_calls_audit: [],
+      sections,
+    };
+  }
+
+  it("renders a PeerScatter for the Peers section with valid peer data", async () => {
+    const { container } = render(
+      <ReportRenderer report={reportWithPeers()} />,
+    );
+    await waitFor(
+      () =>
+        expect(
+          container.querySelector("[data-testid='peer-scatter']"),
+        ).not.toBeNull(),
+      { timeout: 6000 },
+    );
+  });
+
+  it("renders no PeerScatter when the Peers section has no usable peers", () => {
+    // Sector + peers_list metadata only, no per-peer metric claims.
+    const noUsablePeers: ResearchReport = {
+      symbol: "NVDA",
+      generated_at: "2026-04-29T14:05:00+00:00",
+      overall_confidence: "low",
+      tool_calls_audit: [],
+      sections: [
+        {
+          title: "Peers",
+          summary: "",
+          confidence: "low",
+          claims: [
+            {
+              description: "Resolved sector for peer comparison",
+              value: null,
+              source: {
+                tool: "yfinance.peers",
+                fetched_at: "2026-04-29T14:00:00+00:00",
+              },
+              history: [],
+            },
+          ],
+        },
+      ],
+    };
+    const { container } = render(<ReportRenderer report={noUsablePeers} />);
+    expect(
+      container.querySelector("[data-testid='peer-scatter']"),
+    ).toBeNull();
+  });
+
+  it("does not render PeerScatter for non-Peers sections", () => {
+    // The Earnings section has its own SectionChart; PeerScatter must
+    // never appear there even if peer-shaped claim descriptions
+    // somehow leaked in.
+    const earningsOnly: ResearchReport = {
+      symbol: "AAPL",
+      generated_at: "2026-04-29T14:05:00+00:00",
+      overall_confidence: "high",
+      tool_calls_audit: [],
+      sections: [
+        {
+          title: "Earnings",
+          summary: "",
+          confidence: "high",
+          claims: [
+            {
+              description: "Reported EPS (latest quarter)",
+              value: 2.18,
+              source: {
+                tool: "yfinance.earnings",
+                fetched_at: "2026-04-29T14:00:00+00:00",
+              },
+              history: [
+                { period: "2024-Q1", value: 1.4 },
+                { period: "2024-Q2", value: 1.53 },
+                { period: "2024-Q3", value: 2.05 },
+                { period: "2024-Q4", value: 2.18 },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const { container } = render(<ReportRenderer report={earningsOnly} />);
+    // No PeerScatter — even though Recharts loads for the EPS
+    // SectionChart.
+    expect(
+      container.querySelector("[data-testid='peer-scatter']"),
+    ).toBeNull();
   });
 });

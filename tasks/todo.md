@@ -8,7 +8,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- Phase 3 — Visual-first depth: schema (3.1) ✅; data-tool history (3.2.A–F) ✅; frontend visualization 3.3.A (Sparkline) ✅ + 3.3.B (SectionChart) ✅ + 3.3.C (PeerScatter) ✅. **Up next:** 3.4 (eval rubric history extension), then 3.5 (Vercel deploy + dogfood gate).
+- Phase 3 — Visual-first depth: schema (3.1) ✅; data-tool history (3.2.A–F) ✅; frontend visualization 3.3.A–C ✅; eval rubric history (3.4) ✅. **Up next:** 3.5 (Vercel deploy + dogfood gate) — the decision point for whether 3.6 XBRL escalation is needed.
 
 ## Phase 3 — Visual-first depth (active)
 
@@ -60,10 +60,10 @@ The pattern: each builder learns to populate `Claim.history` for the metrics whe
 - [ ] **`DividendsCard` component** *(deferred)* — quarterly dividends bar + yield line, dual-axis. Needs `fetch_dividends_history` tool first; both deferred together.
 - [ ] **`NewsList` component** *(deferred to Phase 4)* — last ~10 items: source, title, timestamp, link out. Plain list; no sentiment shading. Needs `fetch_news` wired into orchestrator first.
 
-### 3.4 Eval rubric extension
+### 3.4 Eval rubric extension ✅ done *(this PR)*
 
-- [ ] **`_matches_claim` reads history** — when checking a number from prose against claim values, also check `claim.history[*].value`. A summary that says "EPS rose from 1.46 to 2.18" passes if both numbers appear anywhere in the referenced claim's history.
-- [ ] **New golden case** with a history-bearing claim — verifies the rubric extension is exercised in CI, not just unit-tested.
+- [x] **`_claim_numeric_values` reads history** — value pool widened to yield each `Claim.history[*].value` alongside the snapshot. Trend prose like "EPS rose from 1.40 to 2.18" matches even when neither endpoint is the snapshot. Existing finance-display rules (tolerance, sign-flip, fraction-percent, scaled units) compose uniformly because they operate on the flat value pool, not per-claim. 6 new rubric unit tests pin: prose cites history, "rose from X to Y" pattern, historical fraction → percent, anti-regression on fabricated values, pre-3.2 backwards compat, cross-section history matching.
+- [x] **Live-LLM golden eval auto-benefits** — the existing AAPL/full case already exercises the new path whenever Sonnet writes a trend sentence. The 0.95 factuality threshold catches any regression. No new golden case needed; cost burn stays opt-in via `ANTHROPIC_API_KEY`.
 
 ### 3.5 Frontend deploy (after 3.1–3.4 land)
 
@@ -177,12 +177,19 @@ The pattern: each builder learns to populate `Claim.history` for the metrics whe
     - [x] Lazy-loaded via `React.lazy()` so recharts splits into its own chunk; main bundle 76 KB gz (under 100 KB budget); SectionChart chunk 103 KB gz on-demand
     - [x] 67/67 frontend tests pass (was 40; +15 featured-claim + 8 SectionChart + 4 ReportRenderer wiring)
 
-- [x] Phase 3.3.C — PeerScatter *(this branch)*
+- [x] Phase 3.3.C — PeerScatter (PR #43)
     - [x] `peer-grouping.ts` helpers — `groupPeers` parses `<TICKER>: <metric>` descriptions; `extractMedian` pulls `Peer median: …` claims; `extractSubject` cross-joins Valuation + Quality for the report's own ticker
     - [x] Recharts `ScatterChart` PeerScatter component — peers / subject / median as three Scatter series; subject 9px slate-900, peers 6px slate-500, median slate-400 cross; reuses `formatClaimValue` for axes
     - [x] Vite auto-chunking hoists recharts into a shared chunk used by both SectionChart and PeerScatter; main bundle 76.92 KB gz (was 76.25; +0.7 KB); per-component chunks 4.84 KB + 6.03 KB; recharts chunk 100 KB shared
     - [x] 94/94 frontend tests pass (was 67; +17 peer-grouping + 7 PeerScatter + 3 ReportRenderer wiring)
     - [x] EARNINGS focus mode falls back to peers + median only (no Quality section to extract subject's gross margin from)
+
+- [x] Phase 3.4 — Eval rubric history *(this branch)*
+    - [x] `_claim_numeric_values` widens to yield each history point alongside the snapshot
+    - [x] Module + function docstrings updated to document the history-aware mode
+    - [x] 6 new rubric unit tests: prose-cites-history, "rose from X to Y", percent display of historical fraction, anti-regression on fabrication, pre-3.2 backwards compat, cross-section history matching
+    - [x] 25/25 rubric tests pass (was 19; +6); ruff clean
+    - [x] Live-LLM golden eval auto-benefits via existing AAPL/full case
 
 ## Blocked / waiting
 

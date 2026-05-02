@@ -8,7 +8,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- Phase 3 — Visual-first depth: schema (3.1) ✅ done; data-tool history (3.2.A–F) ✅ done; frontend visualization (3.3) underway. **Up next:** 3.3.B (SectionChart) and 3.3.C (PeerScatter).
+- Phase 3 — Visual-first depth: schema (3.1) ✅ done; data-tool history (3.2.A–F) ✅ done; frontend visualization 3.3.A (Sparkline) ✅ + 3.3.B (SectionChart) ✅. **Up next:** 3.3.C (PeerScatter), then 3.5 (Vercel deploy + dogfood gate).
 
 ## Phase 3 — Visual-first depth (active)
 
@@ -47,13 +47,14 @@ The pattern: each builder learns to populate `Claim.history` for the metrics whe
 
 ### 3.3 Frontend visualization
 
-- [x] **3.3.A — Sparkline + Trend column** *(this PR)* — hand-rolled SVG (~30 lines) instead of Recharts for the inline use case (Recharts' ResponsiveContainer doesn't measure correctly in nested table cells / happy-dom). Default 80×24, slate-700 stroke, dot on the most-recent point, returns null when `history.length < 2`. ReportRenderer's claims table grew a "Trend" column hidden below `sm:` breakpoint. **Recharts dependency installed** for 3.3.B; tree-shaken away from the 3.3.A bundle (75 KB gz, +0.5 KB net).
-- [ ] **3.3.B — `SectionChart` component** — Recharts `LineChart` (~300×120) at the top of sections that warrant a featured visualization. `featured-claim.ts` picks the right claim per section title:
-    - Earnings → `eps_actual` (with `eps_estimate` as secondary line)
-    - Quality → `operating_margin`
-    - Capital Allocation → `fcf_per_share`
-    - Macro → first `<id>.value` (typically DGS10)
-    - Valuation / Peers / Risk Factors → skip (no history available, or rendered via PeerScatter)
+- [x] **3.3.A — Sparkline + Trend column** (PR #41) — hand-rolled SVG (~30 lines) instead of Recharts for the inline use case (Recharts' ResponsiveContainer doesn't measure correctly in nested table cells / happy-dom). Default 80×24, slate-700 stroke, dot on the most-recent point, returns null when `history.length < 2`. ReportRenderer's claims table grew a "Trend" column hidden below `sm:` breakpoint. Recharts dep installed for 3.3.B; tree-shaken away from the 3.3.A bundle (75 KB gz, +0.5 KB net).
+- [x] **3.3.B — `SectionChart` component** *(this PR)* — Recharts `LineChart` (300×120) at the top of sections with a featured-claim spec. **Lazy-loaded via `React.lazy()`** so recharts (~100 KB gz) lives in its own chunk, keeping the main bundle at 76 KB (under the 100 KB budget). `featured-claim.ts` picks per section title with exact-description matching:
+    - Earnings → `Reported EPS (latest quarter)` (primary) + `Consensus EPS estimate (latest quarter, going in)` (secondary, dashed line)
+    - Quality → `Return on equity` (single-line)
+    - Capital Allocation → `Capital expenditure per share` (single-line)
+    - Macro → first claim with description suffix `(latest observation)` and history (suffix predicate because Macro descriptions are dynamic per FRED series)
+    - Valuation / Peers / Risk Factors / unknown title → skip (returns null)
+    Y-axis ticks + tooltip reuse `formatClaimValue` (single source of truth with table cells AND backend eval rubric). Period axis uses `preserveStartEnd` to avoid 20Q label overlap.
 - [ ] **3.3.C — `PeerScatter` component** — peer-comparison matrix as a 2-D scatter (P/E × gross margin). Subject highlighted vs peers. Augments the existing table (a11y: keep the table for screen readers). Includes `peer-grouping.ts` to regroup flat `peer_N.<metric>` claims into per-symbol records.
 - [ ] **3.3.D *(deferred)* — multi-series / stacked enhancements:** CashFlowStacked (OCF / CapEx / SBC / FCF stacked bars), BalanceSheetTrend (cash vs debt overlay), multi-line Quality SectionChart (margins overlay), EarningsBeatRate (binary strip alongside EPS line). Land only if 3.5 dogfood signals these gaps.
 - [ ] **`DividendsCard` component** *(deferred)* — quarterly dividends bar + yield line, dual-axis. Needs `fetch_dividends_history` tool first; both deferred together.
@@ -164,11 +165,17 @@ The pattern: each builder learns to populate `Claim.history` for the metrics whe
     - [x] **3.2.F** (PR #40) — `fetch_macro` ~36 monthly observations per FRED series via `frequency=m`; provider tuple shape converged across all three multi-period tools
     - **Net result:** 19+ history-bearing claims, all snapshot/`history[-1]` consistent by construction. 499/499 backend tests pass.
 
-- [x] Phase 3.3.A — Sparkline + Trend column *(this branch)*
+- [x] Phase 3.3.A — Sparkline + Trend column (PR #41)
     - [x] Hand-rolled SVG `Sparkline` component (~30 lines, no Recharts for inline use)
     - [x] ReportRenderer "Trend" column added; hidden below `sm:` breakpoint
     - [x] `recharts ^2.13` installed (used by 3.3.B); tree-shaken away from 3.3.A bundle
-    - [x] 40/40 frontend tests pass (was 19; +21 new — 7 Sparkline + 8 ReportRenderer + 6 recovered renderer structural coverage). Bundle 75 KB gz (+0.5 KB).
+    - [x] 40/40 frontend tests pass (was 19; +21 new). Bundle 75 KB gz (+0.5 KB).
+
+- [x] Phase 3.3.B — SectionChart *(this branch)*
+    - [x] `featured-claim.ts` picker — exact-description match per section title; macro suffix predicate; null-guards for unknown / sparse / pre-3.2 cached reports
+    - [x] Recharts `LineChart` SectionChart component — 300×120 default, slate-700 primary + dashed slate-400 secondary, reuses `formatClaimValue` for ticks/tooltip
+    - [x] Lazy-loaded via `React.lazy()` so recharts splits into its own chunk; main bundle 76 KB gz (under 100 KB budget); SectionChart chunk 103 KB gz on-demand
+    - [x] 67/67 frontend tests pass (was 40; +15 featured-claim + 8 SectionChart + 4 ReportRenderer wiring)
 
 ## Blocked / waiting
 

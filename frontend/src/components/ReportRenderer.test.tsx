@@ -18,7 +18,7 @@
  * the Sparkline component sets.
  */
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 
 import type { ResearchReport } from "../lib/schemas";
 import { ReportRenderer } from "./ReportRenderer";
@@ -159,5 +159,133 @@ describe("ReportRenderer Trend column (Phase 3.3.A)", () => {
     render(<ReportRenderer report={buildReport()} />);
     // formatClaimValue renders 2.18 as the string "2.18".
     expect(screen.getByText("2.18")).toBeInTheDocument();
+  });
+});
+
+// ── Phase 3.3.B — SectionChart wiring ───────────────────────────────
+
+describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
+  // SectionChart is lazy-loaded (React.lazy + Suspense) so the
+  // recharts dep stays out of the main bundle. Tests for "did the
+  // chart render" need waitFor() because the chunk resolves async.
+  // Tests for "the chart did NOT render" can be synchronous —
+  // featuredClaim() returns null synchronously and the lazy import
+  // never fires, so the fallback / chart never appears.
+
+  it("renders a SectionChart for an Earnings section with EPS history", async () => {
+    // The default buildReport() has an Earnings section with a
+    // 4-point eps_actual history → the SectionChart should appear.
+    const { container } = render(<ReportRenderer report={buildReport()} />);
+    // 3s timeout because recharts is a 100 KB chunk; the first
+    // lazy() resolution per worker pays the dynamic-import cost
+    // even in vite test mode (subsequent renders in the same file
+    // hit the module cache and resolve instantly).
+    await waitFor(
+      () =>
+        expect(
+          container.querySelector("[data-testid='section-chart']"),
+        ).not.toBeNull(),
+      { timeout: 3000 },
+    );
+  });
+
+  it("renders no SectionChart for Risk Factors (no featured-claim spec)", () => {
+    const riskOnly: ResearchReport = {
+      symbol: "AAPL",
+      generated_at: "2026-04-29T14:05:00+00:00",
+      overall_confidence: "low",
+      tool_calls_audit: [],
+      sections: [
+        {
+          title: "Risk Factors",
+          summary: "",
+          confidence: "low",
+          claims: [
+            {
+              description: "Newly added risk paragraphs vs prior 10-K",
+              value: 3,
+              source: {
+                tool: "sec.ten_k_risks_diff",
+                fetched_at: "2026-04-29T14:00:00+00:00",
+              },
+              history: [],
+            },
+          ],
+        },
+      ],
+    };
+    const { container } = render(<ReportRenderer report={riskOnly} />);
+    expect(
+      container.querySelector("[data-testid='section-chart']"),
+    ).toBeNull();
+  });
+
+  it("renders no SectionChart when Earnings EPS history is empty (graceful pre-3.2 degrade)", () => {
+    const noEpsHistory: ResearchReport = {
+      symbol: "AAPL",
+      generated_at: "2026-04-29T14:05:00+00:00",
+      overall_confidence: "medium",
+      tool_calls_audit: [],
+      sections: [
+        {
+          title: "Earnings",
+          summary: "Pre-3.2 cached report.",
+          confidence: "medium",
+          claims: [
+            {
+              description: "Reported EPS (latest quarter)",
+              value: 2.18,
+              source: {
+                tool: "yfinance.earnings",
+                fetched_at: "2026-04-29T14:00:00+00:00",
+              },
+              history: [], // empty — pre-3.2 cache
+            },
+          ],
+        },
+      ],
+    };
+    const { container } = render(<ReportRenderer report={noEpsHistory} />);
+    expect(
+      container.querySelector("[data-testid='section-chart']"),
+    ).toBeNull();
+  });
+
+  it("renders a SectionChart for Quality with ROE history", async () => {
+    const qualityReport: ResearchReport = {
+      symbol: "AAPL",
+      generated_at: "2026-04-29T14:05:00+00:00",
+      overall_confidence: "high",
+      tool_calls_audit: [],
+      sections: [
+        {
+          title: "Quality",
+          summary: "ROE has trended up over four quarters.",
+          confidence: "high",
+          claims: [
+            {
+              description: "Return on equity",
+              value: 0.18,
+              source: {
+                tool: "yfinance.fundamentals",
+                fetched_at: "2026-04-29T14:00:00+00:00",
+              },
+              history: [
+                { period: "2024-Q1", value: 0.15 },
+                { period: "2024-Q2", value: 0.16 },
+                { period: "2024-Q3", value: 0.17 },
+                { period: "2024-Q4", value: 0.18 },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const { container } = render(<ReportRenderer report={qualityReport} />);
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-testid='section-chart']"),
+      ).not.toBeNull(),
+    );
   });
 });

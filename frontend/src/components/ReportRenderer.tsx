@@ -27,10 +27,20 @@
  * a 60 px sparkline next to a number on a phone is more noise than
  * signal. Hidden via Tailwind's ``hidden sm:table-cell``.
  */
+import { Suspense, lazy } from "react";
+
 import type { Claim, ResearchReport, Section } from "../lib/schemas";
+import { featuredClaim } from "../lib/featured-claim";
 import { formatClaimValue, formatTimestamp } from "../lib/format";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { Sparkline } from "./Sparkline";
+
+// SectionChart is the only Recharts consumer; lazy-loading it keeps
+// recharts (~100 KB gz) out of the initial bundle. Login screen +
+// dashboard skeleton paint fast; the chart chunk loads after the
+// report data arrives. Suspense fallback is a fixed-height box so
+// there's no layout jump when the chart slides in.
+const SectionChart = lazy(() => import("./SectionChart"));
 
 interface Props {
   report: ResearchReport;
@@ -68,6 +78,13 @@ export function ReportRenderer({ report }: Props) {
 }
 
 function SectionCard({ section }: { section: Section }) {
+  // Phase 3.3.B — pick a "headline" Claim (or pair, for Earnings) and
+  // render a SectionChart at the top of the card. Returns null when
+  // the section has no spec, no matching claim, or insufficient
+  // history; in those cases the card falls back to its pre-3.3.B
+  // shape (header + summary + claims table).
+  const featured = featuredClaim(section);
+
   return (
     <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
       <header className="mb-3 flex items-center justify-between gap-3">
@@ -76,6 +93,24 @@ function SectionCard({ section }: { section: Section }) {
         </h3>
         <ConfidenceBadge confidence={section.confidence} size="sm" />
       </header>
+
+      {featured && (
+        <div className="mb-4">
+          <Suspense
+            fallback={
+              <div
+                className="hidden sm:block"
+                style={{ height: 120, width: 300 }}
+              />
+            }
+          >
+            <SectionChart
+              primary={featured.primary}
+              secondary={featured.secondary}
+            />
+          </Suspense>
+        </div>
+      )}
 
       {section.summary && (
         <p className="mb-4 text-sm leading-relaxed text-slate-700">

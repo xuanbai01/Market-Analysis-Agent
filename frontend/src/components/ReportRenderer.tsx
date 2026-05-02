@@ -32,15 +32,22 @@ import { Suspense, lazy } from "react";
 import type { Claim, ResearchReport, Section } from "../lib/schemas";
 import { featuredClaim } from "../lib/featured-claim";
 import { formatClaimValue, formatTimestamp } from "../lib/format";
+import {
+  extractMedian,
+  extractSubject,
+  groupPeers,
+} from "../lib/peer-grouping";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { Sparkline } from "./Sparkline";
 
-// SectionChart is the only Recharts consumer; lazy-loading it keeps
-// recharts (~100 KB gz) out of the initial bundle. Login screen +
-// dashboard skeleton paint fast; the chart chunk loads after the
-// report data arrives. Suspense fallback is a fixed-height box so
-// there's no layout jump when the chart slides in.
+// SectionChart + PeerScatter are the only Recharts consumers; lazy-
+// loading them keeps recharts (~100 KB gz) out of the initial bundle.
+// Login screen + dashboard skeleton paint fast; the chart chunk loads
+// after the report data arrives. Vite's code-splitter hoists recharts
+// into a shared vendor chunk so SectionChart and PeerScatter share
+// the runtime cost of recharts (verified via `npm run build`).
 const SectionChart = lazy(() => import("./SectionChart"));
+const PeerScatter = lazy(() => import("./PeerScatter"));
 
 interface Props {
   report: ResearchReport;
@@ -70,20 +77,41 @@ export function ReportRenderer({ report }: Props) {
         <p className="text-sm text-slate-500">No sections returned.</p>
       ) : (
         report.sections.map((section) => (
-          <SectionCard key={section.title} section={section} />
+          <SectionCard
+            key={section.title}
+            section={section}
+            report={report}
+          />
         ))
       )}
     </article>
   );
 }
 
-function SectionCard({ section }: { section: Section }) {
+function SectionCard({
+  section,
+  report,
+}: {
+  section: Section;
+  report: ResearchReport;
+}) {
   // Phase 3.3.B — pick a "headline" Claim (or pair, for Earnings) and
   // render a SectionChart at the top of the card. Returns null when
   // the section has no spec, no matching claim, or insufficient
   // history; in those cases the card falls back to its pre-3.3.B
   // shape (header + summary + claims table).
   const featured = featuredClaim(section);
+
+  // Phase 3.3.C — Peers section gets a PeerScatter above its claims
+  // table. Subject metrics (P/E, gross margin) are extracted from
+  // sibling Valuation + Quality sections at the renderer level so
+  // PeerScatter stays a pure visual component. Falls back to peers-
+  // only scatter in EARNINGS focus mode (no Quality section).
+  const isPeers = section.title === "Peers";
+  const peers = isPeers ? groupPeers(section.claims) : [];
+  const median = isPeers ? extractMedian(section.claims) ?? undefined : undefined;
+  const subject = isPeers ? extractSubject(report) ?? undefined : undefined;
+  const showScatter = isPeers && peers.length > 0;
 
   return (
     <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
@@ -108,6 +136,21 @@ function SectionCard({ section }: { section: Section }) {
               primary={featured.primary}
               secondary={featured.secondary}
             />
+          </Suspense>
+        </div>
+      )}
+
+      {showScatter && (
+        <div className="mb-4">
+          <Suspense
+            fallback={
+              <div
+                className="hidden sm:block"
+                style={{ height: 240, width: 360 }}
+              />
+            }
+          >
+            <PeerScatter peers={peers} subject={subject} median={median} />
           </Suspense>
         </div>
       )}

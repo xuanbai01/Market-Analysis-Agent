@@ -200,10 +200,15 @@ function buildReport(opts: {
   extraQualityClaims?: Claim[];
 } = {}): ResearchReport {
   const sections: Section[] = [];
+  // Use ``"pe" in opts`` to distinguish "explicitly null" from "not
+  // specified" — the ?? operator collapses both to the default which
+  // hides the null-value test cases.
+  const pe = "pe" in opts ? opts.pe : 28.5;
+  const margin = "margin" in opts ? opts.margin : 0.46;
   if (opts.hasValuation !== false) {
     sections.push(
       section("Valuation", [
-        claim("P/E ratio (trailing 12 months)", opts.pe ?? 28.5),
+        claim("P/E ratio (trailing 12 months)", pe ?? null),
         ...(opts.extraValuationClaims ?? []),
       ]),
     );
@@ -211,7 +216,7 @@ function buildReport(opts: {
   if (opts.hasQuality !== false) {
     sections.push(
       section("Quality", [
-        claim("Gross margin", opts.margin ?? 0.46),
+        claim("Gross margin", margin ?? null),
         ...(opts.extraQualityClaims ?? []),
       ]),
     );

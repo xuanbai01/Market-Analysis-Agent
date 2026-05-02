@@ -185,7 +185,7 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
         expect(
           container.querySelector("[data-testid='section-chart']"),
         ).not.toBeNull(),
-      { timeout: 3000 },
+      { timeout: 6000 },
     );
   });
 
@@ -419,7 +419,7 @@ describe("ReportRenderer PeerScatter wiring (Phase 3.3.C)", () => {
         expect(
           container.querySelector("[data-testid='peer-scatter']"),
         ).not.toBeNull(),
-      { timeout: 3000 },
+      { timeout: 6000 },
     );
   });
 

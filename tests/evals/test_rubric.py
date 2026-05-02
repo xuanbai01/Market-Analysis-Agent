@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 from app.schemas.research import (
     Claim,
+    ClaimHistoryPoint,
     Confidence,
     ResearchReport,
     Section,
@@ -260,6 +261,194 @@ def test_factuality_scaling_only_kicks_in_for_large_claim_values() -> None:
     )
     result = score_factuality(_report([section]))
     assert 3500000.0 in result.unmatched_numbers
+
+
+# ── Phase 3.4: history-aware factuality matching ─────────────────────
+#
+# After Phase 3.2.A–F, ~19 claims carry a ``Claim.history`` of up to 20
+# quarterly / monthly points. The LLM weaves trend prose like "EPS rose
+# from $1.40 in Q1 to $2.18 in Q4" — both numbers come from the
+# claim's history, not its point-in-time snapshot. The rubric must
+# accept these without flagging as fabricated.
+#
+# Implementation strategy: ``_claim_numeric_values`` widens its yield
+# to include each claim's ``history[*].value`` so the existing
+# ``_matches_claim`` rules (tolerance, sign-flip, fraction-percent,
+# scaled units) apply uniformly to historical values.
+
+
+def _h(period: str, value: float) -> ClaimHistoryPoint:
+    """Tiny ClaimHistoryPoint factory — keeps test fixtures readable."""
+    return ClaimHistoryPoint(period=period, value=value)
+
+
+def test_factuality_accepts_number_from_claim_history() -> None:
+    """Prose cites a quarter that's in history but not the snapshot.
+
+    ``Reported EPS`` snapshot is the latest quarter (2.18) but Q2's
+    1.53 lives in ``history``. A summary that mentions "EPS reached
+    $1.53 in Q2" must match — that's the whole point of a sparkline-
+    bearing claim.
+    """
+    section = Section(
+        title="Earnings",
+        claims=[
+            Claim(
+                description="Reported EPS (latest quarter)",
+                value=2.18,
+                source=_src(),
+                history=[
+                    _h("2024-Q1", 1.40),
+                    _h("2024-Q2", 1.53),
+                    _h("2024-Q3", 2.05),
+                    _h("2024-Q4", 2.18),
+                ],
+            ),
+        ],
+        summary="EPS reached 1.53 in Q2 before climbing further.",
+    )
+    result = score_factuality(_report([section]))
+    assert result.score == 1.0, (
+        f"prose cites Q2 EPS from history; expected match, got "
+        f"unmatched={result.unmatched_numbers}"
+    )
+
+
+def test_factuality_accepts_both_endpoints_of_a_trend() -> None:
+    """The canonical "rose from X to Y" pattern. Both numbers are in
+    history — neither is the snapshot, neither matches without history
+    support.
+    """
+    section = Section(
+        title="Earnings",
+        claims=[
+            Claim(
+                description="Reported EPS (latest quarter)",
+                value=2.18,  # snapshot is the latest, neither endpoint
+                source=_src(),
+                history=[
+                    _h("2024-Q1", 1.40),
+                    _h("2024-Q2", 1.53),
+                    _h("2024-Q3", 1.85),
+                    _h("2024-Q4", 2.18),
+                ],
+            ),
+        ],
+        summary="EPS rose from 1.40 in Q1 to 2.18 in Q4 — a 56% climb.",
+    )
+    result = score_factuality(_report([section]))
+    # 1.40 from history; 2.18 is the snapshot AND history[-1]; 56 is
+    # narrative growth (not in claims) — would fail without further
+    # work, but it's outside this test's scope. Tolerate by allowing
+    # one unmatched number.
+    assert 1.40 not in result.unmatched_numbers
+    assert 2.18 not in result.unmatched_numbers
+
+
+def test_factuality_history_value_displayed_as_percent() -> None:
+    """Historical fraction → percent display. ``operating_margin``
+    history has 0.32 for Q3; prose says "operating margin reached 32%
+    in Q3". The fraction-to-percent equivalence rule (already in
+    ``_matches_claim``) must compose with history matching."""
+    section = Section(
+        title="Quality",
+        claims=[
+            Claim(
+                description="Operating margin",
+                value=0.34,  # snapshot
+                source=_src(),
+                history=[
+                    _h("2024-Q1", 0.28),
+                    _h("2024-Q2", 0.30),
+                    _h("2024-Q3", 0.32),
+                    _h("2024-Q4", 0.34),
+                ],
+            ),
+        ],
+        summary="Operating margin reached 32% in Q3 before edging higher.",
+    )
+    result = score_factuality(_report([section]))
+    assert result.score == 1.0, (
+        f"32% should match 0.32 from history under fraction-percent rule; "
+        f"unmatched={result.unmatched_numbers}"
+    )
+
+
+def test_factuality_still_flags_fabrication_with_history_present() -> None:
+    """Anti-regression: history widens the value pool but doesn't
+    swallow fabricated numbers. Prose cites 4.50 EPS — not in
+    snapshot, not in history (history is 1.40–2.18 range). Must
+    surface as unmatched."""
+    section = Section(
+        title="Earnings",
+        claims=[
+            Claim(
+                description="Reported EPS (latest quarter)",
+                value=2.18,
+                source=_src(),
+                history=[
+                    _h("2024-Q1", 1.40),
+                    _h("2024-Q2", 1.53),
+                    _h("2024-Q3", 2.05),
+                    _h("2024-Q4", 2.18),
+                ],
+            ),
+        ],
+        # 4.50 is invented — never in snapshot OR history
+        summary="EPS of 2.18 latest, but management guided to 4.50 next quarter.",
+    )
+    result = score_factuality(_report([section]))
+    assert 4.50 in result.unmatched_numbers
+    # 2.18 still matches snapshot; 4.50 is the fabrication.
+    assert result.score == 0.5
+
+
+def test_factuality_pre_3_2_claim_with_empty_history_unchanged() -> None:
+    """Backwards-compat: a Claim with empty history (pre-3.2 cached
+    report, or non-history-bearing claim like a date label) behaves
+    exactly as before — only the snapshot value matches."""
+    section = Section(
+        title="Valuation",
+        claims=[
+            Claim(
+                description="P/E ratio (trailing 12 months)",
+                value=32.5,
+                source=_src(),
+                history=[],  # empty — pre-3.2 shape
+            ),
+        ],
+        summary="Trades at 32.5 P/E.",
+    )
+    result = score_factuality(_report([section]))
+    assert result.score == 1.0
+    assert result.unmatched_numbers == []
+
+
+def test_factuality_history_matches_across_sections() -> None:
+    """The value pool is per-report, not per-section. A summary in
+    Section A can cite a historical value from a claim in Section B
+    and still match — same as the existing snapshot-matching
+    behavior. Documents the choice; we're not narrowing scope."""
+    quality = Section(
+        title="Quality",
+        claims=[
+            Claim(
+                description="Operating margin",
+                value=0.34,
+                source=_src(),
+                history=[_h("2024-Q1", 0.28), _h("2024-Q2", 0.30)],
+            ),
+        ],
+        summary="",  # no summary — no numbers extracted from this section
+    )
+    earnings = Section(
+        title="Earnings",
+        claims=[Claim(description="EPS", value=2.18, source=_src())],
+        # Cite Q2's 30% — historical, from the OTHER section's claim.
+        summary="Operating leverage reached 30% margin by Q2 alongside 2.18 EPS.",
+    )
+    result = score_factuality(_report([quality, earnings]))
+    assert result.score == 1.0
 
 
 # ── Combined grade ───────────────────────────────────────────────────

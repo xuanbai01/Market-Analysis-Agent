@@ -18,7 +18,7 @@
  * the Sparkline component sets.
  */
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 
 import type { ResearchReport } from "../lib/schemas";
 import { ReportRenderer } from "./ReportRenderer";
@@ -165,13 +165,28 @@ describe("ReportRenderer Trend column (Phase 3.3.A)", () => {
 // ── Phase 3.3.B — SectionChart wiring ───────────────────────────────
 
 describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
-  it("renders a SectionChart for an Earnings section with EPS history", () => {
+  // SectionChart is lazy-loaded (React.lazy + Suspense) so the
+  // recharts dep stays out of the main bundle. Tests for "did the
+  // chart render" need waitFor() because the chunk resolves async.
+  // Tests for "the chart did NOT render" can be synchronous —
+  // featuredClaim() returns null synchronously and the lazy import
+  // never fires, so the fallback / chart never appears.
+
+  it("renders a SectionChart for an Earnings section with EPS history", async () => {
     // The default buildReport() has an Earnings section with a
     // 4-point eps_actual history → the SectionChart should appear.
     const { container } = render(<ReportRenderer report={buildReport()} />);
-    expect(
-      container.querySelector("[data-testid='section-chart']"),
-    ).not.toBeNull();
+    // 3s timeout because recharts is a 100 KB chunk; the first
+    // lazy() resolution per worker pays the dynamic-import cost
+    // even in vite test mode (subsequent renders in the same file
+    // hit the module cache and resolve instantly).
+    await waitFor(
+      () =>
+        expect(
+          container.querySelector("[data-testid='section-chart']"),
+        ).not.toBeNull(),
+      { timeout: 3000 },
+    );
   });
 
   it("renders no SectionChart for Risk Factors (no featured-claim spec)", () => {
@@ -236,7 +251,7 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
     ).toBeNull();
   });
 
-  it("renders a SectionChart for Quality with ROE history", () => {
+  it("renders a SectionChart for Quality with ROE history", async () => {
     const qualityReport: ResearchReport = {
       symbol: "AAPL",
       generated_at: "2026-04-29T14:05:00+00:00",
@@ -267,8 +282,10 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
       ],
     };
     const { container } = render(<ReportRenderer report={qualityReport} />);
-    expect(
-      container.querySelector("[data-testid='section-chart']"),
-    ).not.toBeNull();
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-testid='section-chart']"),
+      ).not.toBeNull(),
+    );
   });
 });

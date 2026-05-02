@@ -25,7 +25,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { Claim, ClaimHistoryPoint, Section } from "./schemas";
+import type {
+  Claim,
+  ClaimHistoryPoint,
+  ClaimValue,
+  Section,
+} from "./schemas";
 import { featuredClaim } from "./featured-claim";
 
 function makeHistory(values: number[]): ClaimHistoryPoint[] {
@@ -34,7 +39,7 @@ function makeHistory(values: number[]): ClaimHistoryPoint[] {
 
 function claim(
   description: string,
-  value: number | null,
+  value: ClaimValue,
   history: ClaimHistoryPoint[] = [],
 ): Claim {
   return {

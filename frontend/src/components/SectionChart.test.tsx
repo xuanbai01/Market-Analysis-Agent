@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 
 import type { Claim, ClaimHistoryPoint } from "../lib/schemas";
-import { SectionChart } from "./SectionChart";
+import SectionChart from "./SectionChart";
 
 function makeHistory(values: number[]): ClaimHistoryPoint[] {
   return values.map((v, i) => ({ period: `2024-Q${i + 1}`, value: v }));

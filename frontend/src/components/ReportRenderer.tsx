@@ -7,16 +7,40 @@
  * - Title + per-section confidence badge
  * - Free-form summary prose (single paragraph from the LLM)
  * - A claims table — one row per claim, with description, formatted
- *   value, and a source link if the claim's Source carries a URL.
+ *   value, **trend sparkline (Phase 3.3.A)**, and a source link if the
+ *   claim's Source carries a URL.
  *
  * The summary prose comes from the LLM and the rubric guarantees
  * every number in it is also present in ``claims``. We deliberately
  * keep the prose plain text (no markdown) — the LLM is instructed
  * the same way (see app/services/research_orchestrator.py).
+ *
+ * ## Phase 3.3.A — Trend column
+ *
+ * After 3.2.A–F shipped 19+ history-bearing claims, this renderer
+ * grew a "Trend" column that shows a tiny inline ``Sparkline`` next
+ * to claims whose ``history`` has at least two points. Empty-history
+ * claims (peers, risk-paragraph counts, business-section length, etc.)
+ * render an empty trend cell so the table layout stays rectangular.
+ *
+ * The Trend column hides on viewports smaller than ``sm`` (640 px) —
+ * a 60 px sparkline next to a number on a phone is more noise than
+ * signal. Hidden via Tailwind's ``hidden sm:table-cell``.
  */
+import { Suspense, lazy } from "react";
+
 import type { Claim, ResearchReport, Section } from "../lib/schemas";
+import { featuredClaim } from "../lib/featured-claim";
 import { formatClaimValue, formatTimestamp } from "../lib/format";
 import { ConfidenceBadge } from "./ConfidenceBadge";
+import { Sparkline } from "./Sparkline";
+
+// SectionChart is the only Recharts consumer; lazy-loading it keeps
+// recharts (~100 KB gz) out of the initial bundle. Login screen +
+// dashboard skeleton paint fast; the chart chunk loads after the
+// report data arrives. Suspense fallback is a fixed-height box so
+// there's no layout jump when the chart slides in.
+const SectionChart = lazy(() => import("./SectionChart"));
 
 interface Props {
   report: ResearchReport;
@@ -54,6 +78,13 @@ export function ReportRenderer({ report }: Props) {
 }
 
 function SectionCard({ section }: { section: Section }) {
+  // Phase 3.3.B — pick a "headline" Claim (or pair, for Earnings) and
+  // render a SectionChart at the top of the card. Returns null when
+  // the section has no spec, no matching claim, or insufficient
+  // history; in those cases the card falls back to its pre-3.3.B
+  // shape (header + summary + claims table).
+  const featured = featuredClaim(section);
+
   return (
     <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
       <header className="mb-3 flex items-center justify-between gap-3">
@@ -62,6 +93,24 @@ function SectionCard({ section }: { section: Section }) {
         </h3>
         <ConfidenceBadge confidence={section.confidence} size="sm" />
       </header>
+
+      {featured && (
+        <div className="mb-4">
+          <Suspense
+            fallback={
+              <div
+                className="hidden sm:block"
+                style={{ height: 120, width: 300 }}
+              />
+            }
+          >
+            <SectionChart
+              primary={featured.primary}
+              secondary={featured.secondary}
+            />
+          </Suspense>
+        </div>
+      )}
 
       {section.summary && (
         <p className="mb-4 text-sm leading-relaxed text-slate-700">
@@ -82,34 +131,56 @@ function ClaimsTable({ claims }: { claims: Claim[] }) {
           <tr>
             <th className="px-3 py-2 font-medium">Metric</th>
             <th className="px-3 py-2 font-medium text-right">Value</th>
+            {/* Trend column — hidden on phones; sparkline is illegible at
+                that width. Re-introduced at sm: (640 px) and up. */}
+            <th
+              scope="col"
+              className="hidden px-3 py-2 font-medium sm:table-cell"
+            >
+              Trend
+            </th>
             <th className="px-3 py-2 font-medium">Source</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {claims.map((claim, i) => (
-            <tr key={`${claim.description}-${i}`} className="hover:bg-slate-50">
-              <td className="px-3 py-2 text-slate-700">{claim.description}</td>
-              <td className="px-3 py-2 text-right font-mono text-slate-900">
-                {formatClaimValue(claim.value)}
-              </td>
-              <td className="px-3 py-2 text-xs text-slate-500">
-                {claim.source.url ? (
-                  <a
-                    href={claim.source.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-slate-700 underline decoration-slate-300 underline-offset-2 hover:text-slate-900 hover:decoration-slate-500"
-                  >
-                    {claim.source.tool}
-                  </a>
-                ) : (
-                  <span>{claim.source.tool}</span>
-                )}
-              </td>
-            </tr>
+            <ClaimRow key={`${claim.description}-${i}`} claim={claim} />
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function ClaimRow({ claim }: { claim: Claim }) {
+  return (
+    <tr className="hover:bg-slate-50">
+      <td className="px-3 py-2 text-slate-700">{claim.description}</td>
+      <td className="px-3 py-2 text-right font-mono text-slate-900">
+        {formatClaimValue(claim.value)}
+      </td>
+      <td className="hidden px-3 py-2 sm:table-cell">
+        {claim.history.length >= 2 ? (
+          <Sparkline
+            history={claim.history}
+            ariaLabel={`Trend for ${claim.description}`}
+          />
+        ) : null}
+      </td>
+      <td className="px-3 py-2 text-xs text-slate-500">
+        {claim.source.url ? (
+          <a
+            href={claim.source.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-slate-700 underline decoration-slate-300 underline-offset-2 hover:text-slate-900 hover:decoration-slate-500"
+          >
+            {claim.source.tool}
+          </a>
+        ) : (
+          <span>{claim.source.tool}</span>
+        )}
+      </td>
+    </tr>
   );
 }

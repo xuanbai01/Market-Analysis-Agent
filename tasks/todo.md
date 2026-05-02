@@ -8,7 +8,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- Phase 3 — Visual-first depth (just kicking off)
+- Phase 3 — Visual-first depth: schema (3.1) ✅ done; data-tool history (3.2.A–F) ✅ done; frontend visualization 3.3.A (Sparkline) ✅ + 3.3.B (SectionChart) ✅. **Up next:** 3.3.C (PeerScatter), then 3.5 (Vercel deploy + dogfood gate).
 
 ## Phase 3 — Visual-first depth (active)
 
@@ -18,44 +18,47 @@ Active sprint for the Market Analysis Agent.
 >
 > **Frontend deploy status:** held until Phase 3 ships. PR #32 (frontend MVP) is merged on `main` and locally tested but not Vercel-deployed. The frontend will pick up history rendering as part of this phase rather than ship a deploy that immediately needs an upgrade.
 
-### 3.1 Schema — `Claim.history`
+### 3.1 Schema — `Claim.history` ✅ done (PR #35)
 
-- [ ] **`ClaimHistoryPoint`** — Pydantic model: `{period: str, value: float}`. `period` is a string (e.g. `"2024-Q4"`, `"2024-12"`, `"2024"`) — different tools emit different granularities; the rendering layer reads them as opaque labels. `value` is a number (no `ClaimValue` union — only numeric points are charted).
-- [ ] **`Claim.history: list[ClaimHistoryPoint] = Field(default_factory=list)`** — added to `app/schemas/research.py`. Default empty so existing claims and existing cache rows round-trip unchanged. Ordered oldest-to-newest by convention; the renderer doesn't sort.
-- [ ] **Mirror in `frontend/src/lib/schemas.ts`** — Zod schema gets the same optional field; existing reports parse unchanged.
-- [ ] **Round-trip test** — write a `Claim` with history → JSONB → read back → unchanged. Empty history round-trips as empty.
+- [x] **`ClaimHistoryPoint`** — Pydantic model: `{period: str, value: float}`. `period` is a string (e.g. `"2024-Q4"`, `"2024-12"`, `"2024"`) — different tools emit different granularities; the rendering layer reads them as opaque labels. `value` is strictly numeric (`field_validator` rejects strings/bools — only floats sparkline).
+- [x] **`Claim.history: list[ClaimHistoryPoint] = Field(default_factory=list)`** — added to `app/schemas/research.py`. Default empty so existing claims and existing cache rows round-trip unchanged. Ordered oldest-to-newest by convention; the renderer doesn't sort.
+- [x] **Mirror in `frontend/src/lib/schemas.ts`** — Zod schema gets the same field with `.default([])`; existing reports parse unchanged.
+- [x] **Round-trip test** — `Claim` with history → JSONB → read back → unchanged. Empty history round-trips as empty.
 
-### 3.2 Tool extensions — Tier 1 (yfinance only, one PR per tool)
+### 3.2 Tool extensions — Tier 1 (yfinance only, one PR per tool) ✅ done (PRs #36 → #40)
 
 > **Concrete chart catalog** in [ADR 0004 §"Phase 3 — Concrete chart catalog"](../docs/adr/0004-visual-first-product-shape.md). Each PR below maps to one row in that catalog's Tier 1 table.
 
 The pattern: each builder learns to populate `Claim.history` for the metrics where yfinance / FRED / derived computation gives us a series. Builders that can't (e.g. peer-comparison single-snapshot metrics) leave history empty.
 
-- [ ] **`fetch_fundamentals` history** — yfinance `Ticker.quarterly_financials`, `quarterly_balance_sheet`, `quarterly_cashflow` give ~5 years of quarters. Add history for:
-    - Per-share metrics: revenue, op income, gross profit, net income, EPS, FCF, OCF (all ÷ `sharesOutstanding`)
-    - Margin trends: gross / operating / net / FCF as % of revenue
-    - Capital efficiency: ROE, ROIC
-    - Cash flow components: OCF / CapEx / SBC / FCF (stacked over time)
-    - Balance sheet trend: cash + ST investments + total debt; total assets vs total liabilities
-    Wrap each new yfinance call in `log_external_call`. Defensive about NaN / missing quarters (skip the point, don't fail the tool). YoY growth derived from history at render time, not stored separately.
-- [ ] **`fetch_earnings` history** — already pulls earnings dates; extend lookback from 4 quarters to ~20. Beat / miss flags become a binary time series. Forward-consensus EPS gets a history field reflecting analyst-revision drift if `Ticker.earnings_estimate` exposes it cheaply; cut otherwise.
-- [ ] **`fetch_macro` history** — FRED already returns series-level data. Surface the last ~24–60 months on each macro claim's history (sector-dependent — short rates need higher cadence than ISM PMI).
-- [ ] **`fetch_valuation_history` (new derived tool)** — combines `fetch_fundamentals` history + price history into rolling P/E, EV/EBIT, EV/EBITDA, P/S over time, plus 5–10Y median band. Gives "AAPL trades at 28x today vs a 5Y median of 26x" — the most-cited gap from dogfooding. Pure compute; no new external call.
-- [ ] **`fetch_dividends_history` (new tool, conditional)** — yfinance `Ticker.dividends` for quarterly history; combined with price history for yield. Renders only when company is a dividend payer. Cheap to add since the source is one line.
-- [ ] **Price-and-technicals history** — we already have OHLCV in `candles`; surface ~5y closing prices on a price-history claim, plus rolling SMA/RSI as charts. Reuse `app.services.technicals` rather than adding a new tool.
-- [ ] **News in report** — wire `fetch_news` (already exists, currently unused in reports) into the orchestrator. Last ~10 symbol-filtered items as a Claim list with timestamps + URLs. Zero new acquisition cost.
-- [ ] **Peers** stay as point-in-time scatter (peer-comp gets a *visualization* upgrade in 3.3 but not a history field — comparing 5y trends across 5 peers is a different chart shape, defer).
+- [x] **`fetch_fundamentals` history** (PRs #36 / #37 / #38 — sub-phases 3.2.A / B+C / D) — yfinance `Ticker.quarterly_financials`, `quarterly_balance_sheet`, `quarterly_cashflow` give ~5 years of quarters. 16 history-bearing claims now ship across:
+    - **3.2.A** (PR #36): per-share growth (revenue, gross profit, op income, FCF, OCF) + margin trends (gross, operating, profit, FCF). 7 new claims, 2 existing claims gained history.
+    - **3.2.B+C** (PR #37): cash flow components (CapEx, SBC per share) + balance sheet trend (cash + ST investments, total debt, total assets, total liabilities per share). 6 new claims.
+    - **3.2.D** (PR #38): TTM ROE + TTM ROIC via 4Q rolling sum + flat 21% NOPAT tax rate. 1 new claim, ROE existing claim gained history.
+
+    Provider returns `(values, history_map)` tuple; `_ratio_history` / `_ttm_sum` / `_nopat_series` helpers in `fundamentals_history.py`. Per-share denominator is `Diluted Average Shares` (per-quarter, not point-in-time `sharesOutstanding`). FCF reads yfinance's pre-computed row. `log_external_call` includes `history_populated_count` summary.
+- [x] **`fetch_earnings` history** (PR #39, sub-phase 3.2.E) — refactored 21 q-prefixed keys (`q1.eps_actual` through `q4.eps_surprise_pct`) to 9 flat keys. 3 history-bearing claims (`eps_actual`, `eps_estimate`, `eps_surprise_pct`) carry up to 20 quarters via `Claim.history`. Switched from `Ticker.earnings_dates` property to `Ticker.get_earnings_dates(limit=24)` for ~6Y of depth. Surprise fallback when yfinance's column is missing.
+- [x] **`fetch_macro` history** (PR #40, sub-phase 3.2.F) — provider returns `(snapshot, history_map)` matching fundamentals + earnings. FRED query: `frequency=m` + `limit=36` for ~3Y of monthly observations. Daily series (DGS10, DCOILWTICO, …) collapse to monthly server-side; already-monthly series (UMCSENT, MANEMP, RSAFS, UNRATE, CPIAUCSL) pass through unchanged. Snapshot/sparkline consistency preserved by construction (`<id>.value == history[-1].value`).
+- [ ] **`fetch_valuation_history` (new derived tool)** — combines `fetch_fundamentals` history + price history into rolling P/E, EV/EBIT, EV/EBITDA, P/S over time, plus 5–10Y median band. Gives "AAPL trades at 28x today vs a 5Y median of 26x" — the most-cited gap from dogfooding. Pure compute; no new external call. *(Deferred — would unlock SectionChart for the Valuation section. Revisit after 3.5 dogfood.)*
+- [ ] **`fetch_dividends_history` (new tool, conditional)** — yfinance `Ticker.dividends` for quarterly history; combined with price history for yield. Renders only when company is a dividend payer. Cheap to add since the source is one line. *(Deferred — would unlock the conditional `DividendsCard`. Revisit if dogfood signals it's missed.)*
+- [ ] **Price-and-technicals history** — we already have OHLCV in `candles`; surface ~5y closing prices on a price-history claim, plus rolling SMA/RSI as charts. Reuse `app.services.technicals` rather than adding a new tool. *(Deferred — would unlock a price section / SectionChart variant. Revisit after 3.5 dogfood.)*
+- [ ] **News in report** — wire `fetch_news` (already exists, currently unused in reports) into the orchestrator. Last ~10 symbol-filtered items as a Claim list with timestamps + URLs. Zero new acquisition cost. *(Deferred — Phase 4 catalyst-awareness work; news doesn't get a sparkline.)*
+- [x] **Peers** stay as point-in-time (peer-comp gets a *visualization* upgrade in 3.3.C but not a history field — comparing 5y trends across 5 peers is a different chart shape, deferred).
 
 ### 3.3 Frontend visualization
 
-- [ ] **`Sparkline` component** — Recharts `LineChart` configured for inline density (~80×24 px). No axes, no legend, no tooltip on the inline variant. Renders any `Claim.history` of length ≥ 2.
-- [ ] **`ClaimRow` integration** — in `ReportRenderer`, the "Value" cell renders `formatClaimValue(value) | <Sparkline history={claim.history} />` when history is present. Mobile width drops the sparkline gracefully.
-- [ ] **`SectionChart` component** — bigger chart for sections that warrant a top-level visualization (price + SMA overlay; fundamentals trend; macro series; valuation-with-median-band). One `SectionChart` per section max. Picks the right "headline" claim per section by builder convention (e.g. Valuation → Trailing P/E with median band, Quality → Gross Margin, Earnings → EPS).
-- [ ] **`StackedBarChart`** for the cash-flow-components view (OCF / CapEx / SBC / FCF) and the balance-sheet trend (Cash + ST Inv + Debt).
-- [ ] **`PeerScatter` component** — for the Peers section, render the peer-comparison matrix as a 2-D scatter (e.g. P/E on x, gross margin on y). Color-code the subject vs peers. Augments the existing table (a11y: keep the table for screen readers).
-- [ ] **`DividendsCard` component** *(conditional)* — quarterly dividends bar + yield line, dual-axis. Renders only when a dividend-history claim is present.
-- [ ] **`NewsList` component** — last ~10 items: source, title, timestamp, link out. Plain list; no sentiment shading (we don't compute it).
-- [ ] **Recharts dependency** — `npm install recharts`. Tree-shaken bundle adds ~30 KB gzipped. Verify build still under 100 KB gz.
+- [x] **3.3.A — Sparkline + Trend column** (PR #41) — hand-rolled SVG (~30 lines) instead of Recharts for the inline use case (Recharts' ResponsiveContainer doesn't measure correctly in nested table cells / happy-dom). Default 80×24, slate-700 stroke, dot on the most-recent point, returns null when `history.length < 2`. ReportRenderer's claims table grew a "Trend" column hidden below `sm:` breakpoint. Recharts dep installed for 3.3.B; tree-shaken away from the 3.3.A bundle (75 KB gz, +0.5 KB net).
+- [x] **3.3.B — `SectionChart` component** *(this PR)* — Recharts `LineChart` (300×120) at the top of sections with a featured-claim spec. **Lazy-loaded via `React.lazy()`** so recharts (~100 KB gz) lives in its own chunk, keeping the main bundle at 76 KB (under the 100 KB budget). `featured-claim.ts` picks per section title with exact-description matching:
+    - Earnings → `Reported EPS (latest quarter)` (primary) + `Consensus EPS estimate (latest quarter, going in)` (secondary, dashed line)
+    - Quality → `Return on equity` (single-line)
+    - Capital Allocation → `Capital expenditure per share` (single-line)
+    - Macro → first claim with description suffix `(latest observation)` and history (suffix predicate because Macro descriptions are dynamic per FRED series)
+    - Valuation / Peers / Risk Factors / unknown title → skip (returns null)
+    Y-axis ticks + tooltip reuse `formatClaimValue` (single source of truth with table cells AND backend eval rubric). Period axis uses `preserveStartEnd` to avoid 20Q label overlap.
+- [ ] **3.3.C — `PeerScatter` component** — peer-comparison matrix as a 2-D scatter (P/E × gross margin). Subject highlighted vs peers. Augments the existing table (a11y: keep the table for screen readers). Includes `peer-grouping.ts` to regroup flat `peer_N.<metric>` claims into per-symbol records.
+- [ ] **3.3.D *(deferred)* — multi-series / stacked enhancements:** CashFlowStacked (OCF / CapEx / SBC / FCF stacked bars), BalanceSheetTrend (cash vs debt overlay), multi-line Quality SectionChart (margins overlay), EarningsBeatRate (binary strip alongside EPS line). Land only if 3.5 dogfood signals these gaps.
+- [ ] **`DividendsCard` component** *(deferred)* — quarterly dividends bar + yield line, dual-axis. Needs `fetch_dividends_history` tool first; both deferred together.
+- [ ] **`NewsList` component** *(deferred to Phase 4)* — last ~10 items: source, title, timestamp, link out. Plain list; no sentiment shading. Needs `fetch_news` wired into orchestrator first.
 
 ### 3.4 Eval rubric extension
 
@@ -147,6 +150,32 @@ The pattern: each builder learns to populate `Claim.history` for the metrics whe
     - [x] **Vitest** smoke tests for Zod schemas + format helper + auth localStorage round-trip
     - [x] **`vercel.json`** + `frontend/README.md` deploy walkthrough
     - 19 vitest tests passing; production build 253 KB / 75 KB gzipped.
+
+- [x] Phase 3.1 schema — `Claim.history` (PR #35)
+    - [x] `ClaimHistoryPoint(period: str, value: float)` — Pydantic frozen model + Zod mirror
+    - [x] `Claim.history: list[ClaimHistoryPoint] = Field(default_factory=list)` — backwards-compat default
+    - [x] Field validator rejects str/bool on `value` (only floats sparkline)
+    - [x] JSONB round-trip test confirms cached pre-3.1 rows still parse
+
+- [x] Phase 3.2 — Tool history (PRs #36 → #40)
+    - [x] **3.2.A** (PR #36) — `fetch_fundamentals` per-share growth + margin trends (7 new claims, 2 existing get history)
+    - [x] **3.2.B+C** (PR #37) — cash flow components + balance sheet trend (6 new claims)
+    - [x] **3.2.D** (PR #38) — TTM ROE + ROIC via 4Q rolling sum + flat 21% NOPAT tax rate (1 new claim, ROE gets history)
+    - [x] **3.2.E** (PR #39) — `fetch_earnings` 21 q-prefixed keys → 9 flat keys with 20Q lookback via `get_earnings_dates(limit=24)`
+    - [x] **3.2.F** (PR #40) — `fetch_macro` ~36 monthly observations per FRED series via `frequency=m`; provider tuple shape converged across all three multi-period tools
+    - **Net result:** 19+ history-bearing claims, all snapshot/`history[-1]` consistent by construction. 499/499 backend tests pass.
+
+- [x] Phase 3.3.A — Sparkline + Trend column (PR #41)
+    - [x] Hand-rolled SVG `Sparkline` component (~30 lines, no Recharts for inline use)
+    - [x] ReportRenderer "Trend" column added; hidden below `sm:` breakpoint
+    - [x] `recharts ^2.13` installed (used by 3.3.B); tree-shaken away from 3.3.A bundle
+    - [x] 40/40 frontend tests pass (was 19; +21 new). Bundle 75 KB gz (+0.5 KB).
+
+- [x] Phase 3.3.B — SectionChart *(this branch)*
+    - [x] `featured-claim.ts` picker — exact-description match per section title; macro suffix predicate; null-guards for unknown / sparse / pre-3.2 cached reports
+    - [x] Recharts `LineChart` SectionChart component — 300×120 default, slate-700 primary + dashed slate-400 secondary, reuses `formatClaimValue` for ticks/tooltip
+    - [x] Lazy-loaded via `React.lazy()` so recharts splits into its own chunk; main bundle 76 KB gz (under 100 KB budget); SectionChart chunk 103 KB gz on-demand
+    - [x] 67/67 frontend tests pass (was 40; +15 featured-claim + 8 SectionChart + 4 ReportRenderer wiring)
 
 ## Blocked / waiting
 

@@ -11,9 +11,13 @@ Three dimensions, in order of how cheap they are to enforce:
    Free; just Pydantic. Catches drift in the structured-output contract.
 
 2. **Factuality** — every numeric fact appearing in any section's
-   ``summary`` prose also appears in that section's ``claims`` list.
-   Catches the most common hallucination mode: the model writing a
-   plausible number into the summary that no tool ever produced.
+   ``summary`` prose also appears in some claim's ``value`` or
+   ``history``. Catches the most common hallucination mode: the
+   model writing a plausible number into the summary that no tool
+   ever produced. After Phase 3.4 the value pool widened to include
+   each ``Claim.history[*].value`` so trend prose like "EPS rose
+   from 1.40 to 2.18" matches even when neither endpoint is the
+   point-in-time snapshot.
 
 3. **Latency** — wall-clock duration of the run. Recorded by the test
    harness, not derived from the report itself.
@@ -105,15 +109,38 @@ def _extract_numbers(text: str) -> list[float]:
 
 
 def _claim_numeric_values(report: ResearchReport) -> list[float]:
-    """All numeric claim values across the report. List, not set: order
-    is irrelevant for matching but duplicates are allowed (a claim value
-    of 0 repeated across sections is still one matchable value)."""
+    """All numeric claim values across the report — snapshots **and**
+    history points.
+
+    List, not set: order is irrelevant for matching but duplicates
+    are allowed (a claim value of 0 repeated across sections is still
+    one matchable value).
+
+    ## Phase 3.4 — history points count as factual support
+
+    After 3.2.A–F shipped 19+ history-bearing claims, the LLM
+    naturally weaves trend prose like "EPS rose from 1.40 in Q1 to
+    2.18 in Q4" — both numbers come from ``Claim.history``, not the
+    point-in-time snapshot. Yielding history values into the same
+    flat list means the existing ``_matches_claim`` rules
+    (tolerance, sign-flip, fraction-percent, scaled units) apply
+    uniformly to historical values too, with no special-casing in
+    the matcher.
+
+    Pre-3.2 claims with ``history=[]`` are unchanged: only the
+    snapshot value is yielded.
+    """
     out: list[float] = []
     for section in report.sections:
         for claim in section.claims:
             v = claim.value
             if isinstance(v, int | float) and not isinstance(v, bool):
                 out.append(float(v))
+            # History points are validated as floats by
+            # ClaimHistoryPoint's field_validator, so no isinstance
+            # guard is needed — the schema already rejects str/bool.
+            for point in claim.history:
+                out.append(float(point.value))
     return out
 
 

@@ -8,7 +8,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- Phase 3 — Visual-first depth: schema (3.1) ✅ done; data-tool history (3.2.A–F) ✅ done; frontend visualization 3.3.A (Sparkline) ✅ + 3.3.B (SectionChart) ✅. **Up next:** 3.3.C (PeerScatter), then 3.5 (Vercel deploy + dogfood gate).
+- Phase 3 — Visual-first depth: schema (3.1) ✅; data-tool history (3.2.A–F) ✅; frontend visualization 3.3.A (Sparkline) ✅ + 3.3.B (SectionChart) ✅ + 3.3.C (PeerScatter) ✅. **Up next:** 3.4 (eval rubric history extension), then 3.5 (Vercel deploy + dogfood gate).
 
 ## Phase 3 — Visual-first depth (active)
 
@@ -48,14 +48,14 @@ The pattern: each builder learns to populate `Claim.history` for the metrics whe
 ### 3.3 Frontend visualization
 
 - [x] **3.3.A — Sparkline + Trend column** (PR #41) — hand-rolled SVG (~30 lines) instead of Recharts for the inline use case (Recharts' ResponsiveContainer doesn't measure correctly in nested table cells / happy-dom). Default 80×24, slate-700 stroke, dot on the most-recent point, returns null when `history.length < 2`. ReportRenderer's claims table grew a "Trend" column hidden below `sm:` breakpoint. Recharts dep installed for 3.3.B; tree-shaken away from the 3.3.A bundle (75 KB gz, +0.5 KB net).
-- [x] **3.3.B — `SectionChart` component** *(this PR)* — Recharts `LineChart` (300×120) at the top of sections with a featured-claim spec. **Lazy-loaded via `React.lazy()`** so recharts (~100 KB gz) lives in its own chunk, keeping the main bundle at 76 KB (under the 100 KB budget). `featured-claim.ts` picks per section title with exact-description matching:
+- [x] **3.3.B — `SectionChart` component** (PR #42) — Recharts `LineChart` (300×120) at the top of sections with a featured-claim spec. **Lazy-loaded via `React.lazy()`** so recharts (~100 KB gz) lives in its own chunk, keeping the main bundle at 76 KB (under the 100 KB budget). `featured-claim.ts` picks per section title with exact-description matching:
     - Earnings → `Reported EPS (latest quarter)` (primary) + `Consensus EPS estimate (latest quarter, going in)` (secondary, dashed line)
     - Quality → `Return on equity` (single-line)
     - Capital Allocation → `Capital expenditure per share` (single-line)
     - Macro → first claim with description suffix `(latest observation)` and history (suffix predicate because Macro descriptions are dynamic per FRED series)
     - Valuation / Peers / Risk Factors / unknown title → skip (returns null)
     Y-axis ticks + tooltip reuse `formatClaimValue` (single source of truth with table cells AND backend eval rubric). Period axis uses `preserveStartEnd` to avoid 20Q label overlap.
-- [ ] **3.3.C — `PeerScatter` component** — peer-comparison matrix as a 2-D scatter (P/E × gross margin). Subject highlighted vs peers. Augments the existing table (a11y: keep the table for screen readers). Includes `peer-grouping.ts` to regroup flat `peer_N.<metric>` claims into per-symbol records.
+- [x] **3.3.C — `PeerScatter` component** *(this PR)* — Recharts `ScatterChart` (360×240) for the Peers section. Three Scatter series: peers (slate-500 dots) + optional median (slate-400 cross from existing `median.*` claims) + optional subject (slate-900 dot, extracted from sibling Valuation P/E + Quality gross margin via cross-section join). Frontend-only PR; subject falls back to `undefined` in EARNINGS focus mode (no Quality section) — scatter degrades to peers + median. Vite's auto-chunking hoists recharts into a shared chunk used by both SectionChart (4.84 KB) and PeerScatter (6.03 KB) per-component chunks; main bundle 76.92 KB gz.
 - [ ] **3.3.D *(deferred)* — multi-series / stacked enhancements:** CashFlowStacked (OCF / CapEx / SBC / FCF stacked bars), BalanceSheetTrend (cash vs debt overlay), multi-line Quality SectionChart (margins overlay), EarningsBeatRate (binary strip alongside EPS line). Land only if 3.5 dogfood signals these gaps.
 - [ ] **`DividendsCard` component** *(deferred)* — quarterly dividends bar + yield line, dual-axis. Needs `fetch_dividends_history` tool first; both deferred together.
 - [ ] **`NewsList` component** *(deferred to Phase 4)* — last ~10 items: source, title, timestamp, link out. Plain list; no sentiment shading. Needs `fetch_news` wired into orchestrator first.
@@ -171,11 +171,18 @@ The pattern: each builder learns to populate `Claim.history` for the metrics whe
     - [x] `recharts ^2.13` installed (used by 3.3.B); tree-shaken away from 3.3.A bundle
     - [x] 40/40 frontend tests pass (was 19; +21 new). Bundle 75 KB gz (+0.5 KB).
 
-- [x] Phase 3.3.B — SectionChart *(this branch)*
+- [x] Phase 3.3.B — SectionChart (PR #42)
     - [x] `featured-claim.ts` picker — exact-description match per section title; macro suffix predicate; null-guards for unknown / sparse / pre-3.2 cached reports
     - [x] Recharts `LineChart` SectionChart component — 300×120 default, slate-700 primary + dashed slate-400 secondary, reuses `formatClaimValue` for ticks/tooltip
     - [x] Lazy-loaded via `React.lazy()` so recharts splits into its own chunk; main bundle 76 KB gz (under 100 KB budget); SectionChart chunk 103 KB gz on-demand
     - [x] 67/67 frontend tests pass (was 40; +15 featured-claim + 8 SectionChart + 4 ReportRenderer wiring)
+
+- [x] Phase 3.3.C — PeerScatter *(this branch)*
+    - [x] `peer-grouping.ts` helpers — `groupPeers` parses `<TICKER>: <metric>` descriptions; `extractMedian` pulls `Peer median: …` claims; `extractSubject` cross-joins Valuation + Quality for the report's own ticker
+    - [x] Recharts `ScatterChart` PeerScatter component — peers / subject / median as three Scatter series; subject 9px slate-900, peers 6px slate-500, median slate-400 cross; reuses `formatClaimValue` for axes
+    - [x] Vite auto-chunking hoists recharts into a shared chunk used by both SectionChart and PeerScatter; main bundle 76.92 KB gz (was 76.25; +0.7 KB); per-component chunks 4.84 KB + 6.03 KB; recharts chunk 100 KB shared
+    - [x] 94/94 frontend tests pass (was 67; +17 peer-grouping + 7 PeerScatter + 3 ReportRenderer wiring)
+    - [x] EARNINGS focus mode falls back to peers + median only (no Quality section to extract subject's gross margin from)
 
 ## Blocked / waiting
 

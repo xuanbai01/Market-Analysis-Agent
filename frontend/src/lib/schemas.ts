@@ -37,6 +37,25 @@ export const ClaimValueSchema = z.union([
 ]);
 export type ClaimValue = z.infer<typeof ClaimValueSchema>;
 
+// Phase 4.3.X — display-unit hint mirroring backend ``ClaimUnit``. The
+// ``formatClaimValue`` helper in ./format.ts dispatches on this so a
+// fraction-form ROE > 1 doesn't drop its % suffix and per-share dollars
+// < $1 don't render as percentages. Optional + nullable so pre-4.3.X
+// cached rows (where the field is absent) round-trip unchanged.
+export const ClaimUnitSchema = z.enum([
+  "fraction",
+  "percent",
+  "usd",
+  "usd_per_share",
+  "ratio",
+  "count",
+  "shares",
+  "basis_points",
+  "date",
+  "string",
+]);
+export type ClaimUnit = z.infer<typeof ClaimUnitSchema>;
+
 // One point in a Claim's time series. ``period`` is an opaque string
 // label (``"2024-Q4"`` / ``"2024-12"`` / ``"2024"``) — different tools
 // emit different cadences and the renderer doesn't parse them. ``value``
@@ -58,6 +77,12 @@ export const ClaimSchema = z.object({
   // "history" key) parses unchanged. Frontend renders a sparkline when
   // ``history.length >= 2``, skips it otherwise.
   history: z.array(ClaimHistoryPointSchema).default([]),
+  // Phase 4.3.X: optional display-unit hint. Truly optional (no
+  // default) so pre-4.3.X cached rows (no ``unit`` key) parse with
+  // ``unit === undefined`` and existing test fixtures don't have to
+  // be updated. The formatter treats undefined and null identically —
+  // both fall back to the legacy heuristic.
+  unit: ClaimUnitSchema.nullable().optional(),
 });
 export type Claim = z.infer<typeof ClaimSchema>;
 

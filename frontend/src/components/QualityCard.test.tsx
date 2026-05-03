@@ -155,11 +155,13 @@ describe("QualityCard", () => {
     const text = subkicker!.textContent ?? "";
     // Sub-kicker must label itself as MARGINS.
     expect(text.toUpperCase()).toMatch(/MARGINS/);
-    // And carry the latest inline values from the FULL_CLAIMS series:
-    // gross margin latest = 0.51, operating margin latest = 0.48,
-    // FCF margin latest = 0.42 (from HIST). Display will be ×100 +
-    // optional decimals; assert the integer parts appear.
-    expect(text).toMatch(/51/);
+    // And carry the snapshot values from the matching FULL_CLAIMS:
+    //   Gross margin = 0.74         → "74"
+    //   Operating margin = 0.48     → "48"
+    //   Free cash flow margin = 0.42 → "42"
+    // Display goes through formatClaimValue so the rendered form is
+    // "74.00%" etc.; assert the integer parts appear.
+    expect(text).toMatch(/74/);
     expect(text).toMatch(/48/);
     expect(text).toMatch(/42/);
   });

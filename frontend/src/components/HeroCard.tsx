@@ -51,7 +51,13 @@ function formatPrice(n: number): string {
 }
 
 function formatLargeNumber(n: number): string {
-  return formatClaimValue(n); // formatClaimValue handles T/B/M abbreviations
+  // Used for the MCAP / VOL / 52W meta strip. MCAP comes through as
+  // already-USD; this wrapper preserves the legacy heuristic for the
+  // pre-Phase-4.1 cached rows (the heuristic correctly abbreviates
+  // 4.11e12 → "4.11T" without the $ prefix). Hero's market-cap stat
+  // uses formatClaimValue with explicit unit when the claim's unit is
+  // available (post-4.3.X cache rows).
+  return formatClaimValue(n);
 }
 
 function logoLetter(symbol: string): string {
@@ -103,14 +109,25 @@ export function HeroCard({ report }: Props) {
               {logoLetter(symbol)}
             </div>
             <div className="flex flex-col">
-              <span className="font-mono text-xs uppercase tracking-kicker text-strata-highlight">
-                {symbol}
-              </span>
-              {hero?.sector && (
-                <span className="mt-0.5 inline-block rounded-full bg-strata-raise px-2 py-0.5 font-mono text-[10px] uppercase tracking-kicker text-strata-dim">
-                  {hero.sector}
-                </span>
-              )}
+              {/*
+                Phase 4.3.X — exchange chip (cosmetic backlog from PR
+                #50). Combines ticker + sector token into one chip
+                matching the design's "NVDA · NASDAQ · SEMIS" treatment.
+                We don't carry exchange data yet — sector_tag stands in
+                until ``fetch_fundamentals`` adds an ``exchange`` claim.
+              */}
+              <div
+                data-testid="hero-exchange-chip"
+                className="inline-flex items-center gap-1.5 font-mono text-xs uppercase tracking-kicker"
+              >
+                <span className="text-strata-highlight">{symbol}</span>
+                {hero?.sector && (
+                  <>
+                    <span aria-hidden className="text-strata-line">·</span>
+                    <span className="text-strata-dim">{hero.sector}</span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
           {hero?.name && (
@@ -200,7 +217,7 @@ export function HeroCard({ report }: Props) {
           {hero?.roicTTM !== null && hero?.roicTTM !== undefined && (
             <FeaturedStat
               label="ROIC TTM"
-              value={formatClaimValue(hero.roicTTM)}
+              value={formatClaimValue(hero.roicTTM, "fraction")}
               sub={hero.roicTTM > 0.4 ? "top decile" : null}
               accentClass="text-strata-quality"
             />
@@ -208,7 +225,7 @@ export function HeroCard({ report }: Props) {
           {hero?.fcfMargin !== null && hero?.fcfMargin !== undefined && (
             <FeaturedStat
               label="FCF margin"
-              value={formatClaimValue(hero.fcfMargin)}
+              value={formatClaimValue(hero.fcfMargin, "fraction")}
               sub={null}
               accentClass="text-strata-cashflow"
             />

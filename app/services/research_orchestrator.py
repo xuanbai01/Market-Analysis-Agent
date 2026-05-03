@@ -297,3 +297,72 @@ async def compose_research_report(
         name=name_value,
         sector=sector_value,
     )
+
+
+# Phase 4.3.X — descriptions used to identify the metadata claims the
+# orchestrator lifts up at fresh-gen time. Held here as constants so the
+# backfill helper stays in step if ``fundamentals._DESCRIPTIONS`` ever
+# renames them (the test suite exercises both paths so drift fails loudly).
+_FUNDAMENTALS_NAME_DESCRIPTION = "Company name"
+_FUNDAMENTALS_SECTOR_DESCRIPTION = "Resolved sector tag"
+
+
+def backfill_top_level_metadata(report: ResearchReport) -> ResearchReport:
+    """Lift name + sector from fundamentals claims when the top-level
+    fields are absent.
+
+    Pre-Phase-4.1 cached reports were generated before ``ResearchReport``
+    grew top-level ``name`` / ``sector`` fields, so the JSONB rows still
+    on disk have those as ``None`` even though the underlying claims
+    are present. The dashboard hero card reads top-level only — without
+    this backfill, AAPL renders as "—" until the cache row ages out.
+
+    The helper is a no-op when:
+    - both top-level fields are already set (never overwrite a fresh
+      value with a stale claim);
+    - the underlying claims aren't in any section (e.g. the
+      orchestrator failed to fan out to fetch_fundamentals).
+
+    Returns a possibly-replaced ``ResearchReport``; never mutates input.
+    """
+    if report.name is not None and report.sector is not None:
+        return report
+
+    backfilled_name = report.name
+    backfilled_sector = report.sector
+
+    if backfilled_name is None or backfilled_sector is None:
+        for section in report.sections:
+            for claim in section.claims:
+                if (
+                    backfilled_name is None
+                    and claim.description == _FUNDAMENTALS_NAME_DESCRIPTION
+                    and isinstance(claim.value, str)
+                ):
+                    backfilled_name = claim.value
+                if (
+                    backfilled_sector is None
+                    and claim.description == _FUNDAMENTALS_SECTOR_DESCRIPTION
+                    and isinstance(claim.value, str)
+                ):
+                    backfilled_sector = claim.value
+                if (
+                    backfilled_name is not None
+                    and backfilled_sector is not None
+                ):
+                    break
+            if (
+                backfilled_name is not None
+                and backfilled_sector is not None
+            ):
+                break
+
+    if (
+        backfilled_name == report.name
+        and backfilled_sector == report.sector
+    ):
+        return report
+
+    return report.model_copy(
+        update={"name": backfilled_name, "sector": backfilled_sector}
+    )

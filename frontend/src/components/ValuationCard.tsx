@@ -21,9 +21,25 @@ import {
   extractValuationCells,
   type ValuationCell,
 } from "../lib/valuation-extract";
-import type { ResearchReport } from "../lib/schemas";
+import type { Claim, ResearchReport } from "../lib/schemas";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { PeerScatterV2 } from "./PeerScatterV2";
+
+// Phase 4.3.X — count distinct peer tickers in a Peers section's
+// claims. Backend ``fetch_peers`` emits each claim as
+// ``<TICKER>: <metric description>``; the "Peer median: ..." claims
+// are aggregates, not individual peers. The same ticker may appear
+// across multiple metrics (P/E, P/S, EV/EBITDA, GM) — count it once.
+function countPeers(claims: readonly Claim[]): number {
+  const tickers = new Set<string>();
+  for (const c of claims) {
+    const m = /^([A-Z][A-Z0-9.\-]{0,9}):\s/.exec(c.description);
+    if (m && m[1] && m[1] !== "Peer median") {
+      tickers.add(m[1]);
+    }
+  }
+  return tickers.size;
+}
 
 interface Props {
   report: ResearchReport;
@@ -68,6 +84,15 @@ export function ValuationCard({ report }: Props) {
           <MetricCell key={c.metric} cell={c} />
         ))}
       </div>
+
+      {peers && peers.claims.length > 0 && (
+        <div
+          data-testid="valuation-peer-count"
+          className="mb-3 font-mono text-[10px] uppercase tracking-kicker text-strata-dim"
+        >
+          n = {countPeers(peers.claims)} peers · sector medians
+        </div>
+      )}
 
       {/* PeerScatterV2.
           Width constrained so the SVG fits the 2/5 column the

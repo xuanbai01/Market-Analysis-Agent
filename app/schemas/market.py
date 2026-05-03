@@ -34,3 +34,26 @@ class MarketHistoryOut(BaseModel):
     symbol: str
     interval: str
     bars: list[OHLCV]
+
+
+# Phase 4.1 — hero price chart endpoint shape. Optimized for the
+# dashboard's needs: ticker + range + compact close-only points + a
+# precomputed "latest" delta.
+class PricePoint(BaseModel):
+    ts: str
+    close: float
+    volume: float
+
+
+class PriceLatest(BaseModel):
+    ts: str
+    close: float
+    delta_abs: float
+    delta_pct: float
+
+
+class MarketPricesOut(BaseModel):
+    ticker: str
+    range: str
+    prices: list[PricePoint]
+    latest: PriceLatest

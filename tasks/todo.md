@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). Backend stays mostly intact; frontend rebuilt as `/symbol/:ticker` route with sidebar shell, hero card, grid-laid-out cards, and adaptive layouts for distressed names. **4.0 done; up next: 4.1 (hero card + earnings card + backend prices route).** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (this PR); up next: 4.2 (Quality + Valuation + PeerScatter v2).** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -37,13 +37,16 @@ Active sprint for the Market Analysis Agent.
 - [ ] **`SearchModal` (deferred to 4.7)** — Search button currently focuses the landing-page input; modal lands when watchlist + recent functionality also do.
 - [ ] **Backend additions deferred to 4.1** — `/v1/market/:ticker/prices?range=60D` and logo URL resolution land alongside hero card implementation.
 
-### 4.1 Hero card + Earnings card
+### 4.1 Hero card + Earnings card ✅ done *(this PR)*
 
-- [ ] **`HeroCard`** — full-width, glow-shadow. Three columns: ticker meta (logo, NVDA, NASDAQ, sector tag, name, big price, delta, MCAP/VOL/52W meta) | 60-day price chart with 1D/5D/1M/3M/1Y/5Y range pills | three featured stats (Forward P/E, ROIC TTM, FCF Margin) with peer/historical sub-context.
-- [ ] **`EarningsCard`** — 20-quarter EPS bars (actual vs estimate, color-coded beat/miss), "X of 20 beat consensus" headline, next-print date with after-market tag, three stats below (beat rate, surprise μ, EPS TTM).
-- [ ] **`LineChart` primitive** — hand-rolled SVG with optional area fill, configurable stroke width and color. Replaces Recharts `LineChart` for the hero use case.
-- [ ] **`EpsBars` primitive** — 20-bar chart with conditional coloring (green for beat, red for miss). Hand-rolled SVG.
-- [ ] **Visible after 4.1:** any ticker URL renders a real hero region with price chart + 3 KPIs + 20Q earnings history. Compelling first-paint product moment even before the rest of the cards land.
+- [x] **`HeroCard`** — three-column glow-shadowed card. Logo letter circle + ticker eyebrow + sector tag + name + big tabular price + colored delta + MCAP/VOL/52W meta (left); 60-day price chart with 6 range pills (center); 3 featured stats with peer/historical sub-context (right).
+- [x] **`EarningsCard`** — replaces ReportRenderer's Earnings claims table. "X of N beat consensus" headline + Next print date + EpsBars chart + 3 stat tiles (Beat rate / Surprise μ / EPS TTM, the last computed client-side from history).
+- [x] **`LineChart` primitive** — hand-rolled SVG, default 560×140, configurable stroke + optional area fill. Used by HeroCard's price chart.
+- [x] **`EpsBars` primitive** — 20-bar SVG chart. Beat/miss coloring (strata-pos / strata-neg); estimate ticks render as horizontal lines for periods with matching estimates; negative actuals (RIVN-class) render with a zero baseline.
+- [x] **`hero-extract.ts`** — pure helper pulls hero data via description matching; reads top-level `name`/`sector` from ResearchReport.
+- [x] **Backend: `GET /v1/market/:ticker/prices?range={60D|1Y|5Y}`** — read-through `candles` cache; falls through to `ingest_market_data` (yfinance) on cache miss with 80% coverage threshold.
+- [x] **Backend: 4 new fundamentals claims** — `name`, `sector_tag`, `fifty_two_week_high`, `fifty_two_week_low`. Plus orchestrator lifts `name`/`sector` to top-level `ResearchReport.name`/`.sector` (Pydantic + Zod schema mirrored).
+- [x] **Visible after 4.1:** `/symbol/AAPL` renders a real hero region with price chart + 3 KPIs + 20-quarter earnings history. Backend 522/522, frontend 146/146 tests pass; main bundle 86.82 KB gz.
 
 ### 4.2 Quality scorecard + Valuation matrix + PeerScatter v2
 

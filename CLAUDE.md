@@ -2,11 +2,11 @@
 
 Guidance for Claude Code (claude.ai/code) when working in this repository.
 
-> **Product context:** this repo is the **AI Equity Research Assistant** — a FastAPI backend exposing `POST /v1/research/{symbol}` that returns a Pydantic-typed citation-backed research report, plus a React + Vite frontend that renders it. Single agent + well-designed tools, free data only, citation discipline non-negotiable. **Visual-first, delta-driven** product shape (charts > prose). The original v1 vision (real-time multi-agent platform, Discord bot) was cut by [ADR 0003](docs/adr/0003-pivot-equity-research.md); the report-shape decision (no Morningstar-narrative chase) is in [ADR 0004](docs/adr/0004-visual-first-product-shape.md).
+> **Product context:** this repo is the **AI Equity Research Assistant** — a FastAPI backend exposing `POST /v1/research/{symbol}` that returns a Pydantic-typed citation-backed research payload, plus a React + Vite frontend rendering it as a **symbol-centric dashboard at `/symbol/:ticker`** (Phase 4, in progress). Single agent + well-designed tools, free data only, citation discipline non-negotiable. **Visual-first, delta-driven** product shape (charts > prose), with **adaptive layouts** for distressed names. The original v1 vision (real-time multi-agent platform, Discord bot) was cut by [ADR 0003](docs/adr/0003-pivot-equity-research.md); the visual-first commitment (no Morningstar-narrative chase) is in [ADR 0004](docs/adr/0004-visual-first-product-shape.md); the pivot from generated-report-page to symbol-centric-dashboard is in [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md).
 >
 > **System design:** [`design_doc.md`](design_doc.md) (root) is the source of truth for scope, budget, stack, and roadmap. Read it before making non-trivial changes.
 > **Active tasks:** `tasks/todo.md`. Lessons: `tasks/lessons.md`.
-> **Architecture Decision Records:** `docs/adr/` — **read [ADR 0003](docs/adr/0003-pivot-equity-research.md) and [ADR 0004](docs/adr/0004-visual-first-product-shape.md) before proposing report-shape changes.**
+> **Architecture Decision Records:** `docs/adr/` — **read [ADR 0003](docs/adr/0003-pivot-equity-research.md), [ADR 0004](docs/adr/0004-visual-first-product-shape.md), and [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md) before proposing surface-shape changes.**
 
 ## How this file works
 
@@ -37,12 +37,20 @@ The `@imports` below pull in modular docs — one concern per file — so a sing
 - **Phase 3.1 schema done (PR #35):** `Claim.history: list[ClaimHistoryPoint]` added to Pydantic + Zod. Backwards-compat default `[]` so pre-3.1 cached rows round-trip unchanged.
 - **Phase 3.2 done (PRs #36 → #40):** all four data-tool history extensions shipped. `fetch_fundamentals` ships 16 history-bearing claims (per-share growth, margin trends, cash flow components, balance sheet trend, ROE/ROIC TTM); `fetch_earnings` ships 3 history-bearing claims with ~20Q lookback; `fetch_macro` ships per-series histories with ~36 monthly observations via FRED `frequency=m`. All three providers converged on a `(values, history_map)` tuple shape.
 - **Phase 3.3 done (frontend visualization):** 3.3.A (PR #41), 3.3.B (PR #42), 3.3.C (PR #43) all merged. `Sparkline` + Trend column, `SectionChart` for Earnings / Quality / Capital Allocation / Macro, `PeerScatter` for the Peers section. Main bundle 76.92 KB gz; recharts hoisted into a shared 100 KB chunk used by both lazy chart components.
-- **Phase 3.4 done (eval rubric history):** `_claim_numeric_values` widens to yield each `Claim.history[*].value` so trend prose like "EPS rose from 1.40 to 2.18" matches even when the endpoints aren't the snapshot. Existing finance-display rules (sign-flip, fraction-percent, scaled units) compose uniformly. 25/25 rubric tests (was 19; +6 history-aware). Up next: 3.5 (Vercel deploy + dogfood gate).
-- **Phase 4 deferred:** narrative layer (Bulls / Bears with `claim_refs`, What Changed, catalyst awareness). Lands only after Phase 3 dogfooding.
-- **Indefinitely deferred** per ADR 0004: `search_history` (pgvector RAG), `compute_options` (yfinance + IV snapshots), Reddit sentiment, real auth + per-user cost caps. None address the perceived-shallowness gap; revisit when there's a concrete trigger.
+- **Phase 3.4 done (eval rubric history) (PR #44):** `_claim_numeric_values` widens to yield each `Claim.history[*].value` so trend prose like "EPS rose from 1.40 to 2.18" matches even when the endpoints aren't the snapshot.
+- **Phase 4 active (symbol-centric dashboard rebuild):** Local Phase 3 dogfooding revealed the data was right but the *report* container was wrong — "click Generate → scroll a static page" feels like a generated artifact, not a tool. Pivot per [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md): rebuild frontend as `/symbol/:ticker` dashboard with sidebar shell, grid-laid-out cards, **adaptive layouts** (RIVN reframes to cash runway / burn / risk; healthy names show valuation + quality + growth), `/compare?a=X&b=Y` route, integrated News + Business descriptions. Backend mostly unchanged; frontend's Sparkline and chart helpers survive, `SectionChart` / `PeerScatter` / `ReportRenderer` get replaced by Strata variants. 8–10 weeks across 4.0–4.8. Vercel deploy moved to 4.8.
+- **Phase 5 deferred (narrative layer):** Bulls Say / Bears Say with `claim_refs`, What Changed, `?focus=thesis`. Lands only if Phase 4.8 dogfooding shows the dashboard's inline narratives don't satisfy the bull/bear-case need.
+- **Phase 6 deferred (XBRL Tier 2):** segment + geography revenue breakdowns, RPO. Conditional on Phase 4.8 signal.
+- **Indefinitely deferred** per ADR 0004: `search_history` (pgvector RAG), `compute_options` (yfinance + IV snapshots), Reddit sentiment, real auth + per-user cost caps.
 
 **Tables today:** `symbols`, `news_items`, `news_symbols`, `candles`, `research_reports`. pgvector + `embeddings` columns are not added until/unless `search_history` un-defers.
 
-**Stubs / 501s:** `/v1/analysis`, `/v1/reports/daily/latest`, `/v1/forecasts/{symbol}` are legacy v1 routes — they'll be removed or redirected to `/v1/research` when convenient. Don't fill them in; prefer adding to `/v1/research`'s shape via the Phase 3/4 roadmap.
+**Stubs / 501s:** `/v1/analysis`, `/v1/reports/daily/latest`, `/v1/forecasts/{symbol}` are legacy v1 routes — they'll be removed or redirected to `/v1/research` when convenient. Don't fill them in; prefer adding to `/v1/research`'s shape via the Phase 4 roadmap.
+
+**Phase 4 backend additions** (lands alongside frontend work):
+- `GET /v1/market/:ticker/prices?range=60D` — OHLCV from `candles` for the hero price chart (data exists, just no route)
+- News integration in orchestrator (`fetch_news` tool exists from PR #13, just not wired)
+- Logo URL resolution (Clearbit or static map)
+- Layout signals payload (`is_unprofitable_ttm`, `cash_runway_quarters`, etc. — derived from existing claims)
 
 When making changes, prefer extending the existing shape (new claims, new history fields, new sections in the static `SECTION_TO_CLAIM_KEYS` registry) over adding parallel surfaces. The deterministic-everything-except-prose architecture is the discipline — read [`app/services/research_orchestrator.py`](app/services/research_orchestrator.py) before proposing structural changes.

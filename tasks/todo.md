@@ -2,100 +2,139 @@
 
 Active sprint for the Market Analysis Agent.
 
-> **Scope:** v2 per [ADR 0003](../docs/adr/0003-pivot-equity-research.md). The v2 product is the **AI Equity Research Assistant**: on-demand structured reports, single agent + tools by default, free data only, citation discipline non-negotiable. Phase 1 infrastructure (FastAPI, async SQLAlchemy, Postgres on Neon, Fly.io, Alembic, observability, tests, deploy pipeline) is complete and reused as-is.
+> **Scope:** v2 per [ADR 0003](../docs/adr/0003-pivot-equity-research.md). The v2 product is the **AI Equity Research Assistant**: free data only, citation discipline non-negotiable. Phase 1 infrastructure complete.
 >
-> **Product shape:** [ADR 0004](../docs/adr/0004-visual-first-product-shape.md) — visual-first, delta-driven. Multi-year history rendered as charts; LLM commentary stays short and stays at genuinely judgment-dependent moments. **Not** chasing Morningstar-depth analyst narrative.
+> **Product shape:** [ADR 0004](../docs/adr/0004-visual-first-product-shape.md) — visual-first, delta-driven. Multi-year history rendered as charts; LLM commentary stays short. **Not** chasing Morningstar-depth analyst narrative.
+>
+> **Surface shape:** [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md) — pivot from "click Generate → static report" to **symbol-centric dashboard** (`/symbol/:ticker`) with adaptive layouts. Same backend; new frontend architecture.
 
 ## In progress
 
-- Phase 3 — Visual-first depth: schema (3.1) ✅; data-tool history (3.2.A–F) ✅; frontend visualization 3.3.A–C ✅; eval rubric history (3.4) ✅. **Up next:** 3.5 (Vercel deploy + dogfood gate) — the decision point for whether 3.6 XBRL escalation is needed.
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). Backend stays mostly intact; frontend rebuilt as `/symbol/:ticker` route with sidebar shell, hero card, grid-laid-out cards, and adaptive layouts for distressed names. **Up next:** 4.0 (token system + sidebar shell + route refactor). See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
-## Phase 3 — Visual-first depth (active)
+## Phase 4 — Symbol-centric dashboard (active)
 
-> **Why this is Phase 3:** dogfooding the v1 report against several names surfaced a clear gap — point-in-time numbers without historical context feel shallow even when the underlying data is comprehensive. The fix isn't more LLM prose (per ADR 0003 anti-hallucination disciplines, prose stays short and citation-bound); the fix is multi-year history surfaced as charts. See [ADR 0004](../docs/adr/0004-visual-first-product-shape.md).
+> **Why this is Phase 4:** dogfooding the Phase 3 visual depth (sparklines, section charts, peer scatter) against MSFT / NVDA / AMZN / AAPL / RIVN locally surfaced that the *data and visualization were right* but the *container was wrong*. "Click Generate → scroll a static report" feels like a generated artifact, not a tool. profitviz / stockanalysis / finchat all converge on a symbol-centric dashboard for a reason. See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md) for the full reasoning.
 >
-> **What this is NOT:** a chase of Morningstar-depth analyst narrative. No multi-year DCF projections, no fair-value estimates, no 5-page bull/bear essays. Those land (in attenuated form) in Phase 4, after the data foundation is right.
+> **What this is NOT:** a polish task. The Strata design pivot is structural — adaptive layouts (RIVN reframes to cash runway / burn / risk; healthy names show valuation + quality + growth), bookmarkable URLs, sidebar persistence, and Compare mode are all impossible in the report shape regardless of how much polish we apply.
 >
-> **Frontend deploy status:** held until Phase 3 ships. PR #32 (frontend MVP) is merged on `main` and locally tested but not Vercel-deployed. The frontend will pick up history rendering as part of this phase rather than ship a deploy that immediately needs an upgrade.
+> **Phase 3 status:** schema (3.1) ✅; data-tool history (3.2.A–F) ✅; frontend visualization (3.3.A–C) ✅; eval rubric history (3.4) ✅. All survives. The frontend visualizations get partially deprecated — `Sparkline` and the chart helpers live on; `SectionChart` / `PeerScatter` / `ReportRenderer` get replaced by Strata variants. The `/v1/research/{symbol}` endpoint and same-day cache layer stay; the renderer that consumes them is what changes.
+>
+> **Vercel deploy:** moved from Phase 3.5 to Phase 4.8. Holding the deploy until the new UI lands rather than shipping a public deploy that immediately needs a redesign.
 
-### 3.1 Schema — `Claim.history` ✅ done (PR #35)
+### 4.0 Token system + sidebar shell + route refactor
 
-- [x] **`ClaimHistoryPoint`** — Pydantic model: `{period: str, value: float}`. `period` is a string (e.g. `"2024-Q4"`, `"2024-12"`, `"2024"`) — different tools emit different granularities; the rendering layer reads them as opaque labels. `value` is strictly numeric (`field_validator` rejects strings/bools — only floats sparkline).
-- [x] **`Claim.history: list[ClaimHistoryPoint] = Field(default_factory=list)`** — added to `app/schemas/research.py`. Default empty so existing claims and existing cache rows round-trip unchanged. Ordered oldest-to-newest by convention; the renderer doesn't sort.
-- [x] **Mirror in `frontend/src/lib/schemas.ts`** — Zod schema gets the same field with `.default([])`; existing reports parse unchanged.
-- [x] **Round-trip test** — `Claim` with history → JSONB → read back → unchanged. Empty history round-trips as empty.
+- [ ] **`tokens.css`** — slate base (9-step), 9 semantic accents (Valuation cyan / Quality mint / Growth yellow-green / Cash flow amber / Balance orange / Earnings rose / Peers violet / Macro slate-blue / Risk coral) at constant chroma + lightness, state colors (pos/neg/neutral/highlight), typography scale (Inter + JetBrains Mono), spacing rhythm (4/8/12/16/24/32/48/64), 4-step radii. Tailwind config maps these to utility classes.
+- [ ] **`SidebarShell`** — 72px fixed-width left rail with logo, Search (`⌘K`), Compare, Watchlist, Recent, Export. Active-state via accent tint + border. Persistent across all routes.
+- [ ] **Route refactor** — replace form-driven `/` with router. Routes: `/` (landing — search + recent), `/symbol/:ticker` (dashboard), `/login`. `/compare?a=X&b=Y` lands in 4.6.
+- [ ] **`SearchModal`** — `⌘K` global keyboard hook. Ticker autocomplete from a static curated list initially; later `/v1/symbols` autocomplete endpoint.
+- [ ] **`SymbolDetailPage` skeleton** — empty grid layout that renders chrome (header, footer with cached-time + source attribution) and placeholder cards. Becomes real in 4.1+.
+- [ ] **Backend: `/v1/market/:ticker/prices?range=60D`** — surface OHLCV from `candles` for the hero price chart. Default ranges: 1D / 5D / 1M / 3M / 1Y / 5Y. JSON shape: `{period, prices: [{ts, close, volume}]}`.
+- [ ] **Backend: logo URL resolution** — Clearbit (`logo.clearbit.com/<domain>`) with a static map for the top ~50 names; null fallback for the rest. Cheap addition to `fetch_fundamentals`.
 
-### 3.2 Tool extensions — Tier 1 (yfinance only, one PR per tool) ✅ done (PRs #36 → #40)
+### 4.1 Hero card + Earnings card
 
-> **Concrete chart catalog** in [ADR 0004 §"Phase 3 — Concrete chart catalog"](../docs/adr/0004-visual-first-product-shape.md). Each PR below maps to one row in that catalog's Tier 1 table.
+- [ ] **`HeroCard`** — full-width, glow-shadow. Three columns: ticker meta (logo, NVDA, NASDAQ, sector tag, name, big price, delta, MCAP/VOL/52W meta) | 60-day price chart with 1D/5D/1M/3M/1Y/5Y range pills | three featured stats (Forward P/E, ROIC TTM, FCF Margin) with peer/historical sub-context.
+- [ ] **`EarningsCard`** — 20-quarter EPS bars (actual vs estimate, color-coded beat/miss), "X of 20 beat consensus" headline, next-print date with after-market tag, three stats below (beat rate, surprise μ, EPS TTM).
+- [ ] **`LineChart` primitive** — hand-rolled SVG with optional area fill, configurable stroke width and color. Replaces Recharts `LineChart` for the hero use case.
+- [ ] **`EpsBars` primitive** — 20-bar chart with conditional coloring (green for beat, red for miss). Hand-rolled SVG.
+- [ ] **Visible after 4.1:** any ticker URL renders a real hero region with price chart + 3 KPIs + 20Q earnings history. Compelling first-paint product moment even before the rest of the cards land.
 
-The pattern: each builder learns to populate `Claim.history` for the metrics where yfinance / FRED / derived computation gives us a series. Builders that can't (e.g. peer-comparison single-snapshot metrics) leave history empty.
+### 4.2 Quality scorecard + Valuation matrix + PeerScatter v2
 
-- [x] **`fetch_fundamentals` history** (PRs #36 / #37 / #38 — sub-phases 3.2.A / B+C / D) — yfinance `Ticker.quarterly_financials`, `quarterly_balance_sheet`, `quarterly_cashflow` give ~5 years of quarters. 16 history-bearing claims now ship across:
-    - **3.2.A** (PR #36): per-share growth (revenue, gross profit, op income, FCF, OCF) + margin trends (gross, operating, profit, FCF). 7 new claims, 2 existing claims gained history.
-    - **3.2.B+C** (PR #37): cash flow components (CapEx, SBC per share) + balance sheet trend (cash + ST investments, total debt, total assets, total liabilities per share). 6 new claims.
-    - **3.2.D** (PR #38): TTM ROE + TTM ROIC via 4Q rolling sum + flat 21% NOPAT tax rate. 1 new claim, ROE existing claim gained history.
+- [ ] **`QualityScorecard`** — 3 metric rings (ROE / ROIC / FCF margin) at top, multi-line margin chart (gross / operating / FCF) below, hybrid 6+expand: default shows the 6 most-important Quality claims, "Show all 16" disclosure expands to the full set. Compact density auto-collapses to 6.
+- [ ] **`MetricRing` primitive** — circular ring with center value + label below + sub-label. Hand-rolled SVG.
+- [ ] **`MultiLine` primitive** — 2-4 series on a shared axis with x-labels + grid. Hand-rolled SVG. Replaces Recharts `LineChart` for the multi-series use case.
+- [ ] **`ValuationMatrix`** — 4-cell grid (P/E trailing, P/E forward, P/S, EV/EBITDA) each with peer median + percentile bar showing where subject sits in peer distribution. Below the grid: PeerScatter v2.
+- [ ] **`PeerScatter` v2** — hand-rolled SVG (replaces 3.3.C Recharts ScatterChart). Selectable axes via dropdown: P/E × Gross Margin (default), P/S × Operating Margin, EV/EBITDA × ROIC. Subject highlighted as larger labeled dot; peers as smaller dots; median as a cross. X/Y axis labels visible.
 
-    Provider returns `(values, history_map)` tuple; `_ratio_history` / `_ttm_sum` / `_nopat_series` helpers in `fundamentals_history.py`. Per-share denominator is `Diluted Average Shares` (per-quarter, not point-in-time `sharesOutstanding`). FCF reads yfinance's pre-computed row. `log_external_call` includes `history_populated_count` summary.
-- [x] **`fetch_earnings` history** (PR #39, sub-phase 3.2.E) — refactored 21 q-prefixed keys (`q1.eps_actual` through `q4.eps_surprise_pct`) to 9 flat keys. 3 history-bearing claims (`eps_actual`, `eps_estimate`, `eps_surprise_pct`) carry up to 20 quarters via `Claim.history`. Switched from `Ticker.earnings_dates` property to `Ticker.get_earnings_dates(limit=24)` for ~6Y of depth. Surprise fallback when yfinance's column is missing.
-- [x] **`fetch_macro` history** (PR #40, sub-phase 3.2.F) — provider returns `(snapshot, history_map)` matching fundamentals + earnings. FRED query: `frequency=m` + `limit=36` for ~3Y of monthly observations. Daily series (DGS10, DCOILWTICO, …) collapse to monthly server-side; already-monthly series (UMCSENT, MANEMP, RSAFS, UNRATE, CPIAUCSL) pass through unchanged. Snapshot/sparkline consistency preserved by construction (`<id>.value == history[-1].value`).
-- [ ] **`fetch_valuation_history` (new derived tool)** — combines `fetch_fundamentals` history + price history into rolling P/E, EV/EBIT, EV/EBITDA, P/S over time, plus 5–10Y median band. Gives "AAPL trades at 28x today vs a 5Y median of 26x" — the most-cited gap from dogfooding. Pure compute; no new external call. *(Deferred — would unlock SectionChart for the Valuation section. Revisit after 3.5 dogfood.)*
-- [ ] **`fetch_dividends_history` (new tool, conditional)** — yfinance `Ticker.dividends` for quarterly history; combined with price history for yield. Renders only when company is a dividend payer. Cheap to add since the source is one line. *(Deferred — would unlock the conditional `DividendsCard`. Revisit if dogfood signals it's missed.)*
-- [ ] **Price-and-technicals history** — we already have OHLCV in `candles`; surface ~5y closing prices on a price-history claim, plus rolling SMA/RSI as charts. Reuse `app.services.technicals` rather than adding a new tool. *(Deferred — would unlock a price section / SectionChart variant. Revisit after 3.5 dogfood.)*
-- [ ] **News in report** — wire `fetch_news` (already exists, currently unused in reports) into the orchestrator. Last ~10 symbol-filtered items as a Claim list with timestamps + URLs. Zero new acquisition cost. *(Deferred — Phase 4 catalyst-awareness work; news doesn't get a sparkline.)*
-- [x] **Peers** stay as point-in-time (peer-comp gets a *visualization* upgrade in 3.3.C but not a history field — comparing 5y trends across 5 peers is a different chart shape, deferred).
+### 4.3 Per-share growth + Cash & capital + Risk diff + Macro
 
-### 3.3 Frontend visualization
+- [ ] **`PerShareGrowth`** — 5Y per-share series (revenue, gross profit, op income, FCF) rebased to Q1 of period start = 100. Multi-line chart shows true relative growth on shared axis. Below: 5 growth-multiple pills (Rev × N, GP × N, OpI × N, FCF × N, OCF × N).
+- [ ] **`CashAndCapital`** — dual stack: top is CapEx + SBC per-share lines, bottom is Cash + Debt per-share lines. Highlight box at the bottom: Net cash / share. Compact: stacks vertically; comfortable: side-by-side.
+- [ ] **`RiskDiff`** — bar chart of paragraph-count deltas by risk category (AI/regulatory, Export controls, Supply concentration, Customer concentration, Competition, Cybersecurity, IP, Macro). One-sentence prose summary below ("Disclosure expanded. Net +9 ¶ across categories — concentrated in AI/regulatory and export controls"). Backend addition: extend `extract_10k_risks_diff` to bucket added/removed paragraphs by category via Haiku classification.
+- [ ] **`MacroPanel`** — 1-2 stacked mini-area-charts (CPI YoY, US 10Y rate) with current value badges. One-sentence prose summary below ("Disinflation continues; 10Y has compressed 43 bps from peak — modest tailwind for long-duration multiples").
 
-- [x] **3.3.A — Sparkline + Trend column** (PR #41) — hand-rolled SVG (~30 lines) instead of Recharts for the inline use case (Recharts' ResponsiveContainer doesn't measure correctly in nested table cells / happy-dom). Default 80×24, slate-700 stroke, dot on the most-recent point, returns null when `history.length < 2`. ReportRenderer's claims table grew a "Trend" column hidden below `sm:` breakpoint. Recharts dep installed for 3.3.B; tree-shaken away from the 3.3.A bundle (75 KB gz, +0.5 KB net).
-- [x] **3.3.B — `SectionChart` component** (PR #42) — Recharts `LineChart` (300×120) at the top of sections with a featured-claim spec. **Lazy-loaded via `React.lazy()`** so recharts (~100 KB gz) lives in its own chunk, keeping the main bundle at 76 KB (under the 100 KB budget). `featured-claim.ts` picks per section title with exact-description matching:
-    - Earnings → `Reported EPS (latest quarter)` (primary) + `Consensus EPS estimate (latest quarter, going in)` (secondary, dashed line)
-    - Quality → `Return on equity` (single-line)
-    - Capital Allocation → `Capital expenditure per share` (single-line)
-    - Macro → first claim with description suffix `(latest observation)` and history (suffix predicate because Macro descriptions are dynamic per FRED series)
-    - Valuation / Peers / Risk Factors / unknown title → skip (returns null)
-    Y-axis ticks + tooltip reuse `formatClaimValue` (single source of truth with table cells AND backend eval rubric). Period axis uses `preserveStartEnd` to avoid 20Q label overlap.
-- [x] **3.3.C — `PeerScatter` component** *(this PR)* — Recharts `ScatterChart` (360×240) for the Peers section. Three Scatter series: peers (slate-500 dots) + optional median (slate-400 cross from existing `median.*` claims) + optional subject (slate-900 dot, extracted from sibling Valuation P/E + Quality gross margin via cross-section join). Frontend-only PR; subject falls back to `undefined` in EARNINGS focus mode (no Quality section) — scatter degrades to peers + median. Vite's auto-chunking hoists recharts into a shared chunk used by both SectionChart (4.84 KB) and PeerScatter (6.03 KB) per-component chunks; main bundle 76.92 KB gz.
-- [ ] **3.3.D *(deferred)* — multi-series / stacked enhancements:** CashFlowStacked (OCF / CapEx / SBC / FCF stacked bars), BalanceSheetTrend (cash vs debt overlay), multi-line Quality SectionChart (margins overlay), EarningsBeatRate (binary strip alongside EPS line). Land only if 3.5 dogfood signals these gaps.
-- [ ] **`DividendsCard` component** *(deferred)* — quarterly dividends bar + yield line, dual-axis. Needs `fetch_dividends_history` tool first; both deferred together.
-- [ ] **`NewsList` component** *(deferred to Phase 4)* — last ~10 items: source, title, timestamp, link out. Plain list; no sentiment shading. Needs `fetch_news` wired into orchestrator first.
+### 4.4 News + Business + section narratives
 
-### 3.4 Eval rubric extension ✅ done *(this PR)*
+- [ ] **News integration** — wire `fetch_news` (already exists, PR #13) into the orchestrator's tool fan-out. New `_build_news` section builder. Last ~30 ranked items. Yahoo per-ticker RSS (free, no auth) is the primary source; NewsAPI free tier (100/day) augments.
+- [ ] **Haiku news categorization** — for each headline, classify category (EARNINGS / PRODUCT / REGULATORY / M&A / SUPPLY / STRATEGY / OTHER) + sentiment (positive / neutral / negative). Haiku 4.5 at ~$0.0001 per headline; ~$0.003 per report total.
+- [ ] **`NewsList` component** — last 5 ranked items by default, with category pills (filter ALL / EARNINGS / PRODUCT / REGULATORY / M&A / SUPPLY) and sentiment counts in footer. "View N more" expands.
+- [ ] **Business description** — yfinance `Ticker.info["longBusinessSummary"]` surfaced as a 1-paragraph card. Founded year, HQ, employee count from `info` too.
+- [ ] **`ContextBand`** — top of `SymbolDetailPage` (between hero and grid), holds Business description card + News card + (later) Revenue mix segment + geography + Next Catalyst. Layout: 2-column on comfortable, 1-column on compact.
+- [ ] **Section narratives** — Sonnet generates 1-2 sentence inline interpretations per card ("Loss is narrowing. EPS −3.82 → −0.78 over 20Q — no positive print"). Renders in the card's bottom strip, below the data. Backed by Claim refs same as section summaries.
+- [ ] **Eval rubric** — section narratives covered by the same factuality rubric (already history-aware after 3.4).
 
-- [x] **`_claim_numeric_values` reads history** — value pool widened to yield each `Claim.history[*].value` alongside the snapshot. Trend prose like "EPS rose from 1.40 to 2.18" matches even when neither endpoint is the snapshot. Existing finance-display rules (tolerance, sign-flip, fraction-percent, scaled units) compose uniformly because they operate on the flat value pool, not per-claim. 6 new rubric unit tests pin: prose cites history, "rose from X to Y" pattern, historical fraction → percent, anti-regression on fabricated values, pre-3.2 backwards compat, cross-section history matching.
-- [x] **Live-LLM golden eval auto-benefits** — the existing AAPL/full case already exercises the new path whenever Sonnet writes a trend sentence. The 0.95 factuality threshold catches any regression. No new golden case needed; cost burn stays opt-in via `ANTHROPIC_API_KEY`.
+### 4.5 Adaptive layout for distressed names *(the differentiator)*
 
-### 3.5 Frontend deploy (after 3.1–3.4 land)
+- [ ] **Backend signals** — extend `compose_research_report` to compute layout flags from claim values: `is_unprofitable_ttm`, `beat_rate_below_30pct`, `cash_runway_quarters` (derived from net cash / FCF burn TTM), `gross_margin_negative`, `debt_rising_cash_falling`. Payload field `layout_signals: dict[str, bool | float]`.
+- [ ] **Layout substitution rules** — when `is_unprofitable_ttm`: hero swaps Forward P/E → P/Sales, ROIC → Cash Runway, FCF Margin stays but with red coloring. When `beat_rate_below_30pct`: Earnings card adds "bottom decile" annotation. When `cash_runway_quarters < 6`: Cash & Capital card adds "raise likely needed" annotation + runway highlight.
+- [ ] **Header pills** — "● UNPROFITABLE · TTM" and "⚠ LIQUIDITY WATCH" pills in the page header for distressed names; nothing for healthy names.
+- [ ] **Section ordering changes** — for distressed names, Cash & Capital moves up (above Per-share growth); Risk diff moves up (above Macro). Layout flags drive the section order.
+- [ ] **Narratives adapt** — section narratives reference the distressed framing ("Trajectory positive, level negative. Gross margin up 226 pts in 5Y but still below break-even"). Sonnet prompts include the layout signals as context.
+- [ ] **Test fixtures** — at least 4 fixture symbols covering the matrix: healthy mature (NVDA, AAPL), slowing growth (F, GM), unprofitable growth (RIVN, LCID), distressed (any name with runway < 4Q at the time of writing).
 
-- [ ] **Vercel deploy** — push-to-deploy from `frontend/`. Set `VITE_BACKEND_URL`, set backend `FRONTEND_ORIGIN`, set `BACKEND_SHARED_SECRET` on both sides. README's "Deploying to Vercel" section already covers this.
-- [ ] **Dogfood** the deployed stack against 5–10 real symbols. Note UX rough edges; fix the high-impact ones in a follow-up. **Decision gate for 3.6:** if the segment-level granularity (revenue / op income by reportable segment + by geography) is repeatedly missed during dogfooding, escalate to 3.6. If Tier 1 is enough, leave 3.6 deferred.
-- [ ] **README + design_doc + CLAUDE.md** sweep — current state reflects Phase 3, screenshots, deploy URL.
+### 4.6 Compare page
 
-### 3.6 Tool extensions — Tier 2 (EDGAR XBRL, conditional)
+- [ ] **`/compare?a=NVDA&b=AVGO`** route — two-ticker side-by-side dashboard.
+- [ ] **`CompareHero`** — two ticker cards side-by-side with mini price charts in the subject's accent color (NVDA cyan, AVGO violet say). "VS" indicator between them.
+- [ ] **Valuation comparison** — 4 metrics (P/E forward, P/S, EV/EBITDA, PEG) shown as horizontal bars between the two values with "lower = cheaper" hint.
+- [ ] **Quality comparison** — 4 metrics (Gross margin, Operating margin, FCF margin, ROIC) with horizontal bars.
+- [ ] **Overlay charts** — 20Q operating margin, 5Y per-share growth (both rebased) with both tickers on shared axes. Narrative call-out below each chart ("NVDA's operating margin overtook AVGO's in Q2-23. AVGO is the steadier business; NVDA captured the cycle").
+- [ ] **Risk diff side-by-side** — both tickers' 10-K risk paragraph deltas as parallel bar charts.
+- [ ] **"What's cut" footer** — explicitly lists what doesn't appear in compare mode (Macro, full Business descriptions, News). Honest about scope.
+- [ ] **Add ticker / Swap controls** — top-right.
 
-> **Conditional gate:** lands only if 3.5 dogfooding shows the segment view is still missed after Tier 1 ships. Tier 1 alone is the bulk of the perceived-shallowness fix; Tier 2 adds breadth where Tier 1 added depth.
+### 4.7 Search + Watchlist + Recent
+
+- [ ] **Search modal** (`⌘K`) — full ticker search; landed in skeleton form in 4.0, fully functional here. Recent + watchlist surfaced inline.
+- [ ] **Watchlist** — localStorage-backed list of tickers; sidebar Watch icon shows live count badge. Clicking a watchlist entry navigates to `/symbol/:ticker`.
+- [ ] **Recent ticker tracking** — last ~10 visited tickers stored in localStorage. Surfaced in sidebar Recent panel + landing page.
+- [ ] **Landing page (`/`)** — search bar, recent tickers as cards (with mini price sparklines), watchlist as a second section, "What's new" feed pulling from `fetch_news` (sector-level instead of per-ticker).
+
+### 4.8 Vercel deploy + dogfood gate
+
+- [ ] **Vercel push-to-deploy** from `frontend/`. Set `VITE_BACKEND_URL`, set backend `FRONTEND_ORIGIN`, set `BACKEND_SHARED_SECRET` on both sides.
+- [ ] **Backend env-var hardening** — confirm Fly secrets match the new dashboard's needs (`ANTHROPIC_API_KEY`, `NEWSAPI_KEY`, `FRED_API_KEY`, `BACKEND_SHARED_SECRET`).
+- [ ] **Dogfood** the deployed stack against 8–10 real symbols spanning the layout matrix (healthy mega-cap, growth, distressed, dividend payer, cyclical). Note rough edges.
+- [ ] **Decision gate for Phase 5 vs Phase 6:** if dogfooding surfaces "I want a real bull/bear case" repeatedly, escalate to Phase 5 (narrative layer). If it surfaces "I need segment / geography breakdowns", escalate to Phase 6 (XBRL Tier 2). If neither dominates, the dashboard is the product and remaining work is polish.
+- [ ] **README + design_doc + CLAUDE.md** sweep — current state reflects Phase 4, screenshots, deploy URL. Update portfolio framing too.
+
+## Phase 5 — Narrative layer (deferred; after Phase 4 dogfooding)
+
+> **Deferred** until Phase 4 ships and is dogfooded. The dashboard's adaptive layout for distressed names (Phase 4.5) plus inline section narratives (Phase 4.4) already deliver a meaningful slice of "what would Bulls Say / Bears Say articulate?" — the killer questions ("EPS narrowing toward break-even but cash runway tightening" or "Operating margin expansion outpacing peers") get answered by the dashboard's data presentation. Phase 5 lands only if dogfooding surfaces a recurring "I want a real bull/bear case" signal that the inline narratives don't satisfy.
+
+- [ ] **Bulls Say / Bears Say** sections — explicit bullet lists with `claim_refs: list[str]` per argument so the rubric can enforce "every bullet cites at least one Claim." Schema work + LLM prompt work + rubric extension all required.
+- [ ] **What Changed** section — surfaces quarter-over-quarter and year-over-year deltas mechanically (from Phase 3 history). LLM writes 1–2 sentence framing per delta. Some of this already exists implicitly in Phase 4.5 adaptive narratives.
+- [ ] **Catalyst awareness** — already partially in Phase 4.4 (next-print date + recent news with sentiment). Phase 5 expansion would tie news directly to the bull/bear thesis ("Q3 print added +7 ¶ to risk factors — feeds the bear case below").
+- [ ] **`?focus=thesis`** — new focus mode oriented around the bull/bear case for active investing decisions, complementing existing `full` (broad diligence) and `earnings` (event-driven).
+
+## Phase 6 — XBRL Tier 2 (deferred; conditional on Phase 4.8 dogfood signal)
+
+> **Deferred** until Phase 4.8 dogfooding shows the segment / geography / RPO breakdowns are repeatedly missed. The Phase 4 dashboard has placeholder cards in the context band for "Revenue mix by segment" and "Revenue mix by geography" that render "data not available" until this lands. If users repeatedly note the gap (especially for names where segment mix is the story — NVDA Data Center vs Gaming, AMZN AWS vs Retail), escalate.
 
 - [ ] **XBRL parser** — pick `python-xbrl` or `arelle`; reuse `fetch_edgar`'s polite-crawl + disk-cache infrastructure. One-time effort; pays for itself across all SEC filers.
 - [ ] **`fetch_segments` (new tool)** — parses `us-gaap:SegmentReportingDisclosure` from the latest 10-K + every 10-Q since. Returns revenue + operating income time series per reportable segment.
 - [ ] **`fetch_geographic_revenue` (new tool)** — parses geographic-disaggregation tags. Returns revenue time series by region (US / Taiwan / China / etc., per the company's reporting structure — no normalization).
 - [ ] **`fetch_rpo_history` (new tool, conditional)** — `us-gaap:RevenueRemainingPerformanceObligation` + `RemainingPerformanceObligationExpectedTimingOfSatisfactionPercentage` for the NTM%. Renders only when the company reports it (mostly SaaS / subscription / defense).
-- [ ] **Frontend additions** — `SegmentDonut` (TTM share) + `SegmentTimeSeries` (per-segment trend chart), `GeographyDonut` + `GeographyTimeSeries`, `RPOCard` (conditional). Mirror profitviz's Tier 2 layouts; skip the polish.
+- [ ] **Frontend additions** — `SegmentDonut` (TTM share) + `SegmentTimeSeries` + `GeographyDonut` + `GeographyTimeSeries` + `RPOCard` rendered into the Phase 4.4 ContextBand placeholders.
 
-## Phase 4 — Narrative layer (deferred; after Phase 3 ships)
+## Other deferred Phase 3 work (rolled forward; revisit case-by-case)
 
-> Phase 4 is intentionally deferred until Phase 3 ships and is dogfooded. With multi-year history in place, the LLM has trends to argue *from* — bull/bear cases become substantive instead of generic. Without Phase 3 first, Phase 4 is just longer-winded versions of today's summaries (per ADR 0004 §"Option 4 rejected").
+These were sketched during Phase 3 but never landed; either Phase 4 absorbs them (news, price history) or they stay deferred:
 
-- [ ] **Bulls Say / Bears Say** sections — explicit bullet lists with `claim_refs: list[str]` per argument so the rubric can enforce "every bullet cites at least one Claim." Schema work + LLM prompt work + rubric extension all required.
-- [ ] **What Changed** section — surfaces quarter-over-quarter and year-over-year deltas mechanically (from Phase 3 history). LLM writes 1–2 sentence framing per delta.
-- [ ] **Catalyst awareness** — wire `fetch_news` (already exists, not in reports today) and earnings dates into a "Coming up" / "Recent" framing. News claims need symbol-tagging upgrades for confidence (already partially done in `app.services.symbol_tagger`).
-- [ ] **`?focus=thesis`** — new focus mode oriented around the bull/bear case for active investing decisions, complementing existing `full` (broad diligence) and `earnings` (event-driven).
+- [x] **News in report** — absorbed into Phase 4.4 (NewsList component + Haiku categorization).
+- [ ] **`fetch_valuation_history` (new derived tool)** — rolling P/E / EV/EBIT / EV/EBITDA over time with median bands. Would unlock a SectionChart for Valuation. *(Still deferred — Phase 4.2's Valuation matrix uses point-in-time + peer percentile bars instead. Revisit if Phase 4.8 dogfooding shows users want "trades at 28× vs 5Y median 26×" framing.)*
+- [ ] **`fetch_dividends_history` (new tool, conditional)** — yfinance `Ticker.dividends` for quarterly history; would unlock a `DividendsCard`. *(Still deferred — niche to dividend payers. Revisit if a recurring use case surfaces.)*
+- [ ] **Price-and-technicals history** — partially absorbed into Phase 4.0/4.1 (60-day price chart in hero). Full SMA / RSI overlay and 5Y price view still TBD; revisit if Phase 4.8 dogfooding shows demand.
 
-## Cross-cutting (do alongside, not blocked on Phase 3)
+## Cross-cutting (do alongside, not blocked on Phase 4)
 
 - [ ] Turn on branch protection for `main` and add `ANTHROPIC_API_KEY` as a repo secret for the AI PR review job
 - [ ] `.python-version` already pinned; verify it's respected by CI's uv setup
 - [ ] **Set `ANTHROPIC_API_KEY` as a Fly secret** — needed before `/v1/research/*` works in prod: `fly secrets set 'ANTHROPIC_API_KEY=sk-ant-...'`
-- [ ] **Local-dev CORS** — `.env.example` should recommend `FRONTEND_ORIGIN=http://localhost:5173` as the obvious local-dev value. Currently empty-by-default trips up every fresh-clone session that runs the frontend against the backend.
+- [ ] **Local-dev defaults sweep** — write a `LOCAL_DEV.md` in the repo root capturing the Phase 3 dogfood lessons: (1) `.env` `DATABASE_URL` should default to local Docker (`postgresql+asyncpg://postgres:postgres@localhost:5432/marketdb`) not Neon; (2) Windows users with native Postgres on :5432 need to either stop the service or remap docker to :5433; (3) `RESEARCH_CACHE_MAX_AGE_HOURS=0` disables cache for debug; (4) browser extensions can rewrite responses — test in incognito to isolate.
+- [ ] **`.env.example`** — recommend `FRONTEND_ORIGIN=http://localhost:5173` as the obvious local-dev value (currently empty trips up fresh-clone sessions).
 
 ## Future scope (deliberately deferred — revisit when there's a concrete trigger)
 

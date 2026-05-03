@@ -112,6 +112,7 @@ POST /v1/research/{symbol}
 | Market | `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ real (yfinance ingest + upsert + technicals) |
 | **Research** | **`POST /v1/research/{symbol}?focus={full,earnings}&refresh={false,true}`** | ✅ **the v2 primary endpoint.** Auth-gated when `BACKEND_SHARED_SECRET` is set. Per-IP rate limit. |
 | Research list | `GET /v1/research?limit=20&offset=0&symbol=...` | ✅ paginated `ResearchReportSummary[]` for the dashboard sidebar |
+| Phase 4 — prices | `GET /v1/market/:ticker/prices?range=60D` | 🟡 planned for 4.0/4.1 (data exists in `candles`, no route yet) |
 | Legacy | `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ 501 (legacy v1 stubs; will be removed or redirected to `/v1/research`) |
 
 Errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](../app/core/errors.py). The handler propagates `HTTPException.headers` so `Retry-After` (429) and `WWW-Authenticate` (401) survive the wrap.
@@ -135,4 +136,5 @@ ADRs in [docs/adr/](adr/):
 - [0001](adr/0001-stack-choice.md) — FastAPI + async SQLAlchemy over Flask/Django.
 - [0002](adr/0002-deployment.md) — Deploy to Fly.io + Postgres on Neon.
 - [0003](adr/0003-pivot-equity-research.md) — Pivot from v1 (real-time multi-agent platform) to v2 (AI Equity Research Assistant).
-- [0004](adr/0004-visual-first-product-shape.md) — **Read this before proposing report-shape changes.** Visual-first, delta-driven; not chasing Morningstar-narrative depth.
+- [0004](adr/0004-visual-first-product-shape.md) — Visual-first, delta-driven; not chasing Morningstar-narrative depth.
+- [0005](adr/0005-symbol-centric-dashboard.md) — **Read this before proposing surface-shape changes.** Pivot from "click Generate → static report" to symbol-centric dashboard with adaptive layouts (Phase 4).

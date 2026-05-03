@@ -1,9 +1,13 @@
 import type { Confidence } from "../lib/schemas";
 
+// Phase 4.0 — restyled for dark theme via Strata state colors.
+// Uses tinted accent backgrounds (12% opacity) over the surface, so
+// the badge reads as a status pill on the dark canvas without
+// fighting the 9 category accents reserved for metric coloring.
 const STYLES: Record<Confidence, string> = {
-  high: "bg-emerald-100 text-emerald-800 ring-emerald-200",
-  medium: "bg-amber-100 text-amber-800 ring-amber-200",
-  low: "bg-red-100 text-red-800 ring-red-200",
+  high: "bg-strata-pos/15 text-strata-pos ring-strata-pos/30",
+  medium: "bg-strata-cashflow/15 text-strata-cashflow ring-strata-cashflow/30",
+  low: "bg-strata-neg/15 text-strata-neg ring-strata-neg/30",
 };
 
 interface Props {

@@ -53,17 +53,17 @@ export function ErrorBanner({ error, onDismiss }: Props) {
   return (
     <div
       role="alert"
-      className="flex items-start justify-between gap-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800"
+      className="flex items-start justify-between gap-3 rounded-md border border-strata-neg/40 bg-strata-neg/10 p-4 text-sm text-strata-neg"
     >
       <div>
         <p className="font-medium">{title}</p>
-        {detail && <p className="mt-1 text-red-700">{detail}</p>}
+        {detail && <p className="mt-1 text-strata-neg/80">{detail}</p>}
       </div>
       {onDismiss && (
         <button
           type="button"
           onClick={onDismiss}
-          className="rounded p-1 text-red-700 hover:bg-red-100"
+          className="rounded p-1 text-strata-neg hover:bg-strata-neg/15"
           aria-label="Dismiss"
         >
           ×

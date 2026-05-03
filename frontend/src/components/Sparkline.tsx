@@ -83,7 +83,7 @@ export function Sparkline({
       <path
         d={pathD}
         fill="none"
-        stroke="rgb(51, 65, 85)" /* slate-700 */
+        stroke="rgb(122, 208, 166)" /* strata-quality — neutral on dark, gets per-claim color in 4.2+ */
         strokeWidth={1.5}
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -92,7 +92,7 @@ export function Sparkline({
         cx={last.x}
         cy={last.y}
         r={1.75}
-        fill="rgb(51, 65, 85)" /* slate-700 */
+        fill="rgb(122, 208, 166)" /* strata-quality */
       />
     </svg>
   );

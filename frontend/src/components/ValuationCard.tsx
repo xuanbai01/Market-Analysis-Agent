@@ -46,7 +46,8 @@ export function ValuationCard({ report }: Props) {
   };
 
   return (
-    <section className="mb-6 rounded-md border border-strata-border bg-strata-surface p-5">
+    // No mb-6 — vertical spacing comes from the parent grid's gap-6.
+    <section className="rounded-md border border-strata-border bg-strata-surface p-5">
       <header className="mb-4 flex items-start justify-between gap-3">
         <div>
           <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-valuation">
@@ -68,9 +69,18 @@ export function ValuationCard({ report }: Props) {
         ))}
       </div>
 
-      {/* PeerScatterV2. */}
+      {/* PeerScatterV2.
+          Width constrained so the SVG fits the 2/5 column the
+          ValuationCard now lives in (Phase 4.3 layout pass). The
+          PeerScatterV2 default is 500px which would overflow the
+          card body at lg breakpoints. */}
       {peers && peers.claims.length > 0 && (
-        <PeerScatterV2 peerClaims={peers.claims} subject={subject} />
+        <PeerScatterV2
+          peerClaims={peers.claims}
+          subject={subject}
+          width={380}
+          height={260}
+        />
       )}
     </section>
   );

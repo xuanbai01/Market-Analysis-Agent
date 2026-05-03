@@ -32,22 +32,16 @@ import { Suspense, lazy } from "react";
 import type { Claim, ResearchReport, Section } from "../lib/schemas";
 import { featuredClaim } from "../lib/featured-claim";
 import { formatClaimValue, formatTimestamp } from "../lib/format";
-import {
-  extractMedian,
-  extractSubject,
-  groupPeers,
-} from "../lib/peer-grouping";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { Sparkline } from "./Sparkline";
 
-// SectionChart + PeerScatter are the only Recharts consumers; lazy-
-// loading them keeps recharts (~100 KB gz) out of the initial bundle.
-// Login screen + dashboard skeleton paint fast; the chart chunk loads
-// after the report data arrives. Vite's code-splitter hoists recharts
-// into a shared vendor chunk so SectionChart and PeerScatter share
-// the runtime cost of recharts (verified via `npm run build`).
+// SectionChart is the only remaining Recharts consumer in this file
+// after Phase 4.2 — Peers moved to PeerScatterV2 (hand-rolled SVG)
+// inside ValuationCard. SectionChart still serves Capital Allocation +
+// Macro until 4.3 replaces those cards. Lazy-loaded so recharts
+// (~100 KB gz) stays out of the main bundle; the chunk loads on demand
+// when a section needing a chart appears.
 const SectionChart = lazy(() => import("./SectionChart"));
-const PeerScatter = lazy(() => import("./PeerScatter"));
 
 interface Props {
   report: ResearchReport;
@@ -100,7 +94,6 @@ export function ReportRenderer({ report, excludeSections = [] }: Props) {
 
 function SectionCard({
   section,
-  report,
 }: {
   section: Section;
   report: ResearchReport;
@@ -110,18 +103,13 @@ function SectionCard({
   // the section has no spec, no matching claim, or insufficient
   // history; in those cases the card falls back to its pre-3.3.B
   // shape (header + summary + claims table).
+  //
+  // Phase 4.2 note: Valuation / Quality / Peers / Earnings are all
+  // rendered by their dedicated Strata cards (ValuationCard,
+  // QualityCard, EarningsCard) and excluded from this renderer. What
+  // remains here are Capital Allocation / Risk Factors / Macro until
+  // 4.3 lands their dedicated cards too.
   const featured = featuredClaim(section);
-
-  // Phase 3.3.C — Peers section gets a PeerScatter above its claims
-  // table. Subject metrics (P/E, gross margin) are extracted from
-  // sibling Valuation + Quality sections at the renderer level so
-  // PeerScatter stays a pure visual component. Falls back to peers-
-  // only scatter in EARNINGS focus mode (no Quality section).
-  const isPeers = section.title === "Peers";
-  const peers = isPeers ? groupPeers(section.claims) : [];
-  const median = isPeers ? extractMedian(section.claims) ?? undefined : undefined;
-  const subject = isPeers ? extractSubject(report) ?? undefined : undefined;
-  const showScatter = isPeers && peers.length > 0;
 
   return (
     <section className="rounded-md border border-strata-border bg-strata-surface p-5">
@@ -146,21 +134,6 @@ function SectionCard({
               primary={featured.primary}
               secondary={featured.secondary}
             />
-          </Suspense>
-        </div>
-      )}
-
-      {showScatter && (
-        <div className="mb-4">
-          <Suspense
-            fallback={
-              <div
-                className="hidden sm:block"
-                style={{ height: 240, width: 360 }}
-              />
-            }
-          >
-            <PeerScatter peers={peers} subject={subject} median={median} />
           </Suspense>
         </div>
       )}

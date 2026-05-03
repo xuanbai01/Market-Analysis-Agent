@@ -1,15 +1,17 @@
 /**
- * risk-extract — pulls Risk10KDiff aggregate counts from the Risk
- * Factors section. Phase 4.3.A.
+ * risk-extract — pulls Risk Factors section claims into the shapes
+ * the RiskDiffCard renders.
  *
- * Pre-4.3.B these are aggregate paragraph counts; 4.3.B will swap in
- * per-category bucketing via Haiku classification. The card falls
- * back gracefully on either shape.
+ * Phase 4.3.A: aggregate paragraph counts (4 bars).
+ * Phase 4.3.B: per-category paragraph deltas via Haiku classification
+ *   (one bar per non-zero bucket). The card prefers the per-category
+ *   shape when available and falls back to aggregates otherwise — pre-
+ *   4.3.B cached rows continue to render.
  *
- * Two helpers:
- *
+ * Helpers:
  *   - extractRiskDiffBars(section) → { added, removed, kept, charDelta } | null
  *   - extractRiskDiffSummary(section) → { framing, netDelta } | null
+ *   - extractRiskCategoryDeltas(section) → RiskCategoryDelta[] | null
  *
  * Description matches mirror app/services/research_tool_registry.py
  * ::_build_risk_factors verbatim.

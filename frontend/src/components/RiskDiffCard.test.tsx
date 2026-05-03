@@ -93,4 +93,53 @@ describe("RiskDiffCard", () => {
     ).toBeNull();
     expect(getByText(/risk diff unavailable/i)).not.toBeNull();
   });
+
+  // Phase 4.3.B: when per-category claims are present, the card swaps
+  // the aggregate 4-bar chart for a per-category bar chart driven by
+  // ``extractRiskCategoryDeltas``. Aggregates fall back when no
+  // per-category claims exist (pre-4.3.B reports + stable disclosures).
+
+  it("renders per-category bars when category-delta claims are present", () => {
+    const withCats = section([
+      ...FULL,
+      claim("AI / regulatory risk paragraph delta vs prior 10-K", 3),
+      claim("Cybersecurity risk paragraph delta vs prior 10-K", -2),
+      claim("Macro risk paragraph delta vs prior 10-K", 1),
+    ]);
+    const { container } = render(<RiskDiffCard section={withCats} />);
+    const catBars = container.querySelectorAll(
+      "[data-testid='risk-category-bars'] [data-row='risk-category-bar']",
+    );
+    expect(catBars.length).toBe(3);
+    // Aggregate chart is hidden when per-category bars take its place.
+    expect(
+      container.querySelector("[data-testid='risk-diff-bars']"),
+    ).toBeNull();
+  });
+
+  it("falls back to aggregate bars when no per-category claims exist", () => {
+    const { container } = render(<RiskDiffCard section={section(FULL)} />);
+    expect(
+      container.querySelector("[data-testid='risk-category-bars']"),
+    ).toBeNull();
+    expect(
+      container.querySelector("[data-testid='risk-diff-bars']"),
+    ).not.toBeNull();
+  });
+
+  it("labels each per-category bar with the human-readable category name", () => {
+    const withCats = section([
+      ...FULL,
+      claim("Supply concentration risk paragraph delta vs prior 10-K", 4),
+    ]);
+    const { container } = render(<RiskDiffCard section={withCats} />);
+    const labels = Array.from(
+      container.querySelectorAll(
+        "[data-row='risk-category-bar']",
+      ),
+    ).map((row) => row.textContent ?? "");
+    // The "Supply concentration" label appears (case-insensitive,
+    // whatever the card chooses for display).
+    expect(labels.some((t) => /supply/i.test(t))).toBe(true);
+  });
 });

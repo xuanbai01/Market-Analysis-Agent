@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (this PR); up next: 4.2 (Quality + Valuation + PeerScatter v2).** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (PR #47); 4.2 done (this PR); up next: 4.3 (Per-share growth + Cash & capital + Risk diff + Macro).** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -48,13 +48,28 @@ Active sprint for the Market Analysis Agent.
 - [x] **Backend: 4 new fundamentals claims** — `name`, `sector_tag`, `fifty_two_week_high`, `fifty_two_week_low`. Plus orchestrator lifts `name`/`sector` to top-level `ResearchReport.name`/`.sector` (Pydantic + Zod schema mirrored).
 - [x] **Visible after 4.1:** `/symbol/AAPL` renders a real hero region with price chart + 3 KPIs + 20-quarter earnings history. Backend 522/522, frontend 146/146 tests pass; main bundle 86.82 KB gz.
 
-### 4.2 Quality scorecard + Valuation matrix + PeerScatter v2
+### 4.2 Quality scorecard + Valuation matrix + PeerScatter v2 ✅ done *(this PR)*
 
-- [ ] **`QualityScorecard`** — 3 metric rings (ROE / ROIC / FCF margin) at top, multi-line margin chart (gross / operating / FCF) below, hybrid 6+expand: default shows the 6 most-important Quality claims, "Show all 16" disclosure expands to the full set. Compact density auto-collapses to 6.
-- [ ] **`MetricRing` primitive** — circular ring with center value + label below + sub-label. Hand-rolled SVG.
-- [ ] **`MultiLine` primitive** — 2-4 series on a shared axis with x-labels + grid. Hand-rolled SVG. Replaces Recharts `LineChart` for the multi-series use case.
-- [ ] **`ValuationMatrix`** — 4-cell grid (P/E trailing, P/E forward, P/S, EV/EBITDA) each with peer median + percentile bar showing where subject sits in peer distribution. Below the grid: PeerScatter v2.
-- [ ] **`PeerScatter` v2** — hand-rolled SVG (replaces 3.3.C Recharts ScatterChart). Selectable axes via dropdown: P/E × Gross Margin (default), P/S × Operating Margin, EV/EBITDA × ROIC. Subject highlighted as larger labeled dot; peers as smaller dots; median as a cross. X/Y axis labels visible.
+> **Scope:** all-frontend. No backend changes. Replaces ReportRenderer's
+> Valuation / Quality / Peers cards with dedicated Strata variants;
+> introduces two hand-rolled SVG primitives so the 4.2 work doesn't lean
+> on Recharts. The Recharts shared chunk stays for now (SectionChart still
+> uses it for Capital Allocation / Macro until 4.3); PeerScatter's recharts
+> dep is gone — the file is deleted.
+
+- [x] **`MetricRing` primitive** — circular SVG ring with center value, label below, optional sub-label. Configurable accent + ratio (0–1, clamped). Hand-rolled. `data-testid='metric-ring'`. 8 tests.
+- [x] **`MultiLine` primitive** — 2-4 series on a shared axis with x-labels + 3 horizontal grid lines + per-series legend chip row. Hand-rolled SVG. Used by QualityCard's gross/operating/FCF margin chart. `data-testid='multi-line'`. 8 tests.
+- [x] **`QualityCard`** — replaces ReportRenderer's Quality section card. Header (kicker + ticker eyebrow) → 3 MetricRings (ROE, ROIC TTM, FCF margin) → MultiLine (Gross / Operating / FCF margins) → hybrid claims table: default 6 (ROE / Gross margin / Operating margin / FCF margin / ROIC / Net profit margin) with "Show all 16" disclosure. Disclosure auto-hides when there are ≤6 claims to avoid the "show all 5" awkward case. 8 tests.
+- [x] **`ValuationCard`** — replaces ReportRenderer's Valuation + Peers section cards. Header → 4-cell grid (P/E trailing, P/E forward, P/S, EV/EBITDA), each cell shows subject value + peer median + horizontal percentile bar (peer min → max with subject dot + median tick) → PeerScatterV2 below. 7 tests.
+- [x] **`PeerScatterV2`** — hand-rolled SVG (replaces 3.3.C Recharts version). 3 axis presets via inline pill row: **P/E × Gross Margin** (default), **P/S × Gross Margin**, **EV/EBITDA × Gross Margin**. All three pairs drawn from the 4 existing `PEER_METRICS` so 4.2 needs no backend change. Subject as larger labeled colored dot; peers as smaller dots with inline ticker labels; median as a small cross. X + Y axis labels + min/max ticks visible. 9 tests.
+- [x] **`quality-extract.ts`** — `extractQualityRings(section)` returns `{roe, roic, fcfMargin}`; `extractMarginSeries(section)` returns 3 history series for MultiLine; `extractPrimaryQualityClaims(section)` + `extractAllQualityClaims(section)` for the 6+expand split. 11 tests.
+- [x] **`valuation-extract.ts`** — for each of the 4 metrics: `{subject, peerMedian, peerMin, peerMax, percentile}`. Reads Valuation section for subject and Peers section for peer/median values. Percentile = `count(peer ≤ subject) / peer_count`; null when subject missing or peer set < 2. 8 tests.
+- [x] **`peer-grouping.ts` extension** — generic `groupPeersForAxes(claims, xMetric, yMetric)` and `extractMedianForAxes(claims, xMetric, yMetric)` so PeerScatterV2 can pivot axes; legacy `groupPeers` / `extractMedian` re-implement on top of the generic helpers. 9 new tests.
+- [x] **SymbolDetailPage** — plucks Quality section; renders `<ValuationCard report={…}/>` and `<QualityCard section={…}/>` above ReportRenderer; ReportRenderer's `excludeSections` widens to `["Earnings","Valuation","Quality","Peers"]`.
+- [x] **Deleted** `components/PeerScatter.tsx` + `.test.tsx` (3.3.C Recharts version replaced by v2). ReportRenderer's lazy `PeerScatter` import + isPeers handling removed; SectionChart still lazy-loaded for Capital Allocation / Macro.
+- [x] **Net result:** 204/204 frontend tests pass (was 146 + 7 PeerScatter; +65 net new across 5 components + 2 extractors + 1 lib extension). Backend untouched at 522/522. Main bundle 90.20 KB gz (was 86.82; +3.4 KB; under 100 KB budget). SectionChart chunk now solo at 103 KB gz (used to share with PeerScatter; loads only on-demand for sections with featuredClaim). Typecheck + lint clean.
+
+**Design decision: axis-preset list.** The original sketch was *P/E × Gross Margin / P/S × Operating Margin / EV/EBITDA × ROIC*. Backend `fetch_peers` only carries 4 metrics (`trailing_pe`, `p_s`, `ev_ebitda`, `gross_margin`); adding operating_margin + ROIC to peers requires per-peer TTM compute (the ROIC formula already exists for the subject in `fundamentals_history.py`). Deferring that backend extension keeps 4.2 frontend-only / one PR. The presets above are all peer-coverage-complete. Richer axis options come back in 4.5/4.8 if dogfooding asks for them.
 
 ### 4.3 Per-share growth + Cash & capital + Risk diff + Macro
 

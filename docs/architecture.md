@@ -27,7 +27,7 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + Anthropic per-
 | Macro | FRED API | ✅ |
 | Hosting | Fly.io (auto-stop machines) + Neon (Postgres) + Vercel (frontend) | ✅ backend, 🟡 frontend deploy held |
 | Frontend stack | Vite + React 18 + Tailwind + TanStack Query + Zod | ✅ |
-| Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ 531 backend / 277 frontend |
+| Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ 531 backend / 295 frontend |
 | Lint | ruff (backend), ESLint (frontend) | ✅ |
 | CI | GitHub Actions (tests + Gitleaks + Claude PR review) + push-to-deploy | ✅ |
 

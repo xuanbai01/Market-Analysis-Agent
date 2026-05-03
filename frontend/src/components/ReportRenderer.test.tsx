@@ -174,22 +174,27 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
   // featuredClaim() returns null synchronously and the lazy import
   // never fires, so the fallback / chart never appears.
 
-  it("renders a SectionChart for an Earnings section with EPS history", async () => {
-    // The default buildReport() has an Earnings section with a
-    // 4-point eps_actual history → the SectionChart should appear.
-    const { container } = render(<ReportRenderer report={buildReport()} />);
-    // 3s timeout because recharts is a 100 KB chunk; the first
-    // lazy() resolution per worker pays the dynamic-import cost
-    // even in vite test mode (subsequent renders in the same file
-    // hit the module cache and resolve instantly).
-    await waitFor(
-      () =>
-        expect(
-          container.querySelector("[data-testid='section-chart']"),
-        ).not.toBeNull(),
-      { timeout: 6000 },
-    );
-  });
+  it(
+    "renders a SectionChart for an Earnings section with EPS history",
+    async () => {
+      // The default buildReport() has an Earnings section with a
+      // 4-point eps_actual history → the SectionChart should appear.
+      // Recharts is a 100 KB chunk; the first lazy() resolution per
+      // worker pays the dynamic-import cost. Under full-suite load
+      // (33 test files post-4.3) the dynamic import has been observed
+      // to take 6+ seconds. Generous timeouts here keep the test
+      // deterministic across machine loads.
+      const { container } = render(<ReportRenderer report={buildReport()} />);
+      await waitFor(
+        () =>
+          expect(
+            container.querySelector("[data-testid='section-chart']"),
+          ).not.toBeNull(),
+        { timeout: 15000 },
+      );
+    },
+    20000,
+  );
 
   it("renders no SectionChart for Risk Factors (no featured-claim spec)", () => {
     const riskOnly: ResearchReport = {
@@ -258,6 +263,8 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
   });
 
   it("renders a SectionChart for Quality with ROE history", async () => {
+    // Same lazy-load timeout consideration as the Earnings test above —
+    // bumped via the explicit 10s test timeout at the bottom of this it().
     const qualityReport: ResearchReport = {
       symbol: "AAPL",
       generated_at: "2026-04-29T14:05:00+00:00",
@@ -290,12 +297,14 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
       ],
     };
     const { container } = render(<ReportRenderer report={qualityReport} />);
-    await waitFor(() =>
-      expect(
-        container.querySelector("[data-testid='section-chart']"),
-      ).not.toBeNull(),
+    await waitFor(
+      () =>
+        expect(
+          container.querySelector("[data-testid='section-chart']"),
+        ).not.toBeNull(),
+      { timeout: 15000 },
     );
-  });
+  }, 20000);
 });
 
 // Phase 4.2 note: the previous "PeerScatter wiring" describe block was

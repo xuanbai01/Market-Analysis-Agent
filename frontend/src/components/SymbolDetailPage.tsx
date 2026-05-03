@@ -19,7 +19,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ApiError, fetchResearchReport } from "../lib/api";
 import { clearStoredToken } from "../lib/auth";
 import { ROUTES } from "../lib/routes";
+import { EarningsCard } from "./EarningsCard";
 import { ErrorBanner } from "./ErrorBanner";
+import { HeroCard } from "./HeroCard";
 import { LoadingState } from "./LoadingState";
 import { ReportRenderer } from "./ReportRenderer";
 
@@ -46,23 +48,29 @@ export function SymbolDetailPage() {
     }
   }, [reportQuery.error, navigate]);
 
+  // Phase 4.1 — pluck the Earnings section so EarningsCard can render
+  // it; ReportRenderer then renders the remaining sections so we don't
+  // double up on Earnings content.
+  const earningsSection = reportQuery.data?.sections.find(
+    (s) => s.title === "Earnings",
+  );
+
   return (
     <div className="mx-auto max-w-6xl px-8 py-8">
-      {/* Hero placeholder — Phase 4.1 fills this in with the price
-          chart + featured stats card. The data-testid lets tests
-          and downstream PRs find the slot. */}
-      <div
-        data-testid="hero-placeholder"
-        className="mb-6 flex h-[200px] items-center justify-center rounded-xl border border-dashed border-strata-border bg-strata-surface text-xs uppercase tracking-kicker text-strata-muted"
-      >
-        Hero · Phase 4.1
-      </div>
-
       {reportQuery.isPending && <LoadingState symbol={upperTicker} />}
       {reportQuery.error && !(reportQuery.error instanceof ApiError && reportQuery.error.status === 401) && (
         <ErrorBanner error={reportQuery.error} />
       )}
-      {reportQuery.data && <ReportRenderer report={reportQuery.data} />}
+      {reportQuery.data && (
+        <>
+          <HeroCard report={reportQuery.data} />
+          {earningsSection && <EarningsCard section={earningsSection} />}
+          <ReportRenderer
+            report={reportQuery.data}
+            excludeSections={["Earnings"]}
+          />
+        </>
+      )}
     </div>
   );
 }

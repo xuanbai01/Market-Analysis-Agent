@@ -227,6 +227,8 @@ function buildReport(opts: {
     generated_at: "2026-04-29T14:05:00+00:00",
     overall_confidence: "high",
     tool_calls_audit: [],
+    name: null,
+    sector: null,
     sections,
   };
 }

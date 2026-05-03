@@ -50,6 +50,19 @@ describe("RiskDiffCard", () => {
     ).not.toBeNull();
   });
 
+  // Phase 4.3.B.1 — risk-diff bar SVG was hardcoded to 360 px width
+  // and overflowed the narrow row-4 column (1/3 of viewport ~360 px
+  // before padding), pushing the value labels outside the card. The
+  // SVG width is now "100%" with viewBox preserving the internal coords.
+  it("renders the risk-diff bars SVG at responsive width", () => {
+    const { container } = render(<RiskDiffCard section={section(FULL)} />);
+    const svg = container.querySelector("[data-testid='risk-diff-bars']");
+    expect(svg?.getAttribute("width")).toBe("100%");
+    // viewBox preserves the internal layout dims so labels stay
+    // anchored at the right edge of the chart's coordinate system.
+    expect(svg?.getAttribute("viewBox")).toMatch(/^0 0 \d+ \d+$/);
+  });
+
   it("renders one bar row per metric (4 rows)", () => {
     const { container } = render(<RiskDiffCard section={section(FULL)} />);
     const rows = container.querySelectorAll("[data-row='risk-diff-bar']");

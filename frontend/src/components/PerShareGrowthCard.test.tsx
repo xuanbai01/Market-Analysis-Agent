@@ -130,4 +130,55 @@ describe("PerShareGrowthCard", () => {
       render(<PerShareGrowthCard ticker="NVDA" section={section([])} />),
     ).not.toThrow();
   });
+
+  // Phase 4.3.B.1 — CAGR annotations. Each multiplier pill grows a
+  // sub-line showing the per-quarter compound growth rate over the
+  // visible period. Adds vertical density so the card grows closer to
+  // its row partner (ValuationCard) without changing the layout.
+  // CAGR per period = multiplier^(1/n_periods) − 1, expressed as a %.
+
+  it("renders a CAGR sub-line under each multiplier pill", () => {
+    const { container } = render(
+      <PerShareGrowthCard ticker="NVDA" section={section(FULL)} />,
+    );
+    const pills = container.querySelectorAll("[data-pill='growth-multiplier']");
+    expect(pills.length).toBe(5);
+    // Every pill must have a CAGR annotation (data-attribute scoped).
+    for (const pill of pills) {
+      const cagr = pill.querySelector("[data-testid='growth-cagr']");
+      expect(cagr).not.toBeNull();
+    }
+  });
+
+  it("formats CAGR as a signed percent per quarter", () => {
+    const { container } = render(
+      <PerShareGrowthCard ticker="NVDA" section={section(FULL)} />,
+    );
+    // HIST has 5 points: 10 → 62 (multiplier 6.2×). CAGR over 4 periods
+    // = 6.2^(1/4) − 1 ≈ 0.578 ≈ 58% per quarter. Match the integer
+    // part — the formatter chooses 0 or 1 decimal. Allow either form.
+    const firstPillCagr = container
+      .querySelector("[data-pill='growth-multiplier'] [data-testid='growth-cagr']");
+    expect(firstPillCagr).not.toBeNull();
+    expect(firstPillCagr!.textContent).toMatch(/\+?(57|58|59)/);
+  });
+
+  it("renders an em-dash for CAGR when the multiplier is null", () => {
+    const partial: Claim[] = [
+      claim("Revenue per share", null, []),
+      claim("Gross profit per share", 43, HIST),
+      claim("Operating income per share", 24, HIST),
+      claim("Free cash flow per share", 21, HIST),
+      claim("Operating cash flow per share", 25.5, HIST),
+    ];
+    const { container } = render(
+      <PerShareGrowthCard ticker="NVDA" section={section(partial)} />,
+    );
+    const pills = container.querySelectorAll("[data-pill='growth-multiplier']");
+    const revPillCagr = pills[0].querySelector(
+      "[data-testid='growth-cagr']",
+    );
+    expect(revPillCagr).not.toBeNull();
+    expect(revPillCagr!.textContent).toContain("—");
+  });
 });

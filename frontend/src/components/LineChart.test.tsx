@@ -38,13 +38,17 @@ describe("LineChart", () => {
     ).toBeNull();
   });
 
-  it("respects custom width and height", () => {
+  it("renders responsive width (100%) with viewBox carrying the dim props", () => {
+    // Phase 4.3.B.1 — chart no longer overflows the hero card on
+    // narrow viewports. The SVG width is always "100%"; viewBox
+    // carries the explicit dimensions so internal coordinates stay
+    // correct.
     const { container } = render(
       <LineChart data={SAMPLE} width={600} height={200} />,
     );
     const svg = container.querySelector("[data-testid='line-chart']");
-    expect(svg?.getAttribute("width")).toBe("600");
-    expect(svg?.getAttribute("height")).toBe("200");
+    expect(svg?.getAttribute("width")).toBe("100%");
+    expect(svg?.getAttribute("viewBox")).toBe("0 0 600 200");
   });
 
   it("renders an area fill path when areaFill is true", () => {

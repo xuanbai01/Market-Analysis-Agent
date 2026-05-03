@@ -138,4 +138,57 @@ describe("EarningsCard", () => {
     };
     expect(() => render(<EarningsCard section={partial} />)).not.toThrow();
   });
+
+  // Phase 4.3.B.1 — RecentPrints sub-table. Adds substantive content
+  // below the 3 stat tiles so the card grows closer to its row partner
+  // (QualityCard, ~700-1200 px). Mini-table shows the last 4 quarters'
+  // period · actual · estimate · surprise %; surprise color-coded.
+
+  it("renders a RecentPrints mini-table with the last 4 quarters", () => {
+    const { container } = render(
+      <EarningsCard section={fakeEarningsSection()} />,
+    );
+    const table = container.querySelector("[data-testid='recent-prints']");
+    expect(table).not.toBeNull();
+    // 4 rows below the header.
+    const rows = container.querySelectorAll(
+      "[data-testid='recent-prints'] [data-row='recent-print']",
+    );
+    expect(rows.length).toBe(4);
+  });
+
+  it("RecentPrints renders period + actual + estimate + surprise per row", () => {
+    const { container } = render(
+      <EarningsCard section={fakeEarningsSection()} />,
+    );
+    const lastRow = container.querySelectorAll(
+      "[data-testid='recent-prints'] [data-row='recent-print']",
+    )[3]; // most recent
+    expect(lastRow).toBeTruthy();
+    const text = lastRow.textContent ?? "";
+    // The fixture's history index 19 is the latest: actual = 1 + 19*0.1 = 2.9,
+    // estimate = 0.95 + 19*0.1 = 2.85, surprise = (2.9-2.85)/2.85 ≈ 1.75%.
+    expect(text).toMatch(/2\.90/); // actual
+    expect(text).toMatch(/2\.85/); // estimate
+    // Surprise rendered as a signed percent.
+    expect(text).toMatch(/\+?1\.[67]\s*%/);
+  });
+
+  it("RecentPrints is hidden when the section has no EPS history", () => {
+    const noHistory: Section = {
+      title: "Earnings",
+      summary: "",
+      confidence: "low",
+      claims: [
+        {
+          description: "Next earnings report date (expected)",
+          value: "2026-05-21",
+          source: { tool: "yfinance.earnings", fetched_at: "2026-05-02T14:00:00+00:00" },
+          history: [],
+        },
+      ],
+    };
+    const { container } = render(<EarningsCard section={noHistory} />);
+    expect(container.querySelector("[data-testid='recent-prints']")).toBeNull();
+  });
 });

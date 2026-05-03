@@ -106,7 +106,8 @@ describe("EpsBars", () => {
       />,
     );
     const svg = container.querySelector("[data-testid='eps-bars']");
-    expect(svg?.getAttribute("width")).toBe("500");
-    expect(svg?.getAttribute("height")).toBe("180");
+    // Phase 4.3.B.1 — responsive width to fit narrow earnings columns.
+    expect(svg?.getAttribute("width")).toBe("100%");
+    expect(svg?.getAttribute("viewBox")).toBe("0 0 500 180");
   });
 });

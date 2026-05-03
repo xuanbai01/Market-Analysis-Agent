@@ -234,4 +234,86 @@ describe("HeroCard", () => {
     expect(text).toMatch(/NVDA/);
     expect(text.toLowerCase()).toMatch(/megacap_tech|tech/);
   });
+
+  // Phase 4.3.B.1 — sub-3M range pills (1D / 5D / 1M / 3M) all backed
+  // by the same /v1/market/:ticker/prices?range=60D fetch. Pre-4.3.B.1
+  // they all rendered the same 60-bar chart because the LineChart
+  // received the unsliced data. The fix slices client-side: each pill
+  // produces a visibly different chart and the range subtitle updates
+  // to reflect the actual span shown.
+
+  it("renders the 60D price chart with all 60 points by default (3M range)", async () => {
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
+    const { container } = renderHero(fakeReport());
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-testid='line-chart']"),
+      ).not.toBeNull(),
+    );
+    // Default range is 3M → entire 60D dataset rendered.
+    const chart = container.querySelector("[data-testid='line-chart']");
+    const path = chart!.querySelector("path");
+    const d = path!.getAttribute("d") ?? "";
+    // 60 points = 1 "M" + 59 segment commands. Match either L or C
+    // segments since the LineChart's path command isn't pinned here.
+    const segmentCount = (d.match(/[ML]/g) ?? []).length;
+    expect(segmentCount).toBe(60);
+  });
+
+  it("slices to 22 points when 1M range is selected", async () => {
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
+    const { container } = renderHero(fakeReport());
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-testid='line-chart']"),
+      ).not.toBeNull(),
+    );
+    fireEvent.click(screen.getByText("1M"));
+    await waitFor(() => {
+      const d =
+        container
+          .querySelector("[data-testid='line-chart'] path")
+          ?.getAttribute("d") ?? "";
+      const segmentCount = (d.match(/[ML]/g) ?? []).length;
+      expect(segmentCount).toBe(22);
+    });
+  });
+
+  it("slices to 5 points when 5D range is selected", async () => {
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
+    const { container } = renderHero(fakeReport());
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-testid='line-chart']"),
+      ).not.toBeNull(),
+    );
+    fireEvent.click(screen.getByText("5D"));
+    await waitFor(() => {
+      const d =
+        container
+          .querySelector("[data-testid='line-chart'] path")
+          ?.getAttribute("d") ?? "";
+      const segmentCount = (d.match(/[ML]/g) ?? []).length;
+      expect(segmentCount).toBe(5);
+    });
+  });
+
+  it("slices to 2 points when 1D range is selected", async () => {
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
+    const { container } = renderHero(fakeReport());
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-testid='line-chart']"),
+      ).not.toBeNull(),
+    );
+    fireEvent.click(screen.getByText("1D"));
+    await waitFor(() => {
+      const d =
+        container
+          .querySelector("[data-testid='line-chart'] path")
+          ?.getAttribute("d") ?? "";
+      const segmentCount = (d.match(/[ML]/g) ?? []).length;
+      expect(segmentCount).toBe(2);
+    });
+  });
 });

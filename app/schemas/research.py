@@ -158,6 +158,12 @@ class ResearchReport(BaseModel):
     sections: list[Section] = Field(default_factory=list)
     overall_confidence: Confidence = Confidence.LOW
     tool_calls_audit: list[str] = Field(default_factory=list)
+    # Phase 4.1 — top-level metadata for the dashboard hero card.
+    # Both default to None so pre-4.1 cached JSONB rows round-trip
+    # unchanged. Values are lifted from fetch_fundamentals' name +
+    # sector_tag claims by ``research_orchestrator.compose_research_report``.
+    name: str | None = None
+    sector: str | None = None
 
     @property
     def all_claims(self) -> list[Claim]:

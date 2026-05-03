@@ -272,10 +272,28 @@ async def compose_research_report(
             )
         )
 
+    # Phase 4.1 — lift name + sector from fetch_fundamentals' metadata
+    # claims to top-level ResearchReport fields so the dashboard hero
+    # card can read them without traversing claims. Underlying claims
+    # stay in place (citation discipline). Both default to None when
+    # fetch_fundamentals failed or omitted them.
+    fundamentals_out = outputs.get("fetch_fundamentals")
+    name_value: str | None = None
+    sector_value: str | None = None
+    if isinstance(fundamentals_out, dict):
+        name_claim = fundamentals_out.get("name")
+        sector_claim = fundamentals_out.get("sector_tag")
+        if name_claim is not None and isinstance(name_claim.value, str):
+            name_value = name_claim.value
+        if sector_claim is not None and isinstance(sector_claim.value, str):
+            sector_value = sector_claim.value
+
     return ResearchReport(
         symbol=target,
         generated_at=datetime.now(UTC),
         sections=sections,
         overall_confidence=_overall_confidence(sections),
         tool_calls_audit=audit,
+        name=name_value,
+        sector=sector_value,
     )

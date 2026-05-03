@@ -455,10 +455,19 @@ def test_yfinance_handles_completely_empty_frames(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A symbol with no financials at all (delisted, brand-new IPO, etc.)
-    must not raise — every key returns None, the agent decides what to do."""
+    must not raise — every numeric key returns None; the agent decides
+    what to do.
+
+    Phase 4.1 carve-out: ``sector_tag`` may be non-None even with empty
+    info because the curated SECTOR_PEERS map (in ``app.services.sectors``)
+    short-circuits to a sector for known symbols. That's correct
+    behavior — knowing NVDA is megacap_tech doesn't require yfinance.
+    """
     _patch_yfinance(monkeypatch, info={})
 
-    raw, _ = _fetch_yfinance_fundamentals("NVDA")
+    # Use an obviously-not-in-the-curated-list symbol so the sector
+    # resolver also returns None alongside the rest.
+    raw, _ = _fetch_yfinance_fundamentals("ZZZZZ-UNKNOWN")
 
     assert set(raw.keys()) == set(CLAIM_KEYS)
     assert all(v is None for v in raw.values())

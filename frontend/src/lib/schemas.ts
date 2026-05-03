@@ -79,6 +79,10 @@ export const ResearchReportSchema = z.object({
   // ``tool_calls_audit`` is debug-only — backend may stop emitting
   // it in a future change. Optional + default so we don't break.
   tool_calls_audit: z.array(z.string()).default([]),
+  // Phase 4.1 — top-level metadata for the hero card. Both default
+  // to null on backwards-compat with pre-4.1 cached reports.
+  name: z.string().nullable().default(null),
+  sector: z.string().nullable().default(null),
 });
 export type ResearchReport = z.infer<typeof ResearchReportSchema>;
 

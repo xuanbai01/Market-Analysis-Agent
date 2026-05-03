@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). Backend stays mostly intact; frontend rebuilt as `/symbol/:ticker` route with sidebar shell, hero card, grid-laid-out cards, and adaptive layouts for distressed names. **Up next:** 4.0 (token system + sidebar shell + route refactor). See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). Backend stays mostly intact; frontend rebuilt as `/symbol/:ticker` route with sidebar shell, hero card, grid-laid-out cards, and adaptive layouts for distressed names. **4.0 done; up next: 4.1 (hero card + earnings card + backend prices route).** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -22,15 +22,20 @@ Active sprint for the Market Analysis Agent.
 >
 > **Vercel deploy:** moved from Phase 3.5 to Phase 4.8. Holding the deploy until the new UI lands rather than shipping a public deploy that immediately needs a redesign.
 
-### 4.0 Token system + sidebar shell + route refactor
+### 4.0 Token system + sidebar shell + route refactor ✅ done *(this PR)*
 
-- [ ] **`tokens.css`** — slate base (9-step), 9 semantic accents (Valuation cyan / Quality mint / Growth yellow-green / Cash flow amber / Balance orange / Earnings rose / Peers violet / Macro slate-blue / Risk coral) at constant chroma + lightness, state colors (pos/neg/neutral/highlight), typography scale (Inter + JetBrains Mono), spacing rhythm (4/8/12/16/24/32/48/64), 4-step radii. Tailwind config maps these to utility classes.
-- [ ] **`SidebarShell`** — 72px fixed-width left rail with logo, Search (`⌘K`), Compare, Watchlist, Recent, Export. Active-state via accent tint + border. Persistent across all routes.
-- [ ] **Route refactor** — replace form-driven `/` with router. Routes: `/` (landing — search + recent), `/symbol/:ticker` (dashboard), `/login`. `/compare?a=X&b=Y` lands in 4.6.
-- [ ] **`SearchModal`** — `⌘K` global keyboard hook. Ticker autocomplete from a static curated list initially; later `/v1/symbols` autocomplete endpoint.
-- [ ] **`SymbolDetailPage` skeleton** — empty grid layout that renders chrome (header, footer with cached-time + source attribution) and placeholder cards. Becomes real in 4.1+.
-- [ ] **Backend: `/v1/market/:ticker/prices?range=60D`** — surface OHLCV from `candles` for the hero price chart. Default ranges: 1D / 5D / 1M / 3M / 1Y / 5Y. JSON shape: `{period, prices: [{ts, close, volume}]}`.
-- [ ] **Backend: logo URL resolution** — Clearbit (`logo.clearbit.com/<domain>`) with a static map for the top ~50 names; null fallback for the rest. Cheap addition to `fetch_fundamentals`.
+- [x] **Tailwind extend with Strata tokens** — slate base (canvas / surface / raise / line / border / muted / dim / fg / hi), 9 semantic accents (valuation / quality / growth / cashflow / balance / earnings / peers / macro / risk), 4 state colors (pos / neg / neutral / highlight), Inter + JetBrains Mono font families, `letterSpacing.kicker` for category labels.
+- [x] **`SidebarShell`** — 72 px fixed-width left rail with brand mark + 5 nav buttons. Search wired (opens stub modal); Compare / Watchlist / Recent / Export disabled in 4.0 (activate in 4.6/4.7).
+- [x] **`RequireAuth`** — route guard; redirects to /login when no token; preserves original URL via location state.
+- [x] **`AppShell`** — sidebar + main outlet; persistent across authenticated routes.
+- [x] **`LandingPage`** — `/` route. Centered search bar + Recent reports list (`PastReportsList` integration). Submit navigates to `/symbol/:ticker` (uppercased).
+- [x] **`SymbolDetailPage`** — `/symbol/:ticker` route. Reads URL param, fetches via existing TanStack Query path, renders hero placeholder + restyled `ReportRenderer`. Centralized 401 → clear token + bounce to /login.
+- [x] **`react-router-dom@^6`** added (~7 KB gz net after the rest of the changes).
+- [x] **Existing components restyled for dark theme** — `ReportRenderer`, `Sparkline`, `ConfidenceBadge`, `LoadingState`, `ErrorBanner`, `PastReportsList`, `LoginScreen` all switched to Strata tokens.
+- [x] **Deleted** — `Dashboard.tsx`, `ReportForm.tsx` (replaced by AppShell + LandingPage + SymbolDetailPage split).
+- [x] **111/111 frontend tests pass** (was 94; +17). Bundle 83.84 KB gz (was 76.92; +7 KB) — under 100 KB budget.
+- [ ] **`SearchModal` (deferred to 4.7)** — Search button currently focuses the landing-page input; modal lands when watchlist + recent functionality also do.
+- [ ] **Backend additions deferred to 4.1** — `/v1/market/:ticker/prices?range=60D` and logo URL resolution land alongside hero card implementation.
 
 ### 4.1 Hero card + Earnings card
 

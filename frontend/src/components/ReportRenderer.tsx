@@ -56,17 +56,17 @@ interface Props {
 export function ReportRenderer({ report }: Props) {
   return (
     <article className="space-y-4">
-      <header className="flex flex-wrap items-baseline justify-between gap-3 border-b border-slate-200 pb-3">
+      <header className="flex flex-wrap items-baseline justify-between gap-3 border-b border-strata-line pb-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+          <h2 className="text-2xl font-semibold tracking-tight text-strata-hi">
             {report.symbol}
           </h2>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-strata-dim">
             Generated {formatTimestamp(report.generated_at)}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs uppercase tracking-wide text-slate-500">
+          <span className="text-xs uppercase tracking-wide text-strata-muted">
             Overall
           </span>
           <ConfidenceBadge confidence={report.overall_confidence} />
@@ -74,7 +74,7 @@ export function ReportRenderer({ report }: Props) {
       </header>
 
       {report.sections.length === 0 ? (
-        <p className="text-sm text-slate-500">No sections returned.</p>
+        <p className="text-sm text-strata-dim">No sections returned.</p>
       ) : (
         report.sections.map((section) => (
           <SectionCard
@@ -114,9 +114,9 @@ function SectionCard({
   const showScatter = isPeers && peers.length > 0;
 
   return (
-    <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="rounded-md border border-strata-border bg-strata-surface p-5">
       <header className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="text-lg font-semibold text-slate-900">
+        <h3 className="text-lg font-semibold text-strata-hi">
           {section.title}
         </h3>
         <ConfidenceBadge confidence={section.confidence} size="sm" />
@@ -156,7 +156,7 @@ function SectionCard({
       )}
 
       {section.summary && (
-        <p className="mb-4 text-sm leading-relaxed text-slate-700">
+        <p className="mb-4 text-sm leading-relaxed text-strata-fg">
           {section.summary}
         </p>
       )}
@@ -168,9 +168,9 @@ function SectionCard({
 
 function ClaimsTable({ claims }: { claims: Claim[] }) {
   return (
-    <div className="overflow-hidden rounded-md border border-slate-200">
+    <div className="overflow-hidden rounded-md border border-strata-line">
       <table className="w-full text-sm">
-        <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+        <thead className="bg-strata-raise text-left text-xs uppercase tracking-wide text-strata-muted">
           <tr>
             <th className="px-3 py-2 font-medium">Metric</th>
             <th className="px-3 py-2 font-medium text-right">Value</th>
@@ -185,7 +185,7 @@ function ClaimsTable({ claims }: { claims: Claim[] }) {
             <th className="px-3 py-2 font-medium">Source</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody className="divide-y divide-strata-line">
           {claims.map((claim, i) => (
             <ClaimRow key={`${claim.description}-${i}`} claim={claim} />
           ))}
@@ -197,9 +197,9 @@ function ClaimsTable({ claims }: { claims: Claim[] }) {
 
 function ClaimRow({ claim }: { claim: Claim }) {
   return (
-    <tr className="hover:bg-slate-50">
-      <td className="px-3 py-2 text-slate-700">{claim.description}</td>
-      <td className="px-3 py-2 text-right font-mono text-slate-900">
+    <tr className="hover:bg-strata-raise">
+      <td className="px-3 py-2 text-strata-fg">{claim.description}</td>
+      <td className="px-3 py-2 text-right font-mono tabular text-strata-hi">
         {formatClaimValue(claim.value)}
       </td>
       <td className="hidden px-3 py-2 sm:table-cell">
@@ -210,13 +210,13 @@ function ClaimRow({ claim }: { claim: Claim }) {
           />
         ) : null}
       </td>
-      <td className="px-3 py-2 text-xs text-slate-500">
+      <td className="px-3 py-2 text-xs text-strata-dim">
         {claim.source.url ? (
           <a
             href={claim.source.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-slate-700 underline decoration-slate-300 underline-offset-2 hover:text-slate-900 hover:decoration-slate-500"
+            className="text-strata-fg underline decoration-strata-line underline-offset-2 hover:text-strata-hi hover:decoration-strata-border"
           >
             {claim.source.tool}
           </a>

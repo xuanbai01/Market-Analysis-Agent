@@ -29,21 +29,21 @@ export function PastReportsList({
 }: Props) {
   return (
     <aside className="space-y-2">
-      <h3 className="px-1 text-xs font-medium uppercase tracking-wide text-slate-500">
-        Past reports
+      <h3 className="px-1 text-xs font-medium uppercase tracking-kicker text-strata-muted">
+        Recent reports
       </h3>
 
       {isLoading && (
-        <p className="px-2 text-xs text-slate-500">Loading…</p>
+        <p className="px-2 text-xs text-strata-dim">Loading…</p>
       )}
 
       {error !== null && error !== undefined && !isLoading && (
-        <p className="px-2 text-xs text-red-600">Could not load past reports.</p>
+        <p className="px-2 text-xs text-strata-neg">Could not load past reports.</p>
       )}
 
       {!isLoading && summaries.length === 0 && error == null && (
-        <p className="px-2 text-xs text-slate-500">
-          Nothing yet. Generate one above.
+        <p className="px-2 text-xs text-strata-dim">
+          Nothing yet. Search for a ticker to begin.
         </p>
       )}
 
@@ -62,18 +62,18 @@ export function PastReportsList({
                 onClick={() => onSelect(summary)}
                 className={`group flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition ${
                   isSelected
-                    ? "bg-slate-200 text-slate-900"
-                    : "hover:bg-slate-100"
+                    ? "bg-strata-raise text-strata-hi"
+                    : "hover:bg-strata-raise text-strata-fg"
                 }`}
               >
                 <div className="min-w-0">
-                  <p className="truncate font-medium text-slate-900">
+                  <p className="truncate font-medium text-strata-hi">
                     {summary.symbol}
-                    <span className="ml-1 text-xs font-normal text-slate-500">
+                    <span className="ml-1 text-xs font-normal text-strata-dim">
                       {summary.focus}
                     </span>
                   </p>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-strata-dim">
                     {summary.report_date}
                   </p>
                 </div>

@@ -59,22 +59,22 @@ export function LoginScreen({ onAuthenticated }: Props) {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-slate-50 p-6">
+    <div className="flex min-h-full items-center justify-center bg-strata-canvas p-6">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
+        className="w-full max-w-sm space-y-4 rounded-lg border border-strata-border bg-strata-surface p-6"
       >
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">
+          <h1 className="text-xl font-semibold text-strata-hi">
             Market Analysis Agent
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-strata-dim">
             Enter your access password to continue.
           </p>
         </div>
 
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">Password</span>
+          <span className="text-sm font-medium text-strata-fg">Password</span>
           <input
             type="password"
             autoFocus
@@ -82,7 +82,7 @@ export function LoginScreen({ onAuthenticated }: Props) {
             value={secret}
             onChange={(e) => setSecret(e.target.value)}
             disabled={isSubmitting}
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:bg-slate-100"
+            className="mt-1 block w-full rounded-md border border-strata-border bg-strata-raise px-3 py-2 text-sm text-strata-hi placeholder-strata-muted focus:border-strata-highlight focus:outline-none focus:ring-1 focus:ring-strata-highlight disabled:bg-strata-line"
             placeholder="Shared secret"
             aria-invalid={error !== null}
             aria-describedby={error ? "login-error" : undefined}
@@ -90,7 +90,7 @@ export function LoginScreen({ onAuthenticated }: Props) {
         </label>
 
         {error && (
-          <p id="login-error" className="text-sm text-red-600" role="alert">
+          <p id="login-error" className="text-sm text-strata-neg" role="alert">
             {error}
           </p>
         )}
@@ -98,7 +98,7 @@ export function LoginScreen({ onAuthenticated }: Props) {
         <button
           type="submit"
           disabled={isSubmitting || !secret}
-          className="w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+          className="w-full rounded-md bg-strata-highlight px-3 py-2 text-sm font-medium text-strata-canvas hover:bg-strata-highlight/90 disabled:cursor-not-allowed disabled:bg-strata-muted disabled:text-strata-dim"
         >
           {isSubmitting ? "Checking…" : "Unlock"}
         </button>

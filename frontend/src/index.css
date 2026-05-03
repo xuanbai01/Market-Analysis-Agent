@@ -10,6 +10,8 @@ body,
 }
 
 body {
+  /* Inter loaded via index.html <link>; JetBrains Mono is per-component
+     via the font-mono Tailwind utility for numerals and labels. */
   font-family:
     "Inter",
     system-ui,
@@ -17,4 +19,11 @@ body {
     "Segoe UI",
     Roboto,
     sans-serif;
+  font-feature-settings: "ss01", "cv11"; /* Inter alt-1 + tabular nums */
+}
+
+/* Tabular figures for any element with the .tabular class — used on
+   numeric cells across the dashboard so columns of digits align. */
+.tabular {
+  font-variant-numeric: tabular-nums;
 }

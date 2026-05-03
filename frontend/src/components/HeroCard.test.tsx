@@ -216,4 +216,22 @@ describe("HeroCard", () => {
     );
     expect(screen.getByText(/52W/i)).toBeInTheDocument();
   });
+
+  // Phase 4.3.X / cosmetic backlog from PR #50: design calls for an
+  // exchange chip near the ticker eyebrow ("NVDA · NASDAQ · SEMIS").
+  // The chip is sourced from the Resolved sector tag claim (already
+  // shipped as ``sector_tag`` since 4.1) — no backend work required,
+  // just a presentation-layer chip render adjacent to the ticker.
+  it("renders an exchange chip combining ticker + sector tag", async () => {
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
+    const { container } = renderHero(fakeReport());
+    await waitFor(() => expect(screen.getByText("NVDA")).toBeInTheDocument());
+    const chip = container.querySelector("[data-testid='hero-exchange-chip']");
+    expect(chip).not.toBeNull();
+    // The chip should reference both the ticker and a sector token —
+    // exact prose is the implementation's call, but both must appear.
+    const text = chip!.textContent ?? "";
+    expect(text).toMatch(/NVDA/);
+    expect(text.toLowerCase()).toMatch(/megacap_tech|tech/);
+  });
 });

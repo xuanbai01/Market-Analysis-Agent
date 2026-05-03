@@ -134,6 +134,29 @@ describe("ValuationCard", () => {
     ).not.toThrow();
   });
 
+  // Phase 4.3.X / cosmetic backlog from PR #50: ValuationCard should
+  // surface "n = X peers · sector medians" so the user sees how many
+  // peers the percentile bars reflect (a 6-peer comparison reads
+  // differently than a 2-peer comparison).
+  it("renders 'n = X peers' annotation reflecting peer count", () => {
+    const peers = [
+      claim("AMD: " + PE, 25.4),
+      claim("INTC: " + PE, 18.2),
+      claim("AVGO: " + PE, 35.7),
+      claim("Peer median: " + PE, 22.0),
+    ];
+    const { container } = render(
+      <ValuationCard report={buildReport({ peersClaims: peers })} />,
+    );
+    const annotation = container.querySelector(
+      "[data-testid='valuation-peer-count']",
+    );
+    expect(annotation).not.toBeNull();
+    // 3 peers: AMD, INTC, AVGO (the "Peer median" claim isn't a peer).
+    expect(annotation!.textContent).toMatch(/n\s*=\s*3/i);
+    expect(annotation!.textContent?.toLowerCase()).toContain("peer");
+  });
+
   it("renders without throwing when valuation section is absent", () => {
     const report: ResearchReport = {
       symbol: "NVDA",

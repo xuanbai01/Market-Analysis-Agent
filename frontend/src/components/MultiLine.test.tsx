@@ -129,4 +129,24 @@ describe("MultiLine", () => {
     };
     expect(() => render(<MultiLine series={[flat]} />)).not.toThrow();
   });
+
+  // Phase 4.3.X / cosmetic backlog from PR #50: design uses smooth
+  // (monotone) curves; the prior implementation drew straight L
+  // segments. The fix uses cubic Bézier ('C' commands) — assert at
+  // least one C segment is present in each series path.
+  it("draws monotone curves (cubic Bézier 'C' commands), not straight L lines", () => {
+    const { container } = render(
+      <MultiLine series={[SERIES_A, SERIES_B]} />,
+    );
+    const paths = container.querySelectorAll(
+      "[data-testid='multi-line'] path[data-series-line]",
+    );
+    expect(paths.length).toBe(2);
+    for (const path of paths) {
+      const d = path.getAttribute("d") ?? "";
+      // Move-to is fine; the curve segments must be C, not L.
+      expect(d).toMatch(/[CS]/);
+      expect(d).not.toMatch(/\sL/);
+    }
+  });
 });

@@ -96,16 +96,23 @@ describe("PerShareGrowthCard", () => {
     expect(emDashCount).toBe(4);
   });
 
-  it("renders the section summary prose when present", () => {
-    const { getByText } = render(
+  // Phase 4.3.X / Bug 5: PerShareGrowthCard reads from the Quality
+  // section, the same section QualityCard reads. Both rendering
+  // ``section.summary`` produced visible duplication ("AAPL demonstrates
+  // strong profitability metrics..." appearing verbatim in both cards).
+  // The fix is to drop the narrative strip from PerShareGrowthCard
+  // entirely — the multipliers ARE the message — and reintroduce
+  // card-specific narratives in Phase 4.4.
+  it("does NOT render the shared section summary prose", () => {
+    const { queryByText } = render(
       <PerShareGrowthCard
         ticker="NVDA"
         section={section(FULL, "Per-share growth has compounded across the stack.")}
       />,
     );
     expect(
-      getByText(/per-share growth has compounded/i),
-    ).not.toBeNull();
+      queryByText(/per-share growth has compounded/i),
+    ).toBeNull();
   });
 
   it("renders a fallback when no series can be rebased", () => {

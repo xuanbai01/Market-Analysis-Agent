@@ -116,6 +116,83 @@ async def test_returns_claim_for_each_known_key(monkeypatch: pytest.MonkeyPatch)
         assert isinstance(claim, Claim)
 
 
+async def test_claim_units_match_expected_categories(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 4.3.X — each fundamentals claim carries a ``unit`` hint that
+    drives frontend display formatting (fraction → ×100 + %, percent →
+    just %, usd_per_share → $X.XX, etc.). Spot-check a representative
+    sample so a forgotten unit annotation fails loudly here.
+
+    Why these specific keys:
+    - ``roe`` is the canonical ROE-bug example: fraction-form ≥ 1
+      (Apple = 1.41) silently dropped the % suffix in pre-4.3.X.
+    - ``dividend_yield`` is the canonical percent-form example:
+      yfinance returns 0.39 meaning "0.39%", not "39%".
+    - ``capex_per_share`` is the canonical per-share-dollar example:
+      values < $1 were rendered as "16.02%" instead of "$0.16".
+    - ``market_cap`` is the canonical large-USD: must abbreviate as
+      "$4.11T" not "4.11T".
+    - ``trailing_pe`` is a plain ratio — no unit suffix.
+    - ``name`` / ``sector_tag`` are pure-string passthroughs.
+    """
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider())
+    result = await fetch_fundamentals("NVDA", provider="fake")
+
+    # Plain numeric ratios — display verbatim, no suffix.
+    assert result["trailing_pe"].unit == "ratio"
+    assert result["forward_pe"].unit == "ratio"
+    assert result["p_s"].unit == "ratio"
+    assert result["ev_ebitda"].unit == "ratio"
+    assert result["peg"].unit == "ratio"
+    assert result["short_ratio"].unit == "ratio"
+
+    # Fraction-form (× 100, append %).
+    assert result["roe"].unit == "fraction"
+    assert result["gross_margin"].unit == "fraction"
+    assert result["profit_margin"].unit == "fraction"
+    assert result["operating_margin"].unit == "fraction"
+    assert result["fcf_margin"].unit == "fraction"
+    assert result["roic"].unit == "fraction"
+    assert result["buyback_yield"].unit == "fraction"
+    assert result["sbc_pct_revenue"].unit == "fraction"
+    assert result["gross_margin_trend_1y"].unit == "fraction"
+
+    # Percent-form (already in percent units; just append %).
+    # yfinance returns dividendYield this way (0.39 meaning 0.39%).
+    assert result["dividend_yield"].unit == "percent"
+
+    # Per-share dollar amounts — prefix $, 2 decimals.
+    for key in (
+        "revenue_per_share",
+        "gross_profit_per_share",
+        "operating_income_per_share",
+        "fcf_per_share",
+        "ocf_per_share",
+        "cash_and_st_investments_per_share",
+        "total_debt_per_share",
+        "total_assets_per_share",
+        "total_liabilities_per_share",
+        "capex_per_share",
+        "sbc_per_share",
+    ):
+        assert result[key].unit == "usd_per_share", (
+            f"{key} should be usd_per_share, got {result[key].unit!r}"
+        )
+
+    # Plain USD — abbreviate large magnitudes.
+    assert result["market_cap"].unit == "usd"
+    assert result["fifty_two_week_high"].unit == "usd"
+    assert result["fifty_two_week_low"].unit == "usd"
+
+    # Shares — abbreviated count, no $.
+    assert result["shares_short"].unit == "shares"
+
+    # String passthroughs — never numeric formatting.
+    assert result["name"].unit == "string"
+    assert result["sector_tag"].unit == "string"
+
+
 async def test_claims_carry_provider_scoped_source(monkeypatch: pytest.MonkeyPatch) -> None:
     """Source.tool reflects the provider id; detail varies per claim."""
     monkeypatch.setitem(PROVIDERS, "fake", _fake_provider())

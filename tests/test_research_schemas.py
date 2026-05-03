@@ -99,6 +99,71 @@ def test_section_default_confidence_is_low() -> None:
     assert s.confidence == Confidence.LOW
 
 
+# ── Claim.unit (Phase 4.3.X) ─────────────────────────────────────────
+#
+# Unit hint drives frontend formatting so a fraction-form ROE > 1
+# doesn't render as a plain number, a per-share dollar amount < $1
+# doesn't render as a percent, and a percent-form dividend yield
+# doesn't get x100'd. Default ``None`` for backwards-compat with
+# pre-4.3.X cached rows; the frontend falls back to the existing
+# heuristic when the field is missing.
+
+
+def test_claim_unit_defaults_to_none() -> None:
+    """Backwards-compat: pre-4.3.X cached rows have no unit field."""
+    c = Claim(description="P/E", value=32.5, source=_src())
+    assert c.unit is None
+
+
+def test_claim_accepts_known_unit_literals() -> None:
+    """The literal-typed unit field accepts the documented categories."""
+    for unit in (
+        "fraction",
+        "percent",
+        "usd",
+        "usd_per_share",
+        "ratio",
+        "count",
+        "date",
+        "string",
+        "shares",
+        "basis_points",
+    ):
+        c = Claim(
+            description=f"X with unit {unit}",
+            value=1.0,
+            source=_src(),
+            unit=unit,  # type: ignore[arg-type]
+        )
+        assert c.unit == unit
+
+
+def test_claim_rejects_unknown_unit() -> None:
+    """Free-form strings on the literal-typed field should fail validation."""
+    with pytest.raises(ValidationError):
+        Claim(
+            description="X",
+            value=1.0,
+            source=_src(),
+            unit="bushels-per-fortnight",  # type: ignore[arg-type]
+        )
+
+
+def test_claim_unit_round_trips_through_jsonb() -> None:
+    """Cache layer serializes via model_dump(mode='json'); the unit
+    must survive that round trip so the dashboard sees it on cache hit."""
+    c = Claim(
+        description="ROE",
+        value=1.41,
+        source=_src(),
+        unit="fraction",
+    )
+    blob = c.model_dump(mode="json")
+    assert blob["unit"] == "fraction"
+    re_parsed = Claim.model_validate(blob)
+    assert re_parsed.unit == "fraction"
+
+
 def test_section_summary_has_length_cap() -> None:
     with pytest.raises(ValidationError):
         Section(title="X", summary="x" * 5000)

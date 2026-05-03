@@ -50,7 +50,8 @@ export function QualityCard({ ticker, section }: Props) {
   const showDisclosure = compact;
 
   return (
-    <section className="mb-6 rounded-md border border-strata-border bg-strata-surface p-5">
+    // No mb-6 — vertical spacing comes from the parent grid's gap-6.
+    <section className="rounded-md border border-strata-border bg-strata-surface p-5">
       <header className="mb-4 flex items-start justify-between gap-3">
         <div>
           <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-quality">

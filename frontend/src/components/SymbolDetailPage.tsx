@@ -81,16 +81,45 @@ export function SymbolDetailPage() {
       {reportQuery.data && (
         <>
           <HeroCard report={reportQuery.data} />
-          {earningsSection && <EarningsCard section={earningsSection} />}
-          <ValuationCard report={reportQuery.data} />
-          {qualitySection && (
-            <QualityCard ticker={upperTicker} section={qualitySection} />
-          )}
-          {qualitySection && (
-            <PerShareGrowthCard ticker={upperTicker} section={qualitySection} />
-          )}
-          {/* Row matches `direction-strata.jsx` row-4: 3-column on
-              desktop, stacks on narrower screens. */}
+
+          {/* Row 2 — Quality | Earnings.
+              Mirrors `direction-strata.jsx` row-2: dense Quality
+              card (rings + multi-line) on the left at ~40% width;
+              the wider Earnings card with its 20-bar EPS chart on
+              the right at ~60%. Stacks to single column under lg. */}
+          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
+            {qualitySection && (
+              <div className="lg:col-span-2">
+                <QualityCard ticker={upperTicker} section={qualitySection} />
+              </div>
+            )}
+            {earningsSection && (
+              <div className="lg:col-span-3">
+                <EarningsCard section={earningsSection} />
+              </div>
+            )}
+          </div>
+
+          {/* Row 3 — Valuation | Per-share growth.
+              Same 40/60 rhythm: ValuationCard (4-cell matrix +
+              PeerScatterV2) on the left, the wide PerShareGrowth
+              MultiLine on the right. */}
+          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
+            <div className="lg:col-span-2">
+              <ValuationCard report={reportQuery.data} />
+            </div>
+            {qualitySection && (
+              <div className="lg:col-span-3">
+                <PerShareGrowthCard
+                  ticker={upperTicker}
+                  section={qualitySection}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Row 4 — Cash & capital | Risk diff | Macro.
+              3-column on desktop, stacks on narrower screens. */}
           <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
             <CashAndCapitalCard
               capAllocSection={capAllocSection}
@@ -99,6 +128,7 @@ export function SymbolDetailPage() {
             {riskSection && <RiskDiffCard section={riskSection} />}
             {macroSection && <MacroPanel section={macroSection} />}
           </div>
+
           <ReportRenderer
             report={reportQuery.data}
             excludeSections={[

@@ -87,7 +87,10 @@ export function EarningsCard({ section }: Props) {
     typeof nextReportClaim?.value === "string" ? nextReportClaim.value : null;
 
   return (
-    <section className="mb-6 rounded-md border border-strata-border bg-strata-surface p-5">
+    // No mb-6 here — the parent grid in SymbolDetailPage owns vertical
+    // spacing via gap-6 so a card-level margin would double up on the
+    // last row of every grid.
+    <section className="rounded-md border border-strata-border bg-strata-surface p-5">
       <header className="mb-4 flex items-start justify-between gap-3">
         <div>
           <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-earnings">

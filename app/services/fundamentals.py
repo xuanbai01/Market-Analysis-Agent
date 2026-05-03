@@ -215,6 +215,69 @@ _DETAILS: dict[str, str] = {
     "fifty_two_week_low": "info.fiftyTwoWeekLow",
 }
 
+# Phase 4.3.X — display-unit hint for the frontend formatter. See
+# ``app.schemas.research.ClaimUnit`` for the literal categories.
+#
+# Why each choice:
+# - Ratios (P/E, EV/EBITDA, PEG, short days-to-cover) — show verbatim.
+# - Fractions (margins, ROE, ROIC, buyback yield, SBC % revenue,
+#   gross-margin trend) — yfinance returns these as 0.x decimals, so
+#   the formatter ×100s them. ROE-class values > 1 (Apple = 1.41) keep
+#   the % suffix instead of being silently rendered as "1.41".
+# - Percent-form (dividend_yield) — yfinance returns this in already-
+#   percent form (0.39 means "0.39%"); the formatter must NOT ×100.
+# - Per-share dollars — small magnitudes (< $1 for capital-light
+#   companies) had been rendering as percents under the legacy
+#   heuristic. Now they're explicit "$0.16" / "$3.48".
+# - Plain USD (market cap, 52W band) — abbreviated as "$4.11T" with
+#   a $ prefix.
+# - Counts (shares short) — abbreviated, no $.
+# - Strings (name, sector tag) — pass through.
+_UNITS: dict[str, str] = {
+    "trailing_pe": "ratio",
+    "forward_pe": "ratio",
+    "p_s": "ratio",
+    "ev_ebitda": "ratio",
+    "peg": "ratio",
+    "roe": "fraction",
+    "gross_margin": "fraction",
+    "profit_margin": "fraction",
+    "revenue_per_share": "usd_per_share",
+    "gross_profit_per_share": "usd_per_share",
+    "operating_income_per_share": "usd_per_share",
+    "fcf_per_share": "usd_per_share",
+    "ocf_per_share": "usd_per_share",
+    "operating_margin": "fraction",
+    "fcf_margin": "fraction",
+    "cash_and_st_investments_per_share": "usd_per_share",
+    "total_debt_per_share": "usd_per_share",
+    "total_assets_per_share": "usd_per_share",
+    "total_liabilities_per_share": "usd_per_share",
+    "capex_per_share": "usd_per_share",
+    "sbc_per_share": "usd_per_share",
+    "roic": "fraction",
+    "dividend_yield": "percent",
+    "short_ratio": "ratio",
+    "shares_short": "shares",
+    "market_cap": "usd",
+    "buyback_yield": "fraction",
+    "sbc_pct_revenue": "fraction",
+    "gross_margin_trend_1y": "fraction",
+    "name": "string",
+    "sector_tag": "string",
+    "fifty_two_week_high": "usd",
+    "fifty_two_week_low": "usd",
+}
+# Sanity-check: keep `_UNITS` in sync with `_DESCRIPTIONS` / `CLAIM_KEYS`.
+# The orchestrator iterates `CLAIM_KEYS` so a forgotten unit annotation
+# would silently fall through to the legacy heuristic. Asserting at
+# import time means the test suite catches drift loudly.
+assert set(_UNITS.keys()) == set(CLAIM_KEYS), (
+    f"_UNITS out of sync with CLAIM_KEYS: "
+    f"missing={set(CLAIM_KEYS) - set(_UNITS.keys())}, "
+    f"extra={set(_UNITS.keys()) - set(CLAIM_KEYS)}"
+)
+
 # yfinance .info key for each info-derived claim. The remaining three
 # claims are computed from financials/cashflow DataFrames below.
 _INFO_KEYS: dict[str, str] = {
@@ -452,5 +515,6 @@ async def fetch_fundamentals(
                 detail=_DETAILS[key],
             ),
             history=history_map.get(key, []),
+            unit=_UNITS[key],  # type: ignore[arg-type]
         )
     return out

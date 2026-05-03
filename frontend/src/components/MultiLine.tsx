@@ -43,6 +43,29 @@ interface Props {
 
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 180;
+
+/** Build a smooth SVG path through ``points`` using Catmull-Rom-to-Bezier
+ *  cubic interpolation. Uses tension 1/6 (the standard CR derivative);
+ *  endpoint control points mirror the nearest neighbor so the curve
+ *  starts/ends tangent to its data without spurious oscillation. */
+function smoothPath(points: { x: number; y: number }[]): string {
+  if (points.length === 0) return "";
+  const fmt = (n: number) => n.toFixed(2);
+  if (points.length === 1) return `M${fmt(points[0].x)},${fmt(points[0].y)}`;
+  let d = `M${fmt(points[0].x)},${fmt(points[0].y)}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[Math.min(points.length - 1, i + 2)];
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C${fmt(c1x)},${fmt(c1y)} ${fmt(c2x)},${fmt(c2y)} ${fmt(p2.x)},${fmt(p2.y)}`;
+  }
+  return d;
+}
 const PADDING_TOP = 8;
 const PADDING_BOTTOM = 24; // room for X-axis label
 const PADDING_LEFT = 8;
@@ -144,22 +167,24 @@ export function MultiLine({
           strokeWidth={1}
         />
 
-        {/* Series paths. */}
+        {/* Series paths. Phase 4.3.X — monotone cubic Bézier curves
+            (Catmull-Rom-to-Bezier) instead of straight L-segments to
+            match the design's smooth-curve treatment. The control
+            points use a tension of 1/6 so the curve hugs the data
+            points without overshoot on flat segments. */}
         {drawable.map((s) => {
           const sortedPoints = [...s.history].sort((a, b) =>
             a.period < b.period ? -1 : a.period > b.period ? 1 : 0,
           );
-          const d = sortedPoints
-            .map(
-              (p, i) =>
-                `${i === 0 ? "M" : "L"}${xOf(p.period).toFixed(2)},${yOf(p.value).toFixed(2)}`,
-            )
-            .join(" ");
+          const xy = sortedPoints.map((p) => ({
+            x: xOf(p.period),
+            y: yOf(p.value),
+          }));
           return (
             <path
               key={s.label}
               data-series-line={s.label}
-              d={d}
+              d={smoothPath(xy)}
               fill="none"
               stroke={s.color}
               strokeWidth={1.8}

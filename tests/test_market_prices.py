@@ -137,6 +137,61 @@ async def test_prices_calls_yfinance_on_cache_miss(
     )
 
 
+async def test_prices_succeeds_for_symbol_not_pre_seeded(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 4.3.X — Bug 1 regression test.
+
+    Before the fix: hitting `/v1/market/AAPL/prices` for any ticker
+    that wasn't in the seed-only ``symbols`` table (NVDA, SPY) returned
+    HTTP 500 with a ForeignKeyViolationError because
+    ``ingest_market_data`` insert candles before ensuring the parent
+    symbol row exists. This effectively broke the HeroCard chart for
+    every ticker the user actually wanted to research.
+
+    After the fix: the ingest path upserts ``symbols`` before inserting
+    ``candles``, so AAPL — never seeded, never previously researched —
+    succeeds end-to-end on first hit.
+    """
+    # Confirm baseline: AAPL is NOT in the test DB to start.
+    from sqlalchemy import select
+
+    pre = (
+        await db_session.execute(select(Symbol).where(Symbol.symbol == "AAPL"))
+    ).scalar_one_or_none()
+    assert pre is None, "test precondition: AAPL must not exist before the call"
+
+    now = datetime.now(UTC)
+    fake_bars = [
+        {
+            "ts": now - timedelta(days=i),
+            "open": Decimal("180"),
+            "high": Decimal("182"),
+            "low": Decimal("178"),
+            "close": Decimal("181"),
+            "volume": 50_000_000,
+        }
+        for i in range(60)
+    ]
+
+    monkeypatch.setitem(
+        PROVIDERS, "yfinance", lambda _s, _p: fake_bars
+    )
+
+    resp = await client.get("/v1/market/AAPL/prices?range=60D")
+    assert resp.status_code == 200, (
+        f"expected 200 after symbols upsert, got {resp.status_code}: {resp.text}"
+    )
+
+    # The fix should have created the AAPL symbol row as a side effect.
+    post = (
+        await db_session.execute(select(Symbol).where(Symbol.symbol == "AAPL"))
+    ).scalar_one_or_none()
+    assert post is not None, "AAPL row should exist after price ingest"
+
+
 # ── Response shape ───────────────────────────────────────────────────
 
 

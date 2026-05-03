@@ -56,11 +56,14 @@ export function PerShareGrowthCard({ ticker, section }: Props) {
           <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-growth">
             Per-share growth · {ticker} · rebased first = 100
           </div>
-          {section.summary && (
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-strata-fg">
-              {section.summary}
-            </p>
-          )}
+          {/*
+            Phase 4.3.X (Bug 5) — narrative strip removed. PerShareGrowthCard
+            and QualityCard both read from the Quality section; rendering
+            section.summary here produced visible duplication of the prose.
+            Per-card narratives come back in 4.4 as a card-specific field
+            (``card_summary``) wired by the orchestrator. Until then, the
+            multipliers (RV / GP / OpI / FCF / OCF) are the message.
+          */}
         </div>
         <div className="flex items-center gap-3">
           {periodLength > 0 && (

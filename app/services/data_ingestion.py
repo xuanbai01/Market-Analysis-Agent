@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.observability import log_external_call
 from app.db.models.candles import Candle
+from app.db.models.symbols import Symbol
 
 # Provider signature: (symbol, period) -> list[dict] where each dict has
 # the keys ``ts, open, high, low, close, volume``. Sync by design —
@@ -111,6 +112,18 @@ async def ingest_market_data(
         }
         for bar in bars
     ]
+
+    # Phase 4.3.X — ensure the parent ``symbols`` row exists before
+    # inserting candles. Without this, hitting the prices route for any
+    # ticker not in the seed migration (NVDA, SPY) 500'd with a
+    # ForeignKeyViolationError on candles → symbols, breaking the
+    # HeroCard chart for ~every real-world request. ON CONFLICT DO
+    # NOTHING preserves the existing row's ``name`` if the symbol was
+    # seeded with one (e.g. NVDA's "NVIDIA Corp" from the baseline
+    # migration).
+    symbol_stmt = pg_insert(Symbol).values(symbol=symbol.upper())
+    symbol_stmt = symbol_stmt.on_conflict_do_nothing(index_elements=["symbol"])
+    await session.execute(symbol_stmt)
 
     stmt = pg_insert(Candle).values(rows)
     stmt = stmt.on_conflict_do_update(

@@ -183,7 +183,7 @@ function ClaimRow({ claim }: { claim: Claim }) {
     <tr className="hover:bg-strata-raise">
       <td className="px-3 py-2 text-strata-fg">{claim.description}</td>
       <td className="px-3 py-2 text-right font-mono tabular text-strata-hi">
-        {formatClaimValue(claim.value)}
+        {formatClaimValue(claim.value, claim.unit)}
       </td>
       <td className="hidden px-3 py-2 sm:table-cell">
         {claim.history.length >= 2 ? (

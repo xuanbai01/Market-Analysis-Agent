@@ -140,4 +140,29 @@ describe("QualityCard", () => {
     const { queryByRole } = render(<QualityCard ticker="NVDA" section={small} />);
     expect(queryByRole("button", { name: /show all/i })).toBeNull();
   });
+
+  // Phase 4.3.X / cosmetic backlog from PR #50: design calls for a
+  // "MARGINS · 5Y" sub-kicker above the MultiLine with inline values
+  // matching the legend chips ("● GM 74.0 · ● OM 48.0 · ● FCF 42.0").
+  it("renders a MARGINS sub-kicker with inline GM/OM/FCF values", () => {
+    const { container } = render(
+      <QualityCard ticker="NVDA" section={section(FULL_CLAIMS)} />,
+    );
+    const subkicker = container.querySelector(
+      "[data-testid='quality-margins-subkicker']",
+    );
+    expect(subkicker).not.toBeNull();
+    const text = subkicker!.textContent ?? "";
+    // Sub-kicker must label itself as MARGINS.
+    expect(text.toUpperCase()).toMatch(/MARGINS/);
+    // And carry the snapshot values from the matching FULL_CLAIMS:
+    //   Gross margin = 0.74         → "74"
+    //   Operating margin = 0.48     → "48"
+    //   Free cash flow margin = 0.42 → "42"
+    // Display goes through formatClaimValue so the rendered form is
+    // "74.00%" etc.; assert the integer parts appear.
+    expect(text).toMatch(/74/);
+    expect(text).toMatch(/48/);
+    expect(text).toMatch(/42/);
+  });
 });

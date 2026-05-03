@@ -168,7 +168,11 @@ async def research(
             max_age_hours=settings.RESEARCH_CACHE_MAX_AGE_HOURS,
         )
         if cached is not None:
-            return cached
+            # Phase 4.3.X — pre-Phase-4.1 cached rows lack top-level
+            # name/sector. Backfill from fundamentals claims so the
+            # hero card renders correctly without forcing a fresh-gen
+            # for every stale ticker.
+            return research_orchestrator.backfill_top_level_metadata(cached)
 
     # Cache miss (or refresh forced) → about to spend an LLM call.
     # Rate-limit gate goes here, after we've confirmed we'd actually

@@ -74,8 +74,10 @@ describe("CashAndCapitalCard", () => {
         qualitySection={QUALITY}
       />,
     );
-    // 26.84 - 3.92 = 22.92
-    expect(getByText("22.92")).not.toBeNull();
+    // 26.84 - 3.92 = 22.92. Phase 4.3.X — net cash / share renders
+    // with the $ prefix (unit hint "usd_per_share"); legacy heuristic
+    // would've rendered "22.92" with no prefix.
+    expect(getByText("$22.92")).not.toBeNull();
   });
 
   it("renders an em-dash when net cash can't be computed", () => {

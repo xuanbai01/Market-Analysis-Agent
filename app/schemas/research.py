@@ -18,9 +18,29 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# Phase 4.3.X — display-unit hint for Claim.value. The frontend formatter
+# (frontend/src/lib/format.ts::formatClaimValue) dispatches on this so a
+# fraction-form ROE > 1 doesn't silently drop the % suffix, a per-share
+# dollar < $1 isn't rendered as a percent, and yfinance's percent-form
+# dividendYield isn't ×100'd a second time. Kept as an optional Literal
+# so pre-4.3.X cached rows (where the field is absent) round-trip
+# unchanged and fall through to the heuristic on the frontend.
+ClaimUnit = Literal[
+    "fraction",        # 0.74 → "74.00%"  — margins, ROE, ROIC, growth fractions
+    "percent",         # 0.39 → "0.39%"   — yfinance-shaped dividendYield, FRED rates
+    "usd",             # 4.11e12 → "$4.11T", 921.04 → "$921.04" — market cap, 52W
+    "usd_per_share",   # 0.16 → "$0.16"   — capex/sbc/per-share dollars
+    "ratio",           # 33.92 → "33.92"  — P/E, EV/EBITDA, days-to-cover
+    "count",           # 12,345 → "12,345" with locale grouping
+    "shares",          # 134.42M → "134.42M" abbreviated, no $
+    "basis_points",    # rare, reserved for explicit bp-shaped deltas
+    "date",            # ISO string passthrough
+    "string",          # name, sector tag
+]
 
 
 class Confidence(str, Enum):
@@ -120,6 +140,14 @@ class Claim(BaseModel):
     value: ClaimValue
     source: Source
     history: list[ClaimHistoryPoint] = Field(default_factory=list)
+    # Phase 4.3.X — optional display-unit hint. ``None`` (the default)
+    # leaves the frontend on its legacy heuristic, which is correct for
+    # any value already covered by the rules in formatClaimValue. Tools
+    # that ship values where the heuristic gets it wrong (per-share
+    # dollars < $1, percent-form yields, fraction-form ROE > 1) set
+    # this to an explicit category so the formatter dispatches
+    # deterministically.
+    unit: ClaimUnit | None = None
 
 
 class Section(BaseModel):

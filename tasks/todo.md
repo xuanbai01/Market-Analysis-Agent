@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (PR #47); 4.2 done (PR #48); 4.3.A done (this PR); 4.3.B (Haiku risk categorizer) deferred follow-up; up next: 4.4 (News + Business + section narratives).** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (PR #47); 4.2 done (PR #48); 4.3.A done (PR #49); 4.3.A.1 done (PR #50); 4.3.X data correctness pass done (this PR — six bugs from [dogfood-2026-05-03.md](dogfood-2026-05-03.md)); 4.3.B (Haiku risk categorizer) and 4.4 (News + section narratives) up next.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -91,6 +91,52 @@ Active sprint for the Market Analysis Agent.
 - [x] **`macro-extract.ts`** — `extractMacroPanels(section)` returns `{id, label, latest, history, observationDate}[]`. Reads `<label> (latest observation)` (value-bearing, history-bearing), `<label> observation date`, and the metadata claim `Human-readable label for FRED series <id>` for the optional id. Skips series with non-numeric latest or empty history. 6 tests.
 - [x] **SymbolDetailPage** — plucks Quality, Capital Allocation, Risk Factors, Macro sections; renders `<PerShareGrowthCard>` after QualityCard, then a 3-column grid `<CashAndCapitalCard> | <RiskDiffCard> | <MacroPanel>` matching the design's row-4 layout. Widens `excludeSections` to `["Earnings","Valuation","Quality","Peers","Risk Factors","Macro"]` — Capital Allocation stays through ReportRenderer.
 - [x] **Net result:** 262/262 frontend tests pass (was 204; +58 net new across 4 cards + 4 extractors). Backend untouched at 522/522. Main bundle 92.93 KB gz (was 90.20; +2.7 KB; under 100 KB budget). SectionChart chunk unchanged at 103 KB gz (still loads on-demand for Capital Allocation's featured-claim chart). Typecheck + lint clean.
+
+### 4.3.X Data correctness + format-helper unit hint *(this PR)*
+
+> **Why this PR exists:** dogfooding the post-PR-#50 dashboard surfaced
+> six substantive bugs in five minutes — see [tasks/dogfood-2026-05-03.md](dogfood-2026-05-03.md).
+> The cards look great but the *numbers are wrong* in places that matter
+> (ROE displayed as `1.41` instead of `141%`, dividend yield as `39.09%`
+> instead of `0.39%`, per-share dollars as `16.02%` instead of `$0.16`).
+> Plus a critical FK violation in the prices route that breaks the
+> HeroCard chart for every ticker that isn't NVDA or SPY.
+>
+> **Why before 4.4 / 4.5:** both downstream phases compound on the data
+> + format layer. 4.5's adaptive-layout signals derive from the same
+> `Claim.value`s being misformatted today. 4.4's per-card narratives
+> need a clean per-card narrative-strip surface (item 3 below blocks).
+> Cheaper to fix the foundation now than to layer features on a moving
+> foundation.
+
+- [x] **Schema unit hint** — `Claim.unit: ClaimUnit | None = None` shipped (Pydantic + Zod). 33 keys in `app/services/fundamentals.py` annotated via parallel `_UNITS` dict + import-time `assert _UNITS == CLAIM_KEYS` so a forgotten annotation fails loudly. Frontend `formatClaimValue(value, unit?)` dispatches deterministically; falls through to legacy heuristic when unit is undefined/null. Wired into QualityCard rings + claim table, ReportRenderer claim table, HeroCard ROIC/FCF, CashAndCapitalCard net cash. Fixes Bugs 2/3/4. *(Other tools — `peers`, `earnings`, `macro`, `research_tool_registry`, `form_4`, `holdings_13f` — keep their unit field default to `None` for now; the legacy heuristic handles their values correctly because the bugs were concentrated in `fetch_fundamentals`. Cleanup follow-up if/when those tools start rendering values that hit the same edge cases.)*
+
+- [x] **Symbols upsert in price ingest path** — `data_ingestion.py::ingest_market_data` does `pg_insert(Symbol).on_conflict_do_nothing` before the candle insert. Test in `tests/test_market_prices.py::test_prices_succeeds_for_symbol_not_pre_seeded` asserts 200 + `Symbol` row created. Fixes Bug 1.
+
+- [x] **Drop section narrative from `PerShareGrowthCard`** — `section.summary` block removed; comment notes per-card narratives return in 4.4. Test flipped to assert the prose is NOT in the card. Fixes Bug 5.
+
+- [x] **HeroCard top-level metadata backfill** — `backfill_top_level_metadata(report)` helper added to `research_orchestrator.py`; called from `research.py` router after `lookup_recent` returns a hit. Lifts `Company name` / `Resolved sector tag` claim values to top-level when `report.name`/`.sector` are None. 3 unit tests pin happy path + preserve-existing-values + missing-claims-no-error. Fixes Bug 6 (a). VOL + 52W (b) come back automatically once fresh reports regenerate.
+
+- [x] **Loading-state copy + ghost skeleton** — copy widened to "30–90 seconds"; ghost skeleton renders the dashboard's 4 row layout (Hero + 2-col 40/60 + 3-col grid) under `animate-pulse`. Fixes Bug 7.
+
+- [x] **Cosmetic backlog from PR #50 audit** — all four shipped:
+  - HeroCard exchange chip combining ticker + sector token (`data-testid='hero-exchange-chip'`).
+  - ValuationCard "n = X peers · sector medians" annotation (`data-testid='valuation-peer-count'`); `countPeers` helper extracts distinct tickers from `<TICKER>: <metric>` claim descriptions.
+  - QualityCard "MARGINS · 5Y" sub-kicker with inline GM/OM/FCF values via the same `formatClaimValue` (`data-testid='quality-margins-subkicker'`).
+  - `MultiLine` paths switch to Catmull-Rom-to-Bezier monotone cubic curves (tension 1/6); endpoints mirror the nearest neighbor so curves start/end tangent without overshoot.
+
+- [ ] **Defer:** Bug 8 (mid-flight nav silently cancels POST) — small standalone ticket; fix is risky enough to keep out of a polish PR.
+
+- [x] **Capture lessons** — entry added to `tasks/lessons.md` covering (a) the heuristic-formatter trap, (b) the test-fixture dogfood gap, and (c) the symbols-FK seeding gotcha for /v1/market/:ticker/prices.
+
+- [x] **Update test counts** — backend 522 → **531** (+9), frontend 262 → **277** (+15). Updated in `CLAUDE.md`, `docs/architecture.md`, this file. Main bundle 92.98 → **93.95 KB gz** (+0.97; under 100 KB budget, ~6 KB headroom retained).
+
+### 4.3.X review *(filled in after the GREEN + docs commits land)*
+
+- **What changed in shape:** `Claim.unit` is the only new schema field; everything else lives behind it (frontend dispatch + tool annotations) or is pure presentation (cosmetic backlog) / single-line correctness (symbols upsert) / single helper (backfill_top_level_metadata).
+- **What didn't change:** the surface of `POST /v1/research/{symbol}` is unchanged for callers that don't read `unit` — backwards-compat default `None` keeps pre-4.3.X cached JSONB rows round-tripping.
+- **Net deltas:** backend +9 tests, frontend +15 tests, main bundle +0.97 KB gz. No new dependencies, no new chunks.
+- **Followups noted but deferred:** unit annotations for the other 5 tools (peers / earnings / macro / research_tool_registry / form_4 / holdings_13f) — wait until a specific bug surfaces; cancel-on-nav (Bug 8) — small standalone ticket; per-card narratives — return in 4.4.
 
 ### 4.3.B Risk Haiku categorizer *(deferred follow-up)*
 

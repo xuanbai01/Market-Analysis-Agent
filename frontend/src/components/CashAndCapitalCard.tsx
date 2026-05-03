@@ -43,7 +43,10 @@ export function CashAndCapitalCard({
         ? "text-strata-neg"
         : "text-strata-hi";
 
-  const netCashLabel = netCash === null ? "—" : formatClaimValue(netCash);
+  // Net cash / share is a per-share dollar amount — pass the unit hint
+  // explicitly so values < $1 don't render as a percent (Phase 4.3.X).
+  const netCashLabel =
+    netCash === null ? "—" : formatClaimValue(netCash, "usd_per_share");
 
   return (
     <section className="rounded-md border border-strata-border bg-strata-surface p-5">

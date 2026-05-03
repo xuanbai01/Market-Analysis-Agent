@@ -30,7 +30,10 @@ from app.schemas.research import (
 )
 from app.schemas.ten_k import Extracted10KSection, Risk10KDiff
 from app.services import research_orchestrator as orch_module
-from app.services.research_orchestrator import compose_research_report
+from app.services.research_orchestrator import (
+    backfill_top_level_metadata,
+    compose_research_report,
+)
 from app.services.research_tool_registry import Focus
 
 # ── Tool output factories ─────────────────────────────────────────────
@@ -636,3 +639,87 @@ async def test_orchestrator_top_level_metadata_defaults_to_none(
 
     assert report.name is None
     assert report.sector is None
+
+
+# ── backfill_top_level_metadata (Phase 4.3.X) ─────────────────────────
+
+
+def _make_report_with_fundamentals(
+    *,
+    top_name: str | None = None,
+    top_sector: str | None = None,
+    fundamentals_name: str | None = None,
+    fundamentals_sector: str | None = None,
+) -> ResearchReport:
+    """Build a minimal ResearchReport whose Valuation section optionally
+    carries fundamentals-style ``Company name`` / ``Resolved sector tag``
+    claims, plus optional top-level ``name``/``sector`` fields."""
+    from app.schemas.research import Section
+
+    claims: list[Claim] = []
+    if fundamentals_name is not None:
+        claims.append(
+            Claim(
+                description="Company name",
+                value=fundamentals_name,
+                source=Source(tool="test.fundamentals", fetched_at=datetime.now(UTC)),
+            )
+        )
+    if fundamentals_sector is not None:
+        claims.append(
+            Claim(
+                description="Resolved sector tag",
+                value=fundamentals_sector,
+                source=Source(tool="test.fundamentals", fetched_at=datetime.now(UTC)),
+            )
+        )
+    return ResearchReport(
+        symbol="AAPL",
+        generated_at=datetime.now(UTC),
+        sections=[Section(title="Valuation", claims=claims)],
+        overall_confidence=Confidence.HIGH,
+        name=top_name,
+        sector=top_sector,
+    )
+
+
+def test_backfill_top_level_metadata_lifts_from_fundamentals_claims() -> None:
+    """Phase 4.3.X / Bug 6 — pre-Phase-4.1 cached rows lack top-level
+    name + sector but still carry the underlying fundamentals claims.
+    The helper lifts the values up so the dashboard hero card renders
+    correctly without forcing a fresh-gen.
+    """
+    report = _make_report_with_fundamentals(
+        fundamentals_name="Apple Inc.",
+        fundamentals_sector="megacap_consumer_tech",
+    )
+    assert report.name is None
+    assert report.sector is None
+
+    out = backfill_top_level_metadata(report)
+    assert out.name == "Apple Inc."
+    assert out.sector == "megacap_consumer_tech"
+
+
+def test_backfill_top_level_metadata_preserves_existing_values() -> None:
+    """When the report already has top-level name/sector set, the
+    helper is a no-op — never overwrites a non-None top-level value
+    even if a stale claim disagrees."""
+    report = _make_report_with_fundamentals(
+        top_name="From Top Level",
+        top_sector="from_top_level",
+        fundamentals_name="From Claim",
+        fundamentals_sector="from_claim",
+    )
+    out = backfill_top_level_metadata(report)
+    assert out.name == "From Top Level"
+    assert out.sector == "from_top_level"
+
+
+def test_backfill_top_level_metadata_no_fundamentals_claim_leaves_none() -> None:
+    """No claim, no top level → still None after backfill (not an error).
+    Renders as em-dash on the frontend."""
+    report = _make_report_with_fundamentals()
+    out = backfill_top_level_metadata(report)
+    assert out.name is None
+    assert out.sector is None

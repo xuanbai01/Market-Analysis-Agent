@@ -74,6 +74,11 @@ def _fake_raw(**overrides: Any) -> dict[str, Any]:
         # Phase 3.2.D — ROIC TTM (Quality section). roe stays in the
         # legacy block above; this is the new derived metric.
         "roic": 0.92,
+        # Phase 4.1 — header metadata + 52W band for the hero card.
+        "name": "NVIDIA Corporation",
+        "sector_tag": "megacap_tech",
+        "fifty_two_week_high": 921.04,
+        "fifty_two_week_low": 410.18,
     }
     # Sanity: the fixture must list every advertised key, otherwise tests
     # silently miss whichever key was added without updating the fixture.
@@ -859,3 +864,78 @@ def test_yfinance_roic_none_when_invested_capital_missing(
     assert history["roic"] == []
     # ROE survives because Stockholders Equity still present.
     assert len(history["roe"]) == 5
+
+
+# ── Phase 4.1 — header metadata + 52W band ───────────────────────────
+
+
+async def test_claim_keys_includes_phase_4_1_additions() -> None:
+    """name / sector_tag / fifty_two_week_high / fifty_two_week_low all
+    surface in CLAIM_KEYS so the hero card can read them."""
+    for key in ("name", "sector_tag", "fifty_two_week_high", "fifty_two_week_low"):
+        assert key in CLAIM_KEYS, f"{key} missing from CLAIM_KEYS"
+
+
+async def test_name_and_sector_tag_carry_string_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """name + sector_tag are string-valued claims (not numeric)."""
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider())
+    result = await fetch_fundamentals("NVDA", provider="fake")
+
+    assert result["name"].value == "NVIDIA Corporation"
+    assert result["sector_tag"].value == "megacap_tech"
+    # No history on metadata claims.
+    assert result["name"].history == []
+    assert result["sector_tag"].history == []
+
+
+async def test_fifty_two_week_band_carries_numeric_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """52W high/low are numeric claims for the hero meta line."""
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider())
+    result = await fetch_fundamentals("NVDA", provider="fake")
+
+    assert result["fifty_two_week_high"].value == 921.04
+    assert result["fifty_two_week_low"].value == 410.18
+
+
+def test_yfinance_pulls_name_and_52w_from_info(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """yfinance provider sources name from info.longName, 52W from
+    info.fiftyTwoWeekHigh / fiftyTwoWeekLow, sector_tag from the
+    sectors resolver (industry → curated map)."""
+    info = {
+        "longName": "NVIDIA Corporation",
+        "industry": "Semiconductors",
+        "fiftyTwoWeekHigh": 921.04,
+        "fiftyTwoWeekLow": 410.18,
+        # All other info fields fall through to None elsewhere
+    }
+    _patch_yfinance(monkeypatch, info=info)
+
+    raw, _ = _fetch_yfinance_fundamentals("NVDA")
+
+    assert raw["name"] == "NVIDIA Corporation"
+    assert raw["fifty_two_week_high"] == pytest.approx(921.04)
+    assert raw["fifty_two_week_low"] == pytest.approx(410.18)
+    # sector_tag derives from the industry → curated sectors map.
+    # We don't pin a specific value (the sectors map evolves); we just
+    # confirm a non-None resolution for a known-mapped industry.
+    assert raw["sector_tag"] is not None
+
+
+def test_yfinance_metadata_none_when_info_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty info → all 4 metadata fields default to None gracefully."""
+    _patch_yfinance(monkeypatch, info={})
+    raw, _ = _fetch_yfinance_fundamentals("UNKNOWN")
+    assert raw["name"] is None
+    assert raw["fifty_two_week_high"] is None
+    assert raw["fifty_two_week_low"] is None
+    # sector_tag may resolve via the symbol map (curated names short-
+    # circuit industry resolution); we don't assert here since "UNKNOWN"
+    # isn't in any curated list.

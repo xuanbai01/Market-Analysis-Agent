@@ -27,7 +27,7 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + Anthropic per-
 | Macro | FRED API | ✅ |
 | Hosting | Fly.io (auto-stop machines) + Neon (Postgres) + Vercel (frontend) | ✅ backend, 🟡 frontend deploy held |
 | Frontend stack | Vite + React 18 + Tailwind + TanStack Query + Zod | ✅ |
-| Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ 505 backend / 111 frontend |
+| Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ 522 backend / 146 frontend |
 | Lint | ruff (backend), ESLint (frontend) | ✅ |
 | CI | GitHub Actions (tests + Gitleaks + Claude PR review) + push-to-deploy | ✅ |
 
@@ -112,7 +112,7 @@ POST /v1/research/{symbol}
 | Market | `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ real (yfinance ingest + upsert + technicals) |
 | **Research** | **`POST /v1/research/{symbol}?focus={full,earnings}&refresh={false,true}`** | ✅ **the v2 primary endpoint.** Auth-gated when `BACKEND_SHARED_SECRET` is set. Per-IP rate limit. |
 | Research list | `GET /v1/research?limit=20&offset=0&symbol=...` | ✅ paginated `ResearchReportSummary[]` for the dashboard sidebar |
-| Phase 4 — prices | `GET /v1/market/:ticker/prices?range=60D` | 🟡 planned for 4.0/4.1 (data exists in `candles`, no route yet) |
+| Phase 4 — prices | `GET /v1/market/:ticker/prices?range={60D\|1Y\|5Y}` | ✅ Phase 4.1 — read-through `candles` cache, falls through to yfinance ingest on miss. Auth-gated. |
 | Legacy | `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ 501 (legacy v1 stubs; will be removed or redirected to `/v1/research`) |
 
 Errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](../app/core/errors.py). The handler propagates `HTTPException.headers` so `Retry-After` (429) and `WWW-Authenticate` (401) survive the wrap.

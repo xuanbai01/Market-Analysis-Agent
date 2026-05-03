@@ -18,8 +18,10 @@ import { z } from "zod";
 import { getStoredToken } from "./auth";
 import {
   type Focus,
+  type MarketPrices,
   type ResearchReport,
   type ResearchReportSummary,
+  MarketPricesSchema,
   ResearchReportSchema,
   ResearchReportSummariesSchema,
 } from "./schemas";
@@ -182,4 +184,33 @@ export async function listResearchReports(
     });
   }
   return parseJsonAndValidate(resp, ResearchReportSummariesSchema);
+}
+
+/**
+ * Phase 4.1 — daily-bar OHLCV for the hero price chart.
+ *
+ * `range` is one of "60D" / "1Y" / "5Y" matching the backend's
+ * accepted values. The backend reads through the `candles` cache,
+ * falling back to yfinance ingestion on miss.
+ */
+export async function fetchMarketPrices(
+  ticker: string,
+  range: string,
+): Promise<MarketPrices> {
+  const url = `${BACKEND_URL}/v1/market/${encodeURIComponent(
+    ticker.toUpperCase(),
+  )}/prices?range=${encodeURIComponent(range)}`;
+
+  const resp = await fetch(url, {
+    method: "GET",
+    headers: { ...authHeaders() },
+  });
+
+  if (!resp.ok) {
+    throw new ApiError({
+      status: resp.status,
+      title: await extractErrorTitle(resp),
+    });
+  }
+  return parseJsonAndValidate(resp, MarketPricesSchema);
 }

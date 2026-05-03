@@ -31,6 +31,8 @@ function buildReport(
     generated_at: "2026-04-29T14:05:00+00:00",
     overall_confidence: "high",
     tool_calls_audit: [],
+    name: null,
+    sector: null,
     sections: [
       {
         title: "Earnings",
@@ -195,6 +197,8 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
       generated_at: "2026-04-29T14:05:00+00:00",
       overall_confidence: "low",
       tool_calls_audit: [],
+    name: null,
+    sector: null,
       sections: [
         {
           title: "Risk Factors",
@@ -226,6 +230,8 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
       generated_at: "2026-04-29T14:05:00+00:00",
       overall_confidence: "medium",
       tool_calls_audit: [],
+    name: null,
+    sector: null,
       sections: [
         {
           title: "Earnings",
@@ -257,6 +263,8 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
       generated_at: "2026-04-29T14:05:00+00:00",
       overall_confidence: "high",
       tool_calls_audit: [],
+    name: null,
+    sector: null,
       sections: [
         {
           title: "Quality",
@@ -406,6 +414,8 @@ describe("ReportRenderer PeerScatter wiring (Phase 3.3.C)", () => {
       generated_at: "2026-04-29T14:05:00+00:00",
       overall_confidence: "high",
       tool_calls_audit: [],
+    name: null,
+    sector: null,
       sections,
     };
   }
@@ -430,6 +440,8 @@ describe("ReportRenderer PeerScatter wiring (Phase 3.3.C)", () => {
       generated_at: "2026-04-29T14:05:00+00:00",
       overall_confidence: "low",
       tool_calls_audit: [],
+    name: null,
+    sector: null,
       sections: [
         {
           title: "Peers",
@@ -464,6 +476,8 @@ describe("ReportRenderer PeerScatter wiring (Phase 3.3.C)", () => {
       generated_at: "2026-04-29T14:05:00+00:00",
       overall_confidence: "high",
       tool_calls_audit: [],
+    name: null,
+    sector: null,
       sections: [
         {
           title: "Earnings",

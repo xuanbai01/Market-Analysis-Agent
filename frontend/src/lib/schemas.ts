@@ -79,6 +79,10 @@ export const ResearchReportSchema = z.object({
   // ``tool_calls_audit`` is debug-only — backend may stop emitting
   // it in a future change. Optional + default so we don't break.
   tool_calls_audit: z.array(z.string()).default([]),
+  // Phase 4.1 — top-level metadata for the hero card. Both default
+  // to null on backwards-compat with pre-4.1 cached reports.
+  name: z.string().nullable().default(null),
+  sector: z.string().nullable().default(null),
 });
 export type ResearchReport = z.infer<typeof ResearchReportSchema>;
 
@@ -98,6 +102,31 @@ export type ResearchReportSummary = z.infer<
 export const ResearchReportSummariesSchema = z.array(
   ResearchReportSummarySchema,
 );
+
+// Phase 4.1 — hero price chart endpoint shape mirroring
+// MarketPricesOut in app/schemas/market.py.
+export const PricePointSchema = z.object({
+  ts: z.string(),
+  close: z.number(),
+  volume: z.number(),
+});
+export type PricePoint = z.infer<typeof PricePointSchema>;
+
+export const PriceLatestSchema = z.object({
+  ts: z.string(),
+  close: z.number(),
+  delta_abs: z.number(),
+  delta_pct: z.number(),
+});
+export type PriceLatest = z.infer<typeof PriceLatestSchema>;
+
+export const MarketPricesSchema = z.object({
+  ticker: z.string().min(1),
+  range: z.string().min(1),
+  prices: z.array(PricePointSchema).default([]),
+  latest: PriceLatestSchema,
+});
+export type MarketPrices = z.infer<typeof MarketPricesSchema>;
 
 // ── Focus enum (mirrors Focus in research_tool_registry.py) ──────────
 

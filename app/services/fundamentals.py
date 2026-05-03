@@ -90,6 +90,15 @@ CLAIM_KEYS: tuple[str, ...] = (
     "roic",
     # Trend (legacy single-value YoY delta — kept alongside history)
     "gross_margin_trend_1y",
+    # Phase 4.1 — header metadata + 52W band for the dashboard hero card.
+    # ``name`` and ``sector_tag`` are also lifted to top-level
+    # ``ResearchReport.name`` / ``.sector`` by the orchestrator so the
+    # frontend can read them without traversing claims; keeping them as
+    # claims here preserves citation discipline.
+    "name",
+    "sector_tag",
+    "fifty_two_week_high",
+    "fifty_two_week_low",
 )
 
 # Human-readable descriptions for the Claim itself. The agent's prompt
@@ -127,6 +136,10 @@ _DESCRIPTIONS: dict[str, str] = {
     "buyback_yield": "Buyback yield (latest fiscal year)",
     "sbc_pct_revenue": "Stock-based compensation as % of revenue (latest fiscal year)",
     "gross_margin_trend_1y": "Gross margin, year-over-year change",
+    "name": "Company name",
+    "sector_tag": "Resolved sector tag",
+    "fifty_two_week_high": "52-week high",
+    "fifty_two_week_low": "52-week low",
 }
 
 # Per-claim Source.detail. Format is intentionally human-readable —
@@ -195,6 +208,11 @@ _DETAILS: dict[str, str] = {
     "gross_margin_trend_1y": (
         "computed: financials.GrossProfit/TotalRevenue, year-over-year delta"
     ),
+    # Phase 4.1 — hero card metadata.
+    "name": "info.longName",
+    "sector_tag": "computed: app.services.sectors.resolve_sector(symbol, info.industry)",
+    "fifty_two_week_high": "info.fiftyTwoWeekHigh",
+    "fifty_two_week_low": "info.fiftyTwoWeekLow",
 }
 
 # yfinance .info key for each info-derived claim. The remaining three
@@ -212,6 +230,10 @@ _INFO_KEYS: dict[str, str] = {
     "short_ratio": "shortRatio",
     "shares_short": "sharesShort",
     "market_cap": "marketCap",
+    # Phase 4.1.
+    "name": "longName",
+    "fifty_two_week_high": "fiftyTwoWeekHigh",
+    "fifty_two_week_low": "fiftyTwoWeekLow",
 }
 
 
@@ -358,6 +380,14 @@ def _fetch_yfinance_fundamentals(
         "roic",
     ):
         raw[key] = latest_value(history_map.get(key, []))
+
+    # 6. Phase 4.1 — sector tag derives from the curated sectors map
+    #    (industry → sector). The resolver also short-circuits to a
+    #    curated value for known mega-caps so we don't re-fetch info.
+    from app.services.sectors import resolve_sector  # noqa: PLC0415
+
+    industry = info.get("industry")
+    raw["sector_tag"] = resolve_sector(symbol, industry)
 
     return raw, history_map
 

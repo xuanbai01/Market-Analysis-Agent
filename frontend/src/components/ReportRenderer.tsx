@@ -51,9 +51,19 @@ const PeerScatter = lazy(() => import("./PeerScatter"));
 
 interface Props {
   report: ResearchReport;
+  /**
+   * Phase 4.1+ — sections to exclude from rendering. Used by
+   * SymbolDetailPage to hand certain sections off to dedicated cards
+   * (e.g. Earnings → EarningsCard) while ReportRenderer continues to
+   * own the rest until 4.2/4.3 replace them too.
+   */
+  excludeSections?: readonly string[];
 }
 
-export function ReportRenderer({ report }: Props) {
+export function ReportRenderer({ report, excludeSections = [] }: Props) {
+  const visibleSections = report.sections.filter(
+    (s) => !excludeSections.includes(s.title),
+  );
   return (
     <article className="space-y-4">
       <header className="flex flex-wrap items-baseline justify-between gap-3 border-b border-strata-line pb-3">
@@ -73,10 +83,10 @@ export function ReportRenderer({ report }: Props) {
         </div>
       </header>
 
-      {report.sections.length === 0 ? (
+      {visibleSections.length === 0 ? (
         <p className="text-sm text-strata-dim">No sections returned.</p>
       ) : (
-        report.sections.map((section) => (
+        visibleSections.map((section) => (
           <SectionCard
             key={section.title}
             section={section}

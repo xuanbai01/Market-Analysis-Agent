@@ -564,3 +564,75 @@ async def test_symbol_uppercased_before_dispatch(
     await compose_research_report("aapl", Focus.FULL)
 
     assert "AAPL" in seen
+
+
+# ── Phase 4.1 — top-level name + sector ─────────────────────────────
+
+
+async def test_orchestrator_lifts_name_and_sector_to_top_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 4.1 — fetch_fundamentals exposes ``name`` and
+    ``sector_tag`` claims; the orchestrator copies their values to
+    top-level ``ResearchReport.name`` / ``.sector`` so the dashboard
+    hero card can read them without traversing claims."""
+    fundamentals = _fundamentals_output()
+    fundamentals["name"] = _claim("Company name", "Apple Inc.")
+    fundamentals["sector_tag"] = _claim("Sector", "megacap_tech")
+
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": fundamentals,
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    report = await compose_research_report("aapl", Focus.FULL)
+
+    assert report.name == "Apple Inc."
+    assert report.sector == "megacap_tech"
+
+
+async def test_orchestrator_top_level_metadata_defaults_to_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When fetch_fundamentals fails or omits the metadata claims,
+    top-level name/sector are None — backwards compatible with pre-4.1
+    cached reports."""
+    fundamentals = _fundamentals_output()
+    # No name / sector_tag claims at all.
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": fundamentals,
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    report = await compose_research_report("aapl", Focus.FULL)
+
+    assert report.name is None
+    assert report.sector is None

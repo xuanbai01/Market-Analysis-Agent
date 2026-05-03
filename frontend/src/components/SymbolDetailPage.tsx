@@ -19,12 +19,16 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ApiError, fetchResearchReport } from "../lib/api";
 import { clearStoredToken } from "../lib/auth";
 import { ROUTES } from "../lib/routes";
+import { CashAndCapitalCard } from "./CashAndCapitalCard";
 import { EarningsCard } from "./EarningsCard";
 import { ErrorBanner } from "./ErrorBanner";
 import { HeroCard } from "./HeroCard";
 import { LoadingState } from "./LoadingState";
+import { MacroPanel } from "./MacroPanel";
+import { PerShareGrowthCard } from "./PerShareGrowthCard";
 import { QualityCard } from "./QualityCard";
 import { ReportRenderer } from "./ReportRenderer";
+import { RiskDiffCard } from "./RiskDiffCard";
 import { ValuationCard } from "./ValuationCard";
 
 export function SymbolDetailPage() {
@@ -50,17 +54,23 @@ export function SymbolDetailPage() {
     }
   }, [reportQuery.error, navigate]);
 
-  // Phase 4.1+ — pluck dedicated-card sections (Earnings, Valuation,
-  // Quality, Peers) so the new Strata cards can render them; pass the
-  // remaining sections to ReportRenderer via excludeSections so we
-  // don't double up. Each card no-ops gracefully when its section is
-  // missing (EARNINGS focus, pre-cached data, upstream tool failure).
-  const earningsSection = reportQuery.data?.sections.find(
-    (s) => s.title === "Earnings",
-  );
-  const qualitySection = reportQuery.data?.sections.find(
-    (s) => s.title === "Quality",
-  );
+  // Phase 4.1+ — pluck dedicated-card sections so the new Strata cards
+  // can render them; pass the remaining sections to ReportRenderer via
+  // excludeSections so we don't double up. Each card no-ops gracefully
+  // when its section is missing (EARNINGS focus, pre-cached data,
+  // upstream tool failure).
+  //
+  // After 4.3.A: Earnings, Valuation, Quality, Peers, Risk Factors,
+  // Macro all have dedicated cards. Capital Allocation stays in
+  // ReportRenderer for its 6 non-history claims (dividend_yield,
+  // buyback_yield, sbc_pct_revenue, short_ratio, shares_short,
+  // market_cap) until 4.4 absorbs them into the context band.
+  const sections = reportQuery.data?.sections ?? [];
+  const earningsSection = sections.find((s) => s.title === "Earnings");
+  const qualitySection = sections.find((s) => s.title === "Quality");
+  const capAllocSection = sections.find((s) => s.title === "Capital Allocation");
+  const riskSection = sections.find((s) => s.title === "Risk Factors");
+  const macroSection = sections.find((s) => s.title === "Macro");
 
   return (
     <div className="mx-auto max-w-6xl px-8 py-8">
@@ -76,9 +86,29 @@ export function SymbolDetailPage() {
           {qualitySection && (
             <QualityCard ticker={upperTicker} section={qualitySection} />
           )}
+          {qualitySection && (
+            <PerShareGrowthCard ticker={upperTicker} section={qualitySection} />
+          )}
+          {/* Row matches `direction-strata.jsx` row-4: 3-column on
+              desktop, stacks on narrower screens. */}
+          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <CashAndCapitalCard
+              capAllocSection={capAllocSection}
+              qualitySection={qualitySection}
+            />
+            {riskSection && <RiskDiffCard section={riskSection} />}
+            {macroSection && <MacroPanel section={macroSection} />}
+          </div>
           <ReportRenderer
             report={reportQuery.data}
-            excludeSections={["Earnings", "Valuation", "Quality", "Peers"]}
+            excludeSections={[
+              "Earnings",
+              "Valuation",
+              "Quality",
+              "Peers",
+              "Risk Factors",
+              "Macro",
+            ]}
           />
         </>
       )}

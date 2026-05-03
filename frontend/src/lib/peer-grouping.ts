@@ -1,37 +1,42 @@
 /**
- * peer-grouping — pure helpers for the Peers section's PeerScatter.
- * Phase 3.3.C.
+ * peer-grouping — pure helpers for the Peers section's PeerScatter /
+ * PeerScatterV2.
  *
- * Three responsibilities, each a pure function with no React /
- * recharts coupling so they can be tested in isolation:
+ * Phase 3.3.C introduced the original (P/E × Gross Margin)-fixed
+ * helpers; Phase 4.2 generalizes them across any pair of metric
+ * descriptions so PeerScatterV2 can pivot axes without re-parsing
+ * every claim per render.
  *
- * 1. ``groupPeers(claims)`` — parses the flat ``Claim[]`` emitted by
- *    ``app/services/peers.py`` (descriptions of the form
- *    ``"<TICKER>: <metric_desc>"``) into ``{symbol, pe, margin}``
- *    rows. One row per peer; peers missing either metric drop out.
- *
- * 2. ``extractMedian(claims)`` — pulls the per-metric medians (those
- *    have descriptions ``"Peer median: <metric_desc>"``) so the
- *    scatter can render a faint reference dot.
- *
- * 3. ``extractSubject(report)`` — cross-section join: the report's
- *    own symbol P/E lives in the Valuation section
- *    (``"P/E ratio (trailing 12 months)"``) and gross margin in the
- *    Quality section (``"Gross margin"``). Returns null when either
- *    section is missing (e.g. EARNINGS focus mode skips Quality) or
- *    either value is non-numeric.
+ * The legacy ``groupPeers`` / ``extractMedian`` keep the original
+ * ``{symbol, pe, margin}`` shape and call into the new generic
+ * helpers under the hood — old call sites continue to work.
  *
  * ## Why descriptions, not keys
  *
- * Same reason as ``featured-claim`` (Phase 3.3.B): the Pydantic schema
- * flattens ``dict[str, Claim]`` into ``Section.claims: list[Claim]``
- * and the stable backend keys (``AMD.trailing_pe``, …) don't survive.
- * Descriptions are stable strings defined in
- * ``app/services/peers.py::_DESCRIPTIONS`` and
+ * Same reason as ``featured-claim`` / ``hero-extract``: the Pydantic
+ * schema flattens ``dict[str, Claim]`` into ``Section.claims:
+ * list[Claim]`` and the stable backend keys (``AMD.trailing_pe``, …)
+ * don't survive the round-trip. Descriptions are stable strings
+ * defined in ``app/services/peers.py::_DESCRIPTIONS`` and
  * ``app/services/fundamentals.py::_DESCRIPTIONS``; tests pin them so
  * a backend rename fails loudly.
  */
 import type { Claim, ResearchReport, Section } from "./schemas";
+
+// ── Generic axis-pair shapes (4.2) ────────────────────────────────────
+
+export interface PeerRowGeneric {
+  symbol: string;
+  x: number;
+  y: number;
+}
+
+export interface MedianPointGeneric {
+  x: number;
+  y: number;
+}
+
+// ── Legacy (P/E × Gross Margin)-fixed shapes (3.3.C) ─────────────────
 
 export interface PeerRow {
   symbol: string;
@@ -50,70 +55,110 @@ export interface SubjectPoint {
   margin: number;
 }
 
-// Backend ``_DESCRIPTIONS`` strings — copy-paste from the source of
-// truth in app/services/peers.py + app/services/fundamentals.py.
-// Defined as constants so the test file imports them directly if
-// needed.
-const PE_METRIC_SUFFIX = "P/E ratio (trailing 12 months)";
+// ── Backend ``_DESCRIPTIONS`` strings ────────────────────────────────
+
+const PE_METRIC = "P/E ratio (trailing 12 months)";
 const GROSS_MARGIN_METRIC = "Gross margin";
 
-const MEDIAN_PE_DESC = `Peer median: ${PE_METRIC_SUFFIX}`;
+const MEDIAN_PE_DESC = `Peer median: ${PE_METRIC}`;
 const MEDIAN_MARGIN_DESC = `Peer median: ${GROSS_MARGIN_METRIC}`;
 
-// "<TICKER>: <metric_desc>" — anchored at start (^), TICKER is
-// uppercase letters / digits / dot (BRK.B) / dash, then ": ", then
-// the metric desc. The matcher only fires for descriptions that
-// look like a peer claim; sector / peers_list / median.* miss this
-// shape.
+// "<TICKER>: <metric_desc>" — anchored at start (^), TICKER is uppercase
+// letters / digits / dot (BRK.B) / dash, then ": ", then the metric.
 const PEER_CLAIM_RE = /^([A-Z][A-Z0-9.-]*): (.+)$/;
 
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
 
+// ── 4.2 generic helpers ──────────────────────────────────────────────
+
 /**
- * Group flat per-peer claims into one row per peer with both P/E
- * and gross margin. Peers missing either metric drop out.
+ * Group flat per-peer claims into one row per peer with both axis
+ * metrics. Peers missing either metric drop out.
+ *
+ * ``xMetric`` / ``yMetric`` are the metric description strings (e.g.
+ * ``"P/E ratio (trailing 12 months)"``). The function matches them
+ * exactly against the ``"<TICKER>: <metric>"`` claim shape.
  */
-export function groupPeers(claims: readonly Claim[]): PeerRow[] {
-  const byPeer = new Map<string, { pe?: number; margin?: number }>();
+export function groupPeersForAxes(
+  claims: readonly Claim[],
+  xMetric: string,
+  yMetric: string,
+): PeerRowGeneric[] {
+  const byPeer = new Map<string, { x?: number; y?: number }>();
 
   for (const claim of claims) {
     const match = PEER_CLAIM_RE.exec(claim.description);
     if (!match) continue;
     const [, symbol, metric] = match;
-
-    // Skip the median.* claims — they match the regex
-    // ("Peer: median: ...") via the "Peer" capture, but the metric
-    // half starts with "median:" which isn't one of the two we want.
-    // Cheaper: explicitly exclude here even though the match against
-    // the metric desc below would already filter them.
     if (symbol === "Peer") continue;
+    if (!isFiniteNumber(claim.value)) continue;
 
-    if (metric === PE_METRIC_SUFFIX && isFiniteNumber(claim.value)) {
+    if (metric === xMetric) {
       const row = byPeer.get(symbol) ?? {};
-      row.pe = claim.value;
+      row.x = claim.value;
       byPeer.set(symbol, row);
-    } else if (metric === GROSS_MARGIN_METRIC && isFiniteNumber(claim.value)) {
+    } else if (metric === yMetric) {
       const row = byPeer.get(symbol) ?? {};
-      row.margin = claim.value;
+      row.y = claim.value;
       byPeer.set(symbol, row);
     }
   }
 
-  const rows: PeerRow[] = [];
-  for (const [symbol, { pe, margin }] of byPeer) {
-    if (pe === undefined || margin === undefined) continue;
-    rows.push({ symbol, pe, margin });
+  const rows: PeerRowGeneric[] = [];
+  for (const [symbol, { x, y }] of byPeer) {
+    if (x === undefined || y === undefined) continue;
+    rows.push({ symbol, x, y });
   }
   return rows;
 }
 
 /**
- * Pull the per-metric peer medians for the reference dot. Returns
+ * Pull the per-metric peer medians for the active axis pair. Returns
  * null when either median is missing or non-numeric.
  */
-export function extractMedian(claims: readonly Claim[]): MedianPoint | null {
+export function extractMedianForAxes(
+  claims: readonly Claim[],
+  xMetric: string,
+  yMetric: string,
+): MedianPointGeneric | null {
+  const xDesc = `Peer median: ${xMetric}`;
+  const yDesc = `Peer median: ${yMetric}`;
+  let x: number | undefined;
+  let y: number | undefined;
+  for (const claim of claims) {
+    if (claim.description === xDesc && isFiniteNumber(claim.value)) {
+      x = claim.value;
+    } else if (claim.description === yDesc && isFiniteNumber(claim.value)) {
+      y = claim.value;
+    }
+  }
+  if (x === undefined || y === undefined) return null;
+  return { x, y };
+}
+
+// ── Legacy 3.3.C helpers — thin wrappers over the generic ones ───────
+
+/**
+ * Group flat per-peer claims into one row per peer with both P/E
+ * and gross margin. Peers missing either metric drop out. Used by
+ * the legacy 3.3.C PeerScatter; PeerScatterV2 calls
+ * ``groupPeersForAxes`` directly.
+ */
+export function groupPeers(claims: readonly Claim[]): PeerRow[] {
+  return groupPeersForAxes(claims, PE_METRIC, GROSS_MARGIN_METRIC).map(
+    (r) => ({ symbol: r.symbol, pe: r.x, margin: r.y }),
+  );
+}
+
+/**
+ * Pull the per-metric peer medians (P/E + gross margin) for the
+ * legacy reference dot. Returns null when either is missing.
+ */
+export function extractMedian(
+  claims: readonly Claim[],
+): MedianPoint | null {
   let pe: number | undefined;
   let margin: number | undefined;
   for (const claim of claims) {
@@ -158,7 +203,7 @@ export function extractSubject(
   const quality = findSection(report, "Quality");
   if (!valuation || !quality) return null;
 
-  const pe = findClaimValue(valuation, PE_METRIC_SUFFIX);
+  const pe = findClaimValue(valuation, PE_METRIC);
   const margin = findClaimValue(quality, GROSS_MARGIN_METRIC);
   if (pe === null || margin === null) return null;
 

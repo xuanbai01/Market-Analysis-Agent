@@ -23,7 +23,9 @@ import { EarningsCard } from "./EarningsCard";
 import { ErrorBanner } from "./ErrorBanner";
 import { HeroCard } from "./HeroCard";
 import { LoadingState } from "./LoadingState";
+import { QualityCard } from "./QualityCard";
 import { ReportRenderer } from "./ReportRenderer";
+import { ValuationCard } from "./ValuationCard";
 
 export function SymbolDetailPage() {
   const { ticker } = useParams<{ ticker: string }>();
@@ -48,11 +50,16 @@ export function SymbolDetailPage() {
     }
   }, [reportQuery.error, navigate]);
 
-  // Phase 4.1 — pluck the Earnings section so EarningsCard can render
-  // it; ReportRenderer then renders the remaining sections so we don't
-  // double up on Earnings content.
+  // Phase 4.1+ — pluck dedicated-card sections (Earnings, Valuation,
+  // Quality, Peers) so the new Strata cards can render them; pass the
+  // remaining sections to ReportRenderer via excludeSections so we
+  // don't double up. Each card no-ops gracefully when its section is
+  // missing (EARNINGS focus, pre-cached data, upstream tool failure).
   const earningsSection = reportQuery.data?.sections.find(
     (s) => s.title === "Earnings",
+  );
+  const qualitySection = reportQuery.data?.sections.find(
+    (s) => s.title === "Quality",
   );
 
   return (
@@ -65,9 +72,13 @@ export function SymbolDetailPage() {
         <>
           <HeroCard report={reportQuery.data} />
           {earningsSection && <EarningsCard section={earningsSection} />}
+          <ValuationCard report={reportQuery.data} />
+          {qualitySection && (
+            <QualityCard ticker={upperTicker} section={qualitySection} />
+          )}
           <ReportRenderer
             report={reportQuery.data}
-            excludeSections={["Earnings"]}
+            excludeSections={["Earnings", "Valuation", "Quality", "Peers"]}
           />
         </>
       )}

@@ -73,7 +73,9 @@ export function EpsBars({
   return (
     <svg
       data-testid="eps-bars"
-      width={width}
+      // Phase 4.3.B.1 — responsive width; the 20-bar chart no longer
+      // overflows narrow earnings columns.
+      width="100%"
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       role="img"

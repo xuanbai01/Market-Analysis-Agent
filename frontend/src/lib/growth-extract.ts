@@ -114,3 +114,45 @@ export function extractGrowthMultipliers(section: Section): GrowthMultipliers {
     ocf: multiplier(DESC_OCF),
   };
 }
+
+/**
+ * Phase 4.3.B.1 — per-period compound growth rate per series.
+ * CAGR = multiplier^(1/n_periods) − 1, where n_periods is
+ * ``history.length − 1`` (e.g. 5 quarterly observations = 4 periods).
+ *
+ * Returns null for any series whose multiplier is null OR whose history
+ * has fewer than 2 points (no period span). The dashboard's
+ * PerShareGrowthCard renders a CAGR sub-line under each multiplier
+ * pill so the pills convey both total growth and per-period pace.
+ */
+export function extractGrowthCagr(section: Section): GrowthMultipliers {
+  function cagr(description: string): number | null {
+    const claim = findClaim(section.claims, description);
+    if (!claim || claim.history.length < 2) return null;
+    const first = claim.history[0].value;
+    const last = claim.history[claim.history.length - 1].value;
+    if (
+      !isFiniteNumber(first) ||
+      first === 0 ||
+      !isFiniteNumber(last) ||
+      // A negative-to-positive sign change would produce a negative
+      // base for the fractional exponent — undefined in real numbers.
+      // Skip rather than emit NaN.
+      Math.sign(first) !== Math.sign(last)
+    ) {
+      return null;
+    }
+    const periods = claim.history.length - 1;
+    const ratio = last / first;
+    if (ratio <= 0) return null;
+    return Math.pow(ratio, 1 / periods) - 1;
+  }
+
+  return {
+    rev: cagr(DESC_REVENUE),
+    gp: cagr(DESC_GP),
+    opi: cagr(DESC_OPI),
+    fcf: cagr(DESC_FCF),
+    ocf: cagr(DESC_OCF),
+  };
+}

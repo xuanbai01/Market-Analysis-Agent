@@ -82,7 +82,11 @@ export function LineChart({
   return (
     <svg
       data-testid="line-chart"
-      width={width}
+      // Phase 4.3.B.1 — responsive width so the hero price chart
+      // doesn't overflow at narrow viewports. The ``width`` prop is
+      // preserved in the viewBox so internal x-positions stay
+      // correct; the SVG itself scales to its container.
+      width="100%"
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       role="img"
@@ -91,6 +95,7 @@ export function LineChart({
     >
       {areaFill && (
         <path
+          data-line-area
           d={areaPath}
           fill={areaActualFill}
           fillOpacity={0.18}
@@ -98,6 +103,7 @@ export function LineChart({
         />
       )}
       <path
+        data-line-stroke
         d={linePath}
         fill="none"
         stroke={strokeColor}

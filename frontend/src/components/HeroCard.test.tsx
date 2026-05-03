@@ -252,9 +252,9 @@ describe("HeroCard", () => {
     );
     // Default range is 3M → entire 60D dataset rendered.
     const chart = container.querySelector("[data-testid='line-chart']");
-    const path = chart!.querySelector("path");
+    const path = chart!.querySelector("path[data-line-stroke]");
     const d = path!.getAttribute("d") ?? "";
-    // 60 points = 1 "M" + 59 segment commands. Match either L or C
+    // 60 points = 1 "M" + 59 "L" commands. Match either L or C
     // segments since the LineChart's path command isn't pinned here.
     const segmentCount = (d.match(/[ML]/g) ?? []).length;
     expect(segmentCount).toBe(60);
@@ -272,7 +272,7 @@ describe("HeroCard", () => {
     await waitFor(() => {
       const d =
         container
-          .querySelector("[data-testid='line-chart'] path")
+          .querySelector("[data-testid='line-chart'] path[data-line-stroke]")
           ?.getAttribute("d") ?? "";
       const segmentCount = (d.match(/[ML]/g) ?? []).length;
       expect(segmentCount).toBe(22);
@@ -291,7 +291,7 @@ describe("HeroCard", () => {
     await waitFor(() => {
       const d =
         container
-          .querySelector("[data-testid='line-chart'] path")
+          .querySelector("[data-testid='line-chart'] path[data-line-stroke]")
           ?.getAttribute("d") ?? "";
       const segmentCount = (d.match(/[ML]/g) ?? []).length;
       expect(segmentCount).toBe(5);
@@ -310,7 +310,7 @@ describe("HeroCard", () => {
     await waitFor(() => {
       const d =
         container
-          .querySelector("[data-testid='line-chart'] path")
+          .querySelector("[data-testid='line-chart'] path[data-line-stroke]")
           ?.getAttribute("d") ?? "";
       const segmentCount = (d.match(/[ML]/g) ?? []).length;
       expect(segmentCount).toBe(2);

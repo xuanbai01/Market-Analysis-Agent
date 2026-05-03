@@ -101,8 +101,10 @@ describe("EarningsCard", () => {
   it("renders 3 stat tiles (Beat rate, Surprise μ, EPS TTM)", () => {
     render(<EarningsCard section={fakeEarningsSection()} />);
     expect(screen.getByText(/beat rate/i)).toBeInTheDocument();
-    // Surprise μ — backend returns avg in percent points
-    expect(screen.getByText(/surprise/i)).toBeInTheDocument();
+    // Surprise μ tile — match the μ glyph specifically so the search
+    // doesn't collide with the RecentPrints header which also says
+    // "actual · estimate · surprise" (Phase 4.3.B.1).
+    expect(screen.getByText(/surprise\s*μ/i)).toBeInTheDocument();
     expect(screen.getByText(/eps ttm/i)).toBeInTheDocument();
   });
 
@@ -167,11 +169,12 @@ describe("EarningsCard", () => {
     expect(lastRow).toBeTruthy();
     const text = lastRow.textContent ?? "";
     // The fixture's history index 19 is the latest: actual = 1 + 19*0.1 = 2.9,
-    // estimate = 0.95 + 19*0.1 = 2.85, surprise = (2.9-2.85)/2.85 ≈ 1.75%.
+    // estimate = 0.95 + 19*0.1 = 2.85, surprise = (2.9-2.85)/2.85 ≈ 1.75%
+    // → "+1.8%" with one-decimal rounding.
     expect(text).toMatch(/2\.90/); // actual
     expect(text).toMatch(/2\.85/); // estimate
-    // Surprise rendered as a signed percent.
-    expect(text).toMatch(/\+?1\.[67]\s*%/);
+    // Surprise rendered as a signed percent (one-decimal precision).
+    expect(text).toMatch(/\+?1\.[678]\s*%/);
   });
 
   it("RecentPrints is hidden when the section has no EPS history", () => {

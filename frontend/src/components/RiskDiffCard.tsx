@@ -108,7 +108,10 @@ export function RiskDiffCard({ section }: Props) {
 
       <svg
         data-testid="risk-diff-bars"
-        width={W}
+        // Phase 4.3.B.1 — responsive width; the value labels no longer
+        // overflow the narrow row-4 column when the chart is rendered
+        // at a card width < 360 px.
+        width="100%"
         height={H}
         viewBox={`0 0 ${W} ${H}`}
         role="img"

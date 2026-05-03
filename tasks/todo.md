@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (PR #47); 4.2 done (this PR); up next: 4.3 (Per-share growth + Cash & capital + Risk diff + Macro).** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (PR #47); 4.2 done (PR #48); 4.3.A done (this PR); 4.3.B (Haiku risk categorizer) deferred follow-up; up next: 4.4 (News + Business + section narratives).** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -71,12 +71,38 @@ Active sprint for the Market Analysis Agent.
 
 **Design decision: axis-preset list.** The original sketch was *P/E × Gross Margin / P/S × Operating Margin / EV/EBITDA × ROIC*. Backend `fetch_peers` only carries 4 metrics (`trailing_pe`, `p_s`, `ev_ebitda`, `gross_margin`); adding operating_margin + ROIC to peers requires per-peer TTM compute (the ROIC formula already exists for the subject in `fundamentals_history.py`). Deferring that backend extension keeps 4.2 frontend-only / one PR. The presets above are all peer-coverage-complete. Richer axis options come back in 4.5/4.8 if dogfooding asks for them.
 
-### 4.3 Per-share growth + Cash & capital + Risk diff + Macro
+### 4.3.A Per-share growth + Cash & capital + Risk diff + Macro ✅ done *(this PR)*
 
-- [ ] **`PerShareGrowth`** — 5Y per-share series (revenue, gross profit, op income, FCF) rebased to Q1 of period start = 100. Multi-line chart shows true relative growth on shared axis. Below: 5 growth-multiple pills (Rev × N, GP × N, OpI × N, FCF × N, OCF × N).
-- [ ] **`CashAndCapital`** — dual stack: top is CapEx + SBC per-share lines, bottom is Cash + Debt per-share lines. Highlight box at the bottom: Net cash / share. Compact: stacks vertically; comfortable: side-by-side.
-- [ ] **`RiskDiff`** — bar chart of paragraph-count deltas by risk category (AI/regulatory, Export controls, Supply concentration, Customer concentration, Competition, Cybersecurity, IP, Macro). One-sentence prose summary below ("Disclosure expanded. Net +9 ¶ across categories — concentrated in AI/regulatory and export controls"). Backend addition: extend `extract_10k_risks_diff` to bucket added/removed paragraphs by category via Haiku classification.
-- [ ] **`MacroPanel`** — 1-2 stacked mini-area-charts (CPI YoY, US 10Y rate) with current value badges. One-sentence prose summary below ("Disinflation continues; 10Y has compressed 43 bps from peak — modest tailwind for long-duration multiples").
+> **Scope:** all-frontend. No backend changes. Fills the row-3 (Per-share
+> growth) and row-4 (Cash & capital + Risk diff + Macro) cards from the
+> Strata design's `direction-strata.jsx`. Capital Allocation remains in
+> ReportRenderer for now (its 6 non-history claims — dividend_yield,
+> buyback_yield, sbc_pct_revenue, short_ratio, shares_short, market_cap
+> — don't fit the 4 new cards cleanly; revisit in 4.4 if the context
+> band absorbs them).
+
+- [x] **`PerShareGrowthCard`** — 5 per-share history series (Revenue, Gross Profit, Op Income, FCF, OCF), each **rebased so the series' first point = 100**, plotted via existing `MultiLine` primitive. Below the chart: 5 multiplier pills ("Rev 6.2×", "GP 7.2×", etc.). Reads from Quality section. 7 tests.
+- [x] **`CashAndCapitalCard`** — cross-section card. Top stack: `MultiLine` of CapEx + SBC per-share (from Capital Allocation). Bottom stack: `MultiLine` of Cash + Debt per-share (from Quality). Highlight box: Net cash / share = (cash − debt) at latest snapshot, colored pos/neg. 7 tests.
+- [x] **`RiskDiffCard`** — inline horizontal bar chart of `{added, removed, kept, char_delta}` from the Risk Factors section's existing 4 claims. Prose summary below ("Disclosure expanded. Net +9 ¶ ..." / "Disclosure shrank ..." / "Disclosure stable ..."). When 4.3.B lands the Haiku categorizer, the bars become per-category — the card already gates on extractor returning null so pre-4.3.B reports keep rendering. 6 tests.
+- [x] **`MacroPanel`** — vertical stack of mini area-chart panels (one per FRED series). Each panel: kicker label + current value badge + 36-month sparkline area chart via existing `LineChart` primitive (`areaFill={true}`). Reads from Macro section. 5 tests.
+- [x] **`growth-extract.ts`** — `extractGrowthSeries(section)` returns 5 `MultiLineSeries` (rebased to first-point = 100); `extractGrowthMultipliers(section)` returns 5 `latest / first` ratios. Drops series whose history is empty or whose first value is zero. 8 tests.
+- [x] **`cash-capital-extract.ts`** — `extractCapexSbcSeries(capAlloc)` + `extractCashDebtSeries(quality)` + `extractNetCashPerShare(quality)`. Net cash supports negative (debt-heavy) values. 10 tests.
+- [x] **`risk-extract.ts`** — `extractRiskDiffBars(section)` returns `{added, removed, kept, charDelta} | null`; `extractRiskDiffSummary(section)` returns the prose framing (`"expanded"` / `"shrank"` / `"stable"`) + signed `netDelta`. 9 tests.
+- [x] **`macro-extract.ts`** — `extractMacroPanels(section)` returns `{id, label, latest, history, observationDate}[]`. Reads `<label> (latest observation)` (value-bearing, history-bearing), `<label> observation date`, and the metadata claim `Human-readable label for FRED series <id>` for the optional id. Skips series with non-numeric latest or empty history. 6 tests.
+- [x] **SymbolDetailPage** — plucks Quality, Capital Allocation, Risk Factors, Macro sections; renders `<PerShareGrowthCard>` after QualityCard, then a 3-column grid `<CashAndCapitalCard> | <RiskDiffCard> | <MacroPanel>` matching the design's row-4 layout. Widens `excludeSections` to `["Earnings","Valuation","Quality","Peers","Risk Factors","Macro"]` — Capital Allocation stays through ReportRenderer.
+- [x] **Net result:** 262/262 frontend tests pass (was 204; +58 net new across 4 cards + 4 extractors). Backend untouched at 522/522. Main bundle 92.93 KB gz (was 90.20; +2.7 KB; under 100 KB budget). SectionChart chunk unchanged at 103 KB gz (still loads on-demand for Capital Allocation's featured-claim chart). Typecheck + lint clean.
+
+### 4.3.B Risk Haiku categorizer *(deferred follow-up)*
+
+> **Decision:** ship the Haiku-driven category bucketing as its own PR.
+> The categorizer is meaningful new backend scope (LLM call + fixtures
+> + cost validation + `Risk10KDiff` schema extension) and lands more
+> cleanly with its own test surface.
+
+- [ ] **Backend: extend `Risk10KDiff` schema** — `category_deltas: dict[RiskCategory, int]` (added − removed paragraphs per category).
+- [ ] **`app/services/risk_categorizer.py`** — Haiku-classify each added/removed paragraph into a category enum (AI_REGULATORY, EXPORT_CONTROLS, SUPPLY_CONCENTRATION, CUSTOMER_CONCENTRATION, COMPETITION, CYBERSECURITY, IP, MACRO, OTHER). Forced-tool schema. Cost target ~$0.001/report.
+- [ ] **Wire categorizer into `extract_10k_risks_diff`** — only when added+removed > 0; otherwise skip the LLM call and stamp empty deltas.
+- [ ] **Frontend: extend `RiskDiffCard`** — when `category_deltas` is populated, render per-category bars instead of the aggregate 4-bar chart. Falls back gracefully on pre-4.3.B cached reports.
 
 ### 4.4 News + Business + section narratives
 

@@ -103,6 +103,7 @@ describe("SymbolDetailPage", () => {
       () => new Promise(() => {}), // never resolves
     );
     renderAt("AAPL");
-    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    // LoadingState renders "Generating report for AAPL…"
+    expect(screen.getByText(/generating report for aapl/i)).toBeInTheDocument();
   });
 });

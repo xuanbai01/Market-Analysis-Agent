@@ -45,50 +45,52 @@ function formatLatest(n: number): string {
 export function MacroPanel({ section }: Props) {
   const panels = extractMacroPanels(section);
 
+  // Phase 4.5.C — return null when no series have data so
+  // ``SymbolDetailPage``'s row 4 can collapse cleanly. Used to render
+  // a "Macro context unavailable" placeholder card; that wasted a
+  // column slot on cached reports without FRED data.
+  if (panels.length === 0) {
+    return null;
+  }
+
   return (
     <section className="rounded-md border border-strata-border bg-strata-surface p-5">
       <div className="mb-3 font-mono text-[10px] uppercase tracking-kicker text-strata-macro">
         Macro · FRED
       </div>
 
-      {panels.length === 0 ? (
-        <div className="flex h-[120px] items-center justify-center font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
-          Macro context unavailable
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {panels.map((panel, i) => {
-            const color = PANEL_COLORS[i % PANEL_COLORS.length];
-            return (
-              <div
-                key={panel.label}
-                className="rounded-md bg-strata-raise px-3 py-3"
-              >
-                <div className="mb-1 flex items-baseline justify-between">
-                  <span
-                    className="font-mono text-[10px] uppercase tracking-kicker"
-                    style={{ color }}
-                  >
-                    {panel.label}
-                  </span>
-                  <span className="font-mono tabular text-base font-medium text-strata-hi">
-                    {formatLatest(panel.latest)}
-                  </span>
-                </div>
-                <LineChart
-                  data={historyToLineChartData(panel.history)}
-                  width={280}
-                  height={50}
-                  strokeColor={color}
-                  fillColor={color}
-                  areaFill
-                  ariaLabel={`${panel.label} area chart`}
-                />
+      <div className="flex flex-col gap-3">
+        {panels.map((panel, i) => {
+          const color = PANEL_COLORS[i % PANEL_COLORS.length];
+          return (
+            <div
+              key={panel.label}
+              className="rounded-md bg-strata-raise px-3 py-3"
+            >
+              <div className="mb-1 flex items-baseline justify-between">
+                <span
+                  className="font-mono text-[10px] uppercase tracking-kicker"
+                  style={{ color }}
+                >
+                  {panel.label}
+                </span>
+                <span className="font-mono tabular text-base font-medium text-strata-hi">
+                  {formatLatest(panel.latest)}
+                </span>
               </div>
-            );
-          })}
-        </div>
-      )}
+              <LineChart
+                data={historyToLineChartData(panel.history)}
+                width={280}
+                height={50}
+                strokeColor={color}
+                fillColor={color}
+                areaFill
+                ariaLabel={`${panel.label} area chart`}
+              />
+            </div>
+          );
+        })}
+      </div>
 
       {section.summary && (
         <p className="mt-3 rounded-md bg-strata-raise px-3 py-2 text-xs leading-relaxed text-strata-dim">

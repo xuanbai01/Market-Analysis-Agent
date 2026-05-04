@@ -11,14 +11,25 @@
  * Phase 4.1 fills the hero. Phase 4.2+ replace each ReportRenderer
  * card with Strata variants. SymbolDetailPage stays the host across
  * all of Phase 4.
+ *
+ * Phase 4.5.C layout polish:
+ *   - max-w-screen-2xl container (was max-w-6xl) so dashboards
+ *     breathe at 1920px+ resolutions
+ *   - items-start on every multi-column grid so cards align top
+ *     and accept honest height gaps as breathing room
+ *   - row 4 (Cash+Risk+Macro) auto-collapses to N columns when
+ *     fewer cards have data — placeholders no longer waste slots
+ *   - ContextBand (Business + News) moved to bottom (after row 4)
+ *     instead of above row 2.
  */
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { ApiError, fetchResearchReport } from "../lib/api";
 import { clearStoredToken } from "../lib/auth";
 import { ROUTES } from "../lib/routes";
+import type { ResearchReport, Section } from "../lib/schemas";
 import { CashAndCapitalCard } from "./CashAndCapitalCard";
 import { ContextBand } from "./ContextBand";
 import { EarningsCard } from "./EarningsCard";
@@ -61,57 +72,37 @@ export function SymbolDetailPage() {
   // excludeSections so we don't double up. Each card no-ops gracefully
   // when its section is missing (EARNINGS focus, pre-cached data,
   // upstream tool failure).
-  //
-  // After 4.3.A: Earnings, Valuation, Quality, Peers, Risk Factors,
-  // Macro all have dedicated cards. Capital Allocation stays in
-  // ReportRenderer for its 6 non-history claims (dividend_yield,
-  // buyback_yield, sbc_pct_revenue, short_ratio, shares_short,
-  // market_cap) until 4.4 absorbs them into the context band.
   const sections = reportQuery.data?.sections ?? [];
   const earningsSection = sections.find((s) => s.title === "Earnings");
   const qualitySection = sections.find((s) => s.title === "Quality");
   const capAllocSection = sections.find((s) => s.title === "Capital Allocation");
   const riskSection = sections.find((s) => s.title === "Risk Factors");
   const macroSection = sections.find((s) => s.title === "Macro");
-  // Phase 4.4.A — Business + News drive the ContextBand between the
-  // hero and the row-2 grid.
   const businessSection = sections.find((s) => s.title === "Business");
   const newsSection = sections.find((s) => s.title === "News");
 
   return (
-    <div className="mx-auto max-w-6xl px-8 py-8">
+    <div
+      data-testid="dashboard-container"
+      className="mx-auto w-full max-w-screen-2xl px-6 py-8 lg:px-8 xl:px-10"
+    >
       {reportQuery.isPending && <LoadingState symbol={upperTicker} />}
       {reportQuery.error && !(reportQuery.error instanceof ApiError && reportQuery.error.status === 401) && (
         <ErrorBanner error={reportQuery.error} />
       )}
       {reportQuery.data && (
         <>
-          {/* Phase 4.5.A — diagnostic pills above the hero. Renders
-              null on healthy reports so the page header stays clean
-              for NVDA / AAPL / etc.; surfaces "● UNPROFITABLE · TTM"
-              + "⚠ LIQUIDITY WATCH" + ... for distressed names. */}
+          {/* Phase 4.5.A — diagnostic pills above the hero. */}
           <div className="mb-3 flex justify-end">
             <HeaderPills signals={reportQuery.data.layout_signals} />
           </div>
 
           <HeroCard report={reportQuery.data} />
 
-          {/* Phase 4.4.A — ContextBand renders Business (left) +
-              News (right) between the hero and the row-2 grid.
-              Returns null when both sections are absent so older
-              cached reports without these fields stay clean. */}
-          <ContextBand
-            ticker={upperTicker}
-            businessSection={businessSection}
-            newsSection={newsSection}
-          />
-
           {/* Row 2 — Quality | Earnings.
-              Mirrors `direction-strata.jsx` row-2: dense Quality
-              card (rings + multi-line) on the left at ~40% width;
-              the wider Earnings card with its 20-bar EPS chart on
-              the right at ~60%. Stacks to single column under lg. */}
-          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
+              40/60 rhythm; ``items-start`` so cards align top with
+              honest height gaps rather than stretch-fill. */}
+          <div className="mb-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-5">
             {qualitySection && (
               <div className="lg:col-span-2">
                 <QualityCard ticker={upperTicker} section={qualitySection} />
@@ -134,80 +125,42 @@ export function SymbolDetailPage() {
             Phase 4.5.B — adaptive row ordering.
             Default (healthy):
               Row 3 = Valuation + PerShareGrowth (40/60)
-              Row 4 = Cash + Risk + Macro (3-col)
+              Row 4 = Cash + Risk + Macro (1, 2, or 3 cols)
             Distressed (is_unprofitable_ttm OR runway < 6):
               Row 3 = Cash + Risk + Macro  (lifted up — survival first)
               Row 4 = Valuation + PerShareGrowth (demoted)
-            The trigger covers both "company loses money" + "company
-            running out of money" — either is enough to flip the order
-            so the user sees the scariest information first.
+
+            Phase 4.5.C — row 4's Cash+Risk+Macro grid collapses to
+            data-card-count cols (1, 2, or 3) so missing
+            RiskDiffCard / MacroPanel don't leave blank slots.
           */}
-          {(() => {
-            const signals = reportQuery.data.layout_signals;
-            const isDistressed =
-              signals.is_unprofitable_ttm ||
-              (signals.cash_runway_quarters !== null &&
-                signals.cash_runway_quarters < 6);
+          <DashboardRows
+            ticker={upperTicker}
+            report={reportQuery.data}
+            qualitySection={qualitySection}
+            capAllocSection={capAllocSection}
+            riskSection={riskSection}
+            macroSection={macroSection}
+          />
 
-            const valuationGrowthRow = (
-              <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
-                <div className="lg:col-span-2">
-                  <ValuationCard report={reportQuery.data} />
-                </div>
-                {qualitySection && (
-                  <div className="lg:col-span-3">
-                    <PerShareGrowthCard
-                      ticker={upperTicker}
-                      section={{ ...qualitySection, card_narrative: null }}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-
-            const cashRiskMacroRow = (
-              <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-                <CashAndCapitalCard
-                  capAllocSection={capAllocSection}
-                  qualitySection={qualitySection}
-                  runwayQuarters={signals.cash_runway_quarters}
-                />
-                {riskSection && <RiskDiffCard section={riskSection} />}
-                {macroSection && <MacroPanel section={macroSection} />}
-              </div>
-            );
-
-            // Wrap each row in a marker div so the row's data-row
-            // attribute (which slot it's in) and data-row-content
-            // attribute (what's rendered inside it) stay decoupled.
-            // Distressed names lift Cash + Risk + Macro into row 3
-            // because the survival story matters more than the
-            // valuation/growth story when the company is unprofitable
-            // or running out of cash.
-            return (
-              <>
-                <div
-                  data-row="dashboard-row-3"
-                  data-row-content={isDistressed ? "cash-risk-macro" : "valuation-growth"}
-                >
-                  {isDistressed ? cashRiskMacroRow : valuationGrowthRow}
-                </div>
-                <div
-                  data-row="dashboard-row-4"
-                  data-row-content={isDistressed ? "valuation-growth" : "cash-risk-macro"}
-                >
-                  {isDistressed ? valuationGrowthRow : cashRiskMacroRow}
-                </div>
-              </>
-            );
-          })()}
+          {/* Phase 4.5.C — ContextBand moved from above row 2 to
+              below row 4. Business description + recent news read
+              less urgent than the numeric rows; keeping them at the
+              bottom avoids burying the hero stat trio. Returns null
+              when both sections are absent so older cached reports
+              without these fields stay clean. */}
+          <ContextBand
+            ticker={upperTicker}
+            businessSection={businessSection}
+            newsSection={newsSection}
+          />
 
           <ReportRenderer
             report={reportQuery.data}
             excludeSections={[
-              // Phase 4.4.A — Business + News render in the
-              // ContextBand above; exclude them from the trailing
-              // ReportRenderer so they don't appear twice.
+              // Business + News render in the ContextBand above; exclude
+              // them from the trailing ReportRenderer so they don't
+              // appear twice.
               "Business",
               "News",
               "Earnings",
@@ -221,5 +174,110 @@ export function SymbolDetailPage() {
         </>
       )}
     </div>
+  );
+}
+
+interface DashboardRowsProps {
+  ticker: string;
+  report: ResearchReport;
+  qualitySection: Section | undefined;
+  capAllocSection: Section | undefined;
+  riskSection: Section | undefined;
+  macroSection: Section | undefined;
+}
+
+/** Phase 4.5.B + 4.5.C — rows 3 + 4 with adaptive ordering and
+ *  auto-collapsing column count. Pulled out of SymbolDetailPage to
+ *  keep the inner JSX readable. */
+function DashboardRows(props: DashboardRowsProps) {
+  const {
+    ticker,
+    report,
+    qualitySection,
+    capAllocSection,
+    riskSection,
+    macroSection,
+  } = props;
+
+  const signals = report.layout_signals;
+  const isDistressed =
+    signals.is_unprofitable_ttm ||
+    (signals.cash_runway_quarters !== null &&
+      signals.cash_runway_quarters < 6);
+
+  // Decide which Cash/Risk/Macro cards have data ahead of render so
+  // the grid's column count adapts. RiskDiffCard + MacroPanel return
+  // null on unavailable data (Phase 4.5.C); CashAndCapitalCard always
+  // renders (it has its own internal fallback for missing data).
+  const cashRiskMacroCards: ReactNode[] = [
+    <CashAndCapitalCard
+      key="cash"
+      capAllocSection={capAllocSection}
+      qualitySection={qualitySection}
+      runwayQuarters={signals.cash_runway_quarters}
+    />,
+  ];
+  if (riskSection && riskSection.claims.length > 0) {
+    cashRiskMacroCards.push(<RiskDiffCard key="risk" section={riskSection} />);
+  }
+  if (macroSection && macroSection.claims.length > 0) {
+    cashRiskMacroCards.push(<MacroPanel key="macro" section={macroSection} />);
+  }
+  const cashRiskMacroCount = cashRiskMacroCards.length;
+  // Tailwind needs literal class names; switch on count.
+  const crmGridCols =
+    cashRiskMacroCount === 3
+      ? "lg:grid-cols-3"
+      : cashRiskMacroCount === 2
+        ? "lg:grid-cols-2"
+        : "lg:grid-cols-1";
+
+  const valuationGrowthRow = (
+    <div className="mb-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-5">
+      <div className="lg:col-span-2">
+        <ValuationCard report={report} />
+      </div>
+      {qualitySection && (
+        <div className="lg:col-span-3">
+          <PerShareGrowthCard
+            ticker={ticker}
+            section={{ ...qualitySection, card_narrative: null }}
+          />
+        </div>
+      )}
+    </div>
+  );
+
+  const cashRiskMacroRow = (
+    <div
+      className={`mb-6 grid grid-cols-1 items-start gap-6 ${crmGridCols}`}
+    >
+      {cashRiskMacroCards}
+    </div>
+  );
+
+  const valuationGrowthCount = qualitySection ? 2 : 1;
+
+  return (
+    <>
+      <div
+        data-row="dashboard-row-3"
+        data-row-content={isDistressed ? "cash-risk-macro" : "valuation-growth"}
+        data-card-count={String(
+          isDistressed ? cashRiskMacroCount : valuationGrowthCount,
+        )}
+      >
+        {isDistressed ? cashRiskMacroRow : valuationGrowthRow}
+      </div>
+      <div
+        data-row="dashboard-row-4"
+        data-row-content={isDistressed ? "valuation-growth" : "cash-risk-macro"}
+        data-card-count={String(
+          isDistressed ? valuationGrowthCount : cashRiskMacroCount,
+        )}
+      >
+        {isDistressed ? valuationGrowthRow : cashRiskMacroRow}
+      </div>
+    </>
   );
 }

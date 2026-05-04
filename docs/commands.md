@@ -46,9 +46,9 @@ Each test runs inside a SAVEPOINT that rolls back, so tests are isolated without
 ## Lint / typecheck
 
 ```bash
-uv run ruff check app            # lint
-uv run ruff check app --fix      # auto-fix
-uv run ruff format app           # format
+uv run ruff check app tests      # lint (matches what CI runs)
+uv run ruff check app tests --fix  # auto-fix
+uv run ruff format app tests     # format
 uv run mypy app                  # (once mypy config lands)
 ```
 
@@ -71,5 +71,7 @@ After `docker compose up -d db` on a fresh machine, always run `alembic upgrade 
 Until CI is fully wired, run this before pushing a branch:
 
 ```bash
-uv run ruff check app && uv run pytest -v
+uv run ruff check app tests && uv run pytest -v
 ```
+
+(Both directories — CI checks `tests/` too, so a clean `app/` alone isn't enough.)

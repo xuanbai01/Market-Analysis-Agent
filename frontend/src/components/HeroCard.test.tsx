@@ -316,4 +316,56 @@ describe("HeroCard", () => {
       expect(segmentCount).toBe(2);
     });
   });
+
+  // Phase 4.3.B.2 — HeroCard enables LineChart's axes + hover tooltip
+  // so the price chart is no longer decorative. The user can see the
+  // price range (min/max y-axis labels) + time span (first/last date
+  // x-axis labels) at a glance, and read exact price + date by hover.
+
+  it("renders y-axis price labels on the hero price chart", async () => {
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
+    const { container } = renderHero(fakeReport());
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-testid='line-chart']"),
+      ).not.toBeNull(),
+    );
+    expect(
+      container.querySelector("[data-testid='line-chart-y-axis-max']"),
+    ).not.toBeNull();
+    expect(
+      container.querySelector("[data-testid='line-chart-y-axis-min']"),
+    ).not.toBeNull();
+  });
+
+  it("renders x-axis date labels on the hero price chart", async () => {
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
+    const { container } = renderHero(fakeReport());
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-testid='line-chart']"),
+      ).not.toBeNull(),
+    );
+    expect(
+      container.querySelector("[data-testid='line-chart-x-axis-start']"),
+    ).not.toBeNull();
+    expect(
+      container.querySelector("[data-testid='line-chart-x-axis-end']"),
+    ).not.toBeNull();
+  });
+
+  it("shows a hover tooltip when the cursor moves over the hero price chart", async () => {
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
+    const { container } = renderHero(fakeReport());
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-testid='line-chart']"),
+      ).not.toBeNull(),
+    );
+    const svg = container.querySelector("[data-testid='line-chart']");
+    fireEvent.mouseMove(svg!, { clientX: 100, clientY: 60 });
+    expect(
+      container.querySelector("[data-testid='line-chart-hover-tooltip']"),
+    ).not.toBeNull();
+  });
 });

@@ -29,7 +29,6 @@ import pytest
 
 from app.schemas.ten_k import RiskCategory
 
-
 # ── Module-under-test imports ─────────────────────────────────────────
 # ``categorize_risk_paragraphs`` and the schema lands in
 # ``app.services.risk_categorizer`` (Phase 4.3.B). The test imports them

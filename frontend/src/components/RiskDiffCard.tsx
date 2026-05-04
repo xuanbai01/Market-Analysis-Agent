@@ -113,56 +113,60 @@ export function RiskDiffCard({ section }: Props) {
         </div>
       </div>
 
-      <svg
-        data-testid="risk-diff-bars"
-        // Phase 4.3.B.1 — responsive width; the value labels no longer
-        // overflow the narrow row-4 column when the chart is rendered
-        // at a card width < 360 px.
-        width="100%"
-        height={H}
-        viewBox={`0 0 ${W} ${H}`}
-        role="img"
-        aria-label="Risk diff bars"
-        className="block"
-      >
-        {rows.map((row, i) => {
-          const y = i * (ROW_H + ROW_GAP);
-          const barLen = Math.max(2, barLength(row));
-          return (
-            <g key={row.label} data-row="risk-diff-bar">
-              <text
-                x={0}
-                y={y + ROW_H / 2 + 4}
-                fill={COLOR_DIM}
-                style={{ fontSize: 10, fontFamily: "var(--font-mono, monospace)" }}
-              >
-                {row.label}
-              </text>
-              <rect
-                x={BAR_X}
-                y={y + ROW_H / 4}
-                width={barLen}
-                height={ROW_H / 2}
-                fill={row.color}
-                rx={2}
-              />
-              <text
-                x={W}
-                y={y + ROW_H / 2 + 4}
-                fill={COLOR_HI}
-                textAnchor="end"
-                style={{
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono, monospace)",
-                  fontWeight: 500,
-                }}
-              >
-                {row.value > 0 && row.label === "Char delta" ? `+${row.value}` : row.value}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+      {categoryDeltas ? (
+        <CategoryBars deltas={categoryDeltas} />
+      ) : (
+        <svg
+          data-testid="risk-diff-bars"
+          // Phase 4.3.B.1 — responsive width; the value labels no longer
+          // overflow the narrow row-4 column when the chart is rendered
+          // at a card width < 360 px.
+          width="100%"
+          height={H}
+          viewBox={`0 0 ${W} ${H}`}
+          role="img"
+          aria-label="Risk diff bars"
+          className="block"
+        >
+          {rows.map((row, i) => {
+            const y = i * (ROW_H + ROW_GAP);
+            const barLen = Math.max(2, barLength(row));
+            return (
+              <g key={row.label} data-row="risk-diff-bar">
+                <text
+                  x={0}
+                  y={y + ROW_H / 2 + 4}
+                  fill={COLOR_DIM}
+                  style={{ fontSize: 10, fontFamily: "var(--font-mono, monospace)" }}
+                >
+                  {row.label}
+                </text>
+                <rect
+                  x={BAR_X}
+                  y={y + ROW_H / 4}
+                  width={barLen}
+                  height={ROW_H / 2}
+                  fill={row.color}
+                  rx={2}
+                />
+                <text
+                  x={W}
+                  y={y + ROW_H / 2 + 4}
+                  fill={COLOR_HI}
+                  textAnchor="end"
+                  style={{
+                    fontSize: 11,
+                    fontFamily: "var(--font-mono, monospace)",
+                    fontWeight: 500,
+                  }}
+                >
+                  {row.value > 0 && row.label === "Char delta" ? `+${row.value}` : row.value}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      )}
 
       <div className="mt-3 rounded-md bg-strata-raise px-3 py-2 text-xs leading-relaxed text-strata-dim">
         <span className="text-strata-fg">{frameWord(summary.framing)}</span>{" "}
@@ -204,7 +208,10 @@ function CategoryBars({ deltas }: { deltas: RiskCategoryDelta[] }) {
   return (
     <svg
       data-testid="risk-category-bars"
-      width={width}
+      // Phase 4.3.B.2 — responsive width matching the aggregate bars
+      // chart, so per-category labels don't overflow the narrow row-4
+      // column on narrow viewports.
+      width="100%"
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       role="img"

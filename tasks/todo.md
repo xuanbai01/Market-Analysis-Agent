@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (PR #47); 4.2 done (PR #48); 4.3.A done (PR #49); 4.3.A.1 done (PR #50); 4.3.X data correctness pass done (PR #51 — six bugs from [dogfood-2026-05-03.md](dogfood-2026-05-03.md)); 4.3.B Haiku risk categorizer (PR #52, open); 4.3.B.1 layout polish + range pills + responsive SVGs in flight (this PR); 4.4 (News + section narratives) up next.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (PR #47); 4.2 done (PR #48); 4.3.A done (PR #49); 4.3.A.1 done (PR #50); 4.3.X data correctness pass done (PR #51 — six bugs from [dogfood-2026-05-03.md](dogfood-2026-05-03.md)); 4.3.B Haiku risk categorizer done (PR #52); 4.3.B.1 layout polish + range pills + responsive SVGs done (PR #53); 4.3.B.2 price chart axes + hover tooltip in flight (this PR); 4.4 (News + section narratives) up next.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -211,6 +211,27 @@ Active sprint for the Market Analysis Agent.
 - [x] **Tests** — frontend 277 → **295** (+18: 7 price-range/Hero, 3 RecentPrints, 3 CAGR, 4 SVG-width updates, 1 EarningsCard label-collision fix). Backend untouched at 531/531.
 
 - [x] **Bundle** — main 93.95 → **94.46 KB gz** (+0.51). Under 100 KB budget; ~5.5 KB headroom retained for 4.4. SectionChart on-demand chunk unchanged at 103.01 KB.
+
+### 4.3.B.2 Price chart axes + hover tooltip *(this PR)*
+
+> **Why:** dogfooding PR #51 + #53 surfaced that the hero price chart
+> read as decorative — the line shape was visible but you couldn't
+> read prices, dates, or hover over it for exact values. The 4.1
+> docstring (``no axes, no tooltip, no grid — the hero card composes
+> those separately around the chart``) was a deferral that the hero
+> never came back to.
+
+- [x] **`LineChart` axis labels** — new opt-in `showAxes` prop renders y-axis min/max price labels formatted as `$X.XX` on the left edge and x-axis first/last date labels (UTC-formatted to avoid TZ drift, since yfinance timestamps bars at UTC midnight). Off by default so any non-Hero caller stays lean. New testids `line-chart-y-axis-{min,max}` + `line-chart-x-axis-{start,end}` for regression assertions.
+
+- [x] **`LineChart` hover tooltip** — new opt-in `showTooltip` prop wires `onMouseMove` and `onMouseLeave` on the SVG. Cursor x maps to viewBox space via the SVG's bounding rect (with a happy-dom fallback for tests); nearest data point selected by linear scan. Three new SVG artifacts under stable testids: `line-chart-hover-{guide,dot,tooltip}` — guide is a vertical dashed line; dot is a filled circle on the line at the nearest point; tooltip is a small floating panel with date + price. Tooltip flips left when too close to the right edge so it stays in-frame.
+
+- [x] **HeroCard wiring** — sets `showAxes={true} showTooltip={true}` on its LineChart. Other consumers (none today) keep the lean default.
+
+- [x] **Bonus: rescue per-category bars regression** — the PR #52 ↔ PR #53 merge silently dropped the conditional render of `CategoryBars` in `RiskDiffCard.tsx`; the `CategoryBars` function survived in the file but was never called from JSX. Two of PR #52's tests were failing on main because of it. Restored the `{categoryDeltas ? <CategoryBars/> : <svg .../>}` ternary. Also made `CategoryBars`' SVG responsive width (matching what PR #53 did for the aggregate bars).
+
+- [x] **Tests** — frontend 295 → **314** (+19: 13 LineChart axes/hover, 3 HeroCard wire-through, 2 rescued RiskDiffCard tests, 1 prior-test fix). Backend untouched at 544/544.
+
+- [x] **Bundle** — main 94.46 → **95.71 KB gz** (+1.25). ~4.3 KB headroom retained under the 100 KB budget. SectionChart on-demand chunk unchanged at 103.01 KB.
 
 ### 4.4 News + Business + section narratives
 

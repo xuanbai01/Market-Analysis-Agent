@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.5.A done (PRs #46–#57); 4.5.B card adaptations + section reorder + LLM signal feed in flight (this PR); 4.6 Compare page follows.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.5.B done (PRs #46–#58); 4.5.C layout polish in flight (this PR); 4.6 Compare page follows.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -375,6 +375,35 @@ Active sprint for the Market Analysis Agent.
   - **Live-LLM dogfood with a distressed name** (RIVN / LCID) is the natural next validation step. The prompt's framing block should produce visibly different narrative tone; verify the prose actually adapts. Lands during the 4.8 dogfood gate.
   - **Test fixture matrix** (NVDA / F / RIVN / TBD) deferred — can fold into 4.8 dogfood or a dedicated 4.5.C if we want named-symbol regression coverage.
   - **Bundle headroom** is now 1.63 KB. Phase 4.6 (Compare page) is ~3 KB net, will need either a chunk split for the new route or compression of an existing card. Address in 4.6 specifically.
+
+### 4.5.C Layout polish from dogfood feedback *(this PR)*
+
+> **Why this exists:** the 4.5.B dogfood surfaced four UX issues the
+> unit tests couldn't catch — page-level whitespace on big monitors,
+> row-internal height mismatch where shorter cards left blank canvas
+> below them, ContextBand placement burying the numeric content, and
+> "UNAVAILABLE" placeholder cards wasting column slots on cached
+> reports. All four are layout-shape issues, not data correctness;
+> shipping them in 4.5.C keeps 4.5.B's behavioral diff reviewable
+> separately from this surface refresh.
+
+- [x] **Container width** — SymbolDetailPage's `max-w-6xl` (1152px) → `max-w-screen-2xl` (1536px). Padding shrinks from `px-8` to `px-6` on small breakpoints, growing back to `lg:px-8 / xl:px-10` on bigger ones to keep content from hugging the edges. Dashboards now breathe at 1920px+ resolutions while staying readable at 1280px.
+- [x] **`items-start` on every multi-column grid** — cards render at natural height with honest gaps below shorter cards rather than stretching to row height. Option (b) from the user's choice — adapts to different resolutions because the gap "absorbs" the height difference.
+- [x] **ContextBand moved to bottom** — Business + News now render after row 4 (and before the trailing ReportRenderer fallback) instead of between hero and row 2. Hero → row 2 → row 3 → row 4 → ContextBand keeps numeric content up top.
+- [x] **Auto-collapse row 4 to N columns** — RiskDiffCard + MacroPanel return `null` instead of placeholder "UNAVAILABLE" cards. SymbolDetailPage's row 4 grid uses `lg:grid-cols-{1,2,3}` based on a populated-card count. Cash + Risk + Macro on healthy data; Cash alone fills the row width when Risk and Macro are empty. `data-card-count` attribute exposed for regression tests.
+- [x] **DashboardRows extracted** from SymbolDetailPage's main render for readability. The IIFE in 4.5.B was inline; refactoring it to a named subcomponent kept the parent component's JSX scannable.
+- [x] **Tests** — 387 → **392** frontend (+5 net: 5 new SymbolDetailPage layout assertions; 2 placeholder-render tests on RiskDiffCard / MacroPanel flipped to null-return assertions). Backend untouched at 607.
+- [x] **Bundle** — main 98.37 → **98.42 KB gz** (+0.05). Headroom unchanged at ~1.58 KB.
+- [x] **Update test counts** — backend stays at 607, frontend 387 → **392**. Updated in `CLAUDE.md`, `docs/architecture.md`, this file.
+
+### 4.5.C review *(filled in after the GREEN + docs commits land)*
+
+- **What changed in shape:** one container className change. One `items-start` class added to every grid (5 grids). One subcomponent extraction (DashboardRows). Two `if !data return null` branches added to RiskDiffCard / MacroPanel. ContextBand moved one position. No new components, no new dependencies, no schema changes.
+- **What didn't change:** healthy reports' card content. The new auto-collapse is back-compat: a section that returns 4 claims renders the same RiskDiffCard as before; a section with 0 claims used to render a placeholder, now renders nothing — and the surrounding row picks a tighter grid.
+- **Net deltas:** backend zero; frontend +5 tests / 2 cards null-return / 1 IIFE → DashboardRows refactor / 1 grid-cols-N column count switch; main bundle +0.05 KB gz.
+- **Followups noted:**
+  - The Vite HMR cache wasn't picking up file changes during preview verification (same issue as 4.5.B). Tracked as: when the worktree is in `.claude/worktrees/...`, Vite's file watcher misses mtime updates. Workaround: trust unit tests; rely on `vite build` to verify production rendering. Long-term fix: investigate whether `server.watch.usePolling` in `vite.config.ts` would resolve.
+  - Bundle headroom still ~1.58 KB. Phase 4.6 Compare page will need a chunk split for the new route. Plan to use `React.lazy()` on the `/compare` route component so the bundle bills only get hit when the user navigates there.
 
 ### 4.6 Compare page
 

@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (PR #47); 4.2 done (PR #48); 4.3.A done (PR #49); 4.3.A.1 done (PR #50); 4.3.X data correctness pass done (PR #51 — six bugs from [dogfood-2026-05-03.md](dogfood-2026-05-03.md)); 4.3.B Haiku risk categorizer done (PR #52); 4.3.B.1 layout polish + range pills + responsive SVGs done (PR #53); 4.3.B.2 price chart axes + hover tooltip in flight (this PR); 4.4 (News + section narratives) up next.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (PR #47); 4.2 done (PR #48); 4.3.A done (PR #49); 4.3.A.1 done (PR #50); 4.3.X data correctness pass done (PR #51 — six bugs from [dogfood-2026-05-03.md](dogfood-2026-05-03.md)); 4.3.B Haiku risk categorizer done (PR #52); 4.3.B.1 layout polish + range pills + responsive SVGs done (PR #53); 4.3.B.2 price chart axes + hover tooltip done (PR #54); 4.4.A News + Business + ContextBand in flight (this PR); 4.4.B per-card section narratives follows.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -235,13 +235,43 @@ Active sprint for the Market Analysis Agent.
 
 ### 4.4 News + Business + section narratives
 
-- [ ] **News integration** — wire `fetch_news` (already exists, PR #13) into the orchestrator's tool fan-out. New `_build_news` section builder. Last ~30 ranked items. Yahoo per-ticker RSS (free, no auth) is the primary source; NewsAPI free tier (100/day) augments.
-- [ ] **Haiku news categorization** — for each headline, classify category (EARNINGS / PRODUCT / REGULATORY / M&A / SUPPLY / STRATEGY / OTHER) + sentiment (positive / neutral / negative). Haiku 4.5 at ~$0.0001 per headline; ~$0.003 per report total.
-- [ ] **`NewsList` component** — last 5 ranked items by default, with category pills (filter ALL / EARNINGS / PRODUCT / REGULATORY / M&A / SUPPLY) and sentiment counts in footer. "View N more" expands.
-- [ ] **Business description** — yfinance `Ticker.info["longBusinessSummary"]` surfaced as a 1-paragraph card. Founded year, HQ, employee count from `info` too.
-- [ ] **`ContextBand`** — top of `SymbolDetailPage` (between hero and grid), holds Business description card + News card + (later) Revenue mix segment + geography + Next Catalyst. Layout: 2-column on comfortable, 1-column on compact.
-- [ ] **Section narratives** — Sonnet generates 1-2 sentence inline interpretations per card ("Loss is narrowing. EPS −3.82 → −0.78 over 20Q — no positive print"). Renders in the card's bottom strip, below the data. Backed by Claim refs same as section summaries.
-- [ ] **Eval rubric** — section narratives covered by the same factuality rubric (already history-aware after 3.4).
+> **Split:** ship as two PRs to keep each reviewable.
+> - **4.4.A — ContextBand (Business + News)** *(this PR)*. The "above the grid" content the user expects from a research dashboard.
+> - **4.4.B — Per-card section narratives** *(follow-up)*. Cross-cutting concern (touches every card + the synth call schema).
+
+#### 4.4.A ContextBand: Business + News *(this PR)*
+
+> **Why:** the dashboard at `/symbol/:ticker` opens straight into Hero → numeric grid. There's no "what does this company *do*" card and no "what's the latest news" feed. Both are canonical for a research dashboard and Strata's screenshot 5 calls them out as the ContextBand layer between Hero and the row-2 grid.
+
+**Backend:**
+
+- [ ] **`app/services/business_info.py`** — new tool `async def fetch_business_info(symbol)` returning `dict[str, Claim]`. Pulls from yfinance `Ticker.info`: `longBusinessSummary` (~3-5 sentences), city/state/country (joined as HQ string), `fullTimeEmployees`. Founded year skipped — yfinance doesn't carry it cleanly. One `log_external_call` record under service id `yfinance.business_info`.
+- [ ] **`app/services/news.py`** — new `async def fetch_news(symbol) -> dict[str, Claim]`. Opens its own AsyncSession, calls `news_repository.list_news(symbol, hours=168, limit=30)`, calls `news_categorizer.categorize_news_headlines` to classify each headline, returns one Claim per article with description=title, value=sentiment, source.url=article_url, source.detail=`"category=<bucket>"`. Returns `{}` cleanly when no articles exist (no upstream-provider call yet — ingestion stays driven by `POST /v1/news/ingest`; revisit if dogfooding shows stale data).
+- [ ] **`app/services/news_categorizer.py`** — mirrors `risk_categorizer.py`. Single Haiku call with a forced-tool `NewsCategorization` schema (`list[HeadlineClassification(index, category, sentiment)]`). Two enums: `NewsCategory` (EARNINGS / PRODUCT / REGULATORY / M_AND_A / SUPPLY / STRATEGY / OTHER, 7 buckets) + `NewsSentiment` (POSITIVE / NEUTRAL / NEGATIVE). Short-circuits on empty input. Defensive on out-of-range indices. Cost target ≤$0.005/report on a typical 20-30 headline batch.
+- [ ] **`research_tool_registry.py`** — add `Business` and `News` sections to `SECTIONS_BY_FOCUS[Focus.FULL]` (placed first so the orchestrator processes them before the numeric sections). New `_build_business` + `_build_news` builders that pass through the tool's `dict[str, Claim]` directly. EARNINGS focus: News only (Business is full-research-only).
+- [ ] **`research_orchestrator.py`** — wire `fetch_business_info` + `fetch_news` into `TOOL_DISPATCH`. Cache miss → fan-out runs them alongside fundamentals/peers/etc. via `asyncio.gather(return_exceptions=True)`.
+
+**Frontend:**
+
+- [ ] **`lib/business-extract.ts`** — `extractBusinessInfo(section)` returns `{summary: string|null, hq: string|null, employeeCount: number|null}` from a Business section's claims.
+- [ ] **`lib/news-extract.ts`** — `extractNewsItems(section)` returns `NewsItem[]` parsed from each Claim (description = title; value = sentiment; source.url = article url; source.detail's `category=<bucket>` substring → category enum). Drops malformed items.
+- [ ] **`components/BusinessCard.tsx`** — single card. Header eyebrow "BUSINESS · {ticker}" + 1-paragraph summary (truncate to ~3 lines with overflow `...`) + small metadata row (HQ · {N} employees). Renders nothing when summary is empty.
+- [ ] **`components/NewsList.tsx`** — header eyebrow "NEWS · LAST 7 DAYS · {N} items" + filter pill row (ALL / EARNINGS / PRODUCT / REGULATORY / M&A / SUPPLY / STRATEGY / OTHER) + 5 latest items by default with title/source/date + category chip + sentiment dot. "View {N} more" disclosure expands. State: filter selection + expand toggle.
+- [ ] **`components/ContextBand.tsx`** — thin 2-col grid wrapper (40/60 same rhythm as rows 2 + 3) holding `<BusinessCard>` (left) + `<NewsList>` (right). Stacks 1-col below `lg:`. Returns null when both children empty.
+- [ ] **`components/SymbolDetailPage.tsx`** — pluck `Business` + `News` sections, render `<ContextBand>` between `<HeroCard>` and the row-2 grid.
+
+**Tests:**
+
+- [ ] Backend ~14 new: 5 categorizer (mirrors risk_categorizer's pattern), 3 business_info, 3 news fetch, 2 registry section-builders, 1 orchestrator wire-through.
+- [ ] Frontend ~10 new: 2 business-extract, 3 news-extract, 2 BusinessCard, 2 NewsList, 1 ContextBand.
+
+**Bundle math:** main currently 95.71 KB / 100 KB gz → 4.3 KB headroom. NewsList (~3 KB) + BusinessCard (~1 KB) + ContextBand (~0.5 KB) ≈ 4.5 KB total. **Tight — may need to lazy-load NewsList** if final size pushes over budget. Decide after the implementation lands.
+
+#### 4.4.B Per-card section narratives *(follow-up PR)*
+
+- [ ] **Backend** — orchestrator's synth call returns one card-level narrative per section title (e.g. `card_narratives: dict[str, str]`). Each card receives a 1-2 sentence inline interp ("Loss is narrowing. EPS −3.82 → −0.78 over 20Q — no positive print"). Schema gets a new `Section.card_narrative: str | None` field; sonnet's tool schema extends to populate it.
+- [ ] **Frontend** — each card grows a narrative strip below its data. PerShareGrowthCard's narrative comes back here (4.3.X removed it because it duplicated Quality's `section.summary`; the per-card field replaces it cleanly).
+- [ ] **Eval rubric** — card narratives covered by the existing factuality rubric (history-aware after 3.4).
 
 ### 4.5 Adaptive layout for distressed names *(the differentiator)*
 

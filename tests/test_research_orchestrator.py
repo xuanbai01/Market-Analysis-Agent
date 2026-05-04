@@ -723,3 +723,62 @@ def test_backfill_top_level_metadata_no_fundamentals_claim_leaves_none() -> None
     out = backfill_top_level_metadata(report)
     assert out.name is None
     assert out.sector is None
+
+
+# ── Phase 4.4.A: Business + News tools wired into TOOL_DISPATCH ──────
+
+
+async def test_full_focus_invokes_business_info_and_news_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 4.4.A — the orchestrator's tool fan-out for FULL focus
+    must include ``fetch_business_info`` + ``fetch_news`` so the
+    ContextBand has data to render. We patch both and assert each is
+    invoked once for the target symbol."""
+    business_calls: list[str] = []
+    news_calls: list[str] = []
+
+    async def _fake_business(symbol: str) -> dict[str, Claim]:
+        business_calls.append(symbol)
+        return {
+            "summary": _claim("Business description (from 10-K filing)", "x"),
+            "hq": _claim("Headquarters location", "Cupertino, CA, United States"),
+            "employee_count": _claim("Full-time employee count", 164_000),
+        }
+
+    async def _fake_news(symbol: str) -> dict[str, Claim]:
+        news_calls.append(symbol)
+        return {
+            "news_0": _claim("Apple beats Q1", "positive"),
+            "news_1": _claim("iPhone 17 launches", "neutral"),
+        }
+
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+            "fetch_business_info": _fake_business,
+            "fetch_news": _fake_news,
+        },
+    )
+    _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Business", "News",
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    report = await compose_research_report("aapl", Focus.FULL)
+
+    assert business_calls == ["AAPL"]
+    assert news_calls == ["AAPL"]
+    titles = [s.title for s in report.sections]
+    assert "Business" in titles
+    assert "News" in titles

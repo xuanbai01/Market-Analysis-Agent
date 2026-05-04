@@ -211,4 +211,35 @@ describe("EarningsCard", () => {
     const { queryByTestId } = render(<EarningsCard section={sec} />);
     expect(queryByTestId("card-narrative")).toBeNull();
   });
+
+  // ── Phase 4.5.B — bottom-decile beat-rate annotation ─────────────
+
+  it("renders 'bottom decile' annotation in the headline when distressed", () => {
+    const { getByTestId } = render(
+      <EarningsCard
+        section={fakeEarningsSection()}
+        distressed={{ beat_rate_below_30pct: true }}
+      />,
+    );
+    expect(getByTestId("earnings-bottom-decile").textContent).toMatch(
+      /bottom decile/i,
+    );
+  });
+
+  it("omits the bottom-decile annotation when not distressed", () => {
+    const { queryByTestId } = render(
+      <EarningsCard
+        section={fakeEarningsSection()}
+        distressed={{ beat_rate_below_30pct: false }}
+      />,
+    );
+    expect(queryByTestId("earnings-bottom-decile")).toBeNull();
+  });
+
+  it("omits the bottom-decile annotation when distressed prop is omitted", () => {
+    const { queryByTestId } = render(
+      <EarningsCard section={fakeEarningsSection()} />,
+    );
+    expect(queryByTestId("earnings-bottom-decile")).toBeNull();
+  });
 });

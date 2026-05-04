@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.4.B done (PRs #46–#56); 4.5.A layout signals + header pills + hero swap in flight (this PR); 4.5.B card adaptations + section reorder + LLM signal feed follows.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.5.A done (PRs #46–#57); 4.5.B card adaptations + section reorder + LLM signal feed in flight (this PR); 4.6 Compare page follows.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -347,14 +347,34 @@ Active sprint for the Market Analysis Agent.
   - Synth prompt receives `layout_signals` as context so Sonnet's narratives adapt ("Trajectory positive, level negative" tone for distressed names).
   - Test fixtures across the layout matrix: healthy mature (NVDA), slowing growth (F or GM), unprofitable growth (RIVN), distressed (TBD by current data). Lands in 4.5.B or 4.5.C.
 
-#### 4.5.B Card adaptations + section reordering + LLM signal feed *(follow-up PR)*
+#### 4.5.B Card adaptations + section reordering + LLM signal feed *(this PR)*
 
-- [ ] **EarningsCard "bottom decile"** annotation when `beat_rate_below_30pct`.
-- [ ] **CashAndCapitalCard** runway stat tile + "raise likely needed" annotation when `cash_runway_quarters < 6`.
-- [ ] **QualityCard rings** flip to red coloring when ratio < 0 (currently green/yellow only).
-- [ ] **SymbolDetailPage** swaps row 3 / row 4 layout when `is_unprofitable_ttm` or `cash_runway_quarters < 6`. Cash & Capital moves up; Risk diff moves up.
-- [ ] **`_SYSTEM_PROMPT`** receives layout signals as user-prompt context so Sonnet's narratives adapt for distressed names.
-- [ ] **Test fixtures** — 4 named fixture symbols covering the layout matrix.
+> **Why this slice:** 4.5.A laid the foundation (signals + header chrome).
+> 4.5.B closes the loop: the dedicated cards each consume a relevant
+> signal, the section grid reorders for distressed names, and Sonnet
+> receives the signals as framing context so its narratives adapt
+> their tone. Together with 4.5.A, this completes Phase 4.5 — the
+> adaptive-layout differentiator from ADR 0005.
+
+- [x] **EarningsCard "bottom decile"** annotation when `beat_rate_below_30pct`. New optional `distressed?: { beat_rate_below_30pct?: boolean }` prop; pill renders next to the X-of-N beat headline. Wired in SymbolDetailPage to read from `layout_signals.beat_rate_below_30pct`.
+- [x] **CashAndCapitalCard** runway stat tile when `cash_runway_quarters` is non-null. New optional `runwayQuarters?: number | null` prop. Tile shows "~X.XQ" runway value; sub-line "raise likely needed" + red value coloring when < 6Q. Wired in SymbolDetailPage. FCF-positive companies + pre-4.5 cache rows omit the tile.
+- [x] **QualityCard rings flip red** when ROE / ROIC TTM / FCF margin values are negative. Each ring picks `text-strata-neg` (loss accent) when its value < 0, else its default (`text-strata-quality` for ROE/ROIC, `text-strata-cashflow` for FCF margin).
+- [x] **SymbolDetailPage row reorder** when distressed (`is_unprofitable_ttm OR cash_runway_quarters < 6`). Default = row 3 Valuation+Growth / row 4 Cash+Risk+Macro. Distressed = row 3 Cash+Risk+Macro / row 4 Valuation+Growth. `data-row='dashboard-row-{3,4}'` markers + `data-row-content` attribute let the reorder logic be regression-tested deterministically.
+- [x] **`_build_user_prompt` accepts layout_signals** and emits a "Layout signals (framing context)" block listing active flags + values when at least one is non-default. Sonnet's narratives adapt tone (challenge framing for distressed names) without breaking the citation-discipline contract — every cited number must still appear in the section's claim list.
+- [x] **Orchestrator wiring** — `compose_research_report` derives layout_signals from a stub (claims-only) report BEFORE the synth call so the prompt receives them; reuses the same signal value when wrapping the final `ResearchReport` to avoid double-derivation.
+- [x] **Tests** — backend 605 → **607** (+2: prompt includes signals when distressed, omits block when healthy). Frontend 371 → **387** (+16: 3 EarningsCard, 5 CashAndCapital, 4 QualityCard, 4 SymbolDetailPage).
+- [x] **Bundle** — main 97.92 → **98.37 KB gz** (+0.45). ~1.63 KB headroom remaining under the 100 KB budget.
+- [x] **Update test counts** — backend 605 → **607**, frontend 371 → **387**. Updated in `CLAUDE.md`, `docs/architecture.md`, this file.
+
+### 4.5.B review *(filled in after the GREEN + docs commits land)*
+
+- **What changed in shape:** three optional props (one each for EarningsCard, CashAndCapitalCard, the EarningsCard-style on QualityCard's accent) + one optional kwarg on `_build_user_prompt`. Plus a SymbolDetailPage IIFE that picks between two row orderings based on a derived `isDistressed` boolean. No new components, no schema changes.
+- **What didn't change:** healthy reports render unchanged. Pre-4.5 cached rows (where signals are at the healthy default after the 4.5.A backfill) take the unchanged code path everywhere.
+- **Net deltas:** backend +2 tests / +1 prompt helper / 1 prompt-builder signature change; frontend +16 tests / 4 cards extended / 1 IIFE-based reorder; main bundle +0.45 KB gz.
+- **Followups noted:**
+  - **Live-LLM dogfood with a distressed name** (RIVN / LCID) is the natural next validation step. The prompt's framing block should produce visibly different narrative tone; verify the prose actually adapts. Lands during the 4.8 dogfood gate.
+  - **Test fixture matrix** (NVDA / F / RIVN / TBD) deferred — can fold into 4.8 dogfood or a dedicated 4.5.C if we want named-symbol regression coverage.
+  - **Bundle headroom** is now 1.63 KB. Phase 4.6 (Compare page) is ~3 KB net, will need either a chunk split for the new route or compression of an existing card. Address in 4.6 specifically.
 
 ### 4.6 Compare page
 

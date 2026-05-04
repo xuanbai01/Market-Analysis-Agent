@@ -21,8 +21,18 @@ import type { Claim, ClaimHistoryPoint, Section } from "../lib/schemas";
 import { EpsBars } from "./EpsBars";
 import { NarrativeStrip } from "./NarrativeStrip";
 
+interface DistressedFlags {
+  /** Phase 4.5.B — when true, surface the "● BOTTOM DECILE" annotation
+   *  beside the X-of-N beat-consensus headline. Driven by the
+   *  research report's ``layout_signals.beat_rate_below_30pct``. */
+  beat_rate_below_30pct?: boolean;
+}
+
 interface Props {
   section: Section;
+  /** Phase 4.5.B — distressed-mode flags read by the card. Optional;
+   *  omitting leaves the card in healthy-default rendering. */
+  distressed?: DistressedFlags;
 }
 
 const DESC_EPS_ACTUAL = "Reported EPS (latest quarter)";
@@ -63,7 +73,7 @@ function epsTTM(history: ClaimHistoryPoint[]): number | null {
   return last4.reduce((acc, p) => acc + p.value, 0);
 }
 
-export function EarningsCard({ section }: Props) {
+export function EarningsCard({ section, distressed }: Props) {
   const claims = section.claims;
   const epsActualClaim = findExact(claims, DESC_EPS_ACTUAL);
   const epsEstimateClaim = findExact(claims, DESC_EPS_ESTIMATE);
@@ -98,8 +108,17 @@ export function EarningsCard({ section }: Props) {
             Earnings · {totalQuarters} quarters
           </div>
           {beatCount !== null && (
-            <div className="mt-1 text-base font-medium text-strata-hi">
-              {beatCount} of {totalQuarters} beat consensus
+            <div className="mt-1 flex flex-wrap items-baseline gap-2 text-base font-medium text-strata-hi">
+              <span>{beatCount} of {totalQuarters} beat consensus</span>
+              {distressed?.beat_rate_below_30pct && (
+                <span
+                  data-testid="earnings-bottom-decile"
+                  className="inline-flex items-center gap-1 rounded-md bg-strata-raise px-2 py-0.5 font-mono text-[10px] uppercase tracking-kicker"
+                >
+                  <span className="text-strata-neg">●</span>
+                  <span className="text-strata-fg">Bottom decile</span>
+                </span>
+              )}
             </div>
           )}
         </div>

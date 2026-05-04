@@ -149,4 +149,64 @@ describe("CashAndCapitalCard", () => {
       ),
     ).not.toThrow();
   });
+
+  // ── Phase 4.5.B — runway tile + raise-needed annotation ──────────
+
+  it("renders a runway stat tile when cash_runway_quarters is provided", () => {
+    const { getByTestId } = render(
+      <CashAndCapitalCard
+        capAllocSection={CAP_ALLOC}
+        qualitySection={QUALITY}
+        runwayQuarters={4.5}
+      />,
+    );
+    const tile = getByTestId("cash-runway-tile");
+    expect(tile.textContent).toMatch(/runway/i);
+    expect(tile.textContent).toMatch(/4\.5/);
+  });
+
+  it("includes 'raise likely needed' sub-line when runway < 6", () => {
+    const { getByTestId } = render(
+      <CashAndCapitalCard
+        capAllocSection={CAP_ALLOC}
+        qualitySection={QUALITY}
+        runwayQuarters={4.5}
+      />,
+    );
+    const tile = getByTestId("cash-runway-tile");
+    expect(tile.textContent).toMatch(/raise likely needed/i);
+  });
+
+  it("omits 'raise likely needed' when runway >= 6", () => {
+    const { getByTestId } = render(
+      <CashAndCapitalCard
+        capAllocSection={CAP_ALLOC}
+        qualitySection={QUALITY}
+        runwayQuarters={8.0}
+      />,
+    );
+    const tile = getByTestId("cash-runway-tile");
+    expect(tile.textContent).not.toMatch(/raise likely needed/i);
+  });
+
+  it("omits the runway tile when runwayQuarters is null", () => {
+    const { queryByTestId } = render(
+      <CashAndCapitalCard
+        capAllocSection={CAP_ALLOC}
+        qualitySection={QUALITY}
+        runwayQuarters={null}
+      />,
+    );
+    expect(queryByTestId("cash-runway-tile")).toBeNull();
+  });
+
+  it("omits the runway tile when the prop is undefined", () => {
+    const { queryByTestId } = render(
+      <CashAndCapitalCard
+        capAllocSection={CAP_ALLOC}
+        qualitySection={QUALITY}
+      />,
+    );
+    expect(queryByTestId("cash-runway-tile")).toBeNull();
+  });
 });

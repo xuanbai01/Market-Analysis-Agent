@@ -25,11 +25,19 @@ import { MultiLine } from "./MultiLine";
 interface Props {
   capAllocSection: Section | undefined;
   qualitySection: Section | undefined;
+  /** Phase 4.5.B — read from ``layout_signals.cash_runway_quarters``.
+   *  When provided (number, including 0.0), the card grows a "Runway"
+   *  stat tile alongside the Net cash highlight. ``null`` / undefined
+   *  hides the tile (FCF-positive companies, cache-pre-4.5 reports). */
+  runwayQuarters?: number | null;
 }
+
+const RUNWAY_RAISE_THRESHOLD = 6;
 
 export function CashAndCapitalCard({
   capAllocSection,
   qualitySection,
+  runwayQuarters,
 }: Props) {
   const capexSbc = extractCapexSbcSeries(capAllocSection);
   const cashDebt = extractCashDebtSeries(qualitySection);
@@ -104,6 +112,37 @@ export function CashAndCapitalCard({
           {netCashLabel}
         </span>
       </div>
+
+      {/* Phase 4.5.B — runway tile. Only renders when the report's
+          layout_signals.cash_runway_quarters is non-null (FCF-burning
+          companies). Adds a "raise likely needed" sub-line when
+          runway < 6Q. Stays hidden for healthy / FCF-positive names. */}
+      {runwayQuarters !== null && runwayQuarters !== undefined && (
+        <div
+          data-testid="cash-runway-tile"
+          className="mt-2 flex items-baseline justify-between rounded-md bg-strata-raise px-3 py-2"
+        >
+          <div className="flex flex-col">
+            <span className="font-mono text-[10px] uppercase tracking-kicker text-strata-risk">
+              Cash runway
+            </span>
+            {runwayQuarters < RUNWAY_RAISE_THRESHOLD && (
+              <span className="mt-0.5 text-xs text-strata-dim">
+                raise likely needed
+              </span>
+            )}
+          </div>
+          <span
+            className={`font-mono tabular text-lg font-medium ${
+              runwayQuarters < RUNWAY_RAISE_THRESHOLD
+                ? "text-strata-neg"
+                : "text-strata-hi"
+            }`}
+          >
+            ~{runwayQuarters.toFixed(1)}Q
+          </span>
+        </div>
+      )}
     </section>
   );
 }

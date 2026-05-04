@@ -119,50 +119,88 @@ export function SymbolDetailPage() {
             )}
             {earningsSection && (
               <div className="lg:col-span-3">
-                <EarningsCard section={earningsSection} />
-              </div>
-            )}
-          </div>
-
-          {/* Row 3 — Valuation | Per-share growth.
-              Same 40/60 rhythm: ValuationCard (4-cell matrix +
-              PeerScatterV2) on the left, the wide PerShareGrowth
-              MultiLine on the right.
-
-              Phase 4.4.B — PerShareGrowthCard reads from the Quality
-              section (which is QualityCard's primary surface). To
-              avoid the LLM's single Quality.card_narrative rendering
-              twice on the page (once in QualityCard, once in
-              PerShareGrowthCard), suppress the strip on this card by
-              passing a section view with card_narrative cleared.
-              QualityCard is the canonical home for that prose. When
-              4.5+ adds a dedicated growth section, PerShareGrowthCard
-              gets its own narrative independently.
-          */}
-          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
-            <div className="lg:col-span-2">
-              <ValuationCard report={reportQuery.data} />
-            </div>
-            {qualitySection && (
-              <div className="lg:col-span-3">
-                <PerShareGrowthCard
-                  ticker={upperTicker}
-                  section={{ ...qualitySection, card_narrative: null }}
+                <EarningsCard
+                  section={earningsSection}
+                  distressed={{
+                    beat_rate_below_30pct:
+                      reportQuery.data.layout_signals.beat_rate_below_30pct,
+                  }}
                 />
               </div>
             )}
           </div>
 
-          {/* Row 4 — Cash & capital | Risk diff | Macro.
-              3-column on desktop, stacks on narrower screens. */}
-          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <CashAndCapitalCard
-              capAllocSection={capAllocSection}
-              qualitySection={qualitySection}
-            />
-            {riskSection && <RiskDiffCard section={riskSection} />}
-            {macroSection && <MacroPanel section={macroSection} />}
-          </div>
+          {/*
+            Phase 4.5.B — adaptive row ordering.
+            Default (healthy):
+              Row 3 = Valuation + PerShareGrowth (40/60)
+              Row 4 = Cash + Risk + Macro (3-col)
+            Distressed (is_unprofitable_ttm OR runway < 6):
+              Row 3 = Cash + Risk + Macro  (lifted up — survival first)
+              Row 4 = Valuation + PerShareGrowth (demoted)
+            The trigger covers both "company loses money" + "company
+            running out of money" — either is enough to flip the order
+            so the user sees the scariest information first.
+          */}
+          {(() => {
+            const signals = reportQuery.data.layout_signals;
+            const isDistressed =
+              signals.is_unprofitable_ttm ||
+              (signals.cash_runway_quarters !== null &&
+                signals.cash_runway_quarters < 6);
+
+            const valuationGrowthRow = (
+              <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
+                <div className="lg:col-span-2">
+                  <ValuationCard report={reportQuery.data} />
+                </div>
+                {qualitySection && (
+                  <div className="lg:col-span-3">
+                    <PerShareGrowthCard
+                      ticker={upperTicker}
+                      section={{ ...qualitySection, card_narrative: null }}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+
+            const cashRiskMacroRow = (
+              <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+                <CashAndCapitalCard
+                  capAllocSection={capAllocSection}
+                  qualitySection={qualitySection}
+                  runwayQuarters={signals.cash_runway_quarters}
+                />
+                {riskSection && <RiskDiffCard section={riskSection} />}
+                {macroSection && <MacroPanel section={macroSection} />}
+              </div>
+            );
+
+            // Wrap each row in a marker div so the row's data-row
+            // attribute (which slot it's in) and data-row-content
+            // attribute (what's rendered inside it) stay decoupled.
+            // Distressed names lift Cash + Risk + Macro into row 3
+            // because the survival story matters more than the
+            // valuation/growth story when the company is unprofitable
+            // or running out of cash.
+            return (
+              <>
+                <div
+                  data-row="dashboard-row-3"
+                  data-row-content={isDistressed ? "cash-risk-macro" : "valuation-growth"}
+                >
+                  {isDistressed ? cashRiskMacroRow : valuationGrowthRow}
+                </div>
+                <div
+                  data-row="dashboard-row-4"
+                  data-row-content={isDistressed ? "valuation-growth" : "cash-risk-macro"}
+                >
+                  {isDistressed ? valuationGrowthRow : cashRiskMacroRow}
+                </div>
+              </>
+            );
+          })()}
 
           <ReportRenderer
             report={reportQuery.data}

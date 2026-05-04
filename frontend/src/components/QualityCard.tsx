@@ -70,20 +70,34 @@ export function QualityCard({ ticker, section }: Props) {
       {/* 3 MetricRings — bail to em-dash when value missing. ROE / ROIC
           / FCF margin are all fraction-form values; pass the unit hint
           explicitly so high-ROE companies (e.g. AAPL ROE = 1.41) render
-          as "141.00%" instead of dropping the % suffix. */}
+          as "141.00%" instead of dropping the % suffix.
+
+          Phase 4.5.B — when a value is negative, flip the ring's accent
+          to ``text-strata-neg`` so the eyebrow + arc both render in the
+          loss color. Distressed names (RIVN ROE = -62%, ROIC = -41%,
+          FCF margin = -52%) get a visually consistent loss treatment
+          across the trio. */}
       <div className="mb-5 grid grid-cols-3 gap-3 border-y border-strata-line py-5">
         <MetricRing
           label="ROE"
           value={rings.roe !== null ? formatClaimValue(rings.roe, "fraction") : "—"}
           ratio={rings.roe}
-          accentClass="text-strata-quality"
+          accentClass={
+            rings.roe !== null && rings.roe < 0
+              ? "text-strata-neg"
+              : "text-strata-quality"
+          }
         />
         <MetricRing
           label="ROIC TTM"
           value={rings.roic !== null ? formatClaimValue(rings.roic, "fraction") : "—"}
           ratio={rings.roic}
           sub={rings.roic !== null && rings.roic > 0.4 ? "top decile" : null}
-          accentClass="text-strata-quality"
+          accentClass={
+            rings.roic !== null && rings.roic < 0
+              ? "text-strata-neg"
+              : "text-strata-quality"
+          }
         />
         <MetricRing
           label="FCF margin"
@@ -93,7 +107,11 @@ export function QualityCard({ ticker, section }: Props) {
               : "—"
           }
           ratio={rings.fcfMargin}
-          accentClass="text-strata-cashflow"
+          accentClass={
+            rings.fcfMargin !== null && rings.fcfMargin < 0
+              ? "text-strata-neg"
+              : "text-strata-cashflow"
+          }
         />
       </div>
 

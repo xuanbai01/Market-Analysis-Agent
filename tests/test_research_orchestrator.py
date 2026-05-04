@@ -1079,6 +1079,87 @@ def test_backfill_layout_signals_no_op_when_already_distressed() -> None:
     assert backfilled is report
 
 
+async def test_user_prompt_includes_layout_signals_when_distressed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 4.5.B — Sonnet's user prompt receives the derived layout
+    signals as context so the model's narratives can adapt for
+    distressed names ("Loss is narrowing" vs "Margins exceptional").
+
+    The prompt must surface the signals when at least one is non-default
+    so the model has the framing context — and skip the block entirely
+    on healthy reports so we don't burn input tokens on a static
+    'all-healthy' boilerplate."""
+    distressed_fundamentals = {
+        "operating_margin": _claim("Operating margin", -0.41),
+        "profit_margin": _claim("Net profit margin", -0.55),
+        "gross_margin": _claim("Gross margin", -0.18),
+    }
+
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": distressed_fundamentals,
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    captured = _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    await compose_research_report("RIVN", Focus.FULL)
+
+    assert len(captured) == 1
+    prompt = captured[0]["prompt"]
+    # The prompt mentions the distressed framing explicitly so Sonnet
+    # can adapt its tone. We don't pin the exact wording — assert the
+    # signals' names land in the prompt + a framing word.
+    assert "is_unprofitable_ttm" in prompt
+    lower = prompt.lower()
+    assert "distressed" in lower or "unprofitable" in lower or "negative" in lower
+
+
+async def test_user_prompt_omits_layout_signals_block_when_healthy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Healthy reports skip the layout-signals context block entirely
+    — no point burning input tokens on a 'no distressed signals' line
+    when every flag is at its healthy default."""
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    captured = _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    await compose_research_report("AAPL", Focus.FULL)
+
+    prompt = captured[0]["prompt"]
+    # No distressed framing should be in the prompt for a healthy
+    # report. The signal names won't appear when the block is omitted.
+    assert "is_unprofitable_ttm" not in prompt
+
+
 def test_system_prompt_documents_card_narrative_as_distinct_field() -> None:
     """The synth-call system prompt must instruct the model that
     ``card_narrative`` is a 1-2 sentence headline distinct from the

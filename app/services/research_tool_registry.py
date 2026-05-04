@@ -166,6 +166,20 @@ def _build_macro(outputs: dict[str, Any]) -> list[Claim]:
     return _all_claims(outputs.get("fetch_macro"))
 
 
+# ── Phase 4.4.A: Business + News section builders ────────────────────
+# Both tools return ``dict[str, Claim]`` so the builders forward the
+# whole dict via ``_all_claims`` — no key-filter step needed since
+# each tool's output is one-to-one with its section.
+
+
+def _build_business(outputs: dict[str, Any]) -> list[Claim]:
+    return _all_claims(outputs.get("fetch_business_info"))
+
+
+def _build_news(outputs: dict[str, Any]) -> list[Claim]:
+    return _all_claims(outputs.get("fetch_news"))
+
+
 # ── Risk Factors: composed from two non-dict tools ────────────────────
 # extract_10k_risks_diff returns Risk10KDiff (or None); we synthesize
 # four Claims from its counts and char delta. extract_10k_business
@@ -284,6 +298,12 @@ def _build_risk_factors(outputs: dict[str, Any]) -> list[Claim]:
 
 SECTIONS_BY_FOCUS: dict[Focus, list[SectionSpec]] = {
     Focus.FULL: [
+        # Phase 4.4.A — Business + News are the "above the grid"
+        # context band the dashboard renders before the numeric
+        # sections. Order matters: they come first so the
+        # ``Section[]`` order matches the page's visual order.
+        SectionSpec("Business", ("fetch_business_info",), _build_business),
+        SectionSpec("News", ("fetch_news",), _build_news),
         SectionSpec("Valuation", ("fetch_fundamentals",), _build_valuation),
         SectionSpec("Quality", ("fetch_fundamentals",), _build_quality),
         SectionSpec(
@@ -301,6 +321,10 @@ SECTIONS_BY_FOCUS: dict[Focus, list[SectionSpec]] = {
         SectionSpec("Macro", ("fetch_macro",), _build_macro),
     ],
     Focus.EARNINGS: [
+        # Phase 4.4.A — News is event-relevant in the earnings lens
+        # (recent prints often have headlines worth the user's eye).
+        # Business is full-research-only context; omitted here.
+        SectionSpec("News", ("fetch_news",), _build_news),
         SectionSpec("Earnings", ("fetch_earnings",), _build_earnings),
         SectionSpec("Valuation", ("fetch_fundamentals",), _build_valuation),
         SectionSpec(

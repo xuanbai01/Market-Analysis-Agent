@@ -20,6 +20,7 @@ import { ApiError, fetchResearchReport } from "../lib/api";
 import { clearStoredToken } from "../lib/auth";
 import { ROUTES } from "../lib/routes";
 import { CashAndCapitalCard } from "./CashAndCapitalCard";
+import { ContextBand } from "./ContextBand";
 import { EarningsCard } from "./EarningsCard";
 import { ErrorBanner } from "./ErrorBanner";
 import { HeroCard } from "./HeroCard";
@@ -71,6 +72,10 @@ export function SymbolDetailPage() {
   const capAllocSection = sections.find((s) => s.title === "Capital Allocation");
   const riskSection = sections.find((s) => s.title === "Risk Factors");
   const macroSection = sections.find((s) => s.title === "Macro");
+  // Phase 4.4.A — Business + News drive the ContextBand between the
+  // hero and the row-2 grid.
+  const businessSection = sections.find((s) => s.title === "Business");
+  const newsSection = sections.find((s) => s.title === "News");
 
   return (
     <div className="mx-auto max-w-6xl px-8 py-8">
@@ -81,6 +86,16 @@ export function SymbolDetailPage() {
       {reportQuery.data && (
         <>
           <HeroCard report={reportQuery.data} />
+
+          {/* Phase 4.4.A — ContextBand renders Business (left) +
+              News (right) between the hero and the row-2 grid.
+              Returns null when both sections are absent so older
+              cached reports without these fields stay clean. */}
+          <ContextBand
+            ticker={upperTicker}
+            businessSection={businessSection}
+            newsSection={newsSection}
+          />
 
           {/* Row 2 — Quality | Earnings.
               Mirrors `direction-strata.jsx` row-2: dense Quality
@@ -132,6 +147,11 @@ export function SymbolDetailPage() {
           <ReportRenderer
             report={reportQuery.data}
             excludeSections={[
+              // Phase 4.4.A — Business + News render in the
+              // ContextBand above; exclude them from the trailing
+              // ReportRenderer so they don't appear twice.
+              "Business",
+              "News",
               "Earnings",
               "Valuation",
               "Quality",

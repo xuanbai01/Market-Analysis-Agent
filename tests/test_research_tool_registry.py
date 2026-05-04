@@ -79,11 +79,13 @@ def _make_fundamentals_output() -> dict[str, Claim]:
 # ── Focus enum + section catalog ──────────────────────────────────────
 
 
-def test_focus_full_has_seven_sections() -> None:
-    """Catalog: Valuation, Quality, Capital Allocation, Earnings, Peers,
-    Risk Factors, Macro."""
+def test_focus_full_section_catalog() -> None:
+    """Catalog (Phase 4.4.A): Business + News (ContextBand) followed
+    by the 7 numeric sections."""
     titles = [s.title for s in SECTIONS_BY_FOCUS[Focus.FULL]]
     assert titles == [
+        "Business",
+        "News",
         "Valuation",
         "Quality",
         "Capital Allocation",
@@ -94,10 +96,12 @@ def test_focus_full_has_seven_sections() -> None:
     ]
 
 
-def test_focus_earnings_has_three_sections() -> None:
-    """Catalog: Earnings, Valuation, Risk Factors — earnings-event lens."""
+def test_focus_earnings_section_catalog() -> None:
+    """Catalog (Phase 4.4.A): News (event-relevant) + Earnings +
+    Valuation + Risk Factors. Business omitted — full-research-only
+    context."""
     titles = [s.title for s in SECTIONS_BY_FOCUS[Focus.EARNINGS]]
-    assert titles == ["Earnings", "Valuation", "Risk Factors"]
+    assert titles == ["News", "Earnings", "Valuation", "Risk Factors"]
 
 
 def test_every_focus_section_declares_at_least_one_tool() -> None:
@@ -113,7 +117,8 @@ def test_every_focus_section_declares_at_least_one_tool() -> None:
 
 
 def test_tools_for_full_lists_every_required_tool() -> None:
-    """Full mode invokes the union of tools across all 7 sections."""
+    """Full mode invokes the union of tools across all 9 sections
+    (Phase 4.4.A added Business + News)."""
     assert tools_for(Focus.FULL) == {
         "fetch_fundamentals",
         "fetch_earnings",
@@ -121,6 +126,8 @@ def test_tools_for_full_lists_every_required_tool() -> None:
         "fetch_macro",
         "extract_10k_risks_diff",
         "extract_10k_business",
+        "fetch_business_info",
+        "fetch_news",
     }
 
 
@@ -441,3 +448,59 @@ def test_risk_factors_builder_omits_per_category_when_deltas_empty() -> None:
     # Sanity: still emits the 4 aggregates.
     assert "Newly added risk paragraphs vs prior 10-K" in descriptions
     assert "Item 1A char delta vs prior 10-K" in descriptions
+
+
+# ── Phase 4.4.A: Business + News sections ────────────────────────────
+
+
+def test_focus_full_includes_business_and_news_sections() -> None:
+    """4.4.A adds Business + News to the FULL focus catalog. Order
+    matters — these belong at the front so SymbolDetailPage's
+    ContextBand renders them above the row-2 grid."""
+    titles = [s.title for s in SECTIONS_BY_FOCUS[Focus.FULL]]
+    assert "Business" in titles
+    assert "News" in titles
+    # Business + News come before the existing numeric sections.
+    assert titles.index("Business") < titles.index("Valuation")
+    assert titles.index("News") < titles.index("Valuation")
+
+
+def test_focus_earnings_includes_news_but_not_business() -> None:
+    """Earnings focus stays narrow. News is event-relevant; Business is
+    full-research-only context that doesn't fit the earnings lens."""
+    titles = [s.title for s in SECTIONS_BY_FOCUS[Focus.EARNINGS]]
+    assert "News" in titles
+    assert "Business" not in titles
+
+
+def test_business_builder_passes_through_dict_claims() -> None:
+    """``fetch_business_info`` returns ``dict[str, Claim]``; the
+    builder hands them through unchanged (same pattern as fetch_peers
+    / fetch_macro)."""
+    business_claims = {
+        "summary": _claim("Business description (from 10-K filing)", "Apple…"),
+        "hq": _claim("Headquarters location", "Cupertino, CA, United States"),
+        "employee_count": _claim("Full-time employee count", 164_000),
+    }
+    outputs = {"fetch_business_info": business_claims}
+
+    claims = _spec(Focus.FULL, "Business").builder(outputs)
+    assert len(claims) == 3
+    descriptions = {c.description for c in claims}
+    assert "Business description (from 10-K filing)" in descriptions
+    assert "Headquarters location" in descriptions
+    assert "Full-time employee count" in descriptions
+
+
+def test_news_builder_passes_through_dict_claims() -> None:
+    """``fetch_news`` returns ``dict[str, Claim]`` with one Claim per
+    article; the builder forwards them all so the eval rubric sees
+    each headline as a citable Claim."""
+    news_claims = {
+        f"news_{i}": _claim(f"Headline {i}", "positive")
+        for i in range(3)
+    }
+    outputs = {"fetch_news": news_claims}
+
+    claims = _spec(Focus.FULL, "News").builder(outputs)
+    assert len(claims) == 3

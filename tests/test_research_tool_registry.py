@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.schemas.research import Claim, Source
-from app.schemas.ten_k import Extracted10KSection, Risk10KDiff
+from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
 from app.services.research_tool_registry import (
     SECTIONS_BY_FOCUS,
     Focus,
@@ -372,3 +372,72 @@ def test_risk_factors_builder_returns_business_only_when_diff_unavailable() -> N
     claims = _spec(Focus.FULL, "Risk Factors").builder(outputs)
     descriptions = {c.description for c in claims}
     assert "Business section length (chars)" in descriptions
+
+
+# ── Phase 4.3.B: per-category risk paragraph delta claims ────────────
+
+
+def test_risk_factors_builder_emits_per_category_delta_claims() -> None:
+    """When ``Risk10KDiff.category_deltas`` carries non-zero buckets,
+    ``_build_risk_factors`` emits one Claim per category in addition to
+    the 4 aggregate claims. Description is stable so the frontend
+    extractor can match on it."""
+    diff = Risk10KDiff(
+        symbol="AAPL",
+        current=_mk_extracted_section(
+            accession="0000320193-25-000079", char_count=68_000
+        ),
+        prior=_mk_extracted_section(
+            accession="0000320193-24-000123", char_count=68_700
+        ),
+        added_paragraphs=["new risk 1", "new risk 2", "new risk 3"],
+        removed_paragraphs=["old risk"],
+        kept_paragraph_count=83,
+        char_delta=-700,
+        category_deltas={
+            RiskCategory.AI_REGULATORY: 2,
+            RiskCategory.SUPPLY_CONCENTRATION: -1,
+            RiskCategory.CYBERSECURITY: 1,
+        },
+    )
+    outputs = {"extract_10k_risks_diff": diff, "extract_10k_business": None}
+
+    claims = _spec(Focus.FULL, "Risk Factors").builder(outputs)
+    by_desc = {c.description: c.value for c in claims}
+
+    # Aggregates still present.
+    assert by_desc["Newly added risk paragraphs vs prior 10-K"] == 3
+    assert by_desc["Risk paragraphs dropped vs prior 10-K"] == 1
+
+    # New per-category claims with stable description shape.
+    assert by_desc["AI / regulatory risk paragraph delta vs prior 10-K"] == 2
+    assert (
+        by_desc["Supply concentration risk paragraph delta vs prior 10-K"]
+        == -1
+    )
+    assert by_desc["Cybersecurity risk paragraph delta vs prior 10-K"] == 1
+
+    # Categories with delta == 0 (or not present in the dict) are NOT
+    # emitted as claims — keeps the Risk Factors section concise.
+    assert "Macro risk paragraph delta vs prior 10-K" not in by_desc
+    assert "Other risk paragraph delta vs prior 10-K" not in by_desc
+
+
+def test_risk_factors_builder_omits_per_category_when_deltas_empty() -> None:
+    """Pre-4.3.B cached rows + stable disclosures both end up here:
+    no per-category claims emitted, just the 4 aggregates."""
+    diff = _mk_risks_diff()  # category_deltas defaults to {}
+    outputs = {"extract_10k_risks_diff": diff, "extract_10k_business": None}
+
+    claims = _spec(Focus.FULL, "Risk Factors").builder(outputs)
+    descriptions = {c.description for c in claims}
+
+    # No claim description should contain the per-category suffix.
+    assert all(
+        "paragraph delta vs prior 10-K" not in d
+        or d == "Item 1A char delta vs prior 10-K"  # different shape
+        for d in descriptions
+    )
+    # Sanity: still emits the 4 aggregates.
+    assert "Newly added risk paragraphs vs prior 10-K" in descriptions
+    assert "Item 1A char delta vs prior 10-K" in descriptions

@@ -39,7 +39,7 @@ from enum import Enum
 from typing import Any
 
 from app.schemas.research import Claim, Source
-from app.schemas.ten_k import Extracted10KSection, Risk10KDiff
+from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
 
 
 class Focus(str, Enum):
@@ -174,6 +174,24 @@ def _build_macro(outputs: dict[str, Any]) -> list[Claim]:
 # the company description.
 
 
+# Phase 4.3.B — human-readable label per RiskCategory, used to build
+# the Claim ``description`` string. Format: "<Label> risk paragraph
+# delta vs prior 10-K". The frontend's risk-extract.ts mirrors this
+# verbatim — change here, change there, kept in sync via the
+# ``risk-extract.test.ts`` description-match assertions.
+_RISK_CATEGORY_LABELS: dict[RiskCategory, str] = {
+    RiskCategory.AI_REGULATORY: "AI / regulatory",
+    RiskCategory.EXPORT_CONTROLS: "Export controls",
+    RiskCategory.SUPPLY_CONCENTRATION: "Supply concentration",
+    RiskCategory.CUSTOMER_CONCENTRATION: "Customer concentration",
+    RiskCategory.COMPETITION: "Competition",
+    RiskCategory.CYBERSECURITY: "Cybersecurity",
+    RiskCategory.IP: "IP",
+    RiskCategory.MACRO: "Macro",
+    RiskCategory.OTHER: "Other",
+}
+
+
 def _build_risk_factors(outputs: dict[str, Any]) -> list[Claim]:
     claims: list[Claim] = []
 
@@ -216,6 +234,31 @@ def _build_risk_factors(outputs: dict[str, Any]) -> list[Claim]:
                 source=diff_source,
             )
         )
+
+        # Phase 4.3.B — emit one Claim per non-zero RiskCategory bucket
+        # so the dashboard's per-category bar chart has citation-backed
+        # values (and the eval rubric's claim-coverage check sees
+        # them). Description shape is stable so the frontend extractor
+        # can match on it. Categories not present in ``category_deltas``
+        # (or with delta 0, which the categorizer filters out) emit
+        # no claim — keeps the section concise on stable disclosures
+        # and pre-4.3.B cached rows.
+        for category, delta in diff.category_deltas.items():
+            if delta == 0:
+                # Defensive: the categorizer drops zero-net buckets,
+                # but a hand-crafted JSONB blob could in theory carry
+                # one through. Don't render an empty bar.
+                continue
+            claims.append(
+                Claim(
+                    description=(
+                        f"{_RISK_CATEGORY_LABELS[category]}"
+                        " risk paragraph delta vs prior 10-K"
+                    ),
+                    value=delta,
+                    source=diff_source,
+                )
+            )
 
     business = outputs.get("extract_10k_business")
     if isinstance(business, Extracted10KSection):

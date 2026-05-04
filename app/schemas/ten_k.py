@@ -17,8 +17,41 @@ serialization invariant.
 from __future__ import annotations
 
 from datetime import date, datetime
+from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class RiskCategory(str, Enum):
+    """
+    Buckets that ``risk_categorizer`` sorts each added/removed Item 1A
+    paragraph into. Phase 4.3.B.
+
+    String-valued so ``model_dump(mode="json")`` serializes them as
+    plain strings — the cache layer's JSONB round-trip + the frontend's
+    Zod schema both expect strings, not ints.
+
+    Adding a new bucket requires a paired update to:
+      - the categorizer's system prompt (definition + 1-line example)
+      - the frontend ``RiskCategory`` union in ``schemas.ts``
+      - the description label in ``research_tool_registry`` so the
+        new bucket renders as a Claim
+
+    The catalog is intentionally narrow (9 buckets) so Haiku can
+    classify confidently and the bar chart stays readable. ``OTHER``
+    is the fallback for paragraphs that don't fit; if ``OTHER``
+    dominates an issuer's diff, that's a signal to widen the catalog.
+    """
+
+    AI_REGULATORY = "ai_regulatory"
+    EXPORT_CONTROLS = "export_controls"
+    SUPPLY_CONCENTRATION = "supply_concentration"
+    CUSTOMER_CONCENTRATION = "customer_concentration"
+    COMPETITION = "competition"
+    CYBERSECURITY = "cybersecurity"
+    IP = "ip"
+    MACRO = "macro"
+    OTHER = "other"
 
 
 class Extracted10KSection(BaseModel):
@@ -67,3 +100,11 @@ class Risk10KDiff(BaseModel):
     removed_paragraphs: list[str]
     kept_paragraph_count: int = Field(ge=0)
     char_delta: int  # current.char_count − prior.char_count; can be negative
+    # Phase 4.3.B — per-bucket net delta from the Haiku categorizer.
+    # Empty dict by default so pre-4.3.B JSONB rows round-trip
+    # unchanged (and stable disclosures, where the categorizer skips
+    # the LLM call entirely, also land here as ``{}``). When populated:
+    # value is added-paragraph-count minus removed-paragraph-count for
+    # that category, never zero (zero-net buckets are filtered out by
+    # the categorizer).
+    category_deltas: dict[RiskCategory, int] = Field(default_factory=dict)

@@ -99,13 +99,13 @@ describe("MacroPanel", () => {
     expect(getByText(/disinflation continues/i)).not.toBeNull();
   });
 
-  it("renders a fallback when no series have data", () => {
-    const { container, getByText } = render(
-      <MacroPanel section={section([])} />,
-    );
-    const charts = container.querySelectorAll("[data-testid='line-chart']");
-    expect(charts.length).toBe(0);
-    expect(getByText(/macro context unavailable/i)).not.toBeNull();
+  it("returns null when no series have data", () => {
+    // Phase 4.5.C — used to render a "Macro context unavailable"
+    // placeholder card; now returns null so SymbolDetailPage's row 4
+    // collapses to populated cards rather than holding a column open
+    // for an empty placeholder.
+    const { container } = render(<MacroPanel section={section([])} />);
+    expect(container.firstChild).toBeNull();
   });
 
   // Phase 4.4.B — per-card narrative strip.

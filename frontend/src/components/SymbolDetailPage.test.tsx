@@ -256,4 +256,176 @@ describe("SymbolDetailPage", () => {
         ?.getAttribute("data-row-content"),
     ).toBe("valuation-growth");
   });
+
+  // ── Phase 4.5.C — layout polish ──────────────────────────────────
+
+  it("renders ContextBand AFTER row 4, not between hero and row 2", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue({
+      ...reportWithSections("AAPL"),
+      sections: [
+        ...reportWithSections("AAPL").sections,
+        { title: "Business", summary: "", confidence: "low", claims: [] },
+        { title: "News", summary: "", confidence: "low", claims: [] },
+      ],
+    });
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
+      ticker: "AAPL",
+      range: "60D",
+      prices: [],
+      latest: { ts: "2026-04-02T00:00:00Z", close: 182, delta_abs: 0, delta_pct: 0 },
+    });
+    const { container } = renderAt("AAPL");
+    await waitFor(() =>
+      expect(container.querySelector("[data-testid='context-band']")).not.toBeNull(),
+    );
+    // ContextBand's DOM position must come AFTER row 4 in source order.
+    const all = Array.from(
+      container.querySelectorAll(
+        "[data-row='dashboard-row-4'], [data-testid='context-band']",
+      ),
+    );
+    const row4Index = all.findIndex(
+      (el) => el.getAttribute("data-row") === "dashboard-row-4",
+    );
+    const ctxIndex = all.findIndex(
+      (el) => el.getAttribute("data-testid") === "context-band",
+    );
+    expect(row4Index).toBeGreaterThanOrEqual(0);
+    expect(ctxIndex).toBeGreaterThan(row4Index);
+  });
+
+  it("collapses row 4 to a single column when only Cash & Capital is populated", async () => {
+    // Sections WITHOUT Risk Factors / Macro — Cash & Capital
+    // (cross-section) still renders because Quality is present.
+    const minimalReport = reportWithSections("AAPL", {
+      sections: [
+        { title: "Valuation", summary: "", confidence: "low", claims: [] },
+        { title: "Quality", summary: "", confidence: "low", claims: [] },
+        { title: "Earnings", summary: "", confidence: "low", claims: [] },
+        { title: "Capital Allocation", summary: "", confidence: "low", claims: [] },
+        // No Risk Factors, no Macro — both should yield null cards.
+      ],
+    });
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(minimalReport);
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
+      ticker: "AAPL",
+      range: "60D",
+      prices: [],
+      latest: { ts: "2026-04-02T00:00:00Z", close: 182, delta_abs: 0, delta_pct: 0 },
+    });
+    const { container } = renderAt("AAPL");
+    await waitFor(() =>
+      expect(container.querySelector("[data-row='dashboard-row-4']")).not.toBeNull(),
+    );
+    const row4 = container.querySelector("[data-row='dashboard-row-4']");
+    // Card count attribute: 1 = single-column collapse.
+    expect(row4?.getAttribute("data-card-count")).toBe("1");
+  });
+
+  it("renders row 4 as 3-col grid when all three cards are populated", async () => {
+    // The reportWithSections fixture includes Risk Factors + Macro
+    // sections, but with empty claims — for this test we want the
+    // cards to actually render, so add some minimal claims.
+    const richReport = reportWithSections("AAPL");
+    const riskSection = richReport.sections.find((s) => s.title === "Risk Factors");
+    if (riskSection) {
+      riskSection.claims = [
+        {
+          description: "Newly added risk paragraphs vs prior 10-K",
+          value: 4,
+          source: { tool: "sec.ten_k_risks_diff", fetched_at: "2026-05-04T14:00:00+00:00" },
+          history: [],
+        },
+        {
+          description: "Risk paragraphs dropped vs prior 10-K",
+          value: 1,
+          source: { tool: "sec.ten_k_risks_diff", fetched_at: "2026-05-04T14:00:00+00:00" },
+          history: [],
+        },
+        {
+          description: "Risk paragraphs kept (carryover)",
+          value: 80,
+          source: { tool: "sec.ten_k_risks_diff", fetched_at: "2026-05-04T14:00:00+00:00" },
+          history: [],
+        },
+        {
+          description: "Item 1A char delta vs prior 10-K",
+          value: 200,
+          source: { tool: "sec.ten_k_risks_diff", fetched_at: "2026-05-04T14:00:00+00:00" },
+          history: [],
+        },
+      ];
+    }
+    const macroSection = richReport.sections.find((s) => s.title === "Macro");
+    if (macroSection) {
+      macroSection.claims = [
+        {
+          description: "10Y Treasury yield (latest observation)",
+          value: 4.1,
+          source: { tool: "fred.macro", fetched_at: "2026-05-04T14:00:00+00:00" },
+          history: [
+            { period: "2024-01", value: 4.5 },
+            { period: "2024-02", value: 4.3 },
+            { period: "2024-03", value: 4.2 },
+            { period: "2024-04", value: 4.1 },
+          ],
+        },
+      ];
+    }
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(richReport);
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
+      ticker: "AAPL",
+      range: "60D",
+      prices: [],
+      latest: { ts: "2026-04-02T00:00:00Z", close: 182, delta_abs: 0, delta_pct: 0 },
+    });
+    const { container } = renderAt("AAPL");
+    await waitFor(() =>
+      expect(container.querySelector("[data-row='dashboard-row-4']")).not.toBeNull(),
+    );
+    const row4 = container.querySelector("[data-row='dashboard-row-4']");
+    expect(row4?.getAttribute("data-card-count")).toBe("3");
+  });
+
+  it("uses items-start on every multi-column row for honest height alignment", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(
+      reportWithSections("AAPL"),
+    );
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
+      ticker: "AAPL",
+      range: "60D",
+      prices: [],
+      latest: { ts: "2026-04-02T00:00:00Z", close: 182, delta_abs: 0, delta_pct: 0 },
+    });
+    const { container } = renderAt("AAPL");
+    await waitFor(() =>
+      expect(container.querySelector("[data-row='dashboard-row-3']")).not.toBeNull(),
+    );
+    // Every row's grid wrapper carries ``items-start`` so cards align
+    // top instead of stretching to row height — 4.5.C layout polish.
+    const rows = container.querySelectorAll("[data-row^='dashboard-row-']");
+    expect(rows.length).toBeGreaterThan(0);
+    rows.forEach((row) => {
+      const gridChild = row.querySelector(".grid");
+      expect(gridChild?.className ?? "").toMatch(/items-start/);
+    });
+  });
+
+  it("uses a wider container (max-w-screen-2xl) so dashboards breathe on big monitors", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(
+      reportWithSections("AAPL"),
+    );
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
+      ticker: "AAPL",
+      range: "60D",
+      prices: [],
+      latest: { ts: "2026-04-02T00:00:00Z", close: 182, delta_abs: 0, delta_pct: 0 },
+    });
+    const { container } = renderAt("AAPL");
+    await waitFor(() =>
+      expect(container.querySelector("[data-testid='dashboard-container']")).not.toBeNull(),
+    );
+    const wrapper = container.querySelector("[data-testid='dashboard-container']");
+    expect(wrapper?.className ?? "").toMatch(/max-w-screen-2xl/);
+  });
 });

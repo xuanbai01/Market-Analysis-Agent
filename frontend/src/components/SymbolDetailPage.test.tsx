@@ -124,4 +124,136 @@ describe("SymbolDetailPage", () => {
     // LoadingState renders "Generating report for AAPL…"
     expect(screen.getByText(/generating report for aapl/i)).toBeInTheDocument();
   });
+
+  // ── Phase 4.5.B — distressed-mode row reordering ─────────────────
+
+  function reportWithSections(
+    symbol: string,
+    overrides: Partial<ResearchReport> = {},
+  ): ResearchReport {
+    const richBase: ResearchReport = {
+      symbol,
+      name: `${symbol} Inc.`,
+      sector: "ev_auto",
+      generated_at: "2026-05-04T14:00:00+00:00",
+      overall_confidence: "low",
+      tool_calls_audit: [],
+      layout_signals: HEALTHY_LAYOUT_SIGNALS,
+      sections: [
+        // The reorder logic only cares about which sections exist;
+        // the cards no-op when their data is sparse, but the row
+        // wrappers render unconditionally so the data-row markers
+        // we assert on always appear.
+        { title: "Valuation", summary: "", confidence: "low", claims: [] },
+        { title: "Quality", summary: "", confidence: "low", claims: [] },
+        { title: "Earnings", summary: "", confidence: "low", claims: [] },
+        { title: "Capital Allocation", summary: "", confidence: "low", claims: [] },
+        { title: "Risk Factors", summary: "", confidence: "low", claims: [] },
+        { title: "Macro", summary: "", confidence: "low", claims: [] },
+      ],
+      ...overrides,
+    };
+    return richBase;
+  }
+
+  it("renders rows in default order when not distressed", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(
+      reportWithSections("AAPL"),
+    );
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
+      ticker: "AAPL",
+      range: "60D",
+      prices: [],
+      latest: { ts: "2026-04-02T00:00:00Z", close: 182, delta_abs: 0, delta_pct: 0 },
+    });
+    const { container } = renderAt("AAPL");
+    await waitFor(() =>
+      expect(container.querySelector("[data-row='dashboard-row-3']")).not.toBeNull(),
+    );
+    const row3 = container.querySelector("[data-row='dashboard-row-3']");
+    const row4 = container.querySelector("[data-row='dashboard-row-4']");
+    // Default order: row 3 = Valuation + PerShareGrowth (the Strata
+    // 40/60 row); row 4 = Cash + Risk + Macro (the 3-col row).
+    expect(row3?.getAttribute("data-row-content")).toBe("valuation-growth");
+    expect(row4?.getAttribute("data-row-content")).toBe("cash-risk-macro");
+  });
+
+  it("swaps rows 3 and 4 when is_unprofitable_ttm fires", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(
+      reportWithSections("RIVN", {
+        layout_signals: {
+          ...HEALTHY_LAYOUT_SIGNALS,
+          is_unprofitable_ttm: true,
+        },
+      }),
+    );
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
+      ticker: "RIVN",
+      range: "60D",
+      prices: [],
+      latest: { ts: "2026-04-02T00:00:00Z", close: 11, delta_abs: 0, delta_pct: 0 },
+    });
+    const { container } = renderAt("RIVN");
+    await waitFor(() =>
+      expect(container.querySelector("[data-row='dashboard-row-3']")).not.toBeNull(),
+    );
+    const row3 = container.querySelector("[data-row='dashboard-row-3']");
+    const row4 = container.querySelector("[data-row='dashboard-row-4']");
+    // Distressed: Cash + Risk + Macro lift to row 3 (the survival
+    // story comes first); Valuation + PerShareGrowth drop to row 4.
+    expect(row3?.getAttribute("data-row-content")).toBe("cash-risk-macro");
+    expect(row4?.getAttribute("data-row-content")).toBe("valuation-growth");
+  });
+
+  it("swaps rows when cash_runway_quarters < 6 (liquidity watch)", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(
+      reportWithSections("RIVN", {
+        layout_signals: {
+          ...HEALTHY_LAYOUT_SIGNALS,
+          cash_runway_quarters: 4.5,
+        },
+      }),
+    );
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
+      ticker: "RIVN",
+      range: "60D",
+      prices: [],
+      latest: { ts: "2026-04-02T00:00:00Z", close: 11, delta_abs: 0, delta_pct: 0 },
+    });
+    const { container } = renderAt("RIVN");
+    await waitFor(() =>
+      expect(container.querySelector("[data-row='dashboard-row-3']")).not.toBeNull(),
+    );
+    expect(
+      container
+        .querySelector("[data-row='dashboard-row-3']")
+        ?.getAttribute("data-row-content"),
+    ).toBe("cash-risk-macro");
+  });
+
+  it("keeps default order when runway is healthy (>= 6Q)", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(
+      reportWithSections("AAPL", {
+        layout_signals: {
+          ...HEALTHY_LAYOUT_SIGNALS,
+          cash_runway_quarters: 24.0,
+        },
+      }),
+    );
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
+      ticker: "AAPL",
+      range: "60D",
+      prices: [],
+      latest: { ts: "2026-04-02T00:00:00Z", close: 182, delta_abs: 0, delta_pct: 0 },
+    });
+    const { container } = renderAt("AAPL");
+    await waitFor(() =>
+      expect(container.querySelector("[data-row='dashboard-row-3']")).not.toBeNull(),
+    );
+    expect(
+      container
+        .querySelector("[data-row='dashboard-row-3']")
+        ?.getAttribute("data-row-content"),
+    ).toBe("valuation-growth");
+  });
 });

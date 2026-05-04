@@ -198,4 +198,62 @@ describe("QualityCard", () => {
     );
     expect(queryByTestId("card-narrative")).toBeNull();
   });
+
+  // ── Phase 4.5.B — distressed-mode ring color flip ────────────────
+
+  it("colors the ROE ring red when ROE is negative", () => {
+    const distressed: Claim[] = [
+      claim("Return on equity", -0.62),
+      claim("Return on invested capital (TTM)", 0.05),
+      claim("Free cash flow margin", 0.10, HIST),
+    ];
+    const { container } = render(
+      <QualityCard ticker="RIVN" section={section(distressed)} />,
+    );
+    // The ROE ring is the first MetricRing in the trio. Its accent
+    // class flips to ``text-strata-neg`` so the eyebrow + arc both
+    // render in the loss color.
+    const rings = container.querySelectorAll("[data-testid='metric-ring']");
+    const roeWrapper = rings[0]?.parentElement;
+    expect(roeWrapper?.innerHTML ?? "").toMatch(/text-strata-neg/);
+  });
+
+  it("colors the ROIC ring red when ROIC TTM is negative", () => {
+    const distressed: Claim[] = [
+      claim("Return on equity", 0.05),
+      claim("Return on invested capital (TTM)", -0.41),
+      claim("Free cash flow margin", 0.10, HIST),
+    ];
+    const { container } = render(
+      <QualityCard ticker="RIVN" section={section(distressed)} />,
+    );
+    const rings = container.querySelectorAll("[data-testid='metric-ring']");
+    const roicWrapper = rings[1]?.parentElement;
+    expect(roicWrapper?.innerHTML ?? "").toMatch(/text-strata-neg/);
+  });
+
+  it("colors the FCF margin ring red when FCF margin is negative", () => {
+    const distressed: Claim[] = [
+      claim("Return on equity", 0.05),
+      claim("Return on invested capital (TTM)", 0.05),
+      claim("Free cash flow margin", -0.52, HIST),
+    ];
+    const { container } = render(
+      <QualityCard ticker="RIVN" section={section(distressed)} />,
+    );
+    const rings = container.querySelectorAll("[data-testid='metric-ring']");
+    const fcfWrapper = rings[2]?.parentElement;
+    expect(fcfWrapper?.innerHTML ?? "").toMatch(/text-strata-neg/);
+  });
+
+  it("keeps default ring colors when all values are non-negative", () => {
+    const { container } = render(
+      <QualityCard ticker="NVDA" section={section(FULL_CLAIMS)} />,
+    );
+    // FULL_CLAIMS has positive ROE/ROIC/FCF margin. None of the rings
+    // should pick up the distressed accent. Assertion via "the rings
+    // section's HTML doesn't contain the neg accent class anywhere".
+    const ringSection = container.querySelector(".grid.grid-cols-3");
+    expect(ringSection?.innerHTML ?? "").not.toMatch(/text-strata-neg/);
+  });
 });

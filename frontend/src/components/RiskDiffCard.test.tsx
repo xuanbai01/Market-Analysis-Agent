@@ -106,14 +106,12 @@ describe("RiskDiffCard", () => {
     expect(getByText(/stable/i)).not.toBeNull();
   });
 
-  it("renders a fallback when the diff is unavailable", () => {
-    const { container, getByText } = render(
-      <RiskDiffCard section={section([])} />,
-    );
-    expect(
-      container.querySelector("[data-testid='risk-diff-bars']"),
-    ).toBeNull();
-    expect(getByText(/risk diff unavailable/i)).not.toBeNull();
+  it("returns null when the diff is unavailable", () => {
+    // Phase 4.5.C — used to render an "Risk diff unavailable" placeholder
+    // card; now returns null so SymbolDetailPage's row 4 collapses to
+    // populated cards rather than wasting a column on a placeholder.
+    const { container } = render(<RiskDiffCard section={section([])} />);
+    expect(container.firstChild).toBeNull();
   });
 
   // Phase 4.3.B: when per-category claims are present, the card swaps

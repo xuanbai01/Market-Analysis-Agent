@@ -77,17 +77,13 @@ export function RiskDiffCard({ section }: Props) {
   // disclosure (no paragraphs to categorize), so we fall back below.
   const categoryDeltas = extractRiskCategoryDeltas(section);
 
+  // Phase 4.5.C — return null when the diff isn't computable so
+  // ``SymbolDetailPage``'s row 4 can collapse cleanly to populated
+  // cards. Used to render a placeholder card with "Risk diff
+  // unavailable" copy; that wasted a column slot on cached reports
+  // without 10-K data.
   if (!bars || !summary) {
-    return (
-      <section className="rounded-md border border-strata-border bg-strata-surface p-5">
-        <div className="mb-3 font-mono text-[10px] uppercase tracking-kicker text-strata-risk">
-          10-K risk diff · vs prior
-        </div>
-        <div className="flex h-[120px] items-center justify-center font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
-          Risk diff unavailable
-        </div>
-      </section>
-    );
+    return null;
   }
 
   const rows = buildRows(bars);

@@ -37,8 +37,18 @@ function claim(
   };
 }
 
-function section(claims: Claim[], summary = ""): Section {
-  return { title: "Quality", claims, summary, confidence: "high" };
+function section(
+  claims: Claim[],
+  summary = "",
+  cardNarrative: string | null = null,
+): Section {
+  return {
+    title: "Quality",
+    claims,
+    summary,
+    confidence: "high",
+    card_narrative: cardNarrative,
+  };
 }
 
 const FULL: Claim[] = [
@@ -180,5 +190,32 @@ describe("PerShareGrowthCard", () => {
     );
     expect(revPillCagr).not.toBeNull();
     expect(revPillCagr!.textContent).toContain("—");
+  });
+
+  // Phase 4.4.B — per-card narrative strip. Restores the bottom prose
+  // surface that 4.3.X removed (it duplicated Quality's section.summary
+  // since this card reads from Quality too); the new field is
+  // card-specific so the duplication is gone.
+  it("renders the card_narrative strip when present", () => {
+    const { getByTestId } = render(
+      <PerShareGrowthCard
+        ticker="NVDA"
+        section={section(
+          FULL,
+          "",
+          "Revenue compounds; profit doesn't. Top line up 8.7×.",
+        )}
+      />,
+    );
+    expect(getByTestId("card-narrative").textContent).toContain(
+      "Revenue compounds",
+    );
+  });
+
+  it("hides the card_narrative strip when null", () => {
+    const { queryByTestId } = render(
+      <PerShareGrowthCard ticker="NVDA" section={section(FULL)} />,
+    );
+    expect(queryByTestId("card-narrative")).toBeNull();
   });
 });

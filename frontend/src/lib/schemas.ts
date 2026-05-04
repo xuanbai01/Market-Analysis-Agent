@@ -91,6 +91,15 @@ export const SectionSchema = z.object({
   claims: z.array(ClaimSchema).default([]),
   summary: z.string().default(""),
   confidence: ConfidenceSchema,
+  // Phase 4.4.B — per-card 1-2 sentence punchy headline distinct from
+  // ``summary`` (the broad 2-4 sentence narrative). Each dedicated card
+  // (Quality / Earnings / PerShareGrowth / RiskDiff / Macro) renders
+  // it as a strip at the bottom of the card body. Optional + nullable
+  // (mirrors ``unit`` on Claim) so pre-4.4.B cached JSONB rows and
+  // existing test fixtures parse without churn — the render check
+  // (``narrative ? <strip /> : null``) handles undefined / null /
+  // empty uniformly.
+  card_narrative: z.string().nullable().optional(),
 });
 export type Section = z.infer<typeof SectionSchema>;
 

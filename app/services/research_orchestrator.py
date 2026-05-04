@@ -93,39 +93,61 @@ TOOL_DISPATCH: dict[str, Callable[[str], Awaitable[Any]]] = {
 # ── Prompt construction ───────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """\
-You are a financial analyst writing the prose summaries of a structured \
-equity research report. The report is composed of sections (Valuation, \
-Quality, Earnings, etc.). For each section the user gives you a list of \
-factual Claims — each Claim has a description, a numeric or text value, \
-and a source identifier. Your only job is to write a 2–4 sentence \
-summary per section.
+You are a financial analyst writing the prose for a structured equity \
+research report. The report is composed of sections (Valuation, \
+Quality, Earnings, etc.). For each section the user gives you a list \
+of factual Claims — each Claim has a description, a numeric or text \
+value, and a source identifier. Your job is to write TWO prose fields \
+per section:
 
-Hard rules — these are non-negotiable:
+- ``summary``: a broad 2–4 sentence narrative covering the section.
+- ``card_narrative``: a SHORTER 1–2 sentence punchy headline tagline \
+distinct from the summary. Lead with the takeaway, follow with the \
+supporting delta. Style examples (do NOT copy verbatim — match the \
+shape, not the words):
+  • "Loss is narrowing. EPS −3.82 → −0.78 over 20Q with no positive print."
+  • "Trajectory positive, level negative. Gross margin up 226 pts in 5Y \
+but still below break-even."
+  • "Disinflation continues. 10Y has compressed 43 bps from peak."
+  • "Disclosure expanded. Net +9 ¶ across categories — concentrated in \
+AI / regulatory and export controls."
+The card_narrative is what users see first on each dashboard card; it \
+should be the single most informative one-liner the data supports.
+
+Hard rules — these are non-negotiable, and they apply to BOTH ``summary`` \
+and ``card_narrative``:
 
 1. **Cite only values present in the claim list.** Every number, \
 percentage, dollar amount, ratio, ticker symbol, or named entity that \
-appears in your summary MUST appear in that section's claim list. Do \
-not introduce values you weren't given. This is the project's \
-anti-hallucination contract.
+appears in your prose MUST appear in that section's claim list (either \
+as a snapshot ``value`` or a ``history[*].value``). Do not introduce \
+values you weren't given. This is the project's anti-hallucination \
+contract.
 
 2. **Round responsibly.** Numbers may be rounded to 1–2 decimal places \
 or to natural units ($24.6M instead of $24,594,922.77) but the rounded \
 form must clearly correspond to a value in the claim list.
 
 3. **Acknowledge missing data.** If a section's claim list is empty or \
-every value is None, write a single sentence explaining that data was \
-unavailable. Do not invent context to fill the gap.
+every value is None, ``summary`` is one sentence explaining that data \
+was unavailable, and ``card_narrative`` is the empty string (omit the \
+field). Do not invent context to fill the gap.
 
 4. **Plain prose only.** No bullet lists, no headers, no markdown \
-inside summaries. The orchestrator wraps your prose in section \
-structure.
+inside either field.
 
-5. **Stay 2–4 sentences.** Concise, factual, declarative. No \
-editorializing, no speculation, no investment advice.
+5. **Length discipline.** ``summary`` stays 2–4 sentences. \
+``card_narrative`` stays 1–2 sentences and reads punchier — the \
+takeaway, then the delta. No editorializing, no speculation, no \
+investment advice in either.
 
 6. **Match the section title exactly.** The user gives you a list of \
-section titles to populate; emit one summary per title using that \
-title verbatim. Do not invent additional sections.
+section titles to populate; emit one entry per title using that title \
+verbatim. Do not invent additional sections.
+
+7. **Don't duplicate.** ``summary`` and ``card_narrative`` are different \
+surfaces — write distinct prose for each. The card_narrative is not \
+the summary's first sentence shortened.
 """
 
 _FALLBACK_SUMMARY_TEMPLATE = (
@@ -222,6 +244,31 @@ def _resolve_summary(
     return _FALLBACK_SUMMARY_TEMPLATE.format(title=title)
 
 
+def _resolve_card_narrative(
+    title: str, summaries: SectionSummaries
+) -> str | None:
+    """Match the synth-call output's card_narrative for ``title``.
+
+    Phase 4.4.B. Distinct from ``_resolve_summary`` in two ways:
+
+    1. **No fallback string.** A missing card_narrative renders as a
+       hidden strip on the frontend — there's no neutral default that
+       would be more informative than the absence.
+    2. **Empty / whitespace normalized to None.** The model may
+       legitimately decline to emit a narrative for a section with
+       no data ("Risk Factors" when nothing changed); collapsing
+       empty strings to None means every renderer can do a uniform
+       truthy check (``narrative ? <strip /> : null``).
+    """
+    matched = [s.card_narrative for s in summaries.sections if s.title == title]
+    if not matched:
+        return None
+    last = matched[-1]
+    if last is None or not last.strip():
+        return None
+    return last
+
+
 def _overall_confidence(sections: list[Section]) -> Confidence:
     """Lowest section confidence wins. Conservative on purpose: a
     report with one LOW section should not present as MEDIUM overall."""
@@ -265,7 +312,8 @@ async def compose_research_report(
         system=_SYSTEM_PROMPT,
     )
 
-    # 4. Stitch together Sections with claims + summary + confidence.
+    # 4. Stitch together Sections with claims + summary +
+    #    card_narrative + confidence.
     sections: list[Section] = []
     for spec in specs:
         claims = section_claims[spec.title]
@@ -274,6 +322,7 @@ async def compose_research_report(
                 title=spec.title,
                 claims=claims,
                 summary=_resolve_summary(spec.title, summaries),
+                card_narrative=_resolve_card_narrative(spec.title, summaries),
                 confidence=score_section(claims),
             )
         )

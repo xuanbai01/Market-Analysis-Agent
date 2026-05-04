@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.3.B.2 done (PRs #46–#54); 4.4.A News + Business + ContextBand in flight (this PR); 4.4.B per-card section narratives follows.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.4.A done (PRs #46–#55); 4.4.B per-card section narratives in flight (this PR); 4.5 adaptive layout signals follows.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -267,11 +267,42 @@ Active sprint for the Market Analysis Agent.
 
 **Bundle math:** main currently 95.71 KB / 100 KB gz → 4.3 KB headroom. NewsList (~3 KB) + BusinessCard (~1 KB) + ContextBand (~0.5 KB) ≈ 4.5 KB total. **Tight — may need to lazy-load NewsList** if final size pushes over budget. Decide after the implementation lands.
 
-#### 4.4.B Per-card section narratives *(follow-up PR)*
+#### 4.4.B Per-card section narratives *(this PR)*
 
-- [ ] **Backend** — orchestrator's synth call returns one card-level narrative per section title (e.g. `card_narratives: dict[str, str]`). Each card receives a 1-2 sentence inline interp ("Loss is narrowing. EPS −3.82 → −0.78 over 20Q — no positive print"). Schema gets a new `Section.card_narrative: str | None` field; sonnet's tool schema extends to populate it.
-- [ ] **Frontend** — each card grows a narrative strip below its data. PerShareGrowthCard's narrative comes back here (4.3.X removed it because it duplicated Quality's `section.summary`; the per-card field replaces it cleanly).
-- [ ] **Eval rubric** — card narratives covered by the existing factuality rubric (history-aware after 3.4).
+> **Why:** the dashboard's dedicated cards (Quality, Earnings,
+> PerShareGrowth, RiskDiff, Macro) shipped without inline prose on the
+> card itself — only the section's broad ``summary`` was rendered, and
+> only in the QualityCard's header. The Strata Rivian screenshot
+> (`docs/screenshots/image-1777831007647.png`) calls out a punchy
+> 1-2 sentence headline strip at the *bottom* of every card body
+> ("Loss is narrowing. EPS −3.82 → −0.78 over 20Q") that's distinct
+> from the longer summary in tone and length. PerShareGrowthCard's
+> narrative slot (removed in 4.3.X because it duplicated Quality's
+> ``summary``) returns cleanly via this card-specific field.
+
+- [x] **Schema: `Section.card_narrative: str | None = None`** in `app/schemas/research.py`. Default ``None`` for back-compat with pre-4.4.B JSONB rows; same 4000-char cap as ``summary``. Mirrored in Zod (`SectionSchema.card_narrative: z.string().nullable().optional()` — optional so existing test fixtures don't churn; the rendering layer handles undefined / null / empty uniformly).
+- [x] **Synth tool schema: `SectionSummary.card_narrative: str = ""`** — defaults to empty string; the orchestrator normalizes empty / whitespace to ``None`` when stitching onto `Section.card_narrative` so the frontend's truthy-check uniformly hides the strip.
+- [x] **Orchestrator wiring** — new `_resolve_card_narrative(title, summaries)` matches the synth output by title (last-wins on duplicates) and collapses empty / whitespace to `None`. Stitched into the `Section(...)` build alongside `summary` and `confidence`.
+- [x] **System prompt extended** — added a 7th rule (`Don't duplicate. summary and card_narrative are different surfaces`), 5 style examples covering each card type, and split rule 5 into two length disciplines (`summary 2-4`, `card_narrative 1-2`). Explicitly instructs the model to write distinct prose for each surface.
+- [x] **Eval rubric: `score_factuality` polices `card_narrative` too** — iterates `summary` + `card_narrative` per section so the LLM can't dodge the rubric by writing the hallucination into the card-strip. Pre-4.4.B reports (no `card_narrative`) score the same as before.
+- [x] **`NarrativeStrip` primitive** — single component, ~25 lines. Rounded inset card-within-card at the bottom of each card body; `data-testid='card-narrative'`. Returns `null` for null / undefined / empty / whitespace so older cached rows render cleanly.
+- [x] **Wired into 5 cards** — QualityCard, EarningsCard, PerShareGrowthCard, RiskDiffCard, MacroPanel each render `<NarrativeStrip text={section.card_narrative} />` at the bottom of their body. PerShareGrowthCard's 4.3.X removal comment replaced with the new slot.
+- [x] **SymbolDetailPage** — passes PerShareGrowthCard a Quality section with `card_narrative` cleared so the LLM's single Quality narrative doesn't render twice on the page (QualityCard is the canonical home; 4.5+ will give PerShareGrowth its own section so the prose can differentiate).
+- [x] **Cards skipped intentionally** — BusinessCard (its body IS prose), NewsList (filter pills + headlines are the message), ValuationCard / CashAndCapitalCard (cross-section / cross-report sources, ambiguous which section's narrative drives the card). Add later if dogfooding asks for them.
+- [x] **Tests** — backend 565 → **577** (+12: 5 schema + 4 orchestrator + 3 rubric); frontend 336 → **353** (+17: 3 schema + 4 NarrativeStrip + 10 per-card pairs).
+- [x] **Bundle** — main 97.06 → **97.17 KB gz** (+0.11). ~2.83 KB headroom retained under the 100 KB budget.
+- [x] **Verified back-compat** — preview against the cached pre-4.4.B NVDA report confirms all 5 cards render without the strip when `card_narrative` is absent. No console errors.
+- [x] **Update test counts** — backend 565 → **577**, frontend 336 → **353**. Updated in `CLAUDE.md`, `docs/architecture.md`, this file.
+
+### 4.4.B review *(filled in after the GREEN + docs commits land)*
+
+- **What changed in shape:** one new optional field on `Section` (`card_narrative`) + one new optional field on the synth's `SectionSummary` tool schema. One new frontend primitive (`NarrativeStrip`). One additional iteration in `score_factuality`. No new top-level routes, no new dependencies, no schema breaks.
+- **What didn't change:** ``Section.summary`` still ships verbatim — the rubric still polices it, ReportRenderer still falls back to it, every existing card that surfaces `summary` keeps doing so. Pre-4.4.B JSONB rows round-trip with `card_narrative=None` and the strip is hidden.
+- **Net deltas:** backend +12 tests / +1 schema field / +1 synth field / +1 resolver helper; frontend +17 tests / +1 primitive / +1 schema field / 5 cards extended; main bundle +0.11 KB gz.
+- **Followups noted:**
+  - Real-LLM dogfood will reveal whether the prompt's "don't duplicate" rule actually keeps the model from writing the same prose into both surfaces. If it doesn't, tighten the prompt with negative examples; if it still doesn't, downsize ``summary`` to a deterministic claim-recap and let ``card_narrative`` carry all the prose weight.
+  - PerShareGrowthCard's narrative is suppressed at the wiring layer because both it and QualityCard read from Quality. When 4.5+ adds a dedicated growth section (or a derived "Trajectory" claim group), PerShareGrowth gets its own narrative independently.
+  - ValuationCard / CashAndCapitalCard could grow strips later — both read from a single primary section (Valuation / Capital Allocation) but share peer / Quality data with neighbors. Hold until a specific dogfood signal asks for them.
 
 ### 4.5 Adaptive layout for distressed names *(the differentiator)*
 

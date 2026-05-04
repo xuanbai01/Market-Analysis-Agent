@@ -12,6 +12,7 @@
 import { LineChart } from "./LineChart";
 import { extractMacroPanels } from "../lib/macro-extract";
 import type { ClaimHistoryPoint, Section } from "../lib/schemas";
+import { NarrativeStrip } from "./NarrativeStrip";
 
 interface Props {
   section: Section;
@@ -94,6 +95,8 @@ export function MacroPanel({ section }: Props) {
           {section.summary}
         </p>
       )}
+
+      <NarrativeStrip text={section.card_narrative} />
     </section>
   );
 }

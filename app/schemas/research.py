@@ -157,12 +157,22 @@ class Section(BaseModel):
     synthesis of those claims into prose. The eval rubric checks that
     every number / named entity in ``summary`` appears in ``claims`` —
     summary cannot introduce new facts.
+
+    ``card_narrative`` (Phase 4.4.B) is a 1-2 sentence punchy framing
+    string distinct from ``summary``. Each dedicated dashboard card
+    (Quality / Earnings / PerShareGrowth / RiskDiff / Macro) renders
+    it as an inset strip at the bottom of the card body — the
+    headline+delta tagline ("Loss is narrowing. EPS −3.82 → −0.78
+    over 20Q"). ``None`` when the model declined to write one or the
+    cached row predates 4.4.B; the rendering layer hides the strip
+    entirely in that case.
     """
 
     title: str = Field(min_length=1, max_length=80)
     claims: list[Claim] = Field(default_factory=list)
     summary: str = Field(default="", max_length=4000)
     confidence: Confidence = Confidence.LOW
+    card_narrative: str | None = Field(default=None, max_length=4000)
 
     @property
     def last_updated(self) -> datetime | None:
@@ -239,19 +249,30 @@ class ResearchReportSummary(BaseModel):
 
 
 class SectionSummary(BaseModel):
-    """One ``{title, summary}`` pair emitted by the synth call.
+    """One ``{title, summary, card_narrative}`` triple emitted by the synth call.
 
     ``title`` MUST match a section title the orchestrator requested
     (case-sensitive). Lookups that miss are dropped silently rather
     than raised — the orchestrator already has the canonical title
     list, the model is allowed to be sloppy, and a missing summary
     falls back to a neutral default.
+
+    ``summary`` is the broad 2-4 sentence narrative.
+
+    ``card_narrative`` (Phase 4.4.B) is a 1-2 sentence headline+delta
+    tagline displayed at the bottom of each dedicated card. Distinct
+    from ``summary`` — the model is instructed to lead with the
+    takeaway and follow with the supporting delta, comma/period
+    separated. Defaults to empty string so the model can omit the
+    field; the orchestrator normalizes empty/whitespace to None when
+    stitching onto ``Section.card_narrative``.
     """
 
     model_config = ConfigDict(frozen=True)
 
     title: str = Field(min_length=1, max_length=80)
     summary: str = Field(default="", max_length=4000)
+    card_narrative: str = Field(default="", max_length=4000)
 
 
 class SectionSummaries(BaseModel):

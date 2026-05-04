@@ -169,6 +169,71 @@ def test_section_summary_has_length_cap() -> None:
         Section(title="X", summary="x" * 5000)
 
 
+# ── Section.card_narrative (Phase 4.4.B) ─────────────────────────────
+#
+# Every dedicated dashboard card (Quality, Earnings, PerShareGrowth,
+# RiskDiff, Macro, …) wants a 1-2 sentence punchy framing string —
+# distinct from ``summary`` (the broad 2-4 sentence narrative). Default
+# ``None`` so pre-4.4.B cached JSONB rows round-trip unchanged and the
+# field is simply absent rather than ``""`` (the rendering layer treats
+# null and empty identically — the difference matters for the rubric).
+
+
+def test_section_card_narrative_defaults_to_none() -> None:
+    """Backwards-compat: pre-4.4.B cached rows have no card_narrative field."""
+    s = Section(title="Quality")
+    assert s.card_narrative is None
+
+
+def test_section_card_narrative_accepts_short_prose() -> None:
+    s = Section(
+        title="Quality",
+        card_narrative="Trajectory positive, level negative. Gross margin up 226 pts in 5Y.",
+    )
+    assert s.card_narrative is not None
+    assert "Trajectory positive" in s.card_narrative
+
+
+def test_section_card_narrative_round_trips_through_jsonb() -> None:
+    """Cache layer serializes via model_dump(mode='json'); the
+    card_narrative must survive that round trip so the dashboard sees
+    it on cache hit."""
+    s = Section(
+        title="Earnings",
+        summary="Q1 beat consensus.",
+        card_narrative="Loss is narrowing. EPS -3.82 -> -0.78 over 20Q.",
+    )
+    blob = s.model_dump(mode="json")
+    assert blob["card_narrative"] == "Loss is narrowing. EPS -3.82 -> -0.78 over 20Q."
+    re_parsed = Section.model_validate(blob)
+    assert re_parsed.card_narrative == s.card_narrative
+    # ``summary`` and ``card_narrative`` are independent surfaces;
+    # adding one must not silently overwrite the other.
+    assert re_parsed.summary == "Q1 beat consensus."
+
+
+def test_section_card_narrative_has_length_cap() -> None:
+    """Same 4000-char cap as ``summary`` — punchy is encouraged but the
+    schema cap matches summary's so we don't have to remember different
+    limits."""
+    with pytest.raises(ValidationError):
+        Section(title="X", card_narrative="x" * 5000)
+
+
+def test_section_pre_4_4_b_cached_payload_still_parses() -> None:
+    """A JSONB row written before this PR has no ``card_narrative``
+    key. It must still parse; ``card_narrative`` defaults to None."""
+    legacy_payload = {
+        "title": "Valuation",
+        "claims": [],
+        "summary": "Trades at 28.5x trailing earnings.",
+        "confidence": "high",
+    }
+    section = Section.model_validate(legacy_payload)
+    assert section.card_narrative is None
+    assert section.summary == "Trades at 28.5x trailing earnings."
+
+
 # ── ResearchReport ───────────────────────────────────────────────────
 
 

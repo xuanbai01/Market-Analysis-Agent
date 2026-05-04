@@ -15,6 +15,7 @@ import {
   ResearchReportSchema,
   ResearchReportSummariesSchema,
   ResearchReportSummarySchema,
+  SectionSchema,
 } from "./schemas";
 
 describe("ResearchReportSchema", () => {
@@ -118,6 +119,61 @@ describe("ResearchReportSchema", () => {
       tool_calls_audit: [],
     };
     expect(() => ResearchReportSchema.parse(payload)).toThrow();
+  });
+});
+
+// ── Phase 4.4.B: Section.card_narrative ──────────────────────────────
+
+describe("SectionSchema with card_narrative", () => {
+  const baseSource = {
+    tool: "yfinance.fundamentals",
+    fetched_at: "2026-04-29T14:00:00+00:00",
+  };
+
+  it("parses a section with a populated card_narrative", () => {
+    const parsed = SectionSchema.parse({
+      title: "Quality",
+      claims: [
+        {
+          description: "Gross margin",
+          value: 0.745,
+          source: baseSource,
+        },
+      ],
+      summary: "Apple's margin profile is exceptional.",
+      card_narrative:
+        "Trajectory positive, level positive. Gross margin stable in mid-40s.",
+      confidence: "high",
+    });
+    expect(parsed.card_narrative).toBe(
+      "Trajectory positive, level positive. Gross margin stable in mid-40s.",
+    );
+    expect(parsed.summary).toBe("Apple's margin profile is exceptional.");
+  });
+
+  it("treats card_narrative as falsy when the field is absent", () => {
+    // Pre-4.4.B cached JSONB rows have no card_narrative key — must
+    // round-trip without throwing. The rendering layer's check
+    // (``narrative ? <strip /> : null``) handles undefined / null /
+    // empty uniformly so the strip stays hidden in all three cases.
+    const parsed = SectionSchema.parse({
+      title: "Valuation",
+      claims: [],
+      summary: "Trades premium.",
+      confidence: "medium",
+    });
+    expect(parsed.card_narrative ?? null).toBeNull();
+  });
+
+  it("accepts an explicit null card_narrative", () => {
+    const parsed = SectionSchema.parse({
+      title: "Macro",
+      claims: [],
+      summary: "",
+      card_narrative: null,
+      confidence: "low",
+    });
+    expect(parsed.card_narrative).toBeNull();
   });
 });
 

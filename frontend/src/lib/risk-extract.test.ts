@@ -23,6 +23,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  extractRiskCategoryDeltas,
   extractRiskDiffBars,
   extractRiskDiffSummary,
 } from "./risk-extract";
@@ -136,5 +137,77 @@ describe("extractRiskDiffSummary", () => {
 
   it("returns null when underlying bars are unavailable", () => {
     expect(extractRiskDiffSummary(section([]))).toBeNull();
+  });
+});
+
+// ── extractRiskCategoryDeltas (Phase 4.3.B) ──────────────────────────
+//
+// Per-category bucketing comes from the Haiku categorizer's output,
+// surfaced as one Claim per non-zero RiskCategory bucket. Description
+// shape: ``"<Category label> risk paragraph delta vs prior 10-K"``
+// (kept verbatim in the registry's _build_risk_factors so a backend
+// rename fails this test loudly).
+
+describe("extractRiskCategoryDeltas", () => {
+  it("returns null when no per-category claims are present (pre-4.3.B reports)", () => {
+    expect(extractRiskCategoryDeltas(section(FULL))).toBeNull();
+  });
+
+  it("returns one entry per non-zero category claim, sorted by absolute delta desc", () => {
+    const out = extractRiskCategoryDeltas(
+      section([
+        ...FULL,
+        claim("AI / regulatory risk paragraph delta vs prior 10-K", 3),
+        claim("Cybersecurity risk paragraph delta vs prior 10-K", -5),
+        claim("Macro risk paragraph delta vs prior 10-K", 1),
+      ]),
+    );
+    expect(out).not.toBeNull();
+    expect(out!.length).toBe(3);
+    // Largest |delta| first: Cybersecurity (5) → AI / regulatory (3) → Macro (1).
+    expect(out![0].category).toBe("cybersecurity");
+    expect(out![0].delta).toBe(-5);
+    expect(out![1].category).toBe("ai_regulatory");
+    expect(out![1].delta).toBe(3);
+    expect(out![2].category).toBe("macro");
+    expect(out![2].delta).toBe(1);
+  });
+
+  it("preserves negative deltas (more removed than added in a bucket)", () => {
+    const out = extractRiskCategoryDeltas(
+      section([
+        claim("Supply concentration risk paragraph delta vs prior 10-K", -2),
+      ]),
+    );
+    expect(out).toEqual([
+      {
+        category: "supply_concentration",
+        label: expect.stringMatching(/supply/i),
+        delta: -2,
+      },
+    ]);
+  });
+
+  it("ignores aggregate / unrelated claims interleaved with category claims", () => {
+    const out = extractRiskCategoryDeltas(
+      section([
+        ...FULL, // 4 aggregate claims + 1 business-section claim
+        claim("Competition risk paragraph delta vs prior 10-K", 2),
+      ]),
+    );
+    expect(out!.length).toBe(1);
+    expect(out![0].category).toBe("competition");
+  });
+
+  it("rejects non-numeric values on a category claim", () => {
+    const out = extractRiskCategoryDeltas(
+      section([
+        claim("Macro risk paragraph delta vs prior 10-K", null),
+        claim("IP risk paragraph delta vs prior 10-K", 4),
+      ]),
+    );
+    // Macro dropped (null), IP kept (4).
+    expect(out!.length).toBe(1);
+    expect(out![0].category).toBe("ip");
   });
 });

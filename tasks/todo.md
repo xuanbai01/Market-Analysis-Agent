@@ -138,17 +138,55 @@ Active sprint for the Market Analysis Agent.
 - **Net deltas:** backend +9 tests, frontend +15 tests, main bundle +0.97 KB gz. No new dependencies, no new chunks.
 - **Followups noted but deferred:** unit annotations for the other 5 tools (peers / earnings / macro / research_tool_registry / form_4 / holdings_13f) — wait until a specific bug surfaces; cancel-on-nav (Bug 8) — small standalone ticket; per-card narratives — return in 4.4.
 
-### 4.3.B Risk Haiku categorizer *(deferred follow-up)*
+### 4.3.B Risk Haiku categorizer *(this PR)*
 
-> **Decision:** ship the Haiku-driven category bucketing as its own PR.
-> The categorizer is meaningful new backend scope (LLM call + fixtures
-> + cost validation + `Risk10KDiff` schema extension) and lands more
-> cleanly with its own test surface.
+> **Why:** RiskDiffCard currently shows 4 aggregate bars (added /
+> removed / kept / char-delta) — useful but missing the "what kind of
+> risk grew?" signal. The Strata design's screenshot 1 shows 8
+> per-category bars (AI / supply / cyber / competition / IP / macro /
+> regulatory / other). The aggregates miss the texture: NVDA might
+> add 5 paragraphs about export controls and remove 2 about FX while
+> a competitor adds 4 about competition and 3 about cybersecurity —
+> both look like "+3 ¶" in the aggregate.
+>
+> Cost discipline: Haiku-only (~$0.001-0.005/report on typical 10–15
+> paragraph diffs). Skipped entirely when added+removed = 0 so a
+> stable disclosure costs nothing. Backwards-compat: pre-4.3.B
+> cached rows lack the per-category fields, the card falls back to
+> the aggregate bars.
 
-- [ ] **Backend: extend `Risk10KDiff` schema** — `category_deltas: dict[RiskCategory, int]` (added − removed paragraphs per category).
-- [ ] **`app/services/risk_categorizer.py`** — Haiku-classify each added/removed paragraph into a category enum (AI_REGULATORY, EXPORT_CONTROLS, SUPPLY_CONCENTRATION, CUSTOMER_CONCENTRATION, COMPETITION, CYBERSECURITY, IP, MACRO, OTHER). Forced-tool schema. Cost target ~$0.001/report.
-- [ ] **Wire categorizer into `extract_10k_risks_diff`** — only when added+removed > 0; otherwise skip the LLM call and stamp empty deltas.
-- [ ] **Frontend: extend `RiskDiffCard`** — when `category_deltas` is populated, render per-category bars instead of the aggregate 4-bar chart. Falls back gracefully on pre-4.3.B cached reports.
+#### Backend
+
+- [x] **`RiskCategory` enum** in `app/schemas/ten_k.py` — 9 categories shipped: `AI_REGULATORY`, `EXPORT_CONTROLS`, `SUPPLY_CONCENTRATION`, `CUSTOMER_CONCENTRATION`, `COMPETITION`, `CYBERSECURITY`, `IP`, `MACRO`, `OTHER`. String-valued so JSONB serializes as plain strings.
+
+- [x] **Extend `Risk10KDiff`** with `category_deltas: dict[RiskCategory, int] = Field(default_factory=dict)` — net delta per category. Default empty so pre-4.3.B JSONB rows round-trip unchanged.
+
+- [x] **`app/services/risk_categorizer.py`** — `categorize_risk_paragraphs(added, removed)` short-circuits on empty inputs, otherwise issues one `triage_call` (Haiku 4.5) with the forced `RiskCategorization` tool schema. Drops zero-net buckets and defends against out-of-range indices in the model's response.
+
+- [x] **Wire categorizer into `extract_10k_risks_diff`** — `try/except` around the call so categorizer failures (rate limit / network) degrade to `category_deltas={}` rather than failing the whole diff. Adds `category_buckets` count to the existing `log_external_call` output summary.
+
+- [x] **`_build_risk_factors` in `research_tool_registry.py`** — emits one extra `Claim` per non-zero category with description `"<Label> risk paragraph delta vs prior 10-K"`. `_RISK_CATEGORY_LABELS` map centralizes the labels — frontend's `risk-extract.ts` mirrors them verbatim, kept in sync via `risk-extract.test.ts` description-match assertions.
+
+- [x] **Frontend `risk-extract.ts`** — `extractRiskCategoryDeltas(section)` returns null when no per-category claims are present, otherwise a sorted `RiskCategoryDelta[]` (largest |delta| first). New `RiskCategory` type union + `RISK_CATEGORY_LABELS` map mirroring backend.
+
+- [x] **`RiskDiffCard.tsx`** — when `extractRiskCategoryDeltas` returns non-null, renders the new `CategoryBars` SVG (positive deltas in risk accent, negative in quality accent, scaled to absolute max). Otherwise falls back to the existing 4-bar aggregate.
+
+- [x] **Tests** — backend 531 → 544 (+13: 4 schema + 5 categorizer + 2 ten_k integration + 2 registry); frontend 277 → 285 (+8: 5 extractor + 3 card).
+
+- [x] **Cost / observability** — categorizer skips Haiku entirely on `len(added)+len(removed)==0`. `log_external_call` records `category_buckets` count so cost-per-report is chartable from the A09 stream. Real-LLM cost validation deferred to dogfooding (target: ≤$0.005/report, $0 stable).
+
+- [x] **Bundle** — main 93.95 → 94.40 KB gz (+0.45). Under 100 KB budget; ~5.6 KB headroom retained for 4.4. SectionChart on-demand chunk unchanged at 103.01 KB gz.
+
+- [x] **Update test counts** — backend 531 → **544**, frontend 277 → **285**. Updated in `CLAUDE.md`, `docs/architecture.md`, this file.
+
+### 4.3.B review *(filled in after the GREEN + docs commits land)*
+
+- **What changed in shape:** one new enum (`RiskCategory`) and one new dict field on `Risk10KDiff`; one new service module; one new wire-through; one new frontend extractor + bar chart. No new top-level routes, no schema breaks, no new dependencies.
+- **What didn't change:** the 4 aggregate `Claim`s still ship for every diff so the existing card render path + extractor work on pre-4.3.B JSONB rows + on stable disclosures (the categorizer skips the Haiku call and `category_deltas` lands as `{}`).
+- **Net deltas:** backend +13 tests / +1 service module; frontend +8 tests / +1 helper / 1 component upgrade; main bundle +0.45 KB gz. No ADR needed.
+- **Followups noted:**
+  - Real-LLM cost telemetry from a few dogfooded reports → confirm/refute the $0.005-target estimate.
+  - The 9-bucket catalog will need to grow if `OTHER` dominates real diffs. Add a guardrail in 4.4 dogfooding to flag issuers where `OTHER >= 50%` of their bucketed paragraphs.
 
 ### 4.3.B.1 Layout polish + range pills + responsive SVGs *(this PR)*
 

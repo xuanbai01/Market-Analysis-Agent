@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 
 from app.schemas.edgar import EdgarFiling
-from app.schemas.ten_k import Extracted10KSection, Risk10KDiff
+from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
 from app.services import ten_k as ten_k_module
 from app.services.ten_k import (
     _extract_section,
@@ -816,3 +816,186 @@ async def test_extract_10k_risks_diff_logs_unavailable_when_only_one_filing(
     ]
     assert len(records) == 1
     assert records[0].output_summary["available"] is False
+
+
+# ── Phase 4.3.B: RiskCategory enum + Risk10KDiff.category_deltas ─────
+
+
+def test_risk_category_has_expected_nine_buckets() -> None:
+    """The bucket set is part of the design — locking it down here so an
+    accidental rename breaks loudly. New categories should be added
+    deliberately (and require a paired frontend extractor + card update)."""
+    assert {c.value for c in RiskCategory} == {
+        "ai_regulatory",
+        "export_controls",
+        "supply_concentration",
+        "customer_concentration",
+        "competition",
+        "cybersecurity",
+        "ip",
+        "macro",
+        "other",
+    }
+
+
+def test_risk_category_is_string_enum_for_jsonb() -> None:
+    """The cache layer serializes via ``model_dump(mode='json')``. A
+    ``str``-valued enum round-trips through JSONB as a plain string;
+    a non-str enum would land as an int and confuse the frontend."""
+    cat = RiskCategory.AI_REGULATORY
+    assert isinstance(cat.value, str)
+    assert cat.value == "ai_regulatory"
+
+
+def test_risk10k_diff_category_deltas_defaults_to_empty_dict() -> None:
+    """Backwards-compat with pre-4.3.B JSONB rows that lack the field."""
+    section = Extracted10KSection(
+        symbol="AAPL",
+        accession="0000320193-25-000079",
+        filed_at=datetime(2026, 1, 1, tzinfo=UTC),
+        section_id="Item 1A",
+        section_title="Risk Factors",
+        text="x" * 600,
+        char_count=600,
+        primary_doc_url="https://www.sec.gov/foo",
+    )
+    diff = Risk10KDiff(
+        symbol="AAPL",
+        current=section,
+        prior=section,
+        added_paragraphs=[],
+        removed_paragraphs=[],
+        kept_paragraph_count=10,
+        char_delta=0,
+    )
+    assert diff.category_deltas == {}
+
+
+def test_risk10k_diff_category_deltas_round_trips_through_jsonb() -> None:
+    """``model_dump(mode='json')`` writes enum keys as their string
+    values; ``model_validate`` accepts either enum or string keys, so
+    a cached blob from disk parses back correctly."""
+    section = Extracted10KSection(
+        symbol="AAPL",
+        accession="0000320193-25-000079",
+        filed_at=datetime(2026, 1, 1, tzinfo=UTC),
+        section_id="Item 1A",
+        section_title="Risk Factors",
+        text="x" * 600,
+        char_count=600,
+        primary_doc_url="https://www.sec.gov/foo",
+    )
+    diff = Risk10KDiff(
+        symbol="AAPL",
+        current=section,
+        prior=section,
+        added_paragraphs=[],
+        removed_paragraphs=[],
+        kept_paragraph_count=10,
+        char_delta=0,
+        category_deltas={
+            RiskCategory.AI_REGULATORY: 3,
+            RiskCategory.SUPPLY_CONCENTRATION: -2,
+            RiskCategory.CYBERSECURITY: 1,
+        },
+    )
+    blob = diff.model_dump(mode="json")
+    assert blob["category_deltas"] == {
+        "ai_regulatory": 3,
+        "supply_concentration": -2,
+        "cybersecurity": 1,
+    }
+    re_parsed = Risk10KDiff.model_validate(blob)
+    assert re_parsed.category_deltas[RiskCategory.AI_REGULATORY] == 3
+    assert re_parsed.category_deltas[RiskCategory.SUPPLY_CONCENTRATION] == -2
+
+
+# ── Phase 4.3.B: extract_10k_risks_diff populates category_deltas ────
+
+
+async def test_extract_10k_risks_diff_populates_category_deltas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When fetch_edgar returns two filings with different Item 1A
+    paragraphs, extract_10k_risks_diff should call risk_categorizer
+    and stamp the result on the returned Risk10KDiff."""
+    from app.services import risk_categorizer as cat_module
+
+    # Force a measurable diff via different prior-year text.
+    current_html = _wrap_html(
+        f"""<h1>Item 1A. Risk Factors</h1><p>{_LONG_RISKS_TEXT}</p>
+            <h1>Item 2. Properties</h1><p>None.</p>"""
+    )
+    prior_html = _wrap_html(
+        f"""<h1>Item 1A. Risk Factors</h1><p>{_LONG_RISKS_TEXT_PRIOR_YEAR}</p>
+            <h1>Item 2. Properties</h1><p>None.</p>"""
+    )
+    current = _mk_filing(
+        accession="0000320193-25-000079",
+        filed_at=datetime(2025, 11, 1, tzinfo=UTC),
+        primary_doc_text=current_html,
+    )
+    prior = _mk_filing(
+        accession="0000320193-24-000123",
+        filed_at=datetime(2024, 11, 1, tzinfo=UTC),
+        primary_doc_text=prior_html,
+    )
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+
+    fake_deltas = {
+        RiskCategory.AI_REGULATORY: 2,
+        RiskCategory.SUPPLY_CONCENTRATION: -1,
+    }
+
+    async def _fake_categorize(_added: list[str], _removed: list[str]) -> dict:
+        return fake_deltas
+
+    monkeypatch.setattr(
+        cat_module, "categorize_risk_paragraphs", _fake_categorize
+    )
+    # The ten_k module imports the function at module load; patch there too.
+    monkeypatch.setattr(
+        ten_k_module, "categorize_risk_paragraphs", _fake_categorize
+    )
+
+    result = await extract_10k_risks_diff("AAPL")
+
+    assert result is not None
+    assert result.category_deltas == fake_deltas
+
+
+async def test_extract_10k_risks_diff_categorizer_failure_falls_back_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the categorizer raises (rate limit, network), the diff still
+    ships with an empty category_deltas — the card degrades to the
+    aggregate-bars fallback rather than the entire section vanishing."""
+    current_html = _wrap_html(
+        f"""<h1>Item 1A. Risk Factors</h1><p>{_LONG_RISKS_TEXT}</p>
+            <h1>Item 2. Properties</h1><p>None.</p>"""
+    )
+    prior_html = _wrap_html(
+        f"""<h1>Item 1A. Risk Factors</h1><p>{_LONG_RISKS_TEXT_PRIOR_YEAR}</p>
+            <h1>Item 2. Properties</h1><p>None.</p>"""
+    )
+    current = _mk_filing(
+        accession="0000320193-25-000079",
+        filed_at=datetime(2025, 11, 1, tzinfo=UTC),
+        primary_doc_text=current_html,
+    )
+    prior = _mk_filing(
+        accession="0000320193-24-000123",
+        filed_at=datetime(2024, 11, 1, tzinfo=UTC),
+        primary_doc_text=prior_html,
+    )
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+
+    async def _raises(_added: list[str], _removed: list[str]) -> dict:
+        raise RuntimeError("haiku rate-limited")
+
+    monkeypatch.setattr(ten_k_module, "categorize_risk_paragraphs", _raises)
+
+    result = await extract_10k_risks_diff("AAPL")
+
+    assert result is not None
+    assert result.category_deltas == {}

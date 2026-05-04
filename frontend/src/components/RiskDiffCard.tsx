@@ -14,8 +14,10 @@
  * returning null, so pre-4.3.B reports continue to render).
  */
 import {
+  extractRiskCategoryDeltas,
   extractRiskDiffBars,
   extractRiskDiffSummary,
+  type RiskCategoryDelta,
   type RiskDiffBars,
 } from "../lib/risk-extract";
 import type { Section } from "../lib/schemas";
@@ -68,6 +70,11 @@ const ROW_H = (H - ROW_GAP * 3) / 4;
 export function RiskDiffCard({ section }: Props) {
   const bars = extractRiskDiffBars(section);
   const summary = extractRiskDiffSummary(section);
+  // Phase 4.3.B — when the Haiku categorizer has stamped per-category
+  // deltas onto the section, prefer that view over the 4-bar
+  // aggregate. ``null`` here means pre-4.3.B cached row OR a stable
+  // disclosure (no paragraphs to categorize), so we fall back below.
+  const categoryDeltas = extractRiskCategoryDeltas(section);
 
   if (!bars || !summary) {
     return (
@@ -176,3 +183,73 @@ export function RiskDiffCard({ section }: Props) {
     </section>
   );
 }
+
+// Phase 4.3.B — per-category bar chart. One row per non-zero
+// RiskCategory bucket; positive deltas (more added than removed) draw
+// in the risk accent, negative deltas (more removed) draw in the
+// quality accent. Bars scale to the absolute max delta in the set.
+const CAT_COLOR_POS = COLOR_RISK;
+const CAT_COLOR_NEG = COLOR_QUAL;
+
+function CategoryBars({ deltas }: { deltas: RiskCategoryDelta[] }) {
+  const maxAbs = Math.max(1, ...deltas.map((d) => Math.abs(d.delta)));
+  const rowH = 18;
+  const rowGap = 4;
+  const labelW = 140;
+  const valueW = 36;
+  const width = 360;
+  const barW = width - labelW - valueW;
+  const height = deltas.length * rowH + Math.max(0, deltas.length - 1) * rowGap;
+
+  return (
+    <svg
+      data-testid="risk-category-bars"
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      aria-label="Risk diff by category"
+      className="block"
+    >
+      {deltas.map((d, i) => {
+        const y = i * (rowH + rowGap);
+        const barLen = Math.max(2, (Math.abs(d.delta) / maxAbs) * barW);
+        const color = d.delta >= 0 ? CAT_COLOR_POS : CAT_COLOR_NEG;
+        return (
+          <g key={d.category} data-row="risk-category-bar">
+            <text
+              x={0}
+              y={y + rowH / 2 + 4}
+              fill={COLOR_DIM}
+              style={{ fontSize: 10, fontFamily: "var(--font-mono, monospace)" }}
+            >
+              {d.label}
+            </text>
+            <rect
+              x={labelW}
+              y={y + rowH / 4}
+              width={barLen}
+              height={rowH / 2}
+              fill={color}
+              rx={2}
+            />
+            <text
+              x={width}
+              y={y + rowH / 2 + 4}
+              fill={COLOR_HI}
+              textAnchor="end"
+              style={{
+                fontSize: 11,
+                fontFamily: "var(--font-mono, monospace)",
+                fontWeight: 500,
+              }}
+            >
+              {d.delta > 0 ? `+${d.delta}` : `${d.delta}`}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+

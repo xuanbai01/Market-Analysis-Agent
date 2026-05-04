@@ -67,8 +67,9 @@ from typing import Any
 from bs4 import BeautifulSoup
 
 from app.core.observability import log_external_call
-from app.schemas.ten_k import Extracted10KSection, Risk10KDiff
+from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
 from app.services.edgar import fetch_edgar
+from app.services.risk_categorizer import categorize_risk_paragraphs
 
 # Below this threshold, a "matched" section is assumed to be a TOC
 # entry rather than the real content. Item 1 / Item 1A in a typical
@@ -501,12 +502,27 @@ async def extract_10k_risks_diff(
         )
         added, removed, kept_count = _paragraph_diff(current_paras, prior_paras)
 
+        # Phase 4.3.B — Haiku-categorize each added/removed paragraph
+        # into one of 9 RiskCategory buckets. Short-circuits to {}
+        # internally when both lists are empty (no LLM cost on stable
+        # disclosures). Catches any failure (rate limit, network,
+        # malformed schema response) and falls back to {} so the
+        # research report still ships with the aggregate counts intact.
+        category_deltas: dict[RiskCategory, int] = {}
+        try:
+            category_deltas = await categorize_risk_paragraphs(added, removed)
+        except Exception:
+            # Logged as part of the existing log_external_call frame —
+            # outcome stays "ok" because the diff itself succeeded.
+            category_deltas = {}
+
         call.record_output(
             {
                 "available": True,
                 "added_count": len(added),
                 "removed_count": len(removed),
                 "kept_count": kept_count,
+                "category_buckets": len(category_deltas),
             }
         )
 
@@ -518,6 +534,7 @@ async def extract_10k_risks_diff(
         removed_paragraphs=removed,
         kept_paragraph_count=kept_count,
         char_delta=current_section.char_count - prior_section.char_count,
+        category_deltas=category_deltas,
     )
 
 

@@ -19,6 +19,7 @@ import {
 import type { Section } from "../lib/schemas";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { MultiLine } from "./MultiLine";
+import { NarrativeStrip } from "./NarrativeStrip";
 
 interface Props {
   ticker: string;
@@ -68,12 +69,11 @@ export function PerShareGrowthCard({ ticker, section }: Props) {
             Per-share growth · {ticker} · rebased first = 100
           </div>
           {/*
-            Phase 4.3.X (Bug 5) — narrative strip removed. PerShareGrowthCard
-            and QualityCard both read from the Quality section; rendering
-            section.summary here produced visible duplication of the prose.
-            Per-card narratives come back in 4.4 as a card-specific field
-            (``card_summary``) wired by the orchestrator. Until then, the
-            multipliers (RV / GP / OpI / FCF / OCF) are the message.
+            Phase 4.4.B — per-card narrative slot returns at the bottom
+            of the card body via NarrativeStrip. The header stays clean;
+            the strip below carries the LLM's "Revenue compounds; profit
+            doesn't" framing on a Quality-section card_narrative now
+            distinct from QualityCard's surface (no more duplication).
           */}
         </div>
         <div className="flex items-center gap-3">
@@ -119,6 +119,8 @@ export function PerShareGrowthCard({ ticker, section }: Props) {
           </div>
         ))}
       </div>
+
+      <NarrativeStrip text={section.card_narrative} />
     </section>
   );
 }

@@ -21,6 +21,7 @@ import {
   type RiskDiffBars,
 } from "../lib/risk-extract";
 import type { Section } from "../lib/schemas";
+import { NarrativeStrip } from "./NarrativeStrip";
 
 interface Props {
   section: Section;
@@ -184,6 +185,8 @@ export function RiskDiffCard({ section }: Props) {
         </span>{" "}
         ({bars.added} added · {bars.removed} dropped · {bars.kept} kept).
       </div>
+
+      <NarrativeStrip text={section.card_narrative} />
     </section>
   );
 }

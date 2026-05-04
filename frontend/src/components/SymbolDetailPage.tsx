@@ -118,7 +118,18 @@ export function SymbolDetailPage() {
           {/* Row 3 — Valuation | Per-share growth.
               Same 40/60 rhythm: ValuationCard (4-cell matrix +
               PeerScatterV2) on the left, the wide PerShareGrowth
-              MultiLine on the right. */}
+              MultiLine on the right.
+
+              Phase 4.4.B — PerShareGrowthCard reads from the Quality
+              section (which is QualityCard's primary surface). To
+              avoid the LLM's single Quality.card_narrative rendering
+              twice on the page (once in QualityCard, once in
+              PerShareGrowthCard), suppress the strip on this card by
+              passing a section view with card_narrative cleared.
+              QualityCard is the canonical home for that prose. When
+              4.5+ adds a dedicated growth section, PerShareGrowthCard
+              gets its own narrative independently.
+          */}
           <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
             <div className="lg:col-span-2">
               <ValuationCard report={reportQuery.data} />
@@ -127,7 +138,7 @@ export function SymbolDetailPage() {
               <div className="lg:col-span-3">
                 <PerShareGrowthCard
                   ticker={upperTicker}
-                  section={qualitySection}
+                  section={{ ...qualitySection, card_narrative: null }}
                 />
               </div>
             )}

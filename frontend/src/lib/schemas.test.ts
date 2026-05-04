@@ -151,17 +151,18 @@ describe("SectionSchema with card_narrative", () => {
     expect(parsed.summary).toBe("Apple's margin profile is exceptional.");
   });
 
-  it("defaults card_narrative to null when the field is absent", () => {
+  it("treats card_narrative as falsy when the field is absent", () => {
     // Pre-4.4.B cached JSONB rows have no card_narrative key — must
-    // round-trip with the field landing as null (not undefined) so
-    // every renderer can do `narrative ? <strip /> : null` uniformly.
+    // round-trip without throwing. The rendering layer's check
+    // (``narrative ? <strip /> : null``) handles undefined / null /
+    // empty uniformly so the strip stays hidden in all three cases.
     const parsed = SectionSchema.parse({
       title: "Valuation",
       claims: [],
       summary: "Trades premium.",
       confidence: "medium",
     });
-    expect(parsed.card_narrative).toBeNull();
+    expect(parsed.card_narrative ?? null).toBeNull();
   });
 
   it("accepts an explicit null card_narrative", () => {

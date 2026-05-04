@@ -207,23 +207,32 @@ def score_factuality(
     tolerance: float = 0.01,
 ) -> FactualityScore:
     """
-    For every decimal number in any ``summary`` prose, check whether it
-    matches some Claim.value in the report — under direct, sign-flip,
-    fraction-percentage, or scaled-unit equivalence (see
-    ``_matches_claim``). If a section has no summary or no claims, it
-    contributes nothing; the check is per-number, not per-section.
+    For every decimal number in any ``summary`` or ``card_narrative``
+    prose, check whether it matches some Claim.value in the report —
+    under direct, sign-flip, fraction-percentage, or scaled-unit
+    equivalence (see ``_matches_claim``). If a section has no prose
+    or no claims, it contributes nothing; the check is per-number,
+    not per-section.
+
+    Phase 4.4.B: ``card_narrative`` joined ``summary`` as a policed
+    surface so the LLM can't dodge the rubric by writing the
+    hallucination into the card-strip instead of the section narrative.
     """
     claim_values = _claim_numeric_values(report)
     found: list[float] = []
     unmatched: list[float] = []
 
     for section in report.sections:
-        if not section.summary:
-            continue
-        for n in _extract_numbers(section.summary):
-            found.append(n)
-            if not any(_matches_claim(n, v, tolerance) for v in claim_values):
-                unmatched.append(n)
+        prose_fields: list[str] = []
+        if section.summary:
+            prose_fields.append(section.summary)
+        if section.card_narrative:
+            prose_fields.append(section.card_narrative)
+        for prose in prose_fields:
+            for n in _extract_numbers(prose):
+                found.append(n)
+                if not any(_matches_claim(n, v, tolerance) for v in claim_values):
+                    unmatched.append(n)
 
     if not found:
         # Pure-prose section with no numbers — vacuously factual.

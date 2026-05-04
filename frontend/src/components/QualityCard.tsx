@@ -28,6 +28,7 @@ import type { Claim, Section } from "../lib/schemas";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { MetricRing } from "./MetricRing";
 import { MultiLine } from "./MultiLine";
+import { NarrativeStrip } from "./NarrativeStrip";
 import { Sparkline } from "./Sparkline";
 
 interface Props {
@@ -157,6 +158,8 @@ export function QualityCard({ ticker, section }: Props) {
           </button>
         </div>
       )}
+
+      <NarrativeStrip text={section.card_narrative} />
     </section>
   );
 }

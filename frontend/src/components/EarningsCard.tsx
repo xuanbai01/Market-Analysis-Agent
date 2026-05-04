@@ -19,6 +19,7 @@
 import { formatClaimValue } from "../lib/format";
 import type { Claim, ClaimHistoryPoint, Section } from "../lib/schemas";
 import { EpsBars } from "./EpsBars";
+import { NarrativeStrip } from "./NarrativeStrip";
 
 interface Props {
   section: Section;
@@ -168,6 +169,8 @@ export function EarningsCard({ section }: Props) {
       {actualHistory.length >= 1 && (
         <RecentPrints actual={actualHistory} estimate={estimateHistory} />
       )}
+
+      <NarrativeStrip text={section.card_narrative} />
     </section>
   );
 }

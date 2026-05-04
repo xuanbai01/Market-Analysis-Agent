@@ -37,3 +37,10 @@ Each entry has three parts:
 **Context:** Phase 4.1's `GET /v1/market/{ticker}/prices?range=60D` returned HTTP 500 with `ForeignKeyViolationError` for any ticker not in the seed migration (NVDA, SPY) — i.e. ~every real-world ticker. The bug was masked in tests because every test fixture explicitly seeds `Symbol(symbol="NVDA")` before adding `Candle` rows.
 **Mistake:** the prices route was added in PR #47 reusing `ingest_market_data`, which was originally only ever called after an explicit `POST /v1/symbols` had created the parent symbol row. The implicit precondition ("the symbol exists") was never tested for the cache-miss branch.
 **Rule:** when adding a route that triggers a cache-miss → upstream-fetch → DB-write path for a primary key the user provides, always include a test where the symbol does NOT pre-exist in the parent table — the database FK is the only thing that catches the gap, and 500s in production are the worst place to discover it.
+
+### Pre-push lint must mirror what CI runs, not what feels close
+
+**Date:** 2026-05-04
+**Context:** PR #54 broke the CI pipeline on `ruff check app tests` (an I001 import-block violation in `tests/test_risk_categorizer.py`) — even though I'd run `ruff check app` locally and seen "All checks passed!"
+**Mistake:** I matched the *spirit* of the lint check (lint the backend code) but not the *letter* of the CI command (`ruff check app tests` — both directories). The test file's import block had a stylistic violation I'd written when first scaffolding the file in PR #52's RED commit; it survived merge because no human ran ruff against `tests/` afterwards.
+**Rule:** verification commands must match CI verbatim, not "the equivalent." The repo's `docs/commands.md` says `uv run ruff check app && uv run pytest -v` is the pre-push sanity check; CI runs `uv run ruff check app tests`. When the two diverge, fix the docs and use the CI command. Never substitute "I ran ruff on the part I changed" for "I ran the full CI lint."

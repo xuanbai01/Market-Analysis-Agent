@@ -164,10 +164,59 @@ def _format_claim_line(c: Any) -> str:
     return f"- {c.description} = {value_repr} ({c.source.tool})"
 
 
+def _format_layout_signals_block(signals: LayoutSignals) -> list[str]:
+    """Phase 4.5.B — render the distressed-name framing context.
+
+    Returns ``[]`` when every flag is at its healthy default — there's
+    no point burning input tokens on a "all signals healthy"
+    boilerplate line. Otherwise emits a short context block listing
+    the active flags + their values so Sonnet's per-section narratives
+    can adapt their tone.
+
+    The block tells the model *what* the signals are (a list of named
+    flags) but doesn't dictate the prose. The LLM still has to ground
+    every number it cites in the section's claim list — these signals
+    are framing context, not new claims.
+    """
+    if signals == LayoutSignals():
+        return []
+
+    lines: list[str] = [
+        "## Layout signals (framing context for narratives)",
+        (
+            "This company shows signs of distress. Adapt the tone of "
+            "your section narratives accordingly — lean into the "
+            "challenge story (e.g. \"Loss is narrowing. Margin trajectory "
+            "improving but level still negative\") rather than the "
+            "exceptional-quality story. The flags below are framing "
+            "context only; every number you cite must still appear in "
+            "the section's claim list."
+        ),
+    ]
+    if signals.is_unprofitable_ttm:
+        lines.append("- is_unprofitable_ttm: TTM operating or net margin negative")
+    if signals.beat_rate_below_30pct:
+        lines.append("- beat_rate_below_30pct: bottom-decile EPS beat history")
+    if signals.cash_runway_quarters is not None:
+        lines.append(
+            f"- cash_runway_quarters: {signals.cash_runway_quarters:.1f} "
+            f"(quarters of net cash at TTM FCF burn rate)"
+        )
+    if signals.gross_margin_negative:
+        lines.append("- gross_margin_negative: selling below cost-of-revenue")
+    if signals.debt_rising_cash_falling:
+        lines.append(
+            "- debt_rising_cash_falling: balance-sheet trajectory deteriorating"
+        )
+    lines.append("")
+    return lines
+
+
 def _build_user_prompt(
     symbol: str,
     focus: Focus,
     section_claims: dict[str, list[Any]],
+    layout_signals: LayoutSignals | None = None,
 ) -> str:
     lines: list[str] = [
         f"Symbol: {symbol}",
@@ -178,6 +227,8 @@ def _build_user_prompt(
         "values from that section's claim list.",
         "",
     ]
+    if layout_signals is not None:
+        lines.extend(_format_layout_signals_block(layout_signals))
     for title, claims in section_claims.items():
         lines.append(f"## {title}")
         if not claims:
@@ -306,8 +357,26 @@ async def compose_research_report(
     # 2. Per-section claim assembly.
     section_claims = _build_section_claims(specs, outputs)
 
+    # Phase 4.5.B — derive layout signals from the assembled section
+    # claims so Sonnet's user prompt receives the distressed-name
+    # framing context. We build a temporary stub report just for the
+    # derivation; the real report (with stitched summaries) is built
+    # below. ``derive_layout_signals`` reads claim values via
+    # description matching so a stub-with-empty-summaries works fine.
+    stub_sections = [
+        Section(title=spec.title, claims=section_claims[spec.title])
+        for spec in specs
+    ]
+    stub_report = ResearchReport(
+        symbol=target,
+        generated_at=datetime.now(UTC),
+        sections=stub_sections,
+        overall_confidence=Confidence.LOW,
+    )
+    derived_signals = derive_layout_signals(stub_report)
+
     # 3. One synth call covering every section.
-    prompt = _build_user_prompt(target, focus, section_claims)
+    prompt = _build_user_prompt(target, focus, section_claims, derived_signals)
     summaries = await llm.synth_call(
         prompt=prompt,
         schema=SectionSummaries,
@@ -345,7 +414,7 @@ async def compose_research_report(
         if sector_claim is not None and isinstance(sector_claim.value, str):
             sector_value = sector_claim.value
 
-    report = ResearchReport(
+    return ResearchReport(
         symbol=target,
         generated_at=datetime.now(UTC),
         sections=sections,
@@ -353,11 +422,12 @@ async def compose_research_report(
         tool_calls_audit=audit,
         name=name_value,
         sector=sector_value,
+        # Phase 4.5.A — adaptive-layout signals. We derived these
+        # before the synth call (so the prompt could include them as
+        # framing context); reuse the same value here rather than
+        # re-deriving over identical claims.
+        layout_signals=derived_signals,
     )
-    # Phase 4.5.A — derive adaptive-layout signals from the assembled
-    # report. Pure transform — runs after section assembly so it can
-    # read the same claim values the dashboard will read.
-    return report.model_copy(update={"layout_signals": derive_layout_signals(report)})
 
 
 # Phase 4.3.X — descriptions used to identify the metadata claims the

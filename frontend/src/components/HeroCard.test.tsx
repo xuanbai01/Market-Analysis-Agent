@@ -368,4 +368,98 @@ describe("HeroCard", () => {
       container.querySelector("[data-testid='line-chart-hover-tooltip']"),
     ).not.toBeNull();
   });
+
+  // ── Phase 4.5.A — distressed-name metric swap ─────────────────────
+
+  function distressedReport(): ResearchReport {
+    const report = fakeReport({
+      symbol: "RIVN",
+      name: "Rivian Automotive",
+      sector: "ev_auto",
+      layout_signals: {
+        is_unprofitable_ttm: true,
+        beat_rate_below_30pct: true,
+        cash_runway_quarters: 4.5,
+        gross_margin_negative: true,
+        debt_rising_cash_falling: true,
+      },
+    });
+    // Add a P/S claim so the swap has something to render.
+    report.sections = [
+      ...report.sections,
+      {
+        title: "Valuation",
+        summary: "",
+        confidence: "medium",
+        claims: [
+          {
+            description: "Price-to-sales ratio (trailing 12 months)",
+            value: 1.84,
+            source: { tool: "yfinance.fundamentals", fetched_at: "2026-05-02T14:00:00+00:00" },
+            history: [],
+          },
+        ],
+      },
+    ];
+    return report;
+  }
+
+  it("swaps Forward P/E to P/Sales when is_unprofitable_ttm", async () => {
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
+    renderHero(distressedReport());
+    await waitFor(() =>
+      expect(screen.getByText(/p\/sales/i)).toBeInTheDocument(),
+    );
+    // Forward P/E label is gone in distressed mode.
+    expect(screen.queryByText(/forward p\/e/i)).toBeNull();
+    // P/S value renders verbatim.
+    expect(screen.getByText(/1\.84/)).toBeInTheDocument();
+  });
+
+  it("swaps ROIC to Cash Runway when is_unprofitable_ttm", async () => {
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
+    renderHero(distressedReport());
+    await waitFor(() =>
+      expect(screen.getByText(/cash runway/i)).toBeInTheDocument(),
+    );
+    // ROIC label is gone in distressed mode.
+    expect(screen.queryByText(/roic ttm/i)).toBeNull();
+    // Runway formats as "~4.5 quarters" (or similar quarterly framing).
+    const runwayValue = screen.getByText(/4\.5/);
+    expect(runwayValue).toBeInTheDocument();
+  });
+
+  it("colors FCF margin red when fcf_margin is negative on distressed report", async () => {
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
+    const report = distressedReport();
+    // Override FCF margin to negative.
+    const qualitySection = report.sections.find((s) => s.title === "Quality");
+    const fcfClaim = qualitySection?.claims.find(
+      (c) => c.description === "Free cash flow margin",
+    );
+    if (fcfClaim) fcfClaim.value = -0.52;
+    const { container } = renderHero(report);
+    await waitFor(() =>
+      expect(screen.getByText(/fcf margin/i)).toBeInTheDocument(),
+    );
+    // The FCF stat tile carries the strata-neg accent class on the
+    // value when the underlying value is negative.
+    const fcfStat = container.querySelector("[data-stat='hero-fcf-margin']");
+    expect(fcfStat).not.toBeNull();
+    const valueClass =
+      fcfStat?.querySelector("[data-stat-value]")?.className ?? "";
+    expect(valueClass).toMatch(/text-strata-neg/);
+  });
+
+  it("keeps the default Forward P/E + ROIC trio when not distressed", async () => {
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
+    renderHero(fakeReport()); // no layout_signals on healthy fixture
+    await waitFor(() =>
+      expect(screen.getByText(/forward p\/e/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/forward p\/e/i)).toBeInTheDocument();
+    expect(screen.getByText(/roic/i)).toBeInTheDocument();
+    expect(screen.queryByText(/p\/sales/i)).toBeNull();
+    expect(screen.queryByText(/cash runway/i)).toBeNull();
+  });
 });

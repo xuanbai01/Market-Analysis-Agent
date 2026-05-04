@@ -12,6 +12,7 @@ import { describe, it, expect } from "vitest";
 import {
   ClaimHistoryPointSchema,
   ClaimSchema,
+  LayoutSignalsSchema,
   ResearchReportSchema,
   ResearchReportSummariesSchema,
   ResearchReportSummarySchema,
@@ -174,6 +175,84 @@ describe("SectionSchema with card_narrative", () => {
       confidence: "low",
     });
     expect(parsed.card_narrative).toBeNull();
+  });
+});
+
+// ── Phase 4.5: LayoutSignals ─────────────────────────────────────────
+
+describe("LayoutSignalsSchema", () => {
+  it("parses an explicit healthy default", () => {
+    const parsed = LayoutSignalsSchema.parse({
+      is_unprofitable_ttm: false,
+      beat_rate_below_30pct: false,
+      cash_runway_quarters: null,
+      gross_margin_negative: false,
+      debt_rising_cash_falling: false,
+    });
+    expect(parsed.is_unprofitable_ttm).toBe(false);
+    expect(parsed.cash_runway_quarters).toBeNull();
+  });
+
+  it("parses an all-distressed payload with a numeric runway", () => {
+    const parsed = LayoutSignalsSchema.parse({
+      is_unprofitable_ttm: true,
+      beat_rate_below_30pct: true,
+      cash_runway_quarters: 4.5,
+      gross_margin_negative: true,
+      debt_rising_cash_falling: true,
+    });
+    expect(parsed.is_unprofitable_ttm).toBe(true);
+    expect(parsed.cash_runway_quarters).toBe(4.5);
+  });
+
+  it("defaults every flag to its healthy value when fields are absent", () => {
+    // The LayoutSignals object embedded in a pre-4.5 cached report
+    // will be missing entirely; per-flag defaults guard the case
+    // where a partial object slips through (e.g. only one signal set).
+    const parsed = LayoutSignalsSchema.parse({});
+    expect(parsed.is_unprofitable_ttm).toBe(false);
+    expect(parsed.beat_rate_below_30pct).toBe(false);
+    expect(parsed.cash_runway_quarters).toBeNull();
+    expect(parsed.gross_margin_negative).toBe(false);
+    expect(parsed.debt_rising_cash_falling).toBe(false);
+  });
+});
+
+describe("ResearchReportSchema layout_signals", () => {
+  it("defaults layout_signals to healthy when the field is absent", () => {
+    // Pre-4.5 cached JSONB rows have no layout_signals key. They must
+    // round-trip with the field as a healthy default so the
+    // dashboard's adaptive UI stays in its non-distressed mode.
+    const payload = {
+      symbol: "AAPL",
+      generated_at: "2026-04-29T14:05:00+00:00",
+      sections: [],
+      overall_confidence: "high",
+      tool_calls_audit: [],
+    };
+    const parsed = ResearchReportSchema.parse(payload);
+    expect(parsed.layout_signals.is_unprofitable_ttm).toBe(false);
+    expect(parsed.layout_signals.cash_runway_quarters).toBeNull();
+  });
+
+  it("threads layout_signals through when present in the payload", () => {
+    const payload = {
+      symbol: "RIVN",
+      generated_at: "2026-04-29T14:05:00+00:00",
+      sections: [],
+      overall_confidence: "low",
+      tool_calls_audit: [],
+      layout_signals: {
+        is_unprofitable_ttm: true,
+        beat_rate_below_30pct: true,
+        cash_runway_quarters: 4.5,
+        gross_margin_negative: true,
+        debt_rising_cash_falling: true,
+      },
+    };
+    const parsed = ResearchReportSchema.parse(payload);
+    expect(parsed.layout_signals.is_unprofitable_ttm).toBe(true);
+    expect(parsed.layout_signals.cash_runway_quarters).toBe(4.5);
   });
 });
 

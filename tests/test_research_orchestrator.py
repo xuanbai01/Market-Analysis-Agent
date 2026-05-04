@@ -956,6 +956,128 @@ async def test_card_narrative_empty_string_normalized_to_none(
     assert by_title["Earnings"].card_narrative == "real prose."
 
 
+async def test_layout_signals_attached_to_fresh_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 4.5.A — orchestrator computes ``layout_signals`` and
+    attaches them to the ``ResearchReport`` it returns. Healthy
+    fixture data → all flags False/None."""
+    from app.schemas.research import LayoutSignals
+
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    report = await compose_research_report("AAPL", Focus.FULL)
+
+    assert isinstance(report.layout_signals, LayoutSignals)
+    # Default fixture descriptions don't match the real Operating
+    # margin / Net profit margin / etc. strings — derive returns the
+    # healthy default.
+    assert report.layout_signals.is_unprofitable_ttm is False
+    assert report.layout_signals.cash_runway_quarters is None
+
+
+async def test_layout_signals_distressed_fixture_lights_signals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the fundamentals tool ships claims with the real
+    ``_DESCRIPTIONS`` strings AND distressed values, the orchestrator's
+    derived signals reflect the distress."""
+    distressed_fundamentals = {
+        "operating_margin": _claim("Operating margin", -0.41),
+        "profit_margin": _claim("Net profit margin", -0.55),
+        "gross_margin": _claim("Gross margin", -0.18),
+    }
+
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": distressed_fundamentals,
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    report = await compose_research_report("RIVN", Focus.FULL)
+
+    assert report.layout_signals.is_unprofitable_ttm is True
+    assert report.layout_signals.gross_margin_negative is True
+
+
+def test_backfill_layout_signals_for_pre_4_5_cached_report() -> None:
+    """Pre-4.5 cached reports lack the derived signals. The backfill
+    helper recomputes them from the section claims so the dashboard's
+    adaptive UI works on cache hits without re-running the LLM."""
+    from app.schemas.research import LayoutSignals
+    from app.services.research_orchestrator import backfill_layout_signals
+
+    distressed_claim = Claim(
+        description="Operating margin",
+        value=-0.41,
+        source=Source(tool="yfinance.fundamentals", fetched_at=datetime.now(UTC)),
+    )
+    report = ResearchReport(
+        symbol="RIVN",
+        generated_at=datetime.now(UTC),
+        sections=[Section(title="Quality", claims=[distressed_claim], confidence=Confidence.HIGH)],
+        overall_confidence=Confidence.HIGH,
+        # Default healthy LayoutSignals — simulating a pre-4.5 cache row.
+        layout_signals=LayoutSignals(),
+    )
+
+    backfilled = backfill_layout_signals(report)
+
+    assert backfilled.layout_signals.is_unprofitable_ttm is True
+    # Original input not mutated.
+    assert report.layout_signals.is_unprofitable_ttm is False
+
+
+def test_backfill_layout_signals_no_op_when_already_distressed() -> None:
+    """If the cached report already has distressed signals (post-4.5
+    cache row), the backfill is a no-op — never overwrite a fresh
+    derivation with another from the same data."""
+    from app.schemas.research import LayoutSignals
+    from app.services.research_orchestrator import backfill_layout_signals
+
+    report = ResearchReport(
+        symbol="RIVN",
+        generated_at=datetime.now(UTC),
+        sections=[],
+        overall_confidence=Confidence.LOW,
+        layout_signals=LayoutSignals(is_unprofitable_ttm=True, cash_runway_quarters=4.5),
+    )
+
+    backfilled = backfill_layout_signals(report)
+    # Same instance — no mutation, no copy.
+    assert backfilled is report
+
+
 def test_system_prompt_documents_card_narrative_as_distinct_field() -> None:
     """The synth-call system prompt must instruct the model that
     ``card_narrative`` is a 1-2 sentence headline distinct from the

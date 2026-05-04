@@ -31,8 +31,17 @@ function claim(description: string, value: ClaimValue): Claim {
   };
 }
 
-function section(claims: Claim[]): Section {
-  return { title: "Risk Factors", claims, summary: "", confidence: "high" };
+function section(
+  claims: Claim[],
+  cardNarrative: string | null = null,
+): Section {
+  return {
+    title: "Risk Factors",
+    claims,
+    summary: "",
+    confidence: "high",
+    card_narrative: cardNarrative,
+  };
 }
 
 const FULL: Claim[] = [
@@ -154,5 +163,24 @@ describe("RiskDiffCard", () => {
     // The "Supply concentration" label appears (case-insensitive,
     // whatever the card chooses for display).
     expect(labels.some((t) => /supply/i.test(t))).toBe(true);
+  });
+
+  // Phase 4.4.B — per-card narrative strip. Sits below the existing
+  // deterministic "Disclosure expanded ..." prose so the LLM's
+  // higher-info framing pairs with the quantitative anchor.
+  it("renders the card_narrative strip when present", () => {
+    const sec = section(
+      FULL,
+      "Liquidity language tripled. Going-concern framing surfaces.",
+    );
+    const { getByTestId } = render(<RiskDiffCard section={sec} />);
+    expect(getByTestId("card-narrative").textContent).toContain(
+      "Liquidity language tripled.",
+    );
+  });
+
+  it("hides the card_narrative strip when null", () => {
+    const { queryByTestId } = render(<RiskDiffCard section={section(FULL)} />);
+    expect(queryByTestId("card-narrative")).toBeNull();
   });
 });

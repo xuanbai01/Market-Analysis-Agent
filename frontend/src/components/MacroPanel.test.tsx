@@ -46,8 +46,18 @@ function claim(
   };
 }
 
-function section(claims: Claim[], summary = ""): Section {
-  return { title: "Macro", claims, summary, confidence: "high" };
+function section(
+  claims: Claim[],
+  summary = "",
+  cardNarrative: string | null = null,
+): Section {
+  return {
+    title: "Macro",
+    claims,
+    summary,
+    confidence: "high",
+    card_narrative: cardNarrative,
+  };
 }
 
 const FULL: Claim[] = [
@@ -96,5 +106,25 @@ describe("MacroPanel", () => {
     const charts = container.querySelectorAll("[data-testid='line-chart']");
     expect(charts.length).toBe(0);
     expect(getByText(/macro context unavailable/i)).not.toBeNull();
+  });
+
+  // Phase 4.4.B — per-card narrative strip.
+  it("renders the card_narrative strip when present", () => {
+    const sec = section(
+      FULL,
+      "",
+      "Disinflation continues. 10Y has compressed 43 bps from peak.",
+    );
+    const { getByTestId } = render(<MacroPanel section={sec} />);
+    expect(getByTestId("card-narrative").textContent).toContain(
+      "Disinflation continues.",
+    );
+  });
+
+  it("hides the card_narrative strip when null", () => {
+    const { queryByTestId } = render(
+      <MacroPanel section={section(FULL)} />,
+    );
+    expect(queryByTestId("card-narrative")).toBeNull();
   });
 });

@@ -451,6 +451,59 @@ def test_factuality_history_matches_across_sections() -> None:
     assert result.score == 1.0
 
 
+# ── Phase 4.4.B — card_narrative is policed alongside summary ────────
+
+
+def test_factuality_scores_numbers_in_card_narrative() -> None:
+    """Numbers cited in ``card_narrative`` must trace to a Claim, same
+    as numbers in ``summary``. Otherwise the LLM could hallucinate
+    freely in the card-strip and dodge the rubric."""
+    section = Section(
+        title="Earnings",
+        claims=[Claim(description="EPS TTM", value=-3.31, source=_src())],
+        summary="EPS sits below break-even.",
+        card_narrative="Loss is narrowing. EPS TTM at -3.31.",
+    )
+    result = score_factuality(_report([section]))
+    # Both summary and card_narrative numbers must match — score is 1.0
+    # because every cited number traces to a claim.
+    assert result.score == 1.0
+    # The cited number from the card_narrative is in the found list.
+    assert 3.31 in result.summary_numbers
+
+
+def test_factuality_flags_hallucinated_number_in_card_narrative() -> None:
+    """A number in card_narrative that doesn't trace to any claim is
+    counted as unmatched."""
+    section = Section(
+        title="Earnings",
+        claims=[Claim(description="EPS TTM", value=-3.31, source=_src())],
+        summary="EPS sits below break-even.",
+        card_narrative="Loss is narrowing. EPS climbed from -8.42 to -3.31.",
+    )
+    result = score_factuality(_report([section]))
+    # -8.42 isn't in any claim and isn't in any history point. The
+    # rubric should flag it.
+    assert 8.42 in result.unmatched_numbers
+    assert result.score < 1.0
+
+
+def test_factuality_skips_card_narrative_when_none() -> None:
+    """Pre-4.4.B reports (or sections where the model declined a
+    narrative) have ``card_narrative=None``. The rubric must skip
+    cleanly — no numbers extracted, no false positives."""
+    section = Section(
+        title="Valuation",
+        claims=[Claim(description="P/E", value=32.5, source=_src())],
+        summary="P/E of 32.5.",
+        card_narrative=None,
+    )
+    result = score_factuality(_report([section]))
+    assert result.score == 1.0
+    # Only summary's "32.5" was extracted; card_narrative contributed nothing.
+    assert result.summary_numbers == [32.5]
+
+
 # ── Combined grade ───────────────────────────────────────────────────
 
 

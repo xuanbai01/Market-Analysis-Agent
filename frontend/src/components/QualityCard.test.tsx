@@ -43,8 +43,18 @@ function claim(
   };
 }
 
-function section(claims: Claim[], summary = ""): Section {
-  return { title: "Quality", claims, summary, confidence: "high" };
+function section(
+  claims: Claim[],
+  summary = "",
+  cardNarrative: string | null = null,
+): Section {
+  return {
+    title: "Quality",
+    claims,
+    summary,
+    confidence: "high",
+    card_narrative: cardNarrative,
+  };
 }
 
 const FULL_CLAIMS: Claim[] = [
@@ -164,5 +174,28 @@ describe("QualityCard", () => {
     expect(text).toMatch(/74/);
     expect(text).toMatch(/48/);
     expect(text).toMatch(/42/);
+  });
+
+  // Phase 4.4.B — per-card narrative strip at bottom of card body.
+  it("renders the card_narrative strip when present", () => {
+    const { getByTestId } = render(
+      <QualityCard
+        ticker="NVDA"
+        section={section(
+          FULL_CLAIMS,
+          "Long broad summary.",
+          "Trajectory positive, level positive. Margins stable.",
+        )}
+      />,
+    );
+    const strip = getByTestId("card-narrative");
+    expect(strip.textContent).toContain("Trajectory positive");
+  });
+
+  it("hides the card_narrative strip when null", () => {
+    const { queryByTestId } = render(
+      <QualityCard ticker="NVDA" section={section(FULL_CLAIMS, "summary only")} />,
+    );
+    expect(queryByTestId("card-narrative")).toBeNull();
   });
 });

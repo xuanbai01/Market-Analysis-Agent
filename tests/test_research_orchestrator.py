@@ -806,3 +806,177 @@ async def test_full_focus_invokes_business_info_and_news_tools(
     titles = [s.title for s in report.sections]
     assert "Business" in titles
     assert "News" in titles
+
+
+# ── Phase 4.4.B — per-card section narratives ────────────────────────
+
+
+async def test_card_narrative_threaded_through_when_synth_returns_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``SectionSummary.card_narrative`` from the synth call lands on
+    ``Section.card_narrative`` in the assembled report — distinct from
+    ``Section.summary`` which holds the longer narrative."""
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    summaries = SectionSummaries(
+        sections=[
+            SectionSummary(
+                title="Quality",
+                summary="Apple's margin profile is exceptional across the board.",
+                card_narrative=(
+                    "Trajectory positive, level positive. Gross margin "
+                    "stable in mid-40s; ROE elite."
+                ),
+            ),
+            SectionSummary(
+                title="Earnings",
+                summary="Beat consensus 17 of 20.",
+                card_narrative="Loss is narrowing. EPS climbed steadily.",
+            ),
+            SectionSummary(title="Valuation", summary="Trades premium."),
+            SectionSummary(title="Capital Allocation", summary="Buybacks dominant."),
+            SectionSummary(title="Peers", summary="Premium to peers."),
+            SectionSummary(title="Risk Factors", summary="Stable."),
+            SectionSummary(title="Macro", summary="Rate-sensitive."),
+        ]
+    )
+    _patch_synth(monkeypatch, summaries)
+
+    report = await compose_research_report("AAPL", Focus.FULL)
+
+    by_title = {s.title: s for s in report.sections}
+    assert by_title["Quality"].card_narrative == (
+        "Trajectory positive, level positive. Gross margin "
+        "stable in mid-40s; ROE elite."
+    )
+    assert by_title["Earnings"].card_narrative == (
+        "Loss is narrowing. EPS climbed steadily."
+    )
+    # Sections whose synth output lacked card_narrative land as None,
+    # not empty string — the rendering layer treats them differently
+    # (None hides the strip; "" would render an empty card-within-card).
+    assert by_title["Valuation"].card_narrative is None
+    # ``summary`` and ``card_narrative`` are independent surfaces.
+    assert by_title["Quality"].summary == (
+        "Apple's margin profile is exceptional across the board."
+    )
+
+
+async def test_card_narrative_falls_back_to_none_when_synth_omits_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the synth call omits a section title entirely, that section's
+    ``card_narrative`` is None (the orchestrator already supplies a
+    fallback ``summary`` — there's no equivalent fallback prose for the
+    card narrative since blank > a generic placeholder)."""
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    # Synth omits Macro entirely.
+    _patch_synth(
+        monkeypatch,
+        SectionSummaries(
+            sections=[
+                SectionSummary(title=t, summary=f"text for {t}", card_narrative=f"narrative for {t}")
+                for t in [
+                    "Valuation", "Quality", "Capital Allocation",
+                    "Earnings", "Peers", "Risk Factors",
+                ]
+            ]
+        ),
+    )
+
+    report = await compose_research_report("AAPL", Focus.FULL)
+
+    by_title = {s.title: s for s in report.sections}
+    macro = by_title["Macro"]
+    # Fallback summary still fires (existing 4.0 behavior).
+    assert macro.summary
+    # Card narrative has no fallback — None when missing.
+    assert macro.card_narrative is None
+    # The sections that were present still get their card narrative.
+    assert by_title["Valuation"].card_narrative == "narrative for Valuation"
+
+
+async def test_card_narrative_empty_string_normalized_to_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If synth emits ``card_narrative=""`` (model declined to write
+    one), the orchestrator stores None so the rendering layer's
+    ``narrative ? <strip/> : null`` check uniformly hides the strip."""
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    _patch_synth(
+        monkeypatch,
+        SectionSummaries(
+            sections=[
+                SectionSummary(title="Valuation", summary="ok", card_narrative=""),
+                SectionSummary(title="Quality", summary="ok", card_narrative="   "),
+                SectionSummary(title="Capital Allocation", summary="ok"),
+                SectionSummary(title="Earnings", summary="ok", card_narrative="real prose."),
+                SectionSummary(title="Peers", summary="ok"),
+                SectionSummary(title="Risk Factors", summary="ok"),
+                SectionSummary(title="Macro", summary="ok"),
+            ]
+        ),
+    )
+
+    report = await compose_research_report("AAPL", Focus.FULL)
+
+    by_title = {s.title: s for s in report.sections}
+    assert by_title["Valuation"].card_narrative is None
+    assert by_title["Quality"].card_narrative is None
+    assert by_title["Earnings"].card_narrative == "real prose."
+
+
+def test_system_prompt_documents_card_narrative_as_distinct_field() -> None:
+    """The synth-call system prompt must instruct the model that
+    ``card_narrative`` is a 1-2 sentence headline distinct from the
+    longer ``summary`` — otherwise the model writes the same prose
+    into both slots."""
+    prompt = orch_module._SYSTEM_PROMPT
+    lower = prompt.lower()
+    # Both surfaces are referenced by name.
+    assert "card_narrative" in prompt
+    assert "summary" in lower
+    # The prompt must distinguish their roles — at least one of these
+    # framings is present (we don't pin the exact wording, just that
+    # the distinction is articulated).
+    distinguishes = (
+        "1-2 sentence" in lower
+        or "1–2 sentence" in lower
+        or "shorter" in lower
+        or "punchy" in lower
+        or "headline" in lower
+    )
+    assert distinguishes, (
+        "system prompt should distinguish card_narrative (1-2 sentence "
+        "headline) from summary (2-4 sentence narrative)"
+    )

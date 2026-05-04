@@ -194,4 +194,21 @@ describe("EarningsCard", () => {
     const { container } = render(<EarningsCard section={noHistory} />);
     expect(container.querySelector("[data-testid='recent-prints']")).toBeNull();
   });
+
+  // Phase 4.4.B — per-card narrative strip.
+  it("renders the card_narrative strip when present", () => {
+    const sec = fakeEarningsSection();
+    sec.card_narrative = "Loss is narrowing. EPS climbed steadily over 20Q.";
+    const { getByTestId } = render(<EarningsCard section={sec} />);
+    expect(getByTestId("card-narrative").textContent).toContain(
+      "Loss is narrowing.",
+    );
+  });
+
+  it("hides the card_narrative strip when null", () => {
+    const sec = fakeEarningsSection();
+    sec.card_narrative = null;
+    const { queryByTestId } = render(<EarningsCard section={sec} />);
+    expect(queryByTestId("card-narrative")).toBeNull();
+  });
 });

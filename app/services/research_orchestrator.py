@@ -58,9 +58,11 @@ from app.schemas.research import (
     SectionSummaries,
 )
 from app.services import llm
+from app.services.business_info import fetch_business_info
 from app.services.earnings import fetch_earnings
 from app.services.fundamentals import fetch_fundamentals
 from app.services.macro import fetch_macro
+from app.services.news import fetch_news
 from app.services.peers import fetch_peers
 from app.services.research_confidence import score_section
 from app.services.research_tool_registry import (
@@ -81,6 +83,10 @@ TOOL_DISPATCH: dict[str, Callable[[str], Awaitable[Any]]] = {
     "fetch_macro": fetch_macro,
     "extract_10k_business": extract_10k_business,
     "extract_10k_risks_diff": extract_10k_risks_diff,
+    # Phase 4.4.A — Business + News tools wired in so the
+    # ContextBand has data to render.
+    "fetch_business_info": fetch_business_info,
+    "fetch_news": fetch_news,
 }
 
 

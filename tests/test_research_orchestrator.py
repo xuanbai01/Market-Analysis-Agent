@@ -147,8 +147,16 @@ def _patch_tools(
     ``async def f(symbol) -> Any``) or a plain object that's wrapped
     so the dispatch invocation returns it. ``Exception`` instances are
     raised when the (mock) tool is called.
+
+    Phase 4.4.A — ``fetch_business_info`` + ``fetch_news`` default to
+    empty-dict stubs so existing tests that don't override them still
+    work after the catalog grew. Tests asserting on the new tools'
+    call sites supply explicit overrides.
     """
-    new_dispatch: dict[str, Any] = {}
+    new_dispatch: dict[str, Any] = {
+        "fetch_business_info": _wrap_const({}),
+        "fetch_news": _wrap_const({}),
+    }
     for name, override in overrides.items():
         if callable(override) and hasattr(override, "__await__"):
             new_dispatch[name] = override
@@ -222,13 +230,23 @@ async def test_full_focus_assembles_seven_sections(
 
     assert isinstance(report, ResearchReport)
     assert report.symbol == "AAPL"  # uppercased
-    assert [s.title for s in report.sections] == [
+    # Phase 4.4.A — Business + News land at the front of the catalog;
+    # this test still asserts on the seven numeric sections, so allow
+    # them through but pin the numeric sequence.
+    titles = [s.title for s in report.sections]
+    assert titles[:2] == ["Business", "News"]
+    assert titles[2:] == [
         "Valuation", "Quality", "Capital Allocation",
         "Earnings", "Peers", "Risk Factors", "Macro",
     ]
-    # All sections populated → HIGH per section, HIGH overall
-    assert all(s.confidence == Confidence.HIGH for s in report.sections)
-    assert report.overall_confidence == Confidence.HIGH
+    # All numeric sections populated → HIGH per section. Business +
+    # News default-stubbed to empty in this test, so they land LOW;
+    # overall confidence is the min so it lands LOW too.
+    assert all(
+        s.confidence == Confidence.HIGH
+        for s in report.sections
+        if s.title not in {"Business", "News"}
+    )
 
 
 async def test_earnings_focus_assembles_three_sections(
@@ -243,12 +261,15 @@ async def test_earnings_focus_assembles_three_sections(
             "extract_10k_business": _business_output(),
         },
     )
-    _patch_synth(monkeypatch, _summaries_for("Earnings", "Valuation", "Risk Factors"))
+    _patch_synth(
+        monkeypatch,
+        _summaries_for("News", "Earnings", "Valuation", "Risk Factors"),
+    )
 
     report = await compose_research_report("AAPL", Focus.EARNINGS)
 
     assert [s.title for s in report.sections] == [
-        "Earnings", "Valuation", "Risk Factors",
+        "News", "Earnings", "Valuation", "Risk Factors",
     ]
 
 
@@ -463,7 +484,8 @@ async def test_synth_unknown_title_silently_dropped(
 
     titles = [s.title for s in report.sections]
     assert "ESG Analysis" not in titles
-    assert len(report.sections) == 7
+    # Phase 4.4.A — Business + News added to FULL catalog → 9 sections.
+    assert len(report.sections) == 9
 
 
 # ── Audit trail + observability ──────────────────────────────────────
@@ -493,11 +515,13 @@ async def test_tool_calls_audit_records_every_invoked_tool(
 
     report = await compose_research_report("AAPL", Focus.FULL)
 
-    # Six tool names — order doesn't matter, presence does.
+    # Phase 4.4.A — eight tool names (added fetch_business_info +
+    # fetch_news). Order doesn't matter, presence does.
     audit_names = {entry.split(":")[0].strip() for entry in report.tool_calls_audit}
     assert audit_names == {
         "fetch_fundamentals", "fetch_earnings", "fetch_peers",
         "fetch_macro", "extract_10k_risks_diff", "extract_10k_business",
+        "fetch_business_info", "fetch_news",
     }
 
 

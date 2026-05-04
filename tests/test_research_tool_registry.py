@@ -79,11 +79,13 @@ def _make_fundamentals_output() -> dict[str, Claim]:
 # ── Focus enum + section catalog ──────────────────────────────────────
 
 
-def test_focus_full_has_seven_sections() -> None:
-    """Catalog: Valuation, Quality, Capital Allocation, Earnings, Peers,
-    Risk Factors, Macro."""
+def test_focus_full_section_catalog() -> None:
+    """Catalog (Phase 4.4.A): Business + News (ContextBand) followed
+    by the 7 numeric sections."""
     titles = [s.title for s in SECTIONS_BY_FOCUS[Focus.FULL]]
     assert titles == [
+        "Business",
+        "News",
         "Valuation",
         "Quality",
         "Capital Allocation",
@@ -94,10 +96,12 @@ def test_focus_full_has_seven_sections() -> None:
     ]
 
 
-def test_focus_earnings_has_three_sections() -> None:
-    """Catalog: Earnings, Valuation, Risk Factors — earnings-event lens."""
+def test_focus_earnings_section_catalog() -> None:
+    """Catalog (Phase 4.4.A): News (event-relevant) + Earnings +
+    Valuation + Risk Factors. Business omitted — full-research-only
+    context."""
     titles = [s.title for s in SECTIONS_BY_FOCUS[Focus.EARNINGS]]
-    assert titles == ["Earnings", "Valuation", "Risk Factors"]
+    assert titles == ["News", "Earnings", "Valuation", "Risk Factors"]
 
 
 def test_every_focus_section_declares_at_least_one_tool() -> None:
@@ -113,7 +117,8 @@ def test_every_focus_section_declares_at_least_one_tool() -> None:
 
 
 def test_tools_for_full_lists_every_required_tool() -> None:
-    """Full mode invokes the union of tools across all 7 sections."""
+    """Full mode invokes the union of tools across all 9 sections
+    (Phase 4.4.A added Business + News)."""
     assert tools_for(Focus.FULL) == {
         "fetch_fundamentals",
         "fetch_earnings",
@@ -121,6 +126,8 @@ def test_tools_for_full_lists_every_required_tool() -> None:
         "fetch_macro",
         "extract_10k_risks_diff",
         "extract_10k_business",
+        "fetch_business_info",
+        "fetch_news",
     }
 
 

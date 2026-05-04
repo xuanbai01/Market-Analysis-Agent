@@ -224,35 +224,101 @@ export function HeroCard({ report }: Props) {
           )}
         </div>
 
-        {/* ── RIGHT: 3 featured stats ── */}
+        {/* ── RIGHT: 3 featured stats ──
+            Phase 4.5.A — distressed-mode swap. When the report's
+            ``layout_signals.is_unprofitable_ttm`` fires, the right-
+            column trio reframes around survival rather than quality:
+
+              Forward P/E → P/Sales  (P/E meaningless for negative E)
+              ROIC TTM    → Cash Runway (~Q remaining at TTM burn rate)
+              FCF margin: label kept, value colored red when negative.
+
+            Healthy reports keep the original Forward P/E + ROIC trio.
+            The swap is feature-additive — pre-4.5 cached reports
+            (where ``layout_signals`` defaults to healthy) keep their
+            existing rendering.
+        */}
         <div className="flex flex-col gap-4 border-l border-strata-line pl-6">
-          {hero?.forwardPE && (
-            <FeaturedStat
-              label="Forward P/E"
-              value={`${hero.forwardPE.value.toFixed(1)}×`}
-              sub={
-                hero.forwardPE.peerMedian
-                  ? `peer median ${hero.forwardPE.peerMedian.toFixed(1)}×`
-                  : null
-              }
-              accentClass="text-strata-valuation"
-            />
-          )}
-          {hero?.roicTTM !== null && hero?.roicTTM !== undefined && (
-            <FeaturedStat
-              label="ROIC TTM"
-              value={formatClaimValue(hero.roicTTM, "fraction")}
-              sub={hero.roicTTM > 0.4 ? "top decile" : null}
-              accentClass="text-strata-quality"
-            />
-          )}
-          {hero?.fcfMargin !== null && hero?.fcfMargin !== undefined && (
-            <FeaturedStat
-              label="FCF margin"
-              value={formatClaimValue(hero.fcfMargin, "fraction")}
-              sub={null}
-              accentClass="text-strata-cashflow"
-            />
+          {report.layout_signals.is_unprofitable_ttm ? (
+            // Distressed-name trio.
+            <>
+              {hero?.priceToSales && (
+                <FeaturedStat
+                  label="P/Sales"
+                  value={`${hero.priceToSales.value.toFixed(2)}×`}
+                  sub={
+                    hero.priceToSales.peerMedian
+                      ? `peer median ${hero.priceToSales.peerMedian.toFixed(2)}×`
+                      : null
+                  }
+                  accentClass="text-strata-valuation"
+                />
+              )}
+              <FeaturedStat
+                label="Cash runway"
+                value={
+                  report.layout_signals.cash_runway_quarters !== null
+                    ? `~${report.layout_signals.cash_runway_quarters.toFixed(1)} Q`
+                    : "—"
+                }
+                sub={
+                  report.layout_signals.cash_runway_quarters !== null &&
+                  report.layout_signals.cash_runway_quarters < 6
+                    ? "raise likely needed"
+                    : null
+                }
+                accentClass="text-strata-risk"
+                valueAccent={
+                  report.layout_signals.cash_runway_quarters !== null &&
+                  report.layout_signals.cash_runway_quarters < 6
+                    ? "text-strata-neg"
+                    : null
+                }
+              />
+              {hero?.fcfMargin !== null && hero?.fcfMargin !== undefined && (
+                <FeaturedStat
+                  label="FCF margin"
+                  value={formatClaimValue(hero.fcfMargin, "fraction")}
+                  sub={null}
+                  accentClass="text-strata-cashflow"
+                  valueAccent={hero.fcfMargin < 0 ? "text-strata-neg" : null}
+                  statId="hero-fcf-margin"
+                />
+              )}
+            </>
+          ) : (
+            // Healthy default trio.
+            <>
+              {hero?.forwardPE && (
+                <FeaturedStat
+                  label="Forward P/E"
+                  value={`${hero.forwardPE.value.toFixed(1)}×`}
+                  sub={
+                    hero.forwardPE.peerMedian
+                      ? `peer median ${hero.forwardPE.peerMedian.toFixed(1)}×`
+                      : null
+                  }
+                  accentClass="text-strata-valuation"
+                />
+              )}
+              {hero?.roicTTM !== null && hero?.roicTTM !== undefined && (
+                <FeaturedStat
+                  label="ROIC TTM"
+                  value={formatClaimValue(hero.roicTTM, "fraction")}
+                  sub={hero.roicTTM > 0.4 ? "top decile" : null}
+                  accentClass="text-strata-quality"
+                />
+              )}
+              {hero?.fcfMargin !== null && hero?.fcfMargin !== undefined && (
+                <FeaturedStat
+                  label="FCF margin"
+                  value={formatClaimValue(hero.fcfMargin, "fraction")}
+                  sub={null}
+                  accentClass="text-strata-cashflow"
+                  statId="hero-fcf-margin"
+                />
+              )}
+            </>
           )}
         </div>
       </div>
@@ -265,20 +331,33 @@ function FeaturedStat({
   value,
   sub,
   accentClass,
+  valueAccent,
+  statId,
 }: {
   label: string;
   value: string;
   sub: string | null;
   accentClass: string;
+  // Phase 4.5.A — optional override for the value's text color when
+  // the underlying number is itself a distress signal (negative FCF
+  // margin, runway < 6Q). Default is the high-contrast foreground.
+  valueAccent?: string | null;
+  // Phase 4.5.A — opt-in stable testid for tiles whose value coloring
+  // is asserted in unit tests (e.g. FCF margin red coloring under
+  // distressed-mode).
+  statId?: string;
 }) {
+  const valueClass = `mt-1 font-mono tabular text-xl font-medium ${
+    valueAccent ?? "text-strata-hi"
+  }`;
   return (
-    <div>
+    <div data-stat={statId}>
       <div
         className={`font-mono text-[10px] uppercase tracking-kicker ${accentClass}`}
       >
         {label}
       </div>
-      <div className="mt-1 font-mono tabular text-xl font-medium text-strata-hi">
+      <div data-stat-value className={valueClass}>
         {value}
       </div>
       {sub && <div className="mt-0.5 text-xs text-strata-dim">{sub}</div>}

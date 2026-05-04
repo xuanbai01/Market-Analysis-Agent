@@ -20,7 +20,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
-import type { ResearchReport } from "../lib/schemas";
+import { HEALTHY_LAYOUT_SIGNALS, type ResearchReport } from "../lib/schemas";
 import { ReportRenderer } from "./ReportRenderer";
 
 function buildReport(
@@ -33,6 +33,7 @@ function buildReport(
     tool_calls_audit: [],
     name: null,
     sector: null,
+    layout_signals: HEALTHY_LAYOUT_SIGNALS,
     sections: [
       {
         title: "Earnings",
@@ -204,6 +205,7 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
       tool_calls_audit: [],
     name: null,
     sector: null,
+    layout_signals: HEALTHY_LAYOUT_SIGNALS,
       sections: [
         {
           title: "Risk Factors",
@@ -237,6 +239,7 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
       tool_calls_audit: [],
     name: null,
     sector: null,
+    layout_signals: HEALTHY_LAYOUT_SIGNALS,
       sections: [
         {
           title: "Earnings",
@@ -272,6 +275,7 @@ describe("ReportRenderer SectionChart wiring (Phase 3.3.B)", () => {
       tool_calls_audit: [],
     name: null,
     sector: null,
+    layout_signals: HEALTHY_LAYOUT_SIGNALS,
       sections: [
         {
           title: "Quality",

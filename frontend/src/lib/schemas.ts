@@ -103,6 +103,34 @@ export const SectionSchema = z.object({
 });
 export type Section = z.infer<typeof SectionSchema>;
 
+// ── Phase 4.5: LayoutSignals ─────────────────────────────────────────
+
+// Per-flag defaults mirror backend ``LayoutSignals`` in
+// ``app/schemas/research.py`` — every flag's "healthy" value is
+// false / null. The schema allows a partial object (any missing flag
+// fills in the healthy default) so a pre-4.5 cached payload OR a
+// post-4.5 payload that omits a not-yet-shipped flag both parse cleanly.
+export const LayoutSignalsSchema = z.object({
+  is_unprofitable_ttm: z.boolean().default(false),
+  beat_rate_below_30pct: z.boolean().default(false),
+  cash_runway_quarters: z.number().nullable().default(null),
+  gross_margin_negative: z.boolean().default(false),
+  debt_rising_cash_falling: z.boolean().default(false),
+});
+export type LayoutSignals = z.infer<typeof LayoutSignalsSchema>;
+
+/** Phase 4.5 — exported so test fixtures can spread the healthy
+ *  default without re-typing every flag. Production code rarely needs
+ *  this since parsed payloads always have ``layout_signals`` populated;
+ *  tests construct raw object literals so they need the constant. */
+export const HEALTHY_LAYOUT_SIGNALS: LayoutSignals = {
+  is_unprofitable_ttm: false,
+  beat_rate_below_30pct: false,
+  cash_runway_quarters: null,
+  gross_margin_negative: false,
+  debt_rising_cash_falling: false,
+};
+
 // ── Top-level shapes returned by the backend ─────────────────────────
 
 export const ResearchReportSchema = z.object({
@@ -117,6 +145,10 @@ export const ResearchReportSchema = z.object({
   // to null on backwards-compat with pre-4.1 cached reports.
   name: z.string().nullable().default(null),
   sector: z.string().nullable().default(null),
+  // Phase 4.5 — adaptive-layout signals. Defaults to healthy so
+  // pre-4.5 cached JSONB rows hydrate as a healthy report and the
+  // dashboard's adaptive UI stays in its non-distressed mode.
+  layout_signals: LayoutSignalsSchema.default(HEALTHY_LAYOUT_SIGNALS),
 });
 export type ResearchReport = z.infer<typeof ResearchReportSchema>;
 

@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.4.A done (PRs #46–#55); 4.4.B per-card section narratives in flight (this PR); 4.5 adaptive layout signals follows.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.4.B done (PRs #46–#56); 4.5.A layout signals + header pills + hero swap in flight (this PR); 4.5.B card adaptations + section reorder + LLM signal feed follows.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -306,12 +306,55 @@ Active sprint for the Market Analysis Agent.
 
 ### 4.5 Adaptive layout for distressed names *(the differentiator)*
 
-- [ ] **Backend signals** — extend `compose_research_report` to compute layout flags from claim values: `is_unprofitable_ttm`, `beat_rate_below_30pct`, `cash_runway_quarters` (derived from net cash / FCF burn TTM), `gross_margin_negative`, `debt_rising_cash_falling`. Payload field `layout_signals: dict[str, bool | float]`.
-- [ ] **Layout substitution rules** — when `is_unprofitable_ttm`: hero swaps Forward P/E → P/Sales, ROIC → Cash Runway, FCF Margin stays but with red coloring. When `beat_rate_below_30pct`: Earnings card adds "bottom decile" annotation. When `cash_runway_quarters < 6`: Cash & Capital card adds "raise likely needed" annotation + runway highlight.
-- [ ] **Header pills** — "● UNPROFITABLE · TTM" and "⚠ LIQUIDITY WATCH" pills in the page header for distressed names; nothing for healthy names.
-- [ ] **Section ordering changes** — for distressed names, Cash & Capital moves up (above Per-share growth); Risk diff moves up (above Macro). Layout flags drive the section order.
-- [ ] **Narratives adapt** — section narratives reference the distressed framing ("Trajectory positive, level negative. Gross margin up 226 pts in 5Y but still below break-even"). Sonnet prompts include the layout signals as context.
-- [ ] **Test fixtures** — at least 4 fixture symbols covering the matrix: healthy mature (NVDA, AAPL), slowing growth (F, GM), unprofitable growth (RIVN, LCID), distressed (any name with runway < 4Q at the time of writing).
+> **Split:** ship as two PRs to keep each reviewable.
+> - **4.5.A — Backend layout_signals + Header pills + Hero metric swap** *(this PR)*. The "this dashboard reframes for distress" headline visual.
+> - **4.5.B — Card adaptations + section reordering + LLM signal feed** *(follow-up)*. The in-card distressed-mode polish + the structural reordering + the LLM prose adaptation.
+
+#### 4.5.A Backend signals + header pills + hero swap *(this PR)*
+
+> **Why this slice:** the most visible "distress" indicator from the
+> Strata Rivian screenshot (`docs/screenshots/image-1777831007647.png`)
+> is the *header chrome* — UNPROFITABLE / LIQUIDITY WATCH pills + the
+> hero's right-column trio swapping from healthy-name metrics
+> (Forward P/E + ROIC + FCF margin) to distressed-name metrics
+> (P/Sales + Cash Runway + red FCF margin). Both consume
+> ``layout_signals`` read-only — no per-card content changes yet, so
+> 4.5.A ships the foundation (signals derivation + payload field) +
+> the two read-only consumers in one tight PR.
+
+- [x] **`LayoutSignals` schema** — new Pydantic model in `app/schemas/research.py` with five flags (`is_unprofitable_ttm`, `beat_rate_below_30pct`, `cash_runway_quarters: float | None`, `gross_margin_negative`, `debt_rising_cash_falling`). Defaults to healthy values so pre-4.5 cached JSONB rows hydrate cleanly. Mirrored in Zod with per-field defaults; `HEALTHY_LAYOUT_SIGNALS` exported for test fixtures.
+- [x] **`ResearchReport.layout_signals`** field with `default_factory=LayoutSignals` for back-compat.
+- [x] **`app/services/research_layout_signals.py`** — pure `derive_layout_signals(report)` reads claim values via description matching (mirrors orchestrator + frontend extractors). Cash runway = `max(net_cash, 0) / |FCF TTM burn|`, computed only when FCF TTM < 0; clamps to `0.0` when net cash is already negative AND burning. Slope signals require ≥ 3 history points.
+- [x] **Orchestrator wiring** — `compose_research_report` runs the derivation as a final step before returning; `backfill_layout_signals(report)` helper recomputes for cached pre-4.5 rows (only when current is the healthy default — never overwrites populated values).
+- [x] **`/v1/research/{symbol}` cache-hit path** — runs both `backfill_top_level_metadata` and `backfill_layout_signals` so the dashboard's adaptive UI works on cache hits without forcing a fresh LLM call.
+- [x] **`HeaderPills`** primitive — renders "● UNPROFITABLE · TTM" / "⚠ LIQUIDITY WATCH" / "● BOTTOM DECILE BEAT RATE" / "▲ DEBT RISING · CASH FALLING" pills above the hero. Returns null when every signal is healthy. `is_unprofitable_ttm` and `gross_margin_negative` collapse to one pill (avoids visual noise on Rivian-class names where both fire). `data-testid='header-pill'`.
+- [x] **HeaderPills wired** into SymbolDetailPage at the page top-right above the hero.
+- [x] **HeroCard right-column trio swap** — when `is_unprofitable_ttm`: Forward P/E → P/Sales (P/E meaningless for negative E), ROIC TTM → Cash Runway (`~Q remaining`, with "raise likely needed" sub-line when < 6Q), FCF margin label kept but value colored red when negative. Healthy reports render the original Forward P/E + ROIC + FCF margin trio unchanged.
+- [x] **`hero-extract.ts`** grows `priceToSales` reader for the swap path.
+- [x] **Tests** — backend 577 → **605** (+28: 4 schema, 18 derivation across all 5 signals + edge cases + compound Rivian fixture, 4 orchestrator wire-through + backfill, 2 router cache-hit). Frontend 353 → **371** (+18: 5 schema, 9 HeaderPills, 4 HeroCard swap).
+- [x] **Bundle** — main 97.17 → **97.92 KB gz** (+0.75). ~2.08 KB headroom retained under the 100 KB budget.
+- [x] **Verified back-compat** — preview against the cached pre-4.5 NVDA report renders the default trio with no header pills (signals backfilled to healthy default). No console errors.
+- [x] **Update test counts** — backend 577 → **605**, frontend 353 → **371**. Updated in `CLAUDE.md`, `docs/architecture.md`, this file.
+
+### 4.5.A review *(filled in after the GREEN + docs commits land)*
+
+- **What changed in shape:** one new model (`LayoutSignals`) + one new field on `ResearchReport`. One new derivation module + one new backfill helper. One new frontend primitive (HeaderPills) + one HeroCard trio swap. Zero new top-level routes, zero new dependencies, no schema breaks.
+- **What didn't change:** healthy reports render unchanged. Pre-4.5 cached JSONB rows round-trip with `LayoutSignals()` default and the cache-hit backfill recomputes from claims so the dashboard's adaptive UI activates without a fresh LLM call.
+- **Net deltas:** backend +28 tests / +1 service module / +1 schema model / +1 helper; frontend +18 tests / +1 primitive / +1 schema field / 1 card swap; main bundle +0.75 KB gz.
+- **Followups noted (4.5.B-bound):**
+  - In-card distressed-mode polish: EarningsCard "bottom decile" annotation, CashAndCapitalCard runway highlight + raise-needed framing, QualityCard ring colors flip to red when ratio < 0.
+  - Section reordering when distressed: Cash & Capital moves up (above Per-share growth); Risk diff moves up (above Macro).
+  - Synth prompt receives `layout_signals` as context so Sonnet's narratives adapt ("Trajectory positive, level negative" tone for distressed names).
+  - Test fixtures across the layout matrix: healthy mature (NVDA), slowing growth (F or GM), unprofitable growth (RIVN), distressed (TBD by current data). Lands in 4.5.B or 4.5.C.
+
+#### 4.5.B Card adaptations + section reordering + LLM signal feed *(follow-up PR)*
+
+- [ ] **EarningsCard "bottom decile"** annotation when `beat_rate_below_30pct`.
+- [ ] **CashAndCapitalCard** runway stat tile + "raise likely needed" annotation when `cash_runway_quarters < 6`.
+- [ ] **QualityCard rings** flip to red coloring when ratio < 0 (currently green/yellow only).
+- [ ] **SymbolDetailPage** swaps row 3 / row 4 layout when `is_unprofitable_ttm` or `cash_runway_quarters < 6`. Cash & Capital moves up; Risk diff moves up.
+- [ ] **`_SYSTEM_PROMPT`** receives layout signals as user-prompt context so Sonnet's narratives adapt for distressed names.
+- [ ] **Test fixtures** — 4 named fixture symbols covering the layout matrix.
 
 ### 4.6 Compare page
 

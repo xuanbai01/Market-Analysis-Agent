@@ -53,6 +53,7 @@ from typing import Any
 
 from app.schemas.research import (
     Confidence,
+    LayoutSignals,
     ResearchReport,
     Section,
     SectionSummaries,
@@ -65,6 +66,7 @@ from app.services.macro import fetch_macro
 from app.services.news import fetch_news
 from app.services.peers import fetch_peers
 from app.services.research_confidence import score_section
+from app.services.research_layout_signals import derive_layout_signals
 from app.services.research_tool_registry import (
     SECTIONS_BY_FOCUS,
     Focus,
@@ -343,7 +345,7 @@ async def compose_research_report(
         if sector_claim is not None and isinstance(sector_claim.value, str):
             sector_value = sector_claim.value
 
-    return ResearchReport(
+    report = ResearchReport(
         symbol=target,
         generated_at=datetime.now(UTC),
         sections=sections,
@@ -352,6 +354,10 @@ async def compose_research_report(
         name=name_value,
         sector=sector_value,
     )
+    # Phase 4.5.A — derive adaptive-layout signals from the assembled
+    # report. Pure transform — runs after section assembly so it can
+    # read the same claim values the dashboard will read.
+    return report.model_copy(update={"layout_signals": derive_layout_signals(report)})
 
 
 # Phase 4.3.X — descriptions used to identify the metadata claims the
@@ -421,3 +427,40 @@ def backfill_top_level_metadata(report: ResearchReport) -> ResearchReport:
     return report.model_copy(
         update={"name": backfilled_name, "sector": backfilled_sector}
     )
+
+
+def backfill_layout_signals(report: ResearchReport) -> ResearchReport:
+    """Recompute ``layout_signals`` from claim values for cached
+    pre-4.5 reports.
+
+    Phase 4.5.A. Pre-4.5 cached JSONB rows have ``layout_signals=
+    LayoutSignals()`` (the healthy default), which silently broke
+    adaptive layouts on cache hits — a Rivian report from before the
+    derivation existed would render as healthy.
+
+    Trust-the-cache rule: if the report's ``layout_signals`` is
+    *anything other than* the healthy default, leave it alone. The
+    only case worth backfilling is "field is at the healthy default,
+    which might mean genuinely healthy or might mean pre-4.5 cache row
+    that never had a derivation". When current == default, re-derive;
+    if the derivation still returns default, fast-path identity so
+    callers can ``backfilled is report``.
+    """
+    if report.layout_signals != LayoutSignals():
+        # Trust the cache — never overwrite a populated value.
+        return report
+    fresh_signals = derive_layout_signals(report)
+    if fresh_signals == report.layout_signals:
+        return report
+    return report.model_copy(update={"layout_signals": fresh_signals})
+
+
+# Re-export ``LayoutSignals`` so the test module can import the type
+# from the orchestrator alongside ``backfill_layout_signals`` without
+# threading two import lines.
+__all__ = [
+    "LayoutSignals",
+    "backfill_layout_signals",
+    "backfill_top_level_metadata",
+    "compose_research_report",
+]

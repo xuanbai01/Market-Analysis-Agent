@@ -220,6 +220,69 @@ def test_section_card_narrative_has_length_cap() -> None:
         Section(title="X", card_narrative="x" * 5000)
 
 
+# ── LayoutSignals (Phase 4.5) ────────────────────────────────────────
+#
+# Adaptive-layout flags derived from claim values by the orchestrator
+# at fresh-report time. All defaults are the "healthy" value so pre-4.5
+# cached JSONB rows hydrate as a healthy-shape report and the
+# dashboard's adaptive UI stays in its default mode.
+
+
+def test_layout_signals_default_factory_creates_healthy_default() -> None:
+    """When no explicit signals are supplied, every flag defaults to
+    its healthy/neutral value: bools to False, runway to None."""
+    from app.schemas.research import LayoutSignals
+
+    signals = LayoutSignals()
+    assert signals.is_unprofitable_ttm is False
+    assert signals.beat_rate_below_30pct is False
+    assert signals.cash_runway_quarters is None
+    assert signals.gross_margin_negative is False
+    assert signals.debt_rising_cash_falling is False
+
+
+def test_layout_signals_round_trip_through_json() -> None:
+    """Adaptive flags survive serialization to JSONB cache + back."""
+    from app.schemas.research import LayoutSignals
+
+    signals = LayoutSignals(
+        is_unprofitable_ttm=True,
+        beat_rate_below_30pct=True,
+        cash_runway_quarters=4.5,
+        gross_margin_negative=False,
+        debt_rising_cash_falling=True,
+    )
+    blob = signals.model_dump(mode="json")
+    restored = LayoutSignals.model_validate(blob)
+    assert restored == signals
+
+
+def test_research_report_layout_signals_defaults_to_healthy() -> None:
+    """Pre-4.5 ResearchReport rows have no ``layout_signals`` key. They
+    must construct cleanly with the healthy default."""
+    report = ResearchReport(
+        symbol="NVDA",
+        generated_at=datetime(2026, 4, 25, 12, 0, tzinfo=UTC),
+    )
+    assert report.layout_signals.is_unprofitable_ttm is False
+    assert report.layout_signals.cash_runway_quarters is None
+
+
+def test_research_report_pre_4_5_cached_payload_parses() -> None:
+    """A JSONB row written before this PR has no ``layout_signals``
+    key. Validating the dict must succeed and yield healthy defaults."""
+    legacy_payload = {
+        "symbol": "NVDA",
+        "generated_at": "2026-04-25T12:00:00+00:00",
+        "sections": [],
+        "overall_confidence": "high",
+        "tool_calls_audit": [],
+    }
+    report = ResearchReport.model_validate(legacy_payload)
+    assert report.layout_signals.is_unprofitable_ttm is False
+    assert report.layout_signals.cash_runway_quarters is None
+
+
 def test_section_pre_4_4_b_cached_payload_still_parses() -> None:
     """A JSONB row written before this PR has no ``card_narrative``
     key. It must still parse; ``card_narrative`` defaults to None."""

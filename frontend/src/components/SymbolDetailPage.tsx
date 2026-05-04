@@ -23,6 +23,7 @@ import { CashAndCapitalCard } from "./CashAndCapitalCard";
 import { ContextBand } from "./ContextBand";
 import { EarningsCard } from "./EarningsCard";
 import { ErrorBanner } from "./ErrorBanner";
+import { HeaderPills } from "./HeaderPills";
 import { HeroCard } from "./HeroCard";
 import { LoadingState } from "./LoadingState";
 import { MacroPanel } from "./MacroPanel";
@@ -85,6 +86,14 @@ export function SymbolDetailPage() {
       )}
       {reportQuery.data && (
         <>
+          {/* Phase 4.5.A — diagnostic pills above the hero. Renders
+              null on healthy reports so the page header stays clean
+              for NVDA / AAPL / etc.; surfaces "● UNPROFITABLE · TTM"
+              + "⚠ LIQUIDITY WATCH" + ... for distressed names. */}
+          <div className="mb-3 flex justify-end">
+            <HeaderPills signals={reportQuery.data.layout_signals} />
+          </div>
+
           <HeroCard report={reportQuery.data} />
 
           {/* Phase 4.4.A — ContextBand renders Business (left) +

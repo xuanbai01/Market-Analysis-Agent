@@ -20,10 +20,13 @@ export interface HeroData {
   marketCap: number | null;
   fiftyTwoWeekHigh: number | null;
   fiftyTwoWeekLow: number | null;
-  // 3 featured stats
+  // 3 featured stats (healthy default trio)
   forwardPE: { value: number; peerMedian: number | null } | null;
   roicTTM: number | null;
   fcfMargin: number | null;
+  // Phase 4.5.A — distressed-mode replacement value. Read by HeroCard
+  // in the swap path when ``layout_signals.is_unprofitable_ttm``.
+  priceToSales: { value: number; peerMedian: number | null } | null;
 }
 
 const DESC_FORWARD_PE = "P/E ratio (forward, analyst consensus)";
@@ -33,6 +36,8 @@ const DESC_MARKET_CAP = "Market capitalization";
 const DESC_52W_HIGH = "52-week high";
 const DESC_52W_LOW = "52-week low";
 const DESC_PEER_MEDIAN_FORWARD_PE = "Peer median: P/E ratio (forward, analyst consensus)";
+const DESC_PRICE_TO_SALES = "Price-to-sales ratio (trailing 12 months)";
+const DESC_PEER_MEDIAN_PRICE_TO_SALES = "Peer median: Price-to-sales ratio (trailing 12 months)";
 
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
@@ -65,6 +70,11 @@ export function extractHeroData(report: ResearchReport): HeroData | null {
     report.sections,
     DESC_PEER_MEDIAN_FORWARD_PE,
   );
+  const ps = findNumericValue(report.sections, DESC_PRICE_TO_SALES);
+  const peerPS = findNumericValue(
+    report.sections,
+    DESC_PEER_MEDIAN_PRICE_TO_SALES,
+  );
 
   return {
     name: report.name ?? null,
@@ -75,5 +85,6 @@ export function extractHeroData(report: ResearchReport): HeroData | null {
     forwardPE: fwdPE !== null ? { value: fwdPE, peerMedian: peerFwdPE } : null,
     roicTTM: findNumericValue(report.sections, DESC_ROIC_TTM),
     fcfMargin: findNumericValue(report.sections, DESC_FCF_MARGIN),
+    priceToSales: ps !== null ? { value: ps, peerMedian: peerPS } : null,
   };
 }

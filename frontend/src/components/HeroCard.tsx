@@ -213,6 +213,8 @@ export function HeroCard({ report }: Props) {
             <LineChart
               data={sliceForRange(pricesQuery.data.prices, range)}
               areaFill={true}
+              showAxes={true}
+              showTooltip={true}
               ariaLabel={`${symbol} price chart, ${range}`}
             />
           ) : (

@@ -23,6 +23,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchMarketPrices } from "../lib/api";
 import { formatClaimValue } from "../lib/format";
 import { extractHeroData } from "../lib/hero-extract";
+import { sliceForRange } from "../lib/price-range";
 import type { ResearchReport } from "../lib/schemas";
 import { LineChart } from "./LineChart";
 
@@ -39,8 +40,29 @@ type Range = (typeof RANGES)[number];
 function backendRangeFor(uiRange: Range): "60D" | "1Y" | "5Y" {
   if (uiRange === "1Y" || uiRange === "5Y") return uiRange;
   // 1D / 5D / 1M / 3M all coerce to 60D for now (the backend doesn't
-  // support intraday cadence yet — that's Phase 4.7+).
+  // support intraday cadence yet — that's Phase 4.7+). The frontend
+  // then slices the 60D dataset client-side via ``sliceForRange``
+  // so each pill produces a visibly different chart.
   return "60D";
+}
+
+function priceRangeLabel(uiRange: Range): string {
+  // Subtitle text mirrors the actual sliced range so the pill click
+  // is visibly meaningful. 1Y / 5Y pass through verbatim.
+  switch (uiRange) {
+    case "1D":
+      return "2 trading days";
+    case "5D":
+      return "5 trading days";
+    case "1M":
+      return "22 trading days";
+    case "3M":
+      return "60 trading days";
+    case "1Y":
+      return "1 year";
+    case "5Y":
+      return "5 years";
+  }
 }
 
 function formatPrice(n: number): string {
@@ -161,7 +183,7 @@ export function HeroCard({ report }: Props) {
         <div>
           <div className="mb-2 flex items-center justify-between">
             <span className="font-mono text-[10px] uppercase tracking-kicker text-strata-highlight">
-              Price · {range === "3M" ? "60 trading days" : range}
+              Price · {priceRangeLabel(range)}
             </span>
             <div className="flex gap-1 font-mono text-xs">
               {RANGES.map((r) => (
@@ -189,7 +211,7 @@ export function HeroCard({ report }: Props) {
             </div>
           ) : pricesQuery.data?.prices.length ? (
             <LineChart
-              data={pricesQuery.data.prices}
+              data={sliceForRange(pricesQuery.data.prices, range)}
               areaFill={true}
               ariaLabel={`${symbol} price chart, ${range}`}
             />

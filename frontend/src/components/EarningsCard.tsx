@@ -157,7 +157,89 @@ export function EarningsCard({ section }: Props) {
           value={ttm !== null ? formatClaimValue(ttm) : "—"}
         />
       </div>
+
+      {/*
+        Phase 4.3.B.1 — RecentPrints mini-table. The 3 stat tiles plus
+        the chart left ~600 px of canvas below the EarningsCard before
+        the row's height matched its partner (QualityCard, ~1200 px).
+        Surfacing the last 4 quarters' actual / estimate / surprise
+        gives substantive content + closes most of the gap.
+      */}
+      {actualHistory.length >= 1 && (
+        <RecentPrints actual={actualHistory} estimate={estimateHistory} />
+      )}
     </section>
+  );
+}
+
+function RecentPrints({
+  actual,
+  estimate,
+}: {
+  actual: ClaimHistoryPoint[];
+  estimate: ClaimHistoryPoint[];
+}) {
+  const estByPeriod = new Map<string, number>();
+  for (const e of estimate) estByPeriod.set(e.period, e.value);
+
+  const last4 = actual.slice(-4);
+  return (
+    <div
+      data-testid="recent-prints"
+      className="mt-4 overflow-hidden rounded-md border border-strata-line"
+    >
+      <div className="flex items-center justify-between bg-strata-raise px-3 py-2">
+        <span className="font-mono text-[10px] uppercase tracking-kicker text-strata-earnings">
+          Recent prints · last {last4.length}Q
+        </span>
+        <span className="font-mono text-[9px] uppercase tracking-kicker text-strata-dim">
+          actual · estimate · surprise
+        </span>
+      </div>
+      <table className="w-full text-sm">
+        <tbody className="divide-y divide-strata-line">
+          {last4.map((row) => {
+            const est = estByPeriod.get(row.period);
+            const surprise =
+              est !== undefined && est !== 0
+                ? ((row.value - est) / Math.abs(est)) * 100
+                : null;
+            const surpriseClass =
+              surprise === null
+                ? "text-strata-dim"
+                : surprise > 0
+                  ? "text-strata-pos"
+                  : surprise < 0
+                    ? "text-strata-neg"
+                    : "text-strata-fg";
+            return (
+              <tr
+                key={row.period}
+                data-row="recent-print"
+                className="hover:bg-strata-raise"
+              >
+                <td className="px-3 py-2 font-mono text-xs text-strata-dim">
+                  {row.period}
+                </td>
+                <td className="px-3 py-2 text-right font-mono tabular text-strata-hi">
+                  {row.value.toFixed(2)}
+                </td>
+                <td className="px-3 py-2 text-right font-mono tabular text-strata-fg">
+                  {est !== undefined ? est.toFixed(2) : "—"}
+                </td>
+                <td
+                  className={`px-3 py-2 text-right font-mono tabular ${surpriseClass}`}
+                >
+                  {surprise !== null
+                    ? `${surprise >= 0 ? "+" : ""}${surprise.toFixed(1)}%`
+                    : "—"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

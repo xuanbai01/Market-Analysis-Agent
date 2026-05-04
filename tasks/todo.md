@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (PR #47); 4.2 done (PR #48); 4.3.A done (PR #49); 4.3.A.1 done (PR #50); 4.3.X data correctness pass done (PR #51 — six bugs from [dogfood-2026-05-03.md](dogfood-2026-05-03.md)); 4.3.B Risk Haiku categorizer done (this PR); 4.4 (News + section narratives) up next.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (PR #47); 4.2 done (PR #48); 4.3.A done (PR #49); 4.3.A.1 done (PR #50); 4.3.X data correctness pass done (PR #51 — six bugs from [dogfood-2026-05-03.md](dogfood-2026-05-03.md)); 4.3.B Haiku risk categorizer (PR #52, open); 4.3.B.1 layout polish + range pills + responsive SVGs in flight (this PR); 4.4 (News + section narratives) up next.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -187,6 +187,30 @@ Active sprint for the Market Analysis Agent.
 - **Followups noted:**
   - Real-LLM cost telemetry from a few dogfooded reports → confirm/refute the $0.005-target estimate.
   - The 9-bucket catalog will need to grow if `OTHER` dominates real diffs. Add a guardrail in 4.4 dogfooding to flag issuers where `OTHER >= 50%` of their bucketed paragraphs.
+
+### 4.3.B.1 Layout polish + range pills + responsive SVGs *(this PR)*
+
+> **Why:** dogfooding PR #51 surfaced four UX rough edges that don't
+> warrant a phase rename but visibly hurt the dashboard's trust:
+> price-chart pills 1D / 5D / 1M all rendered the same 60-bar chart
+> (no client-side slicing); EarningsCard + PerShareGrowthCard had
+> hundreds of pixels of empty canvas below their content (no row
+> partner of similar height); chart elements escaped card borders on
+> narrow viewports because every primitive hardcoded its width.
+
+- [x] **Price chart pills** — `frontend/src/lib/price-range.ts::sliceForRange` slices the 60D feed to last 2 / 5 / 22 points for 1D / 5D / 1M; passes through unchanged for 3M / 1Y / 5Y. HeroCard wires it in front of LineChart's data prop and the subtitle reflects the actual span shown ("22 trading days" not "60 trading days").
+
+- [x] **EarningsCard `RecentPrints`** — last-4-quarters mini-table below the 3 stat tiles. Period · actual · estimate · surprise %, surprise color-coded pos/neg. Hidden when section has no EPS history. Adds substantive content (not just height-padding) — recent prints is canonical for an earnings card.
+
+- [x] **PerShareGrowthCard CAGR annotations** — each multiplier pill grows a sub-line "+58.3% / Q" computed via `extractGrowthCagr` (multiplier^(1/n_periods) − 1, defends against sign-change endpoints + zero/negative ratios). Em-dash on null. ~30px per pill row, closes most of the blank-canvas gap to ValuationCard.
+
+- [x] **Responsive SVG widths** — LineChart, EpsBars, MultiLine, RiskDiffCard's aggregate bars switched from hardcoded `width` props to `width="100%"` with viewBox preserving internal coords. Chart elements stay inside the card border at any viewport. Height stays numeric so visual height is stable. Same pattern Sparkline already used.
+
+- [x] **LineChart path discriminators** — `data-line-stroke` / `data-line-area` on the two paths so tests can count segments on the line specifically (the area path adds 3 extra commands when `areaFill={true}`).
+
+- [x] **Tests** — frontend 277 → **295** (+18: 7 price-range/Hero, 3 RecentPrints, 3 CAGR, 4 SVG-width updates, 1 EarningsCard label-collision fix). Backend untouched at 531/531.
+
+- [x] **Bundle** — main 93.95 → **94.46 KB gz** (+0.51). Under 100 KB budget; ~5.5 KB headroom retained for 4.4. SectionChart on-demand chunk unchanged at 103.01 KB.
 
 ### 4.4 News + Business + section narratives
 

@@ -11,6 +11,7 @@
  * above this card; PerShareGrowthCard is the visual companion.
  */
 import {
+  extractGrowthCagr,
   extractGrowthMultipliers,
   extractGrowthSeries,
   type GrowthMultipliers,
@@ -43,9 +44,19 @@ function formatMultiplier(n: number | null): string {
   return `${n.toFixed(1)}×`;
 }
 
+function formatCagr(n: number | null): string {
+  // Phase 4.3.B.1 — per-period CAGR rendered as a signed percent.
+  // The sub-line beneath each multiplier pill conveys per-quarter
+  // growth pace alongside the total-period multiplier.
+  if (n === null || !Number.isFinite(n)) return "—";
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${(n * 100).toFixed(1)}%`;
+}
+
 export function PerShareGrowthCard({ ticker, section }: Props) {
   const series = extractGrowthSeries(section);
   const mults = extractGrowthMultipliers(section);
+  const cagrs = extractGrowthCagr(section);
   const periodLength = series[0]?.history.length ?? 0;
 
   return (
@@ -98,6 +109,12 @@ export function PerShareGrowthCard({ ticker, section }: Props) {
             </div>
             <div className="mt-1 font-mono tabular text-base font-medium text-strata-hi">
               {formatMultiplier(mults[spec.key])}
+            </div>
+            <div
+              data-testid="growth-cagr"
+              className="mt-0.5 font-mono text-[10px] tabular text-strata-dim"
+            >
+              {formatCagr(cagrs[spec.key])} / Q
             </div>
           </div>
         ))}

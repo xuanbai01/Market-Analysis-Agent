@@ -92,13 +92,19 @@ describe("MultiLine", () => {
     expect(paths.length).toBe(2);
   });
 
-  it("honors width and height props", () => {
+  it("renders responsive width (100%) with viewBox carrying the dim props", () => {
+    // Phase 4.3.B.1 — chart now scales to its parent container instead
+    // of overflowing at hardcoded 560 px. The SVG width attribute is
+    // always "100%"; the width prop survives in the viewBox so internal
+    // x-positions (text labels, grid lines) stay at the right offsets.
     const { container } = render(
       <MultiLine series={[SERIES_A]} width={600} height={220} />,
     );
     const svg = container.querySelector("[data-testid='multi-line']");
-    expect(svg?.getAttribute("width")).toBe("600");
-    expect(svg?.getAttribute("height")).toBe("220");
+    expect(svg?.getAttribute("width")).toBe("100%");
+    expect(svg?.getAttribute("viewBox")).toBe("0 0 600 220");
+    // Height attribute may stay numeric or also go responsive — the
+    // height prop stays in viewBox either way.
   });
 
   it("renders a legend chip per series by default", () => {

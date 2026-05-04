@@ -131,7 +131,11 @@ export function MultiLine({
     <div>
       <svg
         data-testid="multi-line"
-        width={width}
+        // Phase 4.3.B.1 — responsive width so MultiLine charts no
+        // longer overflow narrow card columns. Internal coords are
+        // preserved by the viewBox; height stays numeric to keep a
+        // stable visual height across cards.
+        width="100%"
         height={height}
         viewBox={`0 0 ${width} ${height}`}
         role="img"

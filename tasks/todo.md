@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 done (PR #46); 4.1 done (PR #47); 4.2 done (PR #48); 4.3.A done (PR #49); 4.3.A.1 done (PR #50); 4.3.X data correctness pass done (PR #51 — six bugs from [dogfood-2026-05-03.md](dogfood-2026-05-03.md)); 4.3.B Haiku risk categorizer done (PR #52); 4.3.B.1 layout polish + range pills + responsive SVGs done (PR #53); 4.3.B.2 price chart axes + hover tooltip done (PR #54); 4.4.A News + Business + ContextBand in flight (this PR); 4.4.B per-card section narratives follows.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.3.B.2 done (PRs #46–#54); 4.4.A News + Business + ContextBand in flight (this PR); 4.4.B per-card section narratives follows.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Phase 4 — Symbol-centric dashboard (active)
 

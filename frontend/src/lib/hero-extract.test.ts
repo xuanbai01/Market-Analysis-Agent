@@ -12,7 +12,13 @@
 import { describe, expect, it } from "vitest";
 
 import { extractHeroData } from "./hero-extract";
-import type { Claim, ClaimValue, ResearchReport, Section } from "./schemas";
+import {
+  HEALTHY_LAYOUT_SIGNALS,
+  type Claim,
+  type ClaimValue,
+  type ResearchReport,
+  type Section,
+} from "./schemas";
 
 function claim(description: string, value: ClaimValue): Claim {
   return {
@@ -44,6 +50,7 @@ function report(opts: {
     tool_calls_audit: [],
     name: ("name" in opts ? opts.name : "NVIDIA Corporation") ?? null,
     sector: ("sector" in opts ? opts.sector : "megacap_tech") ?? null,
+    layout_signals: HEALTHY_LAYOUT_SIGNALS,
     sections: [
       section("Valuation", opts.valuationClaims ?? []),
       section("Quality", opts.qualityClaims ?? []),

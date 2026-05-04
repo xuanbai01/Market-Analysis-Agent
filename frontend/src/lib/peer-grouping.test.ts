@@ -26,11 +26,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type {
-  Claim,
-  ClaimValue,
-  ResearchReport,
-  Section,
+import {
+  HEALTHY_LAYOUT_SIGNALS,
+  type Claim,
+  type ClaimValue,
+  type ResearchReport,
+  type Section,
 } from "./schemas";
 import { extractMedian, extractSubject, groupPeers } from "./peer-grouping";
 
@@ -229,6 +230,7 @@ function buildReport(opts: {
     tool_calls_audit: [],
     name: null,
     sector: null,
+    layout_signals: HEALTHY_LAYOUT_SIGNALS,
     sections,
   };
 }

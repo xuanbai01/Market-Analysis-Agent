@@ -24,6 +24,7 @@ from app.schemas.research import (
     Claim,
     Confidence,
     ResearchReport,
+    Section,
     SectionSummaries,
     SectionSummary,
     Source,

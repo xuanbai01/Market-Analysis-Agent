@@ -182,6 +182,51 @@ class Section(BaseModel):
         return max(c.source.fetched_at for c in self.claims)
 
 
+class LayoutSignals(BaseModel):
+    """Phase 4.5 — derived flags driving the dashboard's adaptive
+    layout for distressed names.
+
+    Computed deterministically from claim values by
+    ``app.services.research_layout_signals.derive_layout_signals``,
+    not by the LLM. The orchestrator runs the derivation as a final
+    step before returning the report; cached pre-4.5 rows hydrate
+    with the healthy default and can be backfilled in-place via
+    ``research_orchestrator.backfill_layout_signals``.
+
+    Defaults are the healthy values so the dashboard's adaptive UI
+    stays in its non-distressed mode when the field is absent or any
+    individual signal can't be derived.
+    """
+
+    is_unprofitable_ttm: bool = False
+    """True when the latest snapshot ``Operating margin`` or ``Net
+    profit margin`` claim is strictly negative."""
+
+    beat_rate_below_30pct: bool = False
+    """True when ``beat_count / min(20, len(eps_actual.history)) < 0.3``.
+    The denominator mirrors the ``last_20q.beat_count`` claim's
+    ``or fewer if history is shorter`` framing — a 12Q-history company
+    with 4 beats is at 33% (not distressed)."""
+
+    cash_runway_quarters: float | None = None
+    """Quarters of runway = max(net_cash, 0) / |FCF TTM burn|, where
+    net_cash = cash − debt at latest snapshot and FCF TTM = sum of
+    last 4 quarters' free cash flow per share. ``None`` when FCF TTM
+    >= 0 (cash-flow-positive — runway concept N/A) or when any
+    required claim is missing. Clamped to ``0.0`` when net cash is
+    already negative AND FCF burning."""
+
+    gross_margin_negative: bool = False
+    """True when the latest snapshot ``Gross margin`` claim is
+    strictly negative — sells below cost-of-revenue."""
+
+    debt_rising_cash_falling: bool = False
+    """True when the linear-regression slope of ``Total debt per
+    share`` history is positive AND the slope of ``Cash + short-term
+    investments per share`` history is negative over the same window.
+    Requires >= 3 history points on each."""
+
+
 class ResearchReport(BaseModel):
     """
     Top-level Pydantic model returned by ``POST /v1/research/{symbol}``.
@@ -202,6 +247,10 @@ class ResearchReport(BaseModel):
     # sector_tag claims by ``research_orchestrator.compose_research_report``.
     name: str | None = None
     sector: str | None = None
+    # Phase 4.5 — adaptive-layout flags. Default to a healthy
+    # ``LayoutSignals()`` so pre-4.5 cached JSONB rows (no
+    # ``layout_signals`` key) hydrate as a healthy-shape report.
+    layout_signals: LayoutSignals = Field(default_factory=LayoutSignals)
 
     @property
     def all_claims(self) -> list[Claim]:

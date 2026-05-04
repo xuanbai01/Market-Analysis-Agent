@@ -22,7 +22,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { HeroCard } from "./HeroCard";
 import * as api from "../lib/api";
-import type { ResearchReport } from "../lib/schemas";
+import { HEALTHY_LAYOUT_SIGNALS, type ResearchReport } from "../lib/schemas";
 
 function fakeReport(opts: Partial<ResearchReport> = {}): ResearchReport {
   return {
@@ -32,6 +32,7 @@ function fakeReport(opts: Partial<ResearchReport> = {}): ResearchReport {
     generated_at: "2026-05-02T14:00:00+00:00",
     overall_confidence: "high",
     tool_calls_audit: [],
+    layout_signals: HEALTHY_LAYOUT_SIGNALS,
     sections: [
       {
         title: "Valuation",

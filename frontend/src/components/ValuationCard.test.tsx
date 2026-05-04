@@ -23,7 +23,13 @@ import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 
 import { ValuationCard } from "./ValuationCard";
-import type { Claim, ClaimValue, ResearchReport, Section } from "../lib/schemas";
+import {
+  HEALTHY_LAYOUT_SIGNALS,
+  type Claim,
+  type ClaimValue,
+  type ResearchReport,
+  type Section,
+} from "../lib/schemas";
 
 function claim(description: string, value: ClaimValue): Claim {
   return {
@@ -58,6 +64,7 @@ function buildReport(opts: {
     tool_calls_audit: [],
     name: null,
     sector: null,
+    layout_signals: HEALTHY_LAYOUT_SIGNALS,
     sections: [
       section(
         "Valuation",
@@ -165,6 +172,7 @@ describe("ValuationCard", () => {
       tool_calls_audit: [],
       name: null,
       sector: null,
+      layout_signals: HEALTHY_LAYOUT_SIGNALS,
       sections: [],
     };
     expect(() => render(<ValuationCard report={report} />)).not.toThrow();

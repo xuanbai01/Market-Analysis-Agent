@@ -172,7 +172,13 @@ async def research(
             # name/sector. Backfill from fundamentals claims so the
             # hero card renders correctly without forcing a fresh-gen
             # for every stale ticker.
-            return research_orchestrator.backfill_top_level_metadata(cached)
+            cached = research_orchestrator.backfill_top_level_metadata(cached)
+            # Phase 4.5.A — pre-4.5 cached rows have layout_signals
+            # at the healthy default. Re-derive so the dashboard's
+            # adaptive UI works on cache hits without a fresh-gen
+            # round-trip.
+            cached = research_orchestrator.backfill_layout_signals(cached)
+            return cached
 
     # Cache miss (or refresh forced) → about to spend an LLM call.
     # Rate-limit gate goes here, after we've confirmed we'd actually

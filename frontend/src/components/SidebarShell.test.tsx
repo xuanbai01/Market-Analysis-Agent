@@ -71,3 +71,124 @@ describe("SidebarShell", () => {
     expect(aside).not.toBeNull();
   });
 });
+
+// ── Phase 4.7 — count badges + new click handlers ────────────────────
+//
+// Each Nav button (Compare / Watchlist / Recent) becomes enabled when
+// the corresponding optional onClick handler is passed. Watchlist and
+// Recent additionally render a count badge when the corresponding
+// numeric prop is > 0. Export stays permanently disabled until that
+// phase lands (TBD).
+
+describe("SidebarShell — Phase 4.7 count badges + click handlers", () => {
+  it("Compare becomes enabled and clickable when onCompareClick is provided", () => {
+    const onCompare = vi.fn();
+    render(
+      <SidebarShell
+        active="none"
+        onSearchClick={() => {}}
+        onCompareClick={onCompare}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Compare" });
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    expect(onCompare).toHaveBeenCalledOnce();
+  });
+
+  it("Watchlist becomes enabled when onWatchlistClick is provided", () => {
+    const onWatchlist = vi.fn();
+    render(
+      <SidebarShell
+        active="none"
+        onSearchClick={() => {}}
+        onWatchlistClick={onWatchlist}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /watchlist/i });
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    expect(onWatchlist).toHaveBeenCalledOnce();
+  });
+
+  it("Recent becomes enabled when onRecentClick is provided", () => {
+    const onRecent = vi.fn();
+    render(
+      <SidebarShell
+        active="none"
+        onSearchClick={() => {}}
+        onRecentClick={onRecent}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /recent/i });
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    expect(onRecent).toHaveBeenCalledOnce();
+  });
+
+  it("Watchlist count badge renders when watchlistCount > 0", () => {
+    const { container } = render(
+      <SidebarShell
+        active="none"
+        onSearchClick={() => {}}
+        onWatchlistClick={() => {}}
+        watchlistCount={3}
+      />,
+    );
+    const badge = container.querySelector("[data-badge='watchlist-count']");
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toContain("3");
+  });
+
+  it("Watchlist count badge is hidden when watchlistCount is 0 or undefined", () => {
+    const { container, rerender } = render(
+      <SidebarShell
+        active="none"
+        onSearchClick={() => {}}
+        onWatchlistClick={() => {}}
+        watchlistCount={0}
+      />,
+    );
+    expect(
+      container.querySelector("[data-badge='watchlist-count']"),
+    ).toBeNull();
+
+    rerender(
+      <SidebarShell
+        active="none"
+        onSearchClick={() => {}}
+        onWatchlistClick={() => {}}
+      />,
+    );
+    expect(
+      container.querySelector("[data-badge='watchlist-count']"),
+    ).toBeNull();
+  });
+
+  it("Recent count badge renders when recentCount > 0", () => {
+    const { container } = render(
+      <SidebarShell
+        active="none"
+        onSearchClick={() => {}}
+        onRecentClick={() => {}}
+        recentCount={5}
+      />,
+    );
+    const badge = container.querySelector("[data-badge='recent-count']");
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toContain("5");
+  });
+
+  it("Export stays disabled regardless of other props (TBD phase)", () => {
+    render(
+      <SidebarShell
+        active="none"
+        onSearchClick={() => {}}
+        onCompareClick={() => {}}
+        onWatchlistClick={() => {}}
+        onRecentClick={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Export" })).toBeDisabled();
+  });
+});

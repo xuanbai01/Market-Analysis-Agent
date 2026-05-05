@@ -10,23 +10,23 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.5.C done (PRs #46–#59 — #59 ready for review); 4.6 Compare page is next.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.6.A done (PRs #46–#59 + this PR); 4.6.B (compare narrative) + 4.7 (Search modal + Watchlist + Recent) follow.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
-## Handoff — pickup notes (2026-05-04)
+## Handoff — pickup notes (2026-05-05)
 
 If you're picking this up after a gap, here's the orientation in three lines:
 
-1. **Read [CLAUDE.md](../CLAUDE.md) "Current state" first** — it tracks what's done through 4.5.C with bundle sizes, test counts, and inline summaries of every shipped PR.
-2. **Next concrete work is Phase 4.6 — Compare page.** Spec is below. Bundle headroom is 1.58 KB so the new `/compare` route needs `React.lazy()` chunk-splitting from day one.
-3. **Open PR is #59 (Phase 4.5.C — Layout polish).** If it's still open, merge it before starting 4.6 — the docs in `tasks/todo.md` and `CLAUDE.md` already reflect 4.5.C as done. If it's already merged, the worktree is clean and you can branch off `main`.
+1. **Read [CLAUDE.md](../CLAUDE.md) "Current state" first** — it tracks what's done through 4.6.A with bundle sizes, test counts, and inline summaries of every shipped PR.
+2. **Next concrete work is Phase 4.7 — Search modal + Watchlist + Recent.** 4.6.B (LLM compare narrative) is optional and conditional on dogfood signal — defer unless reviewing the Compare page produces a "wish it had narrative" reaction. The 4.6.A Compare chunk is its own lazy bundle (6.34 KB gz) so 4.7 still has headroom in main (98.56 / 100 KB; ~1.4 KB free).
+3. **Open PR is this one (Phase 4.6.A — Compare page).** If it's already merged, the worktree is clean.
 
-**Three known followups not blocking 4.6:**
+**Three known followups not blocking 4.7:**
 
 - **Vite HMR cache misses file mtime in `.claude/worktrees/...`** — see [tasks/lessons.md](lessons.md). Workaround: trust unit tests + `vite build` for verification when the dev preview shows stale content. Fix candidate: add `server.watch.usePolling: true` to `vite.config.ts`. Low priority.
 - **Pre-existing ValuationCard ESLint warning** (`Unnecessary escape character: \-` at `frontend/src/components/ValuationCard.tsx:36`). Benign; tracking unfix because the regex pattern reads more clearly with the explicit escape. Drop the backslash if you ever want a clean lint pass.
-- **Real-LLM dogfood for 4.5.B's prompt change** — the synth prompt now receives `layout_signals` as framing context for distressed names. Unit-tested, but the actual narrative-tone shift on a real RIVN report hasn't been verified end-to-end. Naturally lands when 4.8 dogfood gate runs.
+- **Real-LLM dogfood for 4.5.B's prompt change** + **Compare narrative dogfood gate** — both naturally land when 4.8 runs. The 4.6.A Compare page is visual-only; the "did the user wish there was a narrative" question is the trigger for 4.6.B.
 
-**`tasks/lessons.md`** captured four lessons during 4.4 → 4.5 — read before non-trivial work to avoid retreading them.
+**`tasks/lessons.md`** captured 7 lessons through 4.5 — read before non-trivial work to avoid retreading them.
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -421,37 +421,52 @@ If you're picking this up after a gap, here's the orientation in three lines:
   - The Vite HMR cache wasn't picking up file changes during preview verification (same issue as 4.5.B). Tracked as: when the worktree is in `.claude/worktrees/...`, Vite's file watcher misses mtime updates. Workaround: trust unit tests; rely on `vite build` to verify production rendering. Long-term fix: investigate whether `server.watch.usePolling` in `vite.config.ts` would resolve.
   - Bundle headroom still ~1.58 KB. Phase 4.6 Compare page will need a chunk split for the new route. Plan to use `React.lazy()` on the `/compare` route component so the bundle bills only get hit when the user navigates there.
 
-### 4.6 Compare page *(NEXT — pickup-ready)*
+### 4.6.A Compare page — visual-only *(this PR)*
 
 > **Why this is next:** the symbol dashboard answers "is this name distressed / healthy / overvalued?" in isolation, but the natural follow-up is "vs what?" A side-by-side compare page reuses every Phase 4 card primitive against two reports at once. Strata mockup at `docs/screenshots/image-1777831012413.png` shows the target shape.
 >
-> **Bundle note:** main bundle is at 98.42 KB gz with ~1.58 KB headroom. Compare page is a new route — easiest path is `React.lazy(() => import("./components/ComparePage"))` so the entire 4.6 deliverable lives in its own chunk and only the route tree node is in main. Pattern already exists for `SectionChart` in `frontend/src/components/ReportRenderer.tsx`.
+> **Bundle note:** main bundle was at 98.42 KB gz with ~1.58 KB headroom. Compare ships as its own lazy chunk via `React.lazy(() => import("./components/compare/ComparePage"))`, so the entire 4.6.A deliverable lives in a separate 6.34 KB chunk and only the route tree node lands in main. Pattern mirrors `SectionChart` in `frontend/src/components/ReportRenderer.tsx`.
+>
+> **Scope split:** 4.6.A is visual-only (this PR). 4.6.B (LLM compare narrative) is conditional on dogfood signal — defer unless reviewing the compare page produces a "wish it had narrative" reaction.
 
 **Frontend:**
 
-- [ ] **`/compare?a=NVDA&b=AVGO`** route — two-ticker side-by-side dashboard, lazy-loaded. Read both tickers from the query string, uppercase both, fire two `fetchResearchReport` queries in parallel via `useQueries` from TanStack Query.
-- [ ] **`CompareHero`** — two ticker cards side-by-side with mini price charts in the subject's accent color (NVDA cyan, AVGO violet say). "VS" indicator between them. Reuses existing `LineChart` primitive (likely `width="100%"` with `showAxes={false}`).
-- [ ] **`CompareValuationRow`** — 4 metrics (P/E forward, P/S, EV/EBITDA, PEG) shown as horizontal bars between the two values with "lower = cheaper" hint. Build on the Valuation cell pattern from `valuation-extract.ts` — extract the 4 metric values per ticker, render two-stop bars.
-- [ ] **`CompareQualityRow`** — 4 metrics (Gross margin, Operating margin, FCF margin, ROIC) with horizontal bars. Mirror of the valuation row.
-- [ ] **`CompareMarginOverlay`** — 20Q operating margin both tickers on shared axes via `MultiLine` primitive. Single chart, two series. Narrative call-out below ("NVDA's operating margin overtook AVGO's in Q2-23"). The narrative copy is LLM-generated — pass both tickers' Quality sections to a new `compose_compare_narrative` synth call (or defer narrative to 4.6.B if Sonnet integration adds risk).
-- [ ] **`CompareGrowthOverlay`** — 5Y per-share growth, both rebased to 100, both tickers on shared axes. Same pattern as `MultiLine` but with rebase logic from `growth-extract.ts`.
-- [ ] **`CompareRiskDiff`** — both tickers' 10-K risk paragraph deltas as parallel bar charts. Reuse the per-category bar logic from `RiskDiffCard`'s `CategoryBars`.
-- [ ] **"What's cut" footer** — explicitly lists what doesn't appear in compare mode (Macro, full Business descriptions, News). Honest about scope.
-- [ ] **Add ticker / Swap controls** — top-right. "Add ticker" pops a search modal; "Swap" exchanges `?a=` and `?b=`.
+- [x] **`/compare?a=NVDA&b=AVGO`** route — two-ticker side-by-side dashboard, lazy-loaded. Reads both tickers from the query string, uppercases both, fires two `fetchResearchReport` queries in parallel via `useQueries` from TanStack Query. Missing either param redirects to landing.
+- [x] **`CompareHero`** — two ticker cards side-by-side with mini area charts in per-side accent colors (`COMPARE_COLOR_A` cyan / `COMPARE_COLOR_B` violet). "VS" badge between them on `lg+` viewports. Reuses `LineChart` with `areaFill={true}` + default no-axes-no-tooltip lean profile. `HeaderPills` renders inside each column so the distress chrome appears only on the affected side (not page-level).
+- [x] **`CompareMetricRow`** — generic horizontal-bar row used for both Valuation (3 metrics: P/E FWD, P/S, EV/EBITDA, `lowerIsBetter=true`, "lower = cheaper" hint) and Quality (4 metrics: Gross / Op / FCF margin / ROIC, `lowerIsBetter=false`, "higher = better" hint). "Winning" side highlighted in `strata-pos`; null values render em-dash. PEG omitted (not currently a backend claim).
+- [x] **`CompareMarginOverlay`** — 20Q operating margin, both tickers, single `MultiLine` SVG, shared axis. Returns null when neither side has the underlying claim history. Narrative call-out deferred to 4.6.B.
+- [x] **`CompareGrowthOverlay`** — 5Y per-share growth (Revenue + FCF per share, both rebased to 100), single `MultiLine` SVG with up to 4 series, multiplier pills below ("NVDA Rev 6.2× · NVDA FCF 12.2× · AVGO Rev 3.9× · AVGO FCF 4.4×"). Same rebase logic as `growth-extract.ts`.
+- [x] **`CompareRiskDiff`** — both tickers' 10-K risk paragraph deltas as parallel SVG bar charts, side-by-side. Per-category bars when 4.3.B's Haiku categorizer ran on the side; aggregate fallback (Added / Removed / Kept / CharDelta) when categorizer absent. Returns null when both sides lack a Risk Factors section.
+- [x] **`CompareFooter`** — "What survives the compare" / "What's cut" honest-scope strip. Explicit about what compare deliberately drops (Macro, full Business descriptions, News, Cash & capital deep dive, Peer scatter — since the comparison IS the peer view).
+- [x] **Add ticker / Swap controls** — top-right. Add ticker is rendered disabled with a "coming in 4.7" tooltip (real search modal lands in 4.7); Swap mutates `?a` ↔ `?b` in place via `useSearchParams`.
 
-**Backend (only if compare narrative ships):**
-
-- [ ] **`POST /v1/compare?a=NVDA&b=AVGO`** OR fold compare narrative into existing `POST /v1/research/{symbol}` with a `?compare_to=AVGO` query string. Decision: if the narrative is just one synth call against both reports' claims joined, no new endpoint needed — the frontend can fetch both reports and pass them to a new `compose_compare_narrative` orchestrator function via a thin `POST /v1/compare/narrative` route. Skip if it's too much for one PR; the visual compare can ship without a narrative call-out.
+**Backend:** untouched. 4.6.A is 100% frontend.
 
 **Tests:**
 
-- [ ] Frontend ~12 new tests across the new components. Backend ~3 if the compare-narrative endpoint ships.
-- [ ] **No new test fixtures for live LLM** — use the existing `_summaries_for` pattern in `tests/test_research_orchestrator.py` style.
+- [x] **Frontend +22 new tests** across 3 files:
+  - `lib/compare-extract.test.ts` (10 tests) — covers all 5 extractors with empty/missing/zero-base edge cases.
+  - `components/compare/ComparePage.test.tsx` (8 tests) — parallel fetch, both tickers render, 3+4 metric rows, swap mutates URL, missing ?a/?b redirects, per-side distress pill, footer strip.
+  - `components/compare/CompareMetricRow.test.tsx` (4 tests) — row count, em-dash on null, hint text per direction.
+- [x] **Backend untouched at 607/607.**
 
 **Implementation notes:**
 
-- The 4.5.A `LayoutSignals` work doesn't apply on the compare page — distress flags are per-ticker. If both tickers are distressed (Rivian vs Lucid), fine; if only one is, render the distress chrome on that ticker's column only. Keep it simple: just pass each ticker's `layout_signals` to its column's HeroCard and let the existing distress logic activate per-side.
-- Path of least bundle resistance: ComparePage and ALL its sub-components (`CompareHero`, `CompareValuationRow`, `CompareMarginOverlay`, etc.) live in one file or one `compare/` subdirectory, lazy-loaded as a unit. Don't lazy-load each sub-component individually — that fragments the chunk graph for no gain.
+- The 4.5.A `LayoutSignals` work applies per-ticker — `signalsA` and `signalsB` are passed to the respective hero columns; the distress chrome activates per-side. The compare metric rows themselves (P/E FWD, etc.) keep consistent axes regardless of distress to preserve cross-ticker comparison; only the per-column hero shows the distress pill.
+- Bundle resistance: ALL of `compare/` lives in one folder, imported only by the lazy `ComparePage` entry. Vite splits the entire subtree into one chunk. Sub-components (`CompareHero`, `CompareMetricRow`, `CompareMarginOverlay`, `CompareGrowthOverlay`, `CompareRiskDiff`, `CompareFooter`) are NOT individually lazy-loaded.
+- Bundle math: main 98.42 → **98.56 KB gz** (+0.14); new ComparePage chunk **6.34 KB gz**; SectionChart chunk unchanged at 103.01 KB gz. Headroom under the 100 KB main-bundle budget: **1.44 KB**. Phase 4.7 still gets to land in main without splitting.
+
+### 4.6.A review *(filled in after the GREEN + docs commits land)*
+
+- **What changed in shape:** one new route (`/compare`); one new directory (`frontend/src/components/compare/`) holding the lazy entry + 6 sub-components; one new extractor module (`lib/compare-extract.ts`). No new top-level routes on the backend, no schema changes, no new dependencies.
+- **What didn't change:** `/symbol/:ticker` is unchanged. `LayoutSignals` is consumed read-only per side; no schema additions. PEG, the compare narrative, three-way compare, and a real Add-ticker button all remain explicit follow-ups.
+- **Net deltas:** backend zero; frontend +22 tests / +1 extractor module / +7 component files / 1 lazy route wired in `App.tsx`; main bundle +0.14 KB gz; new lazy chunk 6.34 KB gz.
+- **Followups noted:**
+  - **4.6.B (compare narrative)** — Sonnet writes "NVDA's operating margin overtook AVGO's in Q2-23" against both reports' Quality sections, plus eval-rubric coverage. New `compose_compare_narrative` orchestrator helper + thin `POST /v1/compare/narrative` route. Land only if dogfood signals "wish there was a narrative."
+  - **PEG metric** — needs a backend claim addition to `fetch_fundamentals` (yfinance `Ticker.info[trailingPegRatio]`). Cheap if dogfood asks; otherwise stay at 3-metric Valuation.
+  - **Real Add-ticker button** — wires to 4.7's search modal; the compare page already has the chrome.
+  - **Three-way compare** (`?a&b&c`) — speculative; revisit only if used.
+  - **EARNINGS-focus compare** — current code reads `focus="full"` only; if dogfood asks for earnings-focus compare, this is one queryFn change.
 
 ### 4.7 Search + Watchlist + Recent
 

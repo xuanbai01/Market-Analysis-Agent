@@ -1,20 +1,32 @@
 /**
  * LandingPage — / route. Authenticated user's home.
  *
- * Two parts:
- *   1. Search bar — submit navigates to /symbol/:ticker (uppercased)
- *   2. Recent reports — PastReportsList driven by GET /v1/research
+ * Phase 4.7 surface:
+ *   1. Recent tickers grid — last-visited tickers as clickable cards
+ *      (from localStorage). Hidden when empty.
+ *   2. Watchlist grid — pinned tickers as clickable cards (from
+ *      localStorage). Hidden when empty.
+ *   3. Search bar — submit navigates to /symbol/:ticker (uppercased).
+ *      ⌘K opens the SearchModal from anywhere; the inline form is
+ *      preserved as the no-shortcut fallback + the form's input is
+ *      what AppShell focuses when Search is clicked from the sidebar.
+ *   4. Recent reports — PastReportsList driven by GET /v1/research.
  *
- * Phase 4.7 replaces the inline form with a `⌘K` modal + autocomplete.
- * Phase 4.4 will add a sector-level news feed below.
+ * The recent + watchlist sections each render up to ~10 ticker cards
+ * with no extra fetches — they're pure localStorage reads. The Past
+ * Reports list below still drives the cached-report click-through
+ * since it's the only surface that knows the report's confidence /
+ * generated_at.
  */
 import { useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 import { listResearchReports } from "../lib/api";
+import { listRecent } from "../lib/recent";
 import { ROUTES } from "../lib/routes";
 import type { ResearchReportSummary } from "../lib/schemas";
+import { listWatchlist } from "../lib/watchlist";
 import { PastReportsList } from "./PastReportsList";
 
 export function LandingPage() {
@@ -27,6 +39,12 @@ export function LandingPage() {
     staleTime: 30_000,
   });
 
+  // Read once on mount — both lists are localStorage-only and small,
+  // and a fresh navigation re-mounts the page so we always see the
+  // latest after a user visits a new ticker.
+  const [recentTickers] = useState<string[]>(() => listRecent());
+  const [watchlistTickers] = useState<string[]>(() => listWatchlist());
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = symbol.trim();
@@ -36,6 +54,10 @@ export function LandingPage() {
 
   function handleSelectPast(summary: ResearchReportSummary) {
     navigate(ROUTES.symbol(summary.symbol));
+  }
+
+  function handleTickerCardClick(ticker: string) {
+    navigate(ROUTES.symbol(ticker));
   }
 
   return (
@@ -51,6 +73,24 @@ export function LandingPage() {
           Adaptive dashboards backed by free data and citation discipline.
         </p>
       </header>
+
+      {recentTickers.length > 0 && (
+        <section className="mb-10">
+          <h2 className="mb-3 px-1 font-mono text-xs uppercase tracking-kicker text-strata-muted">
+            Recent tickers
+          </h2>
+          <TickerGrid tickers={recentTickers} onSelect={handleTickerCardClick} />
+        </section>
+      )}
+
+      {watchlistTickers.length > 0 && (
+        <section className="mb-10">
+          <h2 className="mb-3 px-1 font-mono text-xs uppercase tracking-kicker text-strata-muted">
+            Watchlist
+          </h2>
+          <TickerGrid tickers={watchlistTickers} onSelect={handleTickerCardClick} />
+        </section>
+      )}
 
       <form onSubmit={handleSubmit} className="mb-12">
         <label htmlFor="landing-search" className="sr-only">
@@ -85,5 +125,35 @@ export function LandingPage() {
         />
       </div>
     </div>
+  );
+}
+
+interface TickerGridProps {
+  tickers: string[];
+  onSelect: (ticker: string) => void;
+}
+
+/** Grid of clickable ticker cards. Each card is tiny — ticker label
+ *  only — keeping the surface fast to render and free of network
+ *  fan-out. Future iteration can add per-card sparklines fed by the
+ *  existing market-prices endpoint. */
+function TickerGrid({ tickers, onSelect }: TickerGridProps) {
+  return (
+    <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
+      {tickers.map((ticker) => (
+        <li key={ticker}>
+          <button
+            type="button"
+            onClick={() => onSelect(ticker)}
+            data-card="ticker-card"
+            className="w-full rounded-md border border-strata-border bg-strata-surface px-3 py-2 text-left transition hover:border-strata-highlight/40 hover:bg-strata-raise"
+          >
+            <span className="font-mono text-sm font-medium text-strata-hi">
+              {ticker}
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }

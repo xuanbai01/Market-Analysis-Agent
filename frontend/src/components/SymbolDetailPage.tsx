@@ -28,6 +28,7 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import { ApiError, fetchResearchReport } from "../lib/api";
 import { clearStoredToken } from "../lib/auth";
+import { pushRecent } from "../lib/recent";
 import { ROUTES } from "../lib/routes";
 import type { ResearchReport, Section } from "../lib/schemas";
 import { CashAndCapitalCard } from "./CashAndCapitalCard";
@@ -43,6 +44,7 @@ import { QualityCard } from "./QualityCard";
 import { ReportRenderer } from "./ReportRenderer";
 import { RiskDiffCard } from "./RiskDiffCard";
 import { ValuationCard } from "./ValuationCard";
+import { WatchlistButton } from "./WatchlistButton";
 
 export function SymbolDetailPage() {
   const { ticker } = useParams<{ ticker: string }>();
@@ -66,6 +68,16 @@ export function SymbolDetailPage() {
       navigate(ROUTES.login, { replace: true });
     }
   }, [reportQuery.error, navigate]);
+
+  // Phase 4.7 — push the ticker onto the MRU recent list once the
+  // report has actually loaded. Pushing on report-success rather
+  // than on URL change alone keeps typos / 404 tickers out of the
+  // recent panel.
+  useEffect(() => {
+    if (reportQuery.data && upperTicker) {
+      pushRecent(upperTicker);
+    }
+  }, [reportQuery.data, upperTicker]);
 
   // Phase 4.1+ — pluck dedicated-card sections so the new Strata cards
   // can render them; pass the remaining sections to ReportRenderer via
@@ -92,9 +104,11 @@ export function SymbolDetailPage() {
       )}
       {reportQuery.data && (
         <>
-          {/* Phase 4.5.A — diagnostic pills above the hero. */}
-          <div className="mb-3 flex justify-end">
+          {/* Phase 4.5.A — diagnostic pills above the hero.
+              Phase 4.7 — Watchlist toggle button next to the pills. */}
+          <div className="mb-3 flex items-center justify-end gap-2">
             <HeaderPills signals={reportQuery.data.layout_signals} />
+            <WatchlistButton ticker={upperTicker} />
           </div>
 
           <HeroCard report={reportQuery.data} />
@@ -281,3 +295,10 @@ function DashboardRows(props: DashboardRowsProps) {
     </>
   );
 }
+
+// Phase 4.7 — default export so App.tsx can lazy-load this whole page.
+// Moves all the per-card Strata components (HeroCard, EarningsCard,
+// QualityCard, ValuationCard, PerShareGrowthCard, CashAndCapitalCard,
+// RiskDiffCard, MacroPanel, BusinessCard, NewsList, etc.) out of the
+// main bundle. They only ship when the user navigates to a symbol.
+export default SymbolDetailPage;

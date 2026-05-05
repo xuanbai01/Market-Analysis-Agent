@@ -175,27 +175,23 @@ Auth, real rate limiting, and per-user cost caps land only when the project has 
 
 **Phase 1 — Core infrastructure (done).** FastAPI scaffold, async DB stack, Alembic, yfinance ingest, RSI + SMA technicals, observability, RFC 7807, deploy to Fly + Neon, CI with Gitleaks + Claude PR review.
 
-**Phase 2 — Equity research assistant (done).**
+**Phase 2 — Equity research assistant (done).** Citation-enforcing schema, 9 free-data tools, deterministic-everything-except-prose orchestrator (PR #26), same-day cache (PR #28), per-IP rate limit (PR #29 + post-cache refinement). Real-LLM golden eval at factuality 0.97.
 
-- 2.0 Foundations ✅ — research schemas, LLM client with cost-tier routing, eval harness with rubric (structure + factuality + latency).
-- 2.1 Tool registry ✅ — 9/9 active tools shipped (point-in-time; histories extend in Phase 3).
-- 2.2 Agent + `POST /v1/research/{symbol}` ✅ — deterministic-everything-except-prose architecture (PR #26); same-day cache (PR #28); per-IP rate limit (PR #29 + post-cache refinement). Real-LLM golden eval at factuality 0.97.
+**Phase 3 — Visual-first depth (done; PRs #35 → #44).** Per [ADR 0004](docs/adr/0004-visual-first-product-shape.md). `Claim.history` schema extension, `fetch_fundamentals` / `fetch_earnings` / `fetch_macro` populate multi-period histories, eval rubric `_matches_claim` reads history values. The first-pass frontend (sparklines + SectionChart + PeerScatter via Recharts) shipped here was *partially deprecated* by Phase 4's Strata redesign — the data foundation survives; the renderer changed.
 
-**Phase 3.0 — Frontend backend prereqs (done, PR #31).** Shared-secret bearer auth dep (`/v1/research/*`), CORS middleware (single-origin allowlist via `FRONTEND_ORIGIN`), `GET /v1/research` paginated list endpoint for the dashboard sidebar. 30 new tests; full suite at 426 passing.
+**Phase 4 — Symbol-centric dashboard rebuild (in flight; PRs #46 → #59).** Per [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md). The dashboard pivoted from "click Generate → static report" to a `/symbol/:ticker` URL-routed dashboard with adaptive layouts. Same backend (`POST /v1/research/{symbol}` unchanged); new frontend architecture.
 
-**Phase 3.1 — Frontend MVP (done, PR #32; deploy held).** React + Vite + TS + Tailwind + TanStack Query + Zod. Login screen, dashboard, report renderer, past-reports sidebar. 19 vitest tests; production build 75 KB gzipped. Vercel deploy held until Phase 3 visual-depth work ships per ADR 0004 — shipping the dashboard against today's text-only report would just need an immediate upgrade.
+- **4.0 → 4.4 done (PRs #46 → #56):** Strata token system + nine dedicated cards (Hero, Quality, Earnings, Valuation, PerShareGrowth, CashAndCapital, RiskDiff, Macro, Business + News in ContextBand). Hand-rolled SVG primitives (LineChart, EpsBars, MetricRing, MultiLine, PeerScatterV2) replace Recharts for everything except the legacy SectionChart fallback. Per-card LLM-written `card_narrative` field with the eval rubric policing both that and the broader `summary`.
+- **4.5 done (PRs #57 → #59):** adaptive layout for distressed names. New `LayoutSignals` model + pure derivation reads claim values to detect distress (`is_unprofitable_ttm`, `beat_rate_below_30pct`, `cash_runway_quarters`, `gross_margin_negative`, `debt_rising_cash_falling`). Header pills above hero, hero metric swap (Forward P/E → P/Sales, ROIC → Cash Runway, FCF margin red on negative), in-card adaptations (EarningsCard "bottom decile" pill, CashAndCapital runway tile + raise-needed framing, QualityCard rings flip red on negative ratios), section reorder (Cash + Risk + Macro lift above Valuation + Growth on distressed names so the survival story comes first), and Sonnet's prompt receives signals as framing context. Layout polish (4.5.C): wider container, `items-start` honest-height alignment, ContextBand to bottom, auto-collapsing row 4.
+- **4.6 next — Compare page (`/compare?a=NVDA&b=AVGO`)**. Two-ticker side-by-side dashboard with overlay charts. Bundle headroom is currently 1.58 KB so the new route needs `React.lazy()` chunk-splitting. Plan in `tasks/todo.md` §4.6.
+- **4.7 — Search modal + Watchlist + Recent**. `⌘K` modal, localStorage watchlist, recent ticker tracking, landing-page upgrade.
+- **4.8 — Vercel deploy + dogfood gate**. Ship the frontend; dogfood across 8–10 real symbols spanning the layout matrix; the dogfood signal decides whether to escalate to Phase 5 (Narrative layer) or Phase 6 (XBRL Tier 2).
 
-**Phase 3 — Visual-first depth (active).** Per [ADR 0004](docs/adr/0004-visual-first-product-shape.md):
+**Phase 5 — Narrative layer (deferred; conditional on 4.8 dogfood signal).** Explicit Bulls Say / Bears Say with `claim_refs` enforcement, What Changed deltas (mechanical from Phase 3 history), `?focus=thesis` mode. Phase 4's per-card narratives + adaptive layout already deliver a meaningful slice of the bull/bear-case need. Lands only if dogfooding surfaces a recurring "I want a real bull/bear case" signal that the per-card prose doesn't satisfy.
 
-- 3.1 Schema — `Claim.history?: list[ClaimHistoryPoint]` (period + value), backwards-compatible.
-- 3.2 Tool extensions — `fetch_fundamentals`, `fetch_earnings`, `fetch_macro` learn to populate history from yfinance's quarterly tables, FRED series, and earnings-date history. New derived `fetch_valuation_history` for rolling P/E / P/S / EV/EBITDA over time.
-- 3.3 Frontend visualization — Recharts. `Sparkline` inline next to history-bearing claims, `SectionChart` for top-level visualizations (price+SMA, fundamentals trend, macro series), `PeerScatter` for the Peers section.
-- 3.4 Eval rubric extension — `_matches_claim` reads `claim.history[*].value` so prose like "EPS rose from 1.46 to 2.18" passes when both numbers are in the referenced claim's history.
-- 3.5 Frontend deploy — Vercel + Fly secrets + dogfood + docs sweep.
+**Phase 6 — XBRL Tier 2 (deferred; conditional on 4.8 dogfood signal).** Segment + geography revenue breakdowns, RPO via XBRL parser. The Phase 4 ContextBand has placeholder slots ready for `fetch_segments` / `fetch_geographic_revenue` / `fetch_rpo_history` outputs. Lands if 4.8 surfaces "I need segment/geography breakdowns" repeatedly (esp. for names where segment mix is the story — NVDA Data Center vs Gaming, AMZN AWS vs Retail).
 
-**Phase 4 — Narrative layer (deferred until Phase 3 ships).** Per ADR 0004: explicit Bulls Say / Bears Say with `claim_refs` enforcement, a What Changed delta section (mechanical from Phase 3 history), catalyst awareness wiring `fetch_news` into reports, new `?focus=thesis` mode. Lands only after Phase 3 dogfooding confirms the data foundation is right; without Phase 3 first, Phase 4 is just longer-winded versions of today's summaries.
-
-**Indefinitely deferred (future scope).** `search_history` (pgvector RAG over stored news + filings), `compute_options` (yfinance options + daily IV snapshot), Reddit sentiment, real auth + per-user cost caps + Redis-backed horizontal rate limit. None of these address the perceived-shallowness gap that motivated the Phase 3/4 reshuffle; revisit when there's a concrete trigger.
+**Indefinitely deferred (future scope).** `search_history` (pgvector RAG over stored news + filings), `compute_options` (yfinance options + daily IV snapshot), Reddit sentiment, real auth + per-user cost caps + Redis-backed horizontal rate limit. Revisit when there's a concrete trigger.
 
 ## Risks
 
@@ -212,6 +208,8 @@ Auth, real rate limiting, and per-user cost caps land only when the project has 
 - [ADR 0001](docs/adr/0001-stack-choice.md) — FastAPI + async SQLAlchemy + PostgreSQL
 - [ADR 0002](docs/adr/0002-deployment.md) — Fly.io + Neon
 - [ADR 0003](docs/adr/0003-pivot-equity-research.md) — Pivot to AI Equity Research Assistant
+- [ADR 0004](docs/adr/0004-visual-first-product-shape.md) — Visual-first, delta-driven (no Morningstar narrative chase)
+- [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md) — Pivot from generated-report-page to symbol-centric dashboard with adaptive layouts
 
 ## Resume framing
 

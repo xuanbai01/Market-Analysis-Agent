@@ -10,7 +10,23 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.5.B done (PRs #46–#58); 4.5.C layout polish in flight (this PR); 4.6 Compare page follows.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.5.C done (PRs #46–#59 — #59 ready for review); 4.6 Compare page is next.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+
+## Handoff — pickup notes (2026-05-04)
+
+If you're picking this up after a gap, here's the orientation in three lines:
+
+1. **Read [CLAUDE.md](../CLAUDE.md) "Current state" first** — it tracks what's done through 4.5.C with bundle sizes, test counts, and inline summaries of every shipped PR.
+2. **Next concrete work is Phase 4.6 — Compare page.** Spec is below. Bundle headroom is 1.58 KB so the new `/compare` route needs `React.lazy()` chunk-splitting from day one.
+3. **Open PR is #59 (Phase 4.5.C — Layout polish).** If it's still open, merge it before starting 4.6 — the docs in `tasks/todo.md` and `CLAUDE.md` already reflect 4.5.C as done. If it's already merged, the worktree is clean and you can branch off `main`.
+
+**Three known followups not blocking 4.6:**
+
+- **Vite HMR cache misses file mtime in `.claude/worktrees/...`** — see [tasks/lessons.md](lessons.md). Workaround: trust unit tests + `vite build` for verification when the dev preview shows stale content. Fix candidate: add `server.watch.usePolling: true` to `vite.config.ts`. Low priority.
+- **Pre-existing ValuationCard ESLint warning** (`Unnecessary escape character: \-` at `frontend/src/components/ValuationCard.tsx:36`). Benign; tracking unfix because the regex pattern reads more clearly with the explicit escape. Drop the backslash if you ever want a clean lint pass.
+- **Real-LLM dogfood for 4.5.B's prompt change** — the synth prompt now receives `layout_signals` as framing context for distressed names. Unit-tested, but the actual narrative-tone shift on a real RIVN report hasn't been verified end-to-end. Naturally lands when 4.8 dogfood gate runs.
+
+**`tasks/lessons.md`** captured four lessons during 4.4 → 4.5 — read before non-trivial work to avoid retreading them.
 
 ## Phase 4 — Symbol-centric dashboard (active)
 
@@ -405,16 +421,37 @@ Active sprint for the Market Analysis Agent.
   - The Vite HMR cache wasn't picking up file changes during preview verification (same issue as 4.5.B). Tracked as: when the worktree is in `.claude/worktrees/...`, Vite's file watcher misses mtime updates. Workaround: trust unit tests; rely on `vite build` to verify production rendering. Long-term fix: investigate whether `server.watch.usePolling` in `vite.config.ts` would resolve.
   - Bundle headroom still ~1.58 KB. Phase 4.6 Compare page will need a chunk split for the new route. Plan to use `React.lazy()` on the `/compare` route component so the bundle bills only get hit when the user navigates there.
 
-### 4.6 Compare page
+### 4.6 Compare page *(NEXT — pickup-ready)*
 
-- [ ] **`/compare?a=NVDA&b=AVGO`** route — two-ticker side-by-side dashboard.
-- [ ] **`CompareHero`** — two ticker cards side-by-side with mini price charts in the subject's accent color (NVDA cyan, AVGO violet say). "VS" indicator between them.
-- [ ] **Valuation comparison** — 4 metrics (P/E forward, P/S, EV/EBITDA, PEG) shown as horizontal bars between the two values with "lower = cheaper" hint.
-- [ ] **Quality comparison** — 4 metrics (Gross margin, Operating margin, FCF margin, ROIC) with horizontal bars.
-- [ ] **Overlay charts** — 20Q operating margin, 5Y per-share growth (both rebased) with both tickers on shared axes. Narrative call-out below each chart ("NVDA's operating margin overtook AVGO's in Q2-23. AVGO is the steadier business; NVDA captured the cycle").
-- [ ] **Risk diff side-by-side** — both tickers' 10-K risk paragraph deltas as parallel bar charts.
+> **Why this is next:** the symbol dashboard answers "is this name distressed / healthy / overvalued?" in isolation, but the natural follow-up is "vs what?" A side-by-side compare page reuses every Phase 4 card primitive against two reports at once. Strata mockup at `docs/screenshots/image-1777831012413.png` shows the target shape.
+>
+> **Bundle note:** main bundle is at 98.42 KB gz with ~1.58 KB headroom. Compare page is a new route — easiest path is `React.lazy(() => import("./components/ComparePage"))` so the entire 4.6 deliverable lives in its own chunk and only the route tree node is in main. Pattern already exists for `SectionChart` in `frontend/src/components/ReportRenderer.tsx`.
+
+**Frontend:**
+
+- [ ] **`/compare?a=NVDA&b=AVGO`** route — two-ticker side-by-side dashboard, lazy-loaded. Read both tickers from the query string, uppercase both, fire two `fetchResearchReport` queries in parallel via `useQueries` from TanStack Query.
+- [ ] **`CompareHero`** — two ticker cards side-by-side with mini price charts in the subject's accent color (NVDA cyan, AVGO violet say). "VS" indicator between them. Reuses existing `LineChart` primitive (likely `width="100%"` with `showAxes={false}`).
+- [ ] **`CompareValuationRow`** — 4 metrics (P/E forward, P/S, EV/EBITDA, PEG) shown as horizontal bars between the two values with "lower = cheaper" hint. Build on the Valuation cell pattern from `valuation-extract.ts` — extract the 4 metric values per ticker, render two-stop bars.
+- [ ] **`CompareQualityRow`** — 4 metrics (Gross margin, Operating margin, FCF margin, ROIC) with horizontal bars. Mirror of the valuation row.
+- [ ] **`CompareMarginOverlay`** — 20Q operating margin both tickers on shared axes via `MultiLine` primitive. Single chart, two series. Narrative call-out below ("NVDA's operating margin overtook AVGO's in Q2-23"). The narrative copy is LLM-generated — pass both tickers' Quality sections to a new `compose_compare_narrative` synth call (or defer narrative to 4.6.B if Sonnet integration adds risk).
+- [ ] **`CompareGrowthOverlay`** — 5Y per-share growth, both rebased to 100, both tickers on shared axes. Same pattern as `MultiLine` but with rebase logic from `growth-extract.ts`.
+- [ ] **`CompareRiskDiff`** — both tickers' 10-K risk paragraph deltas as parallel bar charts. Reuse the per-category bar logic from `RiskDiffCard`'s `CategoryBars`.
 - [ ] **"What's cut" footer** — explicitly lists what doesn't appear in compare mode (Macro, full Business descriptions, News). Honest about scope.
-- [ ] **Add ticker / Swap controls** — top-right.
+- [ ] **Add ticker / Swap controls** — top-right. "Add ticker" pops a search modal; "Swap" exchanges `?a=` and `?b=`.
+
+**Backend (only if compare narrative ships):**
+
+- [ ] **`POST /v1/compare?a=NVDA&b=AVGO`** OR fold compare narrative into existing `POST /v1/research/{symbol}` with a `?compare_to=AVGO` query string. Decision: if the narrative is just one synth call against both reports' claims joined, no new endpoint needed — the frontend can fetch both reports and pass them to a new `compose_compare_narrative` orchestrator function via a thin `POST /v1/compare/narrative` route. Skip if it's too much for one PR; the visual compare can ship without a narrative call-out.
+
+**Tests:**
+
+- [ ] Frontend ~12 new tests across the new components. Backend ~3 if the compare-narrative endpoint ships.
+- [ ] **No new test fixtures for live LLM** — use the existing `_summaries_for` pattern in `tests/test_research_orchestrator.py` style.
+
+**Implementation notes:**
+
+- The 4.5.A `LayoutSignals` work doesn't apply on the compare page — distress flags are per-ticker. If both tickers are distressed (Rivian vs Lucid), fine; if only one is, render the distress chrome on that ticker's column only. Keep it simple: just pass each ticker's `layout_signals` to its column's HeroCard and let the existing distress logic activate per-side.
+- Path of least bundle resistance: ComparePage and ALL its sub-components (`CompareHero`, `CompareValuationRow`, `CompareMarginOverlay`, etc.) live in one file or one `compare/` subdirectory, lazy-loaded as a unit. Don't lazy-load each sub-component individually — that fragments the chunk graph for no gain.
 
 ### 4.7 Search + Watchlist + Recent
 

@@ -4,7 +4,7 @@ An **AI Equity Research Assistant**. POST a ticker, get back a structured analys
 
 Live: <https://market-analysis-agent.fly.dev/docs>
 
-> **Status — Phase 1 + Phase 2 done; Phase 3 active (visual-first depth).** The agent endpoint `POST /v1/research/{symbol}` is live, with a 7-day same-day cache and per-IP rate limit. Real-LLM golden eval passes at factuality ≥ 0.97. Frontend (React + Vite + TS) shipped to `main` (PRs #31 + #32) but **deploy held until Phase 3 lands** — dogfooding showed point-in-time numbers without historical context feel shallow even with citation-backed data. Phase 3 adds multi-year history rendered as charts; the LLM commentary stays short and stays at judgment-dependent moments. See [ADR 0004](docs/adr/0004-visual-first-product-shape.md) for the rationale and [tasks/todo.md](tasks/todo.md) for the granular plan. **426 tests passing on the backend, 19 on the frontend.**
+> **Status — Phases 1 → 4.5 done; Phase 4.6 (Compare page) is next.** The agent endpoint `POST /v1/research/{symbol}` is live with a 7-day same-day cache and per-IP rate limit; real-LLM golden eval passes at factuality ≥ 0.97. Phase 4 (the symbol-centric dashboard rebuild per [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md)) shipped 4.0 → 4.5.C: dashboard route at `/symbol/:ticker`, hand-rolled SVG primitives (Sparkline, LineChart, EpsBars, MetricRing, MultiLine, PeerScatterV2), nine dedicated cards (Hero, Quality, Earnings, Valuation, PerShareGrowth, CashAndCapital, RiskDiff, Macro, plus Business + News in a ContextBand), per-card LLM-written narratives, and adaptive layouts that reframe distressed names (Rivian-class) around survival rather than quality. Frontend Vercel deploy held until **Phase 4.8 dogfood gate**. See [tasks/todo.md](tasks/todo.md) for the granular tracker. **607 tests passing on the backend, 392 on the frontend; main bundle 98.42 KB gzipped (under 100 KB budget).**
 
 ## What this is (and isn't)
 
@@ -53,7 +53,9 @@ See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for the full first-hour c
 | `GET /v1/news`, `GET /v1/news/{id}` | ✅ Real (list, detail, 404 as RFC 7807 `problem+json`) |
 | `POST /v1/news/ingest` | ✅ Real — NewsAPI dev tier + Yahoo per-ticker RSS, symbol tagging, `news_symbols` join |
 | `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ Real (yfinance ingest with upsert → `candles`; latest-bar with technicals; date-range history) |
-| `POST /v1/research/{symbol}?focus={full,earnings}&refresh={false,true}` | ✅ **The v2 primary endpoint.** 7 sections in `full` mode (Valuation, Quality, Capital Allocation, Earnings, Peers, Risk Factors, Macro) or 3 in `earnings`. Same-day cache (default 7 days, configurable) + per-IP rate limit (default 3/hour, configurable). |
+| `GET /v1/market/{symbol}/prices?range={60D\|1Y\|5Y}` | ✅ **Phase 4.1.** Read-through `candles` cache; falls through to yfinance ingest on miss with 80%-coverage threshold. Auth-gated. Powers the dashboard hero price chart. |
+| `POST /v1/research/{symbol}?focus={full,earnings}&refresh={false,true}` | ✅ **The v2 primary endpoint.** 9 sections in `full` mode (Business, News, Valuation, Quality, Capital Allocation, Earnings, Peers, Risk Factors, Macro) or 4 in `earnings` (News, Earnings, Valuation, Risk Factors). Same-day cache (default 7 days, configurable) + per-IP rate limit (default 3/hour, configurable). Phase 4.4.B added `Section.card_narrative` for per-card 1-2 sentence headlines; Phase 4.5.A added `ResearchReport.layout_signals` for adaptive-layout flags. |
+| `GET /v1/research?limit=20&offset=0&symbol=...` | ✅ Paginated `ResearchReportSummary[]` for the dashboard sidebar. |
 | `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ `501 Not Implemented` (legacy v1 routes; will be removed or redirected to `/v1/research`) |
 
 All errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](app/core/errors.py).
@@ -163,23 +165,32 @@ A research-report agent that produces beautifully-formatted hallucinations is wo
 ```
 /
 ├── app/                         # FastAPI application
-│   ├── main.py                  # app factory + router mounting
-│   ├── core/                    # settings, logging, errors, observability (A09 helper)
+│   ├── main.py                  # app factory, CORS, error handlers, router mounting
+│   ├── core/                    # settings, auth, cors, errors, observability (A09 helper)
 │   ├── api/v1/
-│   │   ├── dependencies.py      # DB session DI
-│   │   └── routers/             # one file per route group
+│   │   ├── dependencies.py      # DB session DI, rate limit
+│   │   └── routers/             # health, symbols, news, market, research
 │   ├── db/
 │   │   ├── session.py           # async engine + sessionmaker
-│   │   └── models/              # Symbol, NewsItemModel, Candle
-│   ├── schemas/                 # Pydantic request/response models
-│   └── services/                # repositories, ingestion, technicals (Phase 2: agent.py, tools/, evals/)
-├── alembic/                     # schema migrations (async)
-│   ├── env.py
-│   └── versions/                # one file per migration; `alembic upgrade head` applies all
-├── tests/                       # pytest-asyncio; function-scoped DB with SAVEPOINT rollback
-├── docs/                        # architecture, security, testing, commands, deployment, ADRs
-├── tasks/                       # active sprint (todo.md) + lessons learned
-├── design_doc.md                # long-form system design (v2 scope at top, v1 preserved below)
+│   │   └── models/              # Symbol, NewsItemModel, NewsSymbol, Candle, ResearchReportRow
+│   ├── schemas/                 # Pydantic request/response (research.py is the v2 schema)
+│   └── services/                # tools (fetch_*, parse_*), orchestrator, layout signals,
+│                                # research_cache, rate_limit, llm
+├── alembic/versions/            # 0001 baseline, 0002 news_symbols, 0003 research_reports
+├── frontend/                    # Vite + React 18 + TS dashboard
+│   ├── src/
+│   │   ├── components/          # SymbolDetailPage, HeroCard, QualityCard, EarningsCard,
+│   │   │                        # ValuationCard, PerShareGrowthCard, CashAndCapitalCard,
+│   │   │                        # RiskDiffCard, MacroPanel, BusinessCard, NewsList,
+│   │   │                        # ContextBand, HeaderPills, NarrativeStrip, primitives
+│   │   │                        # (LineChart, EpsBars, MetricRing, MultiLine, PeerScatterV2)
+│   │   └── lib/                 # Zod schemas, API client, extractors, format helpers
+│   └── vercel.json              # Vercel deploy config (held until 4.8)
+├── tests/                       # pytest-asyncio; per-test SAVEPOINT rollback. Plus tests/evals/
+├── docs/                        # architecture, security, testing, commands, ADRs (0001 → 0005)
+├── tasks/                       # active sprint (todo.md), lessons learned, dogfood notes
+├── scripts/                     # smoke.py — exercises each tool against live providers
+├── design_doc.md                # long-form system design
 ├── fly.toml                     # Fly.io app config
 ├── Dockerfile
 ├── docker-compose.yml
@@ -231,18 +242,21 @@ No license file yet. Treat as all-rights-reserved until one lands.
 - **Phase 1 — Core Infrastructure** ✅ *(complete)*
   FastAPI + Alembic + tests + real yfinance ingest + RSI/SMA technicals + Fly + Neon + push-to-deploy.
 - **Phase 2 — AI Equity Research Assistant** ✅ *(complete)*
-  - 2.0 Foundations: citation-enforcing schema, LLM client with cost-tier routing, eval harness with rubric (structure / factuality / latency).
-  - 2.1 Tool registry: 9/9 active tools shipped. Histories extend in Phase 3.
-  - 2.2 Agent + endpoint: `POST /v1/research/{symbol}` with deterministic-everything-except-prose architecture; same-day cache (default 7-day window); per-IP rate limit (default 3/hour). Real-LLM golden eval at factuality 0.97.
-- **Phase 3.0 — Frontend backend prereqs** ✅ *(PR #31 merged)*
-  Shared-secret bearer auth dep, CORS middleware, `GET /v1/research` paginated list endpoint.
-- **Phase 3.1 — Frontend MVP** ✅ *(PR #32 merged; deploy held)*
-  React + Vite + TS dashboard. Deploy held until Phase 3 visual-depth ships per [ADR 0004](docs/adr/0004-visual-first-product-shape.md) — shipping the dashboard against today's text-only report would just need an immediate upgrade.
-- **Phase 3 — Visual-first depth** 🔄 *(active)*
-  Per [ADR 0004](docs/adr/0004-visual-first-product-shape.md): multi-year history surfaced as charts. `Claim.history?` schema extension. `fetch_fundamentals` / `fetch_earnings` / `fetch_macro` return ~5y of quarterly / monthly history. New derived `fetch_valuation_history` for rolling P/E / P/S / EV/EBITDA. Frontend gets sparklines (inline), section-level charts, peer-comp scatter. Eval rubric extends to read `claim.history`.
-- **Phase 4 — Narrative layer** 🔜 *(deferred until Phase 3 ships)*
-  Explicit Bulls Say / Bears Say with `claim_refs` enforcement. What Changed delta section (mechanical from Phase 3 history). Catalyst awareness wiring `fetch_news` into reports. New `?focus=thesis` mode.
-- **Indefinitely deferred (future scope)** ⏸
-  `search_history` (pgvector RAG), `compute_options` (yfinance + daily IV snapshot), Reddit sentiment, real auth + per-user cost caps + Redis-backed horizontal rate limit. None address the perceived-shallowness gap that motivated the Phase 3/4 reshuffle; revisit when there's a concrete trigger.
+  Citation-enforcing schema, 9 free-data tools, deterministic-everything-except-prose orchestrator, same-day cache, per-IP rate limit, real-LLM golden eval at factuality 0.97.
+- **Phase 3 — Visual-first depth** ✅ *(complete; PRs #35 → #44)*
+  `Claim.history` schema extension; `fetch_fundamentals` / `fetch_earnings` / `fetch_macro` ship multi-period histories; eval rubric reads `claim.history` for trend-prose factuality. Frontend sparklines + section charts shipped via the v1 dashboard before being replaced by the Phase 4 Strata redesign.
+- **Phase 4 — Symbol-centric dashboard rebuild** 🔄 *(in flight; 4.5.C ready for review at PR #59; 4.6 next)*
+  Per [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md). The dashboard pivoted from "click Generate → static report" to a `/symbol/:ticker` URL-routed dashboard with adaptive layouts:
+  - **4.0 → 4.4 done (PRs #46 → #56):** Strata token system, `react-router-dom@6`, `SidebarShell` + `LandingPage` + `SymbolDetailPage`. Hand-rolled SVG primitives (LineChart, EpsBars, MetricRing, MultiLine, PeerScatterV2). Nine dedicated cards: Hero (price + featured stats), Quality, Earnings (20Q EPS bars + recent prints), Valuation (4-cell + peer scatter), PerShareGrowth (5 series rebased), CashAndCapital, RiskDiff (per-category Haiku categorizer), MacroPanel, plus Business + News in a ContextBand. Per-card LLM-written `card_narrative` field with the eval rubric policing both that and the broader `summary`.
+  - **4.5 done (PRs #57 → #59):** adaptive layout. `LayoutSignals` model + pure derivation read claim values to detect distress (`is_unprofitable_ttm`, `beat_rate_below_30pct`, `cash_runway_quarters`, `gross_margin_negative`, `debt_rising_cash_falling`). HeaderPills above hero ("● UNPROFITABLE · TTM", "⚠ LIQUIDITY WATCH"); HeroCard right-column trio swap (Forward P/E → P/Sales, ROIC → Cash Runway, FCF margin red on negative); EarningsCard "bottom decile" pill; CashAndCapitalCard runway tile + "raise likely needed"; QualityCard rings flip red on negative ratios; SymbolDetailPage row 3/4 reorder so Cash + Risk + Macro lift above Valuation + Growth on distressed names; Sonnet's prompt receives signals as framing context. Layout polish (4.5.C): wider `max-w-screen-2xl` container, `items-start` honest-height alignment, ContextBand to bottom, auto-collapsing row 4.
+  - **4.6 next — Compare page (`/compare?a=NVDA&b=AVGO`)**: two-ticker side-by-side dashboard with overlay charts. Bundle headroom is currently 1.58 KB so the new route needs `React.lazy()` chunk-splitting. Plan in `tasks/todo.md` §4.6.
+  - **4.7 — Search modal + Watchlist + Recent**: `⌘K` modal, localStorage watchlist, recent ticker tracking, landing-page upgrade.
+  - **4.8 — Vercel deploy + dogfood gate**: ship the frontend; dogfood across 8–10 real symbols; the dogfood signal decides whether to escalate to Phase 5 (Narrative layer) or Phase 6 (XBRL Tier 2).
+- **Phase 5 — Narrative layer** ⏸ *(deferred; conditional on 4.8 dogfood signal)*
+  Explicit Bulls Say / Bears Say with `claim_refs` enforcement, What Changed deltas, `?focus=thesis`. Lands only if 4.8 surfaces "I want a real bull/bear case" repeatedly that the per-card narratives don't satisfy.
+- **Phase 6 — XBRL Tier 2** ⏸ *(deferred; conditional on 4.8 dogfood signal)*
+  Segment + geography revenue breakdowns, RPO via XBRL parser. Lands if 4.8 surfaces "I need segment/geography breakdowns" repeatedly (esp. for names where segment mix is the story — NVDA Data Center vs Gaming, AMZN AWS vs Retail).
+- **Indefinitely deferred** ⏸
+  `search_history` (pgvector RAG), `compute_options` (yfinance + daily IV snapshot), Reddit sentiment, real auth + per-user cost caps + Redis-backed horizontal rate limit. Revisit when there's a concrete trigger.
 
-See [tasks/todo.md](tasks/todo.md) for the granular tracker, [design_doc.md](design_doc.md) for system design, [ADR 0003](docs/adr/0003-pivot-equity-research.md) for the v1→v2 pivot, and [ADR 0004](docs/adr/0004-visual-first-product-shape.md) for the report-shape decision.
+See [tasks/todo.md](tasks/todo.md) for the granular tracker, [design_doc.md](design_doc.md) for system design, [ADR 0003](docs/adr/0003-pivot-equity-research.md) for the v1→v2 pivot, [ADR 0004](docs/adr/0004-visual-first-product-shape.md) for the visual-first commitment, and [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md) for the Phase 4 dashboard pivot.

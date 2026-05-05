@@ -1,26 +1,32 @@
 /**
- * App root. Phase 4.0 — router-driven.
+ * App root. Phase 4.0 — router-driven. Phase 4.6 — Compare lazy-loaded.
  *
  *   /login           → LoginScreen (unauthenticated)
  *   /                → LandingPage (search + recent reports)
  *   /symbol/:ticker  → SymbolDetailPage (the dashboard)
+ *   /compare         → ComparePage (lazy chunk; Phase 4.6.A)
  *
  * Authenticated routes wrap in RequireAuth (redirects to /login when
  * no token is in localStorage) and AppShell (sidebar + main outlet).
  *
- * Compare and other Phase 4.6/4.7 routes are not wired yet; the
- * sidebar shows them disabled.
+ * The Compare route is lazy-imported so its sub-components (CompareHero,
+ * CompareMetricRow, CompareMarginOverlay, etc.) split into their own
+ * chunk and don't bloat the main bundle. Bundle headroom is the
+ * binding constraint — see tasks/todo.md §4.6 for the math.
  */
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { AppShell } from "./components/AppShell";
 import { LandingPage } from "./components/LandingPage";
+import { LoadingState } from "./components/LoadingState";
 import { LoginScreen } from "./components/LoginScreen";
 import { RequireAuth } from "./components/RequireAuth";
 import { SymbolDetailPage } from "./components/SymbolDetailPage";
 import { getStoredToken } from "./lib/auth";
 import { ROUTES } from "./lib/routes";
+
+const ComparePage = lazy(() => import("./components/compare/ComparePage"));
 
 /**
  * LoginRoute — wraps LoginScreen with post-auth redirect logic.
@@ -61,6 +67,14 @@ export function App() {
         >
           <Route path={ROUTES.landing} element={<LandingPage />} />
           <Route path="/symbol/:ticker" element={<SymbolDetailPage />} />
+          <Route
+            path={ROUTES.compare}
+            element={
+              <Suspense fallback={<LoadingState symbol="compare" />}>
+                <ComparePage />
+              </Suspense>
+            }
+          />
         </Route>
         {/* Catch-all: anything else bounces to landing (or /login if
             not authed, via the route guard). */}

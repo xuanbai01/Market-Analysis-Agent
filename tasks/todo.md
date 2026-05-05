@@ -10,21 +10,21 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.6.A done (PRs #46–#59 + this PR); 4.6.B (compare narrative) + 4.7 (Search modal + Watchlist + Recent) follow.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.7 done (PRs #46–#61 + this PR); 4.6.B (compare narrative) + 4.8 (Vercel deploy + dogfood) follow.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Handoff — pickup notes (2026-05-05)
 
 If you're picking this up after a gap, here's the orientation in three lines:
 
-1. **Read [CLAUDE.md](../CLAUDE.md) "Current state" first** — it tracks what's done through 4.6.A with bundle sizes, test counts, and inline summaries of every shipped PR.
-2. **Next concrete work is Phase 4.7 — Search modal + Watchlist + Recent.** 4.6.B (LLM compare narrative) is optional and conditional on dogfood signal — defer unless reviewing the Compare page produces a "wish it had narrative" reaction. The 4.6.A Compare chunk is its own lazy bundle (6.34 KB gz) so 4.7 still has headroom in main (98.56 / 100 KB; ~1.4 KB free).
-3. **Open PR is this one (Phase 4.6.A — Compare page).** If it's already merged, the worktree is clean.
+1. **Read [CLAUDE.md](../CLAUDE.md) "Current state" first** — it tracks what's done through 4.7 with bundle sizes, test counts, and inline summaries of every shipped PR.
+2. **Next concrete work is Phase 4.8 — Vercel deploy + dogfood gate.** 4.6.B (LLM compare narrative) stays optional and conditional on dogfood signal. Bundle headroom is now **16.98 KB** (main 83.02 / 100 KB) so 4.8 + Phase 5/6 land without budget anxiety.
+3. **Open PR is this one (Phase 4.7 — Search + Watchlist + Recent + bundle hygiene).** If it's already merged, the worktree is clean.
 
-**Three known followups not blocking 4.7:**
+**Three known followups not blocking 4.8:**
 
 - **Vite HMR cache misses file mtime in `.claude/worktrees/...`** — see [tasks/lessons.md](lessons.md). Workaround: trust unit tests + `vite build` for verification when the dev preview shows stale content. Fix candidate: add `server.watch.usePolling: true` to `vite.config.ts`. Low priority.
 - **Pre-existing ValuationCard ESLint warning** (`Unnecessary escape character: \-` at `frontend/src/components/ValuationCard.tsx:36`). Benign; tracking unfix because the regex pattern reads more clearly with the explicit escape. Drop the backslash if you ever want a clean lint pass.
-- **Real-LLM dogfood for 4.5.B's prompt change** + **Compare narrative dogfood gate** — both naturally land when 4.8 runs. The 4.6.A Compare page is visual-only; the "did the user wish there was a narrative" question is the trigger for 4.6.B.
+- **Real-LLM dogfood for 4.5.B's prompt change** + **Compare narrative dogfood gate** + **Recent / Watchlist + per-card sparkline polish** — all naturally land when 4.8 runs. The 4.7 LandingPage ticker grids are minimal cards (no sparklines) so the surface stays fast; if dogfood wants per-card sparklines, plumb the existing fetchMarketPrices through.
 
 **`tasks/lessons.md`** captured 7 lessons through 4.5 — read before non-trivial work to avoid retreading them.
 
@@ -468,12 +468,62 @@ If you're picking this up after a gap, here's the orientation in three lines:
   - **Three-way compare** (`?a&b&c`) — speculative; revisit only if used.
   - **EARNINGS-focus compare** — current code reads `focus="full"` only; if dogfood asks for earnings-focus compare, this is one queryFn change.
 
-### 4.7 Search + Watchlist + Recent
+### 4.7 Search + Watchlist + Recent + bundle hygiene *(this PR)*
 
-- [ ] **Search modal** (`⌘K`) — full ticker search; landed in skeleton form in 4.0, fully functional here. Recent + watchlist surfaced inline.
-- [ ] **Watchlist** — localStorage-backed list of tickers; sidebar Watch icon shows live count badge. Clicking a watchlist entry navigates to `/symbol/:ticker`.
-- [ ] **Recent ticker tracking** — last ~10 visited tickers stored in localStorage. Surfaced in sidebar Recent panel + landing page.
-- [ ] **Landing page (`/`)** — search bar, recent tickers as cards (with mini price sparklines), watchlist as a second section, "What's new" feed pulling from `fetch_news` (sector-level instead of per-ticker).
+> **Why this is next:** the three sidebar nav buttons (Watchlist / Recent / Search) have been visually present but disabled since 4.0. The Strata mockup at `docs/screenshots/image-1777830988606.png` shows them all wired with count badges. This PR activates all three, adds the ⌘K shortcut, and grows the LandingPage to surface recent + watchlist tickers.
+>
+> **Bundle hygiene split:** main was at **98.56 / 100 KB gz** with 1.44 KB headroom — uncomfortably tight for any new work. This PR ships ``SymbolDetailPage`` as a lazy chunk (mirroring the 4.6.A ComparePage pattern) so all per-card Strata components move out of main. Net: main drops to **83.02 KB**, headroom jumps to **16.98 KB**. Phase 4.8 + 5/6 can land without bundle anxiety.
+
+**Frontend (no backend changes):**
+
+- [x] **`lib/watchlist.ts`** — localStorage CRUD (``addToWatchlist`` / ``removeFromWatchlist`` / ``toggleWatchlist`` / ``listWatchlist`` / ``isWatched``). Uppercases on the way in; dedup; corrupt-payload survival.
+- [x] **`lib/recent.ts`** — MRU list (``pushRecent`` prepends + dedupes + caps at ``RECENT_MAX``=10; ``listRecent``).
+- [x] **`lib/popular-tickers.ts`** — 12 curated names for SearchModal default suggestions when recent + watchlist are empty.
+- [x] **`WatchlistButton`** — ★ toggle on /symbol/:ticker. Local-mirrored aria-pressed state so click feels instant.
+- [x] **`SearchModal`** — ⌘K-triggered. Filterable input over recent ∪ watchlist ∪ POPULAR_TICKERS (deduped, source-tagged). Enter submits → onSelect uppercased; clicking a suggestion → onSelect; Esc → onClose. Lazy-loaded by App.tsx so the ~1.3 KB chunk only ships on first open.
+- [x] **`SidebarShell` extension** — optional ``onCompareClick`` / ``onWatchlistClick`` / ``onRecentClick`` props enable the corresponding nav button (backward-compat with pre-4.6 callers). ``watchlistCount`` / ``recentCount`` props render ``data-badge='*-count'`` badges when > 0.
+- [x] **`AppShell` wiring** — global ⌘K / Ctrl+K keydown listener opens SearchModal. useEffect re-reads localStorage counts on every route change so badges stay live. Compare nav handler navigates to ``/compare?a=<recent[0]>&b=<recent[1]>`` (or NVDA/AVGO defaults). Watchlist + Recent nav handlers surface inside the search modal (no dedicated routes this PR — defer if dogfood asks).
+- [x] **`SymbolDetailPage` updates** — ``pushRecent`` on report-success (typos / 404 tickers stay out of recent). ``WatchlistButton`` rendered next to the ``HeaderPills`` container.
+- [x] **`LandingPage` upgrade** — Recent Tickers + Watchlist sections above the search bar. Click-to-navigate ticker-card grids; hidden when empty so a fresh-clone landing stays clean. Per-card sparklines deliberately omitted to keep the surface fast (no fan-out of fetchMarketPrices on landing mount); revisit if dogfood asks.
+
+**Bundle hygiene companion:**
+
+- [x] **Lazy-load `SymbolDetailPage`** — added default export + `lazy(() => import("./components/SymbolDetailPage"))` + Suspense wrapping in App.tsx. Moves all per-card Strata components (HeroCard, EarningsCard, QualityCard, ValuationCard, PerShareGrowthCard, CashAndCapitalCard, RiskDiffCard, MacroPanel, BusinessCard, NewsList, ContextBand, HeaderPills, NarrativeStrip, MetricRing, MultiLine, LineChart, EpsBars, PeerScatterV2, all extractors) out of main into a 14.49 KB on-demand chunk. Vite auto-extracted ``risk-extract.ts`` into a shared chunk because both SymbolDetailPage and ComparePage import it.
+
+**Tests:**
+
+- [x] **Frontend +33 new tests** across 4 new files + 2 extensions:
+  - `lib/watchlist.test.ts` (6 tests) — list/add/remove/toggle/isWatched + corrupt-payload survival.
+  - `lib/recent.test.ts` (6 tests) — list/push (MRU + dedup + cap)/uppercase + corrupt-payload survival.
+  - `components/WatchlistButton.test.tsx` (4 tests) — empty/filled aria-pressed; click toggles persistence; uppercases ticker prop.
+  - `components/search/SearchModal.test.tsx` (8 tests) — open/closed renders; popular + recent + watchlist surfaced; filter; Enter submits; click selects; Esc closes.
+  - `components/SidebarShell.test.tsx` (+7 tests) — Compare/Watchlist/Recent become enabled with handlers; count badges render when > 0; Export stays disabled.
+  - `components/LandingPage.test.tsx` (+2 tests) — Recent / Watchlist sections render from localStorage entries.
+- [x] **Backend untouched at 607/607.**
+
+**Bundle math (vite build):**
+
+| | Before | After |
+|---|---|---|
+| main entry | 98.56 KB gz | **83.02 KB** (−15.54) |
+| SymbolDetailPage chunk | — | 14.49 KB (new lazy) |
+| SearchModal chunk | — | 1.31 KB (new lazy) |
+| risk-extract chunk | — | 4.27 KB (auto-extracted shared) |
+| ComparePage chunk | 6.34 KB | 6.35 KB (unchanged) |
+| SectionChart chunk | 103.01 KB | 103.03 KB (unchanged) |
+
+Headroom under 100 KB main-bundle budget: **1.44 → 16.98 KB**. Phase 4.8 + Phase 5/6 land without budget anxiety.
+
+### 4.7 review *(filled in after the GREEN + docs commits land)*
+
+- **What changed in shape:** three new lib modules (``watchlist`` / ``recent`` / ``popular-tickers``); two new components (``WatchlistButton`` / ``SearchModal``); five existing files extended (``AppShell``, ``SidebarShell``, ``LandingPage``, ``SymbolDetailPage``, ``App.tsx``). No new top-level routes (the SearchModal is a portal-overlay-style dialog, not a route), no schema changes, no new dependencies.
+- **What didn't change:** the per-symbol dashboard's data flow (cache lookup → tools → synth) is unchanged. The Compare page is unchanged. Pre-4.7 cached reports render unchanged. Backward-compat preserved on SidebarShell — pre-4.7 callers (only ``onSearchClick``) keep their existing disabled-button behavior because the new handlers are all optional.
+- **Net deltas:** backend zero; frontend +33 tests / +3 lib modules / +2 components / 5 files extended; main bundle **−15.54 KB gz**; +3 lazy chunks (SymbolDetailPage 14.49 / SearchModal 1.31 / risk-extract 4.27).
+- **Followups noted:**
+  - **4.6.B (compare narrative)** — Sonnet writes "NVDA's operating margin overtook AVGO's in Q2-23" against both reports' Quality sections. Optional, conditional on 4.8 dogfood signal.
+  - **Per-card sparklines on LandingPage's recent / watchlist grids** — would fan out fetchMarketPrices for each visible ticker. Cheap if all share the existing TanStack Query cache (recent visits would already be warm). Land if dogfood says the cards feel naked.
+  - **Backend ticker-search endpoint** — current SearchModal is frontend-only. If dogfood surfaces "I want to search for AVGO before I've ever visited it" beyond the popular-tickers list, add a yfinance-backed lookup or a seeded-symbols endpoint. 4.7.B territory.
+  - **Help overlay (`?` shortcut)** — mockup footer "Press ? for shortcuts" suggests a keyboard-help modal. Defer until 4.7's ⌘K is dogfooded enough to know what other shortcuts users want.
 
 ### 4.8 Vercel deploy + dogfood gate
 

@@ -10,23 +10,33 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.7 done (PRs #46–#61 + this PR); 4.6.B (compare narrative) + 4.8 (Vercel deploy + dogfood) follow.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.7 done (16 PRs through #62); 4.8 (Vercel deploy + dogfood) is next; 4.6.B (compare narrative) is optional / conditional on dogfood signal.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
 
 ## Handoff — pickup notes (2026-05-05)
 
-If you're picking this up after a gap, here's the orientation in three lines:
+If you're picking this up after a gap, the orientation in three lines:
 
-1. **Read [CLAUDE.md](../CLAUDE.md) "Current state" first** — it tracks what's done through 4.7 with bundle sizes, test counts, and inline summaries of every shipped PR.
-2. **Next concrete work is Phase 4.8 — Vercel deploy + dogfood gate.** 4.6.B (LLM compare narrative) stays optional and conditional on dogfood signal. Bundle headroom is now **16.98 KB** (main 83.02 / 100 KB) so 4.8 + Phase 5/6 land without budget anxiety.
-3. **Open PR is this one (Phase 4.7 — Search + Watchlist + Recent + bundle hygiene).** If it's already merged, the worktree is clean.
+1. **Read [CLAUDE.md](../CLAUDE.md) "Current state" first** — it tracks every shipped PR through 4.7 with bundle sizes, test counts, and inline summaries.
+2. **Next concrete work is Phase 4.8 — Vercel deploy + dogfood gate.** Spec is in §4.8 below. 4.6.B (LLM compare narrative) stays optional and conditional on dogfood signal — defer unless the gate produces a "wish Compare had narrative" reaction. Bundle headroom is now **16.98 KB** (main 83.02 / 100 KB) so 4.8 + Phase 5/6 land without budget anxiety.
+3. **Test counts to expect on a clean checkout:** `uv run pytest -v` → 607/607 backend (some skipped if FRED_API_KEY unset). `cd frontend && npx vitest run` → 447/447 frontend.
 
-**Three known followups not blocking 4.8:**
+**Known follow-ups not blocking 4.8:**
 
 - **Vite HMR cache misses file mtime in `.claude/worktrees/...`** — see [tasks/lessons.md](lessons.md). Workaround: trust unit tests + `vite build` for verification when the dev preview shows stale content. Fix candidate: add `server.watch.usePolling: true` to `vite.config.ts`. Low priority.
 - **Pre-existing ValuationCard ESLint warning** (`Unnecessary escape character: \-` at `frontend/src/components/ValuationCard.tsx:36`). Benign; tracking unfix because the regex pattern reads more clearly with the explicit escape. Drop the backslash if you ever want a clean lint pass.
-- **Real-LLM dogfood for 4.5.B's prompt change** + **Compare narrative dogfood gate** + **Recent / Watchlist + per-card sparkline polish** — all naturally land when 4.8 runs. The 4.7 LandingPage ticker grids are minimal cards (no sparklines) so the surface stays fast; if dogfood wants per-card sparklines, plumb the existing fetchMarketPrices through.
+- **Real-LLM dogfood for 4.5.B's prompt change** (distressed-name framing context block) — unit-tested but not verified end-to-end against a real RIVN report. Naturally lands during 4.8.
+- **Compare narrative dogfood gate** — 4.6.A Compare page ships visual-only. Whether to escalate to 4.6.B is a 4.8 decision.
+- **Per-card sparklines on LandingPage's Recent + Watchlist grids** — current cards are ticker-only (no fetch fan-out). If 4.8 dogfood wants sparklines, plumb the existing `fetchMarketPrices` query through; cache hits are likely warm if those tickers are in recent.
+- **Help overlay (`?` shortcut)** — mockup footer suggests a keyboard-help modal. Defer until ⌘K is dogfooded enough to know what other shortcuts are wanted.
 
-**`tasks/lessons.md`** captured 7 lessons through 4.5 — read before non-trivial work to avoid retreading them.
+**`tasks/lessons.md`** captured 8 lessons through 4.6.A — read before non-trivial work to avoid retreading them.
+
+## Local-dev gotchas (Windows)
+
+A clean checkout on Windows often hits two issues that cost dev hours if not pre-warned:
+
+1. **Native Postgres 18 service collides with Docker's :5432 mapping.** When the Windows `postgresql-x64-18` service is running, Docker's `5432:5432` mapping silently bumps the host port. Check with `docker ps` — if you see `0.0.0.0:5433->5432/tcp`, update `.env`'s `DATABASE_URL` to `localhost:5433`. Alternative: `Stop-Service postgresql-x64-18` to free :5432, then `docker compose down && up -d db`.
+2. **`.env`'s `DATABASE_URL` defaults to whatever the previous user set.** If the alembic / uvicorn stack hangs forever or fails with `ConnectionRefusedError`, check whether the URL points at Neon (`...neon.tech...?sslmode=require`) when you meant local. Neon connections appear in stack traces as `_create_ssl_connection`. Replace with `postgresql+asyncpg://postgres:postgres@localhost:5432/marketdb` for local.
 
 ## Phase 4 — Symbol-centric dashboard (active)
 

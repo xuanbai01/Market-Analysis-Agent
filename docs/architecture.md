@@ -49,11 +49,25 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + Anthropic per-
 │   ├── schemas/                 # Pydantic request/response (research.py is the v2 schema)
 │   └── services/                # tools (fetch_*, parse_*), orchestrator, cache, rate_limit, llm
 ├── alembic/versions/            # 0001 baseline, 0002 news_symbols, 0003 research_reports
-├── frontend/                    # Vite + React dashboard (Phase 3.1)
+├── frontend/                    # Vite + React 18 + TS dashboard (Phase 4)
 │   ├── src/
-│   │   ├── components/          # LoginScreen, Dashboard, ReportRenderer, etc.
-│   │   └── lib/                 # Zod schemas, API client, auth helpers, format helpers
-│   └── vercel.json              # Vercel deploy config
+│   │   ├── App.tsx              # Router + auth guard. SymbolDetailPage + ComparePage lazy.
+│   │   ├── components/
+│   │   │   ├── AppShell.tsx     # Sidebar + main outlet + global ⌘K listener
+│   │   │   ├── SidebarShell.tsx # 72px nav rail with count badges
+│   │   │   ├── LandingPage.tsx  # / route — search + Recent + Watchlist
+│   │   │   ├── SymbolDetailPage.tsx  # /symbol/:ticker (LAZY chunk, 14.5 KB gz)
+│   │   │   ├── compare/         # /compare/?a&b sub-tree (LAZY chunk, 6.4 KB gz)
+│   │   │   ├── search/          # SearchModal (LAZY chunk, 1.3 KB gz)
+│   │   │   └── ...              # Strata cards: HeroCard, QualityCard, EarningsCard,
+│   │   │                        #   ValuationCard, PerShareGrowthCard, CashAndCapitalCard,
+│   │   │                        #   RiskDiffCard, MacroPanel, BusinessCard, NewsList,
+│   │   │                        #   ContextBand, HeaderPills, NarrativeStrip,
+│   │   │                        #   WatchlistButton + SVG primitives
+│   │   └── lib/                 # Zod schemas, API client, auth helpers, format helpers,
+│   │                            #   per-card extractors, watchlist + recent localStorage,
+│   │                            #   popular-tickers
+│   └── vercel.json              # Vercel deploy config (held until 4.8)
 ├── tests/                       # pytest-asyncio; per-test SAVEPOINT rollback. Plus tests/evals/ (rubric + golden)
 ├── docs/                        # this directory (architecture, security, testing, commands, ADRs)
 ├── tasks/                       # active sprint (todo.md) + lessons learned
@@ -102,7 +116,7 @@ POST /v1/research/{symbol}
 | `candles` | composite PK `(symbol, ts, interval)`; OHLCV + volume | FK → `symbols`. Indexed `(symbol, interval, ts DESC)`. Append-only. |
 | `research_reports` | composite PK `(symbol, focus, report_date)`; `report_json` (JSONB), `generated_at` (timestamptz) | Same-day cache. JSONB stores serialized `ResearchReport`. Lookup is time-windowed via `generated_at` (configurable via `RESEARCH_CACHE_MAX_AGE_HOURS`). |
 
-## Routes (current)
+## Backend routes (current)
 
 | Group | Routes | Status |
 |---|---|---|
@@ -114,6 +128,18 @@ POST /v1/research/{symbol}
 | Research list | `GET /v1/research?limit=20&offset=0&symbol=...` | ✅ paginated `ResearchReportSummary[]` for the dashboard sidebar |
 | Phase 4 — prices | `GET /v1/market/:ticker/prices?range={60D\|1Y\|5Y}` | ✅ Phase 4.1 — read-through `candles` cache, falls through to yfinance ingest on miss. Auth-gated. |
 | Legacy | `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ 501 (legacy v1 stubs; will be removed or redirected to `/v1/research`) |
+
+## Frontend routes (current)
+
+Lazy-loading is the binding bundle constraint — main is at 83.02 KB gz (16.98 KB headroom under the 100 KB budget). Every authenticated route except `/` is split into its own chunk so the entry stays lean.
+
+| Route | State | Chunk |
+|---|---|---|
+| `/login` | ✅ Pre-auth screen. | main |
+| `/` | ✅ LandingPage — search bar + Recent Tickers + Watchlist + Past Reports. | main |
+| `/symbol/:ticker` | ✅ The dashboard. All Strata cards live here (HeroCard, QualityCard, EarningsCard, ValuationCard, PerShareGrowthCard, CashAndCapitalCard, RiskDiffCard, MacroPanel, ContextBand, etc.). | **lazy** (14.5 KB gz) |
+| `/compare?a=X&b=Y` | ✅ Phase 4.6.A — two-ticker side-by-side. Per-side distress chrome. | **lazy** (6.4 KB gz) |
+| (overlay) `SearchModal` | ✅ Phase 4.7 — ⌘K-triggered. | **lazy** (1.3 KB gz) |
 
 Errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](../app/core/errors.py). The handler propagates `HTTPException.headers` so `Retry-After` (429) and `WWW-Authenticate` (401) survive the wrap.
 

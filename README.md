@@ -4,7 +4,7 @@ An **AI Equity Research Assistant**. POST a ticker, get back a structured analys
 
 Live: <https://market-analysis-agent.fly.dev/docs>
 
-> **Status — Phases 1 → 4.5 done; Phase 4.6 (Compare page) is next.** The agent endpoint `POST /v1/research/{symbol}` is live with a 7-day same-day cache and per-IP rate limit; real-LLM golden eval passes at factuality ≥ 0.97. Phase 4 (the symbol-centric dashboard rebuild per [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md)) shipped 4.0 → 4.5.C: dashboard route at `/symbol/:ticker`, hand-rolled SVG primitives (Sparkline, LineChart, EpsBars, MetricRing, MultiLine, PeerScatterV2), nine dedicated cards (Hero, Quality, Earnings, Valuation, PerShareGrowth, CashAndCapital, RiskDiff, Macro, plus Business + News in a ContextBand), per-card LLM-written narratives, and adaptive layouts that reframe distressed names (Rivian-class) around survival rather than quality. Frontend Vercel deploy held until **Phase 4.8 dogfood gate**. See [tasks/todo.md](tasks/todo.md) for the granular tracker. **607 tests passing on the backend, 392 on the frontend; main bundle 98.42 KB gzipped (under 100 KB budget).**
+> **Status — Phases 1 → 4.7 done; Phase 4.8 (Vercel deploy + dogfood gate) is next.** The agent endpoint `POST /v1/research/{symbol}` is live with a 7-day same-day cache and per-IP rate limit; real-LLM golden eval passes at factuality ≥ 0.97. Phase 4 (the symbol-centric dashboard rebuild per [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md)) shipped 4.0 → 4.7: dashboard route at `/symbol/:ticker` (lazy-loaded), Compare page at `/compare?a=X&b=Y` (lazy-loaded), hand-rolled SVG primitives (Sparkline, LineChart, EpsBars, MetricRing, MultiLine, PeerScatterV2), nine dedicated cards, per-card LLM-written narratives, adaptive layouts for distressed names (Rivian-class), ⌘K search modal, localStorage watchlist + recent tracking with sidebar count badges. Frontend Vercel deploy held until **Phase 4.8 dogfood gate**. See [tasks/todo.md](tasks/todo.md) for the granular tracker. **607 tests passing on the backend, 447 on the frontend; main bundle 83.02 KB gzipped (16.98 KB headroom under the 100 KB budget).**
 
 ## What this is (and isn't)
 
@@ -56,6 +56,15 @@ See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for the full first-hour c
 | `GET /v1/market/{symbol}/prices?range={60D\|1Y\|5Y}` | ✅ **Phase 4.1.** Read-through `candles` cache; falls through to yfinance ingest on miss with 80%-coverage threshold. Auth-gated. Powers the dashboard hero price chart. |
 | `POST /v1/research/{symbol}?focus={full,earnings}&refresh={false,true}` | ✅ **The v2 primary endpoint.** 9 sections in `full` mode (Business, News, Valuation, Quality, Capital Allocation, Earnings, Peers, Risk Factors, Macro) or 4 in `earnings` (News, Earnings, Valuation, Risk Factors). Same-day cache (default 7 days, configurable) + per-IP rate limit (default 3/hour, configurable). Phase 4.4.B added `Section.card_narrative` for per-card 1-2 sentence headlines; Phase 4.5.A added `ResearchReport.layout_signals` for adaptive-layout flags. |
 | `GET /v1/research?limit=20&offset=0&symbol=...` | ✅ Paginated `ResearchReportSummary[]` for the dashboard sidebar. |
+
+**Frontend routes** (lazy-loaded splits keep main bundle at 83 KB gz):
+
+| Route | State |
+|---|---|
+| `/login` | ✅ Auth gate; pre-auth screen, lives in main bundle. |
+| `/` | ✅ Landing — search bar + Recent Tickers + Watchlist sections (localStorage) + Past Reports list. Stays in main. |
+| `/symbol/:ticker` | ✅ Dashboard. **Lazy chunk** (14.5 KB gz). All per-card Strata components ship here only on first visit. |
+| `/compare?a=X&b=Y` | ✅ **Phase 4.6.A.** Two-ticker side-by-side. **Lazy chunk** (6.4 KB gz). Per-side distress chrome. |
 | `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ `501 Not Implemented` (legacy v1 routes; will be removed or redirected to `/v1/research`) |
 
 All errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](app/core/errors.py).
@@ -179,12 +188,18 @@ A research-report agent that produces beautifully-formatted hallucinations is wo
 ├── alembic/versions/            # 0001 baseline, 0002 news_symbols, 0003 research_reports
 ├── frontend/                    # Vite + React 18 + TS dashboard
 │   ├── src/
-│   │   ├── components/          # SymbolDetailPage, HeroCard, QualityCard, EarningsCard,
-│   │   │                        # ValuationCard, PerShareGrowthCard, CashAndCapitalCard,
-│   │   │                        # RiskDiffCard, MacroPanel, BusinessCard, NewsList,
-│   │   │                        # ContextBand, HeaderPills, NarrativeStrip, primitives
-│   │   │                        # (LineChart, EpsBars, MetricRing, MultiLine, PeerScatterV2)
-│   │   └── lib/                 # Zod schemas, API client, extractors, format helpers
+│   │   ├── components/          # SymbolDetailPage (lazy), LandingPage, AppShell,
+│   │   │   │                    # WatchlistButton, HeroCard, QualityCard, EarningsCard,
+│   │   │   │                    # ValuationCard, PerShareGrowthCard, CashAndCapitalCard,
+│   │   │   │                    # RiskDiffCard, MacroPanel, BusinessCard, NewsList,
+│   │   │   │                    # ContextBand, HeaderPills, NarrativeStrip, primitives
+│   │   │   │                    # (LineChart, EpsBars, MetricRing, MultiLine, PeerScatterV2)
+│   │   │   ├── compare/         # ComparePage (lazy), CompareHero, CompareMetricRow,
+│   │   │   │                    #   CompareMarginOverlay, CompareGrowthOverlay,
+│   │   │   │                    #   CompareRiskDiff, CompareFooter
+│   │   │   └── search/          # SearchModal (lazy), ⌘K-triggered
+│   │   └── lib/                 # Zod schemas, API client, extractors, format helpers,
+│   │                            # watchlist + recent localStorage helpers, popular-tickers
 │   └── vercel.json              # Vercel deploy config (held until 4.8)
 ├── tests/                       # pytest-asyncio; per-test SAVEPOINT rollback. Plus tests/evals/
 ├── docs/                        # architecture, security, testing, commands, ADRs (0001 → 0005)
@@ -245,13 +260,13 @@ No license file yet. Treat as all-rights-reserved until one lands.
   Citation-enforcing schema, 9 free-data tools, deterministic-everything-except-prose orchestrator, same-day cache, per-IP rate limit, real-LLM golden eval at factuality 0.97.
 - **Phase 3 — Visual-first depth** ✅ *(complete; PRs #35 → #44)*
   `Claim.history` schema extension; `fetch_fundamentals` / `fetch_earnings` / `fetch_macro` ship multi-period histories; eval rubric reads `claim.history` for trend-prose factuality. Frontend sparklines + section charts shipped via the v1 dashboard before being replaced by the Phase 4 Strata redesign.
-- **Phase 4 — Symbol-centric dashboard rebuild** 🔄 *(in flight; 4.5.C ready for review at PR #59; 4.6 next)*
+- **Phase 4 — Symbol-centric dashboard rebuild** 🔄 *(in flight; 4.0 → 4.7 done; 4.8 next — the dogfood gate)*
   Per [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md). The dashboard pivoted from "click Generate → static report" to a `/symbol/:ticker` URL-routed dashboard with adaptive layouts:
   - **4.0 → 4.4 done (PRs #46 → #56):** Strata token system, `react-router-dom@6`, `SidebarShell` + `LandingPage` + `SymbolDetailPage`. Hand-rolled SVG primitives (LineChart, EpsBars, MetricRing, MultiLine, PeerScatterV2). Nine dedicated cards: Hero (price + featured stats), Quality, Earnings (20Q EPS bars + recent prints), Valuation (4-cell + peer scatter), PerShareGrowth (5 series rebased), CashAndCapital, RiskDiff (per-category Haiku categorizer), MacroPanel, plus Business + News in a ContextBand. Per-card LLM-written `card_narrative` field with the eval rubric policing both that and the broader `summary`.
   - **4.5 done (PRs #57 → #59):** adaptive layout. `LayoutSignals` model + pure derivation read claim values to detect distress (`is_unprofitable_ttm`, `beat_rate_below_30pct`, `cash_runway_quarters`, `gross_margin_negative`, `debt_rising_cash_falling`). HeaderPills above hero ("● UNPROFITABLE · TTM", "⚠ LIQUIDITY WATCH"); HeroCard right-column trio swap (Forward P/E → P/Sales, ROIC → Cash Runway, FCF margin red on negative); EarningsCard "bottom decile" pill; CashAndCapitalCard runway tile + "raise likely needed"; QualityCard rings flip red on negative ratios; SymbolDetailPage row 3/4 reorder so Cash + Risk + Macro lift above Valuation + Growth on distressed names; Sonnet's prompt receives signals as framing context. Layout polish (4.5.C): wider `max-w-screen-2xl` container, `items-start` honest-height alignment, ContextBand to bottom, auto-collapsing row 4.
-  - **4.6 next — Compare page (`/compare?a=NVDA&b=AVGO`)**: two-ticker side-by-side dashboard with overlay charts. Bundle headroom is currently 1.58 KB so the new route needs `React.lazy()` chunk-splitting. Plan in `tasks/todo.md` §4.6.
-  - **4.7 — Search modal + Watchlist + Recent**: `⌘K` modal, localStorage watchlist, recent ticker tracking, landing-page upgrade.
-  - **4.8 — Vercel deploy + dogfood gate**: ship the frontend; dogfood across 8–10 real symbols; the dogfood signal decides whether to escalate to Phase 5 (Narrative layer) or Phase 6 (XBRL Tier 2).
+  - **4.6.A done (PR #61) — Compare page (`/compare?a=NVDA&b=AVGO`)**: two-ticker side-by-side dashboard, lazy-loaded. `CompareHero` (per-side mini area chart + per-side distress chrome), `CompareMetricRow` for Valuation (3 metrics, lower=cheaper) and Quality (4 metrics, higher=better), `CompareMarginOverlay` (operating margin 20Q both tickers), `CompareGrowthOverlay` (5Y per-share Rev + FCF rebased), `CompareRiskDiff` (10-K diff side-by-side), `CompareFooter` ("What survives / What's cut"). PEG metric and LLM compare narrative deferred to 4.6.B.
+  - **4.7 done (PR #62) — Search + Watchlist + Recent + bundle hygiene**: ⌘K search modal (lazy-loaded; filters over recent ∪ watchlist ∪ POPULAR_TICKERS), localStorage `lib/watchlist.ts` + `lib/recent.ts` (MRU cap-at-10), `WatchlistButton` star toggle on `/symbol/:ticker`, sidebar count badges, `LandingPage` Recent + Watchlist sections. Companion bundle hygiene: `SymbolDetailPage` lazy-loaded so all per-card Strata components move out of main into a 14.5 KB on-demand chunk — main bundle drops 98.56 → 83.02 KB gz; headroom 1.44 → **16.98 KB**.
+  - **4.8 next — Vercel deploy + dogfood gate**: ship the frontend; dogfood across 8–10 real symbols spanning the layout matrix (healthy mega-cap, growth, distressed, dividend, cyclical); the dogfood signal decides whether to escalate to Phase 5 (Narrative layer) or Phase 6 (XBRL Tier 2). Optional follow-ups: 4.6.B compare narrative if dogfood asks; per-card sparklines on landing-page ticker grids; help-overlay (`?` shortcut).
 - **Phase 5 — Narrative layer** ⏸ *(deferred; conditional on 4.8 dogfood signal)*
   Explicit Bulls Say / Bears Say with `claim_refs` enforcement, What Changed deltas, `?focus=thesis`. Lands only if 4.8 surfaces "I want a real bull/bear case" repeatedly that the per-card narratives don't satisfy.
 - **Phase 6 — XBRL Tier 2** ⏸ *(deferred; conditional on 4.8 dogfood signal)*

@@ -81,7 +81,7 @@ function Panel({
       </div>
       <MultiLine
         series={series}
-        width={320}
+        width={300}
         height={PANEL_HEIGHT}
         yDomain={domain}
         includeZero

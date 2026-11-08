@@ -19,12 +19,15 @@
  *   - Hover: a guide at the nearest period and a readout listing every
  *     series at that period (plus ``formatChange`` vs the prior period).
  *   - ``yDomain`` lets sibling charts share one scale.
+ *   - Drawn at the container's measured pixel width, so labels stay a
+ *     true 11 px in any card instead of shrinking with a fixed viewBox
+ *     (``width`` is the fallback before measurement and in tests).
  *
  * Period axis: the sorted union of every series' periods (lexical sort
  * works for ``YYYY-Qn`` / ``YYYY-MM`` / ``YYYY``). Series with < 2 points
  * are dropped.
  */
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import type { ClaimHistoryPoint } from "../lib/schemas";
 
@@ -65,8 +68,8 @@ const DEFAULT_HEIGHT = 180;
 const MAX_ALL_X_LABELS = 8;
 const THINNED_X_LABELS = 5;
 const MAX_MARKED_PERIODS = 12;
-const END_LABEL_GAP = 12;
-const CHAR_W = 6.1; // ~10 px mono glyph width in viewBox units
+const END_LABEL_GAP = 13;
+const CHAR_W = 6.7; // ~11 px mono glyph width in viewBox units
 const PAD_TOP = 10;
 const PAD_BOTTOM = 22;
 
@@ -75,7 +78,7 @@ const BASELINE_COLOR = "#5a6473"; // strata-muted
 const AXIS_LABEL_COLOR = "#5a6473"; // strata-muted
 const END_LABEL_COLOR = "#8892a0"; // strata-dim
 const MARKER_RING = "#0e1116"; // strata-surface
-const LABEL_STYLE = { fontSize: 10, fontFamily: "var(--font-mono, monospace)" };
+const LABEL_STYLE = { fontSize: 11, fontFamily: "var(--font-mono, monospace)" };
 
 function defaultFormat(v: number): string {
   const abs = Math.abs(v);
@@ -118,13 +121,30 @@ function shortPeriod(period: string): string {
   return m ? `Q${m[2]} '${m[1].slice(2)}` : period;
 }
 
-function xTickIndices(n: number): number[] {
-  if (n <= MAX_ALL_X_LABELS) return Array.from({ length: n }, (_, i) => i);
+function evenlySpaced(n: number, k: number): number[] {
+  if (k >= n) return Array.from({ length: n }, (_, i) => i);
   const picks = new Set<number>();
-  for (let i = 0; i < THINNED_X_LABELS; i++) {
-    picks.add(Math.round((i * (n - 1)) / (THINNED_X_LABELS - 1)));
-  }
+  for (let i = 0; i < k; i++) picks.add(Math.round((i * (n - 1)) / (k - 1)));
   return Array.from(picks).sort((a, b) => a - b);
+}
+
+/** Which period indices get a label: as many as fit without touching —
+ *  every period up to 8, otherwise at most 5 — always keeping both ends.
+ *  The first label is anchored at its start and the last at its end, so
+ *  extents are checked per anchor rather than assuming equal spacing. */
+function pickXTicks(n: number, xAt: (i: number) => number, labelPx: number): number[] {
+  const kMax = n <= MAX_ALL_X_LABELS ? n : THINNED_X_LABELS;
+  for (let k = kMax; k >= 2; k--) {
+    const idx = evenlySpaced(n, k);
+    const extents = idx.map((i, j) => {
+      const x = xAt(i);
+      if (j === 0) return [x, x + labelPx];
+      if (j === idx.length - 1) return [x - labelPx, x];
+      return [x - labelPx / 2, x + labelPx / 2];
+    });
+    if (extents.every((e, j) => j === 0 || e[0] >= extents[j - 1][1] + 4)) return idx;
+  }
+  return n > 1 ? [0, n - 1] : [0];
 }
 
 function sortedHistory(h: ClaimHistoryPoint[]): ClaimHistoryPoint[] {
@@ -146,6 +166,19 @@ export function MultiLine({
   ariaLabel,
 }: Props) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
+  const observer = useRef<ResizeObserver | null>(null);
+  const measureRef = useCallback((el: HTMLDivElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.round(entries[0]?.contentRect.width ?? 0);
+      if (w > 0) setMeasuredWidth((prev) => (prev === w ? prev : w));
+    });
+    ro.observe(el);
+    observer.current = ro;
+  }, []);
 
   const drawable = series
     .filter((s) => s.history.length >= 2)
@@ -174,7 +207,8 @@ export function MultiLine({
   const yHi = ticks[ticks.length - 1];
   const referenceValue = baseline ?? (yLo <= 0 && yHi >= 0 ? 0 : undefined);
 
-  // ── Layout (viewBox units) ─────────────────────────────────────────
+  // ── Layout (viewBox units = CSS px once measured) ──────────────────
+  const W = measuredWidth ?? width;
   const tickLabels = ticks.map(formatTick ?? formatValue);
   const padLeft = 10 + Math.max(...tickLabels.map((t) => t.length)) * CHAR_W;
   const endTexts = drawable.map((s) => {
@@ -184,7 +218,7 @@ export function MultiLine({
   const padRight = showEndLabels
     ? Math.min(130, 14 + Math.max(...endTexts.map((t) => t.length)) * CHAR_W)
     : 12;
-  const innerW = width - padLeft - padRight;
+  const innerW = W - padLeft - padRight;
   const innerH = height - PAD_TOP - PAD_BOTTOM;
   const plotRight = padLeft + innerW;
   const plotBottom = PAD_TOP + innerH;
@@ -210,6 +244,9 @@ export function MultiLine({
 
   const markAll = periods.length <= MAX_MARKED_PERIODS;
 
+  const xLabelPx = Math.max(...periods.map((p) => shortPeriod(p).length)) * CHAR_W;
+  const xTicks = pickXTicks(periods.length, xAt, xLabelPx);
+
   // ── Hover ──────────────────────────────────────────────────────────
   function onMouseMove(e: React.MouseEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -218,7 +255,7 @@ export function MultiLine({
       setHoverIdx(periods.length - 1);
       return;
     }
-    const vbX = ((e.clientX - rect.left) / rect.width) * width;
+    const vbX = ((e.clientX - rect.left) / rect.width) * W;
     const frac = (vbX - padLeft) / (innerW || 1);
     setHoverIdx(Math.max(0, Math.min(periods.length - 1, Math.round(frac * (periods.length - 1)))));
   }
@@ -235,17 +272,17 @@ export function MultiLine({
           const change = formatChange && prev !== null ? formatChange(now, prev) : null;
           return [{ s, now, change }];
         });
-  const hoverLeftPct = hoverIdx === null ? 0 : (xAt(hoverIdx) / width) * 100;
+  const hoverLeftPct = hoverIdx === null ? 0 : (xAt(hoverIdx) / W) * 100;
 
   return (
     <div>
-      <div className="relative">
+      <div className="relative" ref={measureRef}>
         <svg
           data-testid="multi-line"
           // Responsive width; internal coords preserved by the viewBox.
           width="100%"
           height={height}
-          viewBox={`0 0 ${width} ${height}`}
+          viewBox={`0 0 ${W} ${height}`}
           role="img"
           aria-label={ariaLabel ?? `Multi-series chart with ${drawable.length} series`}
           className="block"
@@ -283,7 +320,7 @@ export function MultiLine({
           )}
 
           {/* Period axis labels. */}
-          {xTickIndices(periods.length).map((i, k, all) => (
+          {xTicks.map((i, k, all) => (
             <text
               key={periods[i]}
               data-testid="multi-line-x-tick"

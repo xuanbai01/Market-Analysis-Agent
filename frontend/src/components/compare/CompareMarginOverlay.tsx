@@ -6,6 +6,7 @@
  * caption). Returns null when neither ticker has the underlying data
  * so the parent layout can collapse cleanly.
  */
+import { fractionPct, fractionPctTick, pointsChange } from "../../lib/chart-format";
 import { extractCompareMarginOverlay } from "../../lib/compare-extract";
 import type { ResearchReport } from "../../lib/schemas";
 import { MultiLine } from "../MultiLine";
@@ -26,7 +27,15 @@ export function CompareMarginOverlay({ a, b }: Props) {
           Operating margin · 20Q · both tickers
         </div>
       </div>
-      <MultiLine series={series} ariaLabel="Operating margin overlay" height={180} />
+      <MultiLine
+        series={series}
+        ariaLabel="Operating margin overlay"
+        height={180}
+        includeZero
+        formatValue={fractionPct}
+        formatTick={fractionPctTick}
+        formatChange={pointsChange}
+      />
     </section>
   );
 }

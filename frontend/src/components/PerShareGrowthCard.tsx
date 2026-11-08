@@ -1,24 +1,30 @@
 /**
- * PerShareGrowthCard — Phase 4.3.A.
+ * PerShareGrowthCard — Phase 4.3.A; redrawn 2026-11.
  *
- * Renders the row-3 card from `direction-strata.jsx`: 5 per-share
- * series rebased to first-point=100, plotted on a shared MultiLine,
- * with 5 multiplier pills below summarizing total growth.
+ * Five per-share series (Revenue, Gross profit, Op income, OCF, FCF) as
+ * actual dollars per share in two panels — income lines and cash-flow
+ * lines — on one shared, labelled scale, with 5 multiplier + CAGR pills
+ * below summarizing total growth.
+ *
+ * Until 2026-11 this was one chart of all five lines rebased to the
+ * first quarter = 100, with no axis or baseline and smoothed curves
+ * (tasks/dogfood-2026-11.md #8). Rebasing inflated small bases and
+ * flipped negative ones; the series share a unit, so they now plot as-is
+ * and the growth story lives in the pills.
  *
  * Data lives in the Quality section (history-bearing claims from
- * Phase 3.2.A). The card is read-only — no toggle, no expand. The
- * deeper claim list still surfaces in QualityCard's hybrid table
- * above this card; PerShareGrowthCard is the visual companion.
+ * Phase 3.2.A).
  */
+import { relativeChange, usdPerShare, usdTick } from "../lib/chart-format";
 import {
   extractGrowthCagr,
   extractGrowthMultipliers,
-  extractGrowthSeries,
+  extractPerSharePanels,
   type GrowthMultipliers,
 } from "../lib/growth-extract";
 import type { Section } from "../lib/schemas";
 import { ConfidenceBadge } from "./ConfidenceBadge";
-import { MultiLine } from "./MultiLine";
+import { MultiLine, type MultiLineSeries } from "./MultiLine";
 import { NarrativeStrip } from "./NarrativeStrip";
 
 interface Props {
@@ -54,11 +60,50 @@ function formatCagr(n: number | null): string {
   return `${sign}${(n * 100).toFixed(1)}%`;
 }
 
+const PANEL_HEIGHT = 190;
+const perShareChange = relativeChange(usdPerShare);
+
+function Panel({
+  testId,
+  title,
+  series,
+  domain,
+}: {
+  testId: string;
+  title: string;
+  series: MultiLineSeries[];
+  domain: [number, number];
+}) {
+  return (
+    <div data-testid={testId}>
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
+        {title}
+      </div>
+      <MultiLine
+        series={series}
+        width={300}
+        height={PANEL_HEIGHT}
+        yDomain={domain}
+        includeZero
+        formatValue={usdPerShare}
+        formatTick={usdTick}
+        formatChange={perShareChange}
+        ariaLabel={`${title}: ${series.map((s) => s.label).join(", ")}`}
+      />
+    </div>
+  );
+}
+
 export function PerShareGrowthCard({ ticker, section }: Props) {
-  const series = extractGrowthSeries(section);
+  const panels = extractPerSharePanels(section);
   const mults = extractGrowthMultipliers(section);
   const cagrs = extractGrowthCagr(section);
-  const periodLength = series[0]?.history.length ?? 0;
+  const all = [...panels.income, ...panels.cashFlow];
+  const periodLength = Math.max(0, ...all.map((s) => s.history.length));
+  const values = all.flatMap((s) => s.history.map((p) => p.value));
+  // One scale for both panels so a cash-flow line and an income line of
+  // the same height mean the same $/share.
+  const domain: [number, number] = [Math.min(0, ...values), Math.max(0, ...values)];
 
   return (
     // No mb-6 — vertical spacing comes from the parent grid's gap-6.
@@ -66,7 +111,7 @@ export function PerShareGrowthCard({ ticker, section }: Props) {
       <header className="mb-4 flex items-start justify-between gap-3">
         <div>
           <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-growth">
-            Per-share growth · {ticker} · rebased first = 100
+            Per-share growth · {ticker} · $ / share
           </div>
           {/*
             Phase 4.4.B — per-card narrative slot returns at the bottom
@@ -86,8 +131,15 @@ export function PerShareGrowthCard({ ticker, section }: Props) {
         </div>
       </header>
 
-      {series.length >= 2 ? (
-        <MultiLine series={series} height={200} />
+      {all.length > 0 ? (
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          {panels.income.length > 0 && (
+            <Panel testId="per-share-panel-income" title="Income / share" series={panels.income} domain={domain} />
+          )}
+          {panels.cashFlow.length > 0 && (
+            <Panel testId="per-share-panel-cashflow" title="Cash flow / share" series={panels.cashFlow} domain={domain} />
+          )}
+        </div>
       ) : (
         <div className="flex h-[120px] items-center justify-center font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
           Per-share growth history unavailable

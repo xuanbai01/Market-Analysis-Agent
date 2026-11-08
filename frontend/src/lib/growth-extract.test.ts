@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractGrowthMultipliers,
   extractGrowthSeries,
+  extractPerSharePanels,
 } from "./growth-extract";
 import type { Claim, ClaimHistoryPoint, ClaimValue, Section } from "./schemas";
 
@@ -150,5 +151,74 @@ describe("extractGrowthMultipliers", () => {
     const mults = extractGrowthMultipliers(s);
     expect(mults.rev).toBeNull();
     expect(mults.gp).toBeNull();
+  });
+});
+
+// ── extractPerSharePanels (2026-11 dogfood #8) ──────────────────────
+//
+// The five per-share series share one unit ($/share), so the card plots
+// actual values on a real axis instead of rebasing to the first quarter
+// (which blew up small bases and flipped negative ones).
+
+describe("extractPerSharePanels", () => {
+  const FCF_HIST: ClaimHistoryPoint[] = [
+    { period: "2025-Q3", value: -0.55 },
+    { period: "2025-Q4", value: 0.9 },
+    { period: "2026-Q1", value: 0.88 },
+  ];
+
+  it("splits income lines from cash-flow lines, in display order", () => {
+    const panels = extractPerSharePanels(
+      section([
+        claim("Revenue per share", 62, REV_HIST),
+        claim("Gross profit per share", 43.4, GP_HIST),
+        claim("Operating income per share", 30, REV_HIST),
+        claim("Operating cash flow per share", 1, FCF_HIST),
+        claim("Free cash flow per share", 0.88, FCF_HIST),
+      ]),
+    );
+    expect(panels.income.map((s) => s.label)).toEqual([
+      "Revenue",
+      "Gross profit",
+      "Op income",
+    ]);
+    expect(panels.cashFlow.map((s) => s.label)).toEqual(["OCF", "FCF"]);
+  });
+
+  it("keeps the actual values — no rebasing", () => {
+    const panels = extractPerSharePanels(
+      section([claim("Revenue per share", 62, REV_HIST)]),
+    );
+    expect(panels.income[0].history.map((p) => p.value)).toEqual(
+      REV_HIST.map((p) => p.value),
+    );
+  });
+
+  it("keeps negative values (a loss-making first quarter can't flip the line)", () => {
+    const panels = extractPerSharePanels(
+      section([claim("Free cash flow per share", 0.88, FCF_HIST)]),
+    );
+    expect(panels.cashFlow[0].history[0].value).toBe(-0.55);
+  });
+
+  it("gives every series a short label for the line end", () => {
+    const panels = extractPerSharePanels(
+      section([
+        claim("Revenue per share", 62, REV_HIST),
+        claim("Free cash flow per share", 0.88, FCF_HIST),
+      ]),
+    );
+    expect(panels.income[0].shortLabel).toBe("Rev");
+    expect(panels.cashFlow[0].shortLabel).toBe("FCF");
+  });
+
+  it("drops series with fewer than 2 points", () => {
+    const panels = extractPerSharePanels(
+      section([
+        claim("Revenue per share", 62, [{ period: "2026-Q1", value: 62 }]),
+        claim("Gross profit per share", 43.4, GP_HIST),
+      ]),
+    );
+    expect(panels.income.map((s) => s.label)).toEqual(["Gross profit"]);
   });
 });

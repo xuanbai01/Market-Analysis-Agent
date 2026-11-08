@@ -60,13 +60,53 @@ const FULL: Claim[] = [
 ];
 
 describe("PerShareGrowthCard", () => {
-  it("renders a MultiLine SVG when series have rebased history", () => {
+  // 2026-11 dogfood #8: one chart of five lines rebased to the first
+  // quarter had no axis, no baseline and invented curves. Now: actual
+  // $/share in two panels (income vs cash flow) on one shared scale.
+  it("renders an income panel and a cash-flow panel", () => {
+    const { getByTestId } = render(
+      <PerShareGrowthCard ticker="NVDA" section={section(FULL)} />,
+    );
+    const income = getByTestId("per-share-panel-income");
+    const cash = getByTestId("per-share-panel-cashflow");
+    expect(income.querySelector("[data-testid='multi-line']")).not.toBeNull();
+    expect(cash.querySelector("[data-testid='multi-line']")).not.toBeNull();
+    expect(income.querySelectorAll("path[data-series-line]")).toHaveLength(3);
+    expect(cash.querySelectorAll("path[data-series-line]")).toHaveLength(2);
+  });
+
+  it("plots dollars per share on one shared, labelled scale", () => {
+    const { getByTestId } = render(
+      <PerShareGrowthCard ticker="NVDA" section={section(FULL)} />,
+    );
+    const ticksOf = (id: string) =>
+      Array.from(
+        getByTestId(id).querySelectorAll("[data-testid='multi-line-y-tick']"),
+      ).map((t) => t.textContent);
+    const incomeTicks = ticksOf("per-share-panel-income");
+    expect(incomeTicks).toContain("$0");
+    expect(incomeTicks.every((t) => t?.startsWith("$"))).toBe(true);
+    expect(ticksOf("per-share-panel-cashflow")).toEqual(incomeTicks);
+  });
+
+  it("labels each line's latest $/share value", () => {
+    const { getByTestId } = render(
+      <PerShareGrowthCard ticker="NVDA" section={section(FULL)} />,
+    );
+    const labels = Array.from(
+      getByTestId("per-share-panel-income").querySelectorAll(
+        "[data-testid='multi-line-end-label']",
+      ),
+    ).map((l) => l.textContent);
+    expect(labels).toContain("Rev $62.00");
+  });
+
+  it("no longer describes the chart as rebased", () => {
     const { container } = render(
       <PerShareGrowthCard ticker="NVDA" section={section(FULL)} />,
     );
-    expect(
-      container.querySelector("[data-testid='multi-line']"),
-    ).not.toBeNull();
+    expect(container.textContent).not.toMatch(/rebased/i);
+    expect(container.textContent).toMatch(/\$ \/ share/i);
   });
 
   it("renders 5 multiplier pills", () => {

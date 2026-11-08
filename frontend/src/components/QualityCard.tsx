@@ -17,6 +17,7 @@
  */
 import { useState } from "react";
 
+import { fractionPct, fractionPctTick, pointsChange } from "../lib/chart-format";
 import { formatClaimValue } from "../lib/format";
 import {
   extractAllQualityClaims,
@@ -29,7 +30,7 @@ import { ConfidenceBadge } from "./ConfidenceBadge";
 import { MetricRing } from "./MetricRing";
 import { MultiLine } from "./MultiLine";
 import { NarrativeStrip } from "./NarrativeStrip";
-import { Sparkline } from "./Sparkline";
+import { TrendCell } from "./TrendCell";
 
 interface Props {
   ticker: string;
@@ -39,6 +40,9 @@ interface Props {
 export function QualityCard({ ticker, section }: Props) {
   const rings = extractQualityRings(section);
   const series = extractMarginSeries(section);
+  // The margin histories are quarterly (~5 quarters from yfinance);
+  // the sub-kicker used to say "5Y".
+  const marginPeriods = Math.max(0, ...series.map((s) => s.history.length));
   const primaryClaims = extractPrimaryQualityClaims(section);
   const allClaims = extractAllQualityClaims(section);
   const [expanded, setExpanded] = useState(false);
@@ -130,10 +134,17 @@ export function QualityCard({ ticker, section }: Props) {
             data-testid="quality-margins-subkicker"
             className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-kicker"
           >
-            <span className="text-strata-quality">Margins · 5Y</span>
+            <span className="text-strata-quality">Margins · {marginPeriods}Q</span>
             <MarginsInline section={section} />
           </div>
-          <MultiLine series={series} />
+          <MultiLine
+            series={series}
+            includeZero
+            formatValue={fractionPct}
+            formatTick={fractionPctTick}
+            formatChange={pointsChange}
+            ariaLabel="Gross, operating and FCF margin by quarter"
+          />
         </div>
       )}
 
@@ -190,12 +201,7 @@ function ClaimRow({ claim }: { claim: Claim }) {
         {formatClaimValue(claim.value, claim.unit)}
       </td>
       <td className="hidden px-3 py-2 sm:table-cell">
-        {claim.history.length >= 2 ? (
-          <Sparkline
-            history={claim.history}
-            ariaLabel={`Trend for ${claim.description}`}
-          />
-        ) : null}
+        <TrendCell history={claim.history} unit={claim.unit} label={claim.description} />
       </td>
     </tr>
   );

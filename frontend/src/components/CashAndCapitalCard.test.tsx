@@ -56,15 +56,38 @@ const QUALITY = section("Quality", [
 ]);
 
 describe("CashAndCapitalCard", () => {
-  it("renders 2 MultiLine SVGs when both stacks have data", () => {
-    const { container } = render(
-      <CashAndCapitalCard
-        capAllocSection={CAP_ALLOC}
-        qualitySection={QUALITY}
-      />,
+  // 2026-11 dogfood #9: two 80 px charts with no scale showed flat lines
+  // (CapEx $0.11 vs SBC $0.08, or debt tripling, were unreadable). Each
+  // metric is now a tile: latest value, change since the first quarter,
+  // and a sparkline with marked ends.
+  it("renders one tile per metric, in order", () => {
+    const { getAllByTestId } = render(
+      <CashAndCapitalCard capAllocSection={CAP_ALLOC} qualitySection={QUALITY} />,
     );
-    const charts = container.querySelectorAll("[data-testid='multi-line']");
-    expect(charts.length).toBe(2);
+    const tiles = getAllByTestId("cash-capital-tile");
+    expect(tiles.map((t) => t.getAttribute("data-metric"))).toEqual([
+      "CapEx",
+      "SBC",
+      "Cash",
+      "Debt",
+    ]);
+  });
+
+  it("shows each metric's latest value and its change since the first quarter", () => {
+    const { getAllByTestId } = render(
+      <CashAndCapitalCard capAllocSection={CAP_ALLOC} qualitySection={QUALITY} />,
+    );
+    const capex = getAllByTestId("cash-capital-tile")[0];
+    expect(capex.textContent).toContain("$1.30");
+    expect(capex.textContent).toContain("+30% vs 2024-Q1");
+    expect(capex.querySelector("[data-testid='sparkline']")).not.toBeNull();
+  });
+
+  it("no longer draws unlabeled mini line charts", () => {
+    const { container } = render(
+      <CashAndCapitalCard capAllocSection={CAP_ALLOC} qualitySection={QUALITY} />,
+    );
+    expect(container.querySelectorAll("[data-testid='multi-line']").length).toBe(0);
   });
 
   it("renders the Net cash / share value when cash + debt are present", () => {
@@ -135,8 +158,7 @@ describe("CashAndCapitalCard", () => {
         qualitySection={emptyQ}
       />,
     );
-    const charts = container.querySelectorAll("[data-testid='multi-line']");
-    expect(charts.length).toBe(0);
+    expect(container.querySelectorAll("[data-testid='cash-capital-tile']").length).toBe(0);
   });
 
   it("does not throw when sections are undefined", () => {

@@ -60,6 +60,7 @@ from app.schemas.research import (
 )
 from app.services import llm
 from app.services.business_info import fetch_business_info
+from app.services.claim_display import format_claim_value
 from app.services.earnings import fetch_earnings
 from app.services.fundamentals import fetch_fundamentals
 from app.services.macro import fetch_macro
@@ -130,6 +131,12 @@ contract.
 or to natural units ($24.6M instead of $24,594,922.77) but the rounded \
 form must clearly correspond to a value in the claim list.
 
+2b. **Keep the display units you're given.** Values shown with a unit \
+("142.26%", "0.32%", "$4.98T", "$0.17") are already in display units — \
+the same text the reader sees on the dashboard. Cite them in those \
+units ("ROE of 142.26%"), never as the raw decimal behind them \
+("ROE of 1.42"), and only compare values once they're in the same unit.
+
 3. **Acknowledge missing data.** If a section's claim list is empty or \
 every value is None, ``summary`` is one sentence explaining that data \
 was unavailable, and ``card_narrative`` is the empty string (omit the \
@@ -159,9 +166,14 @@ _FALLBACK_SUMMARY_TEMPLATE = (
 
 
 def _format_claim_line(c: Any) -> str:
-    """One line per claim for the prompt: ``- description = value (tool)``."""
-    value_repr = "None" if c.value is None else repr(c.value)
-    return f"- {c.description} = {value_repr} ({c.source.tool})"
+    """One line per claim for the prompt: ``- description = value (tool)``.
+
+    Unit-annotated values go in display form ("142.26%", "$4.98T"), the
+    same text the dashboard card shows, so the prose matches the cards
+    and never compares numbers stored in different forms. Unannotated
+    claims keep ``repr`` (see ``claim_display``)."""
+    value = format_claim_value(c.value, getattr(c, "unit", None))
+    return f"- {c.description} = {value} ({c.source.tool})"
 
 
 def _format_layout_signals_block(signals: LayoutSignals) -> list[str]:

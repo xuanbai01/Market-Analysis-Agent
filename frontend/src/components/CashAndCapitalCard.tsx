@@ -1,18 +1,21 @@
 /**
- * CashAndCapitalCard — Phase 4.3.A.
+ * CashAndCapitalCard — Phase 4.3.A; redrawn 2026-11.
  *
- * Cross-section card matching the row-4 leftmost card from
- * `direction-strata.jsx`. Top stack: CapEx + SBC per-share lines from
- * Capital Allocation. Bottom stack: Cash + Debt per-share lines from
- * Quality. Highlight box: Net cash / share = (cash − debt at latest
- * snapshot), colored pos/neg.
+ * Cross-section card: CapEx + SBC per share (Capital Allocation) and
+ * Cash + Debt per share (Quality), one tile each — latest value, change
+ * since the first quarter, and a sparkline with marked ends — then the
+ * Net cash / share highlight (cash − debt at the latest snapshot) and,
+ * for cash-burning names, the runway tile.
  *
- * The card degrades gracefully:
+ * Until 2026-11 the four series were two 80 px line charts with no scale
+ * (tasks/dogfood-2026-11.md #9): CapEx $0.11 vs SBC $0.08, or debt
+ * tripling, read as flat lines. These are "current value + trend" data,
+ * so stat tiles carry them better than charts.
  *
- *   - Either stack alone renders if its sibling lacks data.
- *   - Net cash falls back to em-dash when either snapshot is missing.
- *   - Both stacks empty → just the empty highlight box.
+ * Degrades gracefully: a metric without history gets no tile; net cash
+ * falls back to an em-dash when either snapshot is missing.
  */
+import { usdPerShare } from "../lib/chart-format";
 import { formatClaimValue } from "../lib/format";
 import {
   extractCapexSbcSeries,
@@ -20,7 +23,8 @@ import {
   extractNetCashPerShare,
 } from "../lib/cash-capital-extract";
 import type { Section } from "../lib/schemas";
-import { MultiLine } from "./MultiLine";
+import type { MultiLineSeries } from "./MultiLine";
+import { Sparkline } from "./Sparkline";
 
 interface Props {
   capAllocSection: Section | undefined;
@@ -34,13 +38,51 @@ interface Props {
 
 const RUNWAY_RAISE_THRESHOLD = 6;
 
+function changeSinceFirst(first: number, last: number): string {
+  if (first > 0) {
+    const pct = (last / first - 1) * 100;
+    return `${pct >= 0 ? "+" : ""}${pct.toFixed(0)}%`;
+  }
+  const diff = last - first;
+  return `${diff >= 0 ? "+" : "-"}${usdPerShare(Math.abs(diff))}`;
+}
+
+function MetricTile({ series }: { series: MultiLineSeries }) {
+  const sorted = [...series.history].sort((a, b) => (a.period < b.period ? -1 : 1));
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  return (
+    <div
+      data-testid="cash-capital-tile"
+      data-metric={series.label}
+      className="rounded-md bg-strata-raise px-3 py-2"
+    >
+      <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-kicker text-strata-dim">
+        <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-sm" style={{ backgroundColor: series.color }} />
+        {series.label} / share
+      </div>
+      <div className="mt-1 font-mono text-base font-medium text-strata-hi">
+        {usdPerShare(last.value)}
+      </div>
+      <div className="font-mono text-[10px] text-strata-dim">
+        {changeSinceFirst(first.value, last.value)} vs {first.period}
+      </div>
+      <div className="mt-1">
+        <Sparkline history={sorted} width="100%" height={26} color={series.color} ariaLabel={`${series.label} per share by quarter`} />
+      </div>
+    </div>
+  );
+}
+
 export function CashAndCapitalCard({
   capAllocSection,
   qualitySection,
   runwayQuarters,
 }: Props) {
-  const capexSbc = extractCapexSbcSeries(capAllocSection);
-  const cashDebt = extractCashDebtSeries(qualitySection);
+  const tiles = [
+    ...extractCapexSbcSeries(capAllocSection),
+    ...extractCashDebtSeries(qualitySection),
+  ].filter((s) => s.history.length >= 2);
   const netCash = extractNetCashPerShare(qualitySection);
 
   const sign = netCash === null ? "neutral" : netCash >= 0 ? "pos" : "neg";
@@ -62,39 +104,11 @@ export function CashAndCapitalCard({
         Cash &amp; capital · / share
       </div>
 
-      {/* Top stack — CapEx + SBC */}
-      {capexSbc.length > 0 && (
-        <div className="mb-4">
-          <div className="mb-1 flex flex-wrap gap-3 font-mono text-[10px] text-strata-dim">
-            {capexSbc.map((s) => (
-              <span
-                key={s.label}
-                className="flex items-center gap-1"
-                style={{ color: s.color }}
-              >
-                ● {s.label}
-              </span>
-            ))}
-          </div>
-          <MultiLine series={capexSbc} height={80} showLegend={false} />
-        </div>
-      )}
-
-      {/* Bottom stack — Cash + Debt */}
-      {cashDebt.length > 0 && (
-        <div className="mb-4">
-          <div className="mb-1 flex flex-wrap gap-3 font-mono text-[10px] text-strata-dim">
-            {cashDebt.map((s) => (
-              <span
-                key={s.label}
-                className="flex items-center gap-1"
-                style={{ color: s.color }}
-              >
-                ● {s.label}
-              </span>
-            ))}
-          </div>
-          <MultiLine series={cashDebt} height={80} showLegend={false} />
+      {tiles.length > 0 && (
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          {tiles.map((s) => (
+            <MetricTile key={s.label} series={s} />
+          ))}
         </div>
       )}
 

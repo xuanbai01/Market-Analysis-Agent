@@ -5,9 +5,12 @@
  *
  * Phase 4.3.A.
  *
- * Two helpers:
+ * Helpers:
  *
- *   - extractGrowthSeries(section)      → MultiLineSeries[] (rebased)
+ *   - extractPerSharePanels(section)    → { income, cashFlow } actual
+ *                                         $/share series (the dashboard card)
+ *   - extractGrowthSeries(section)      → MultiLineSeries[] (rebased; the
+ *                                         two-ticker Compare overlay)
  *   - extractGrowthMultipliers(section) → { rev, gp, opi, fcf, ocf }
  *                                         where each = latest / first.
  *
@@ -88,6 +91,44 @@ export function extractGrowthSeries(section: Section): MultiLineSeries[] {
     out.push({ label: spec.label, color: spec.color, history: rebased });
   }
   return out;
+}
+
+export interface PerSharePanels {
+  /** Revenue, Gross profit, Op income — the income-statement lines. */
+  income: MultiLineSeries[];
+  /** OCF, FCF — the cash-flow lines. */
+  cashFlow: MultiLineSeries[];
+}
+
+const SHORT_LABELS: Record<string, string> = {
+  [DESC_REVENUE]: "Rev",
+  [DESC_GP]: "GP",
+  [DESC_OPI]: "OpI",
+  [DESC_OCF]: "OCF",
+  [DESC_FCF]: "FCF",
+};
+const INCOME_ORDER = [DESC_REVENUE, DESC_GP, DESC_OPI];
+const CASH_FLOW_ORDER = [DESC_OCF, DESC_FCF];
+
+/**
+ * 2026-11 (tasks/dogfood-2026-11.md #8): the per-share card plots the
+ * actual $/share values. All five series share that unit, so they fit
+ * one real axis without rebasing — which inflated small bases (NVDA FCF
+ * $0.55 → "3.6×") and flipped the direction of negative ones. Split into
+ * income vs cash-flow panels so five lines don't share one plot.
+ * Series with fewer than 2 points are dropped.
+ */
+export function extractPerSharePanels(section: Section): PerSharePanels {
+  const pick = (order: string[]): MultiLineSeries[] =>
+    order.flatMap((description) => {
+      const spec = SERIES_SPEC.find((s) => s.description === description);
+      const claim = findClaim(section.claims, description);
+      if (!spec || !claim) return [];
+      const history = claim.history.filter((p) => isFiniteNumber(p.value));
+      if (history.length < 2) return [];
+      return [{ label: spec.label, shortLabel: SHORT_LABELS[description], color: spec.color, history }];
+    });
+  return { income: pick(INCOME_ORDER), cashFlow: pick(CASH_FLOW_ORDER) };
 }
 
 /**

@@ -1184,3 +1184,97 @@ def test_system_prompt_documents_card_narrative_as_distinct_field() -> None:
         "system prompt should distinguish card_narrative (1-2 sentence "
         "headline) from summary (2-4 sentence narrative)"
     )
+
+
+# ── Claim units reach the prompt (2026-11 dogfood #1) ────────────────
+#
+# The prompt used to carry ``repr(value)``, so DeepSeek wrote "return on
+# equity of 1.42" and compared a fraction-form buyback yield (0.017)
+# with a percent-form dividend yield (0.32) as if they were the same
+# unit. Unit-annotated claims now reach the model as display values.
+
+
+def _unit_claim(description: str, value: float, unit: str) -> Claim:
+    return Claim(
+        description=description,
+        value=value,
+        unit=unit,  # type: ignore[arg-type]
+        source=Source(tool="yfinance.fundamentals", fetched_at=datetime.now(UTC)),
+    )
+
+
+async def test_user_prompt_shows_unit_annotated_values_in_display_form(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fundamentals = _fundamentals_output()
+    fundamentals["roe"] = _unit_claim("Return on equity", 1.4226, "fraction")
+    fundamentals["dividend_yield"] = _unit_claim("Forward dividend yield", 0.32, "percent")
+    fundamentals["buyback_yield"] = _unit_claim(
+        "Buyback yield (latest fiscal year)", 0.0174, "fraction"
+    )
+    fundamentals["market_cap"] = _unit_claim("Market capitalization", 4.98e12, "usd")
+
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": fundamentals,
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    captured = _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    await compose_research_report("AAPL", Focus.FULL)
+
+    prompt = captured[0]["prompt"]
+    assert "Return on equity = 142.26%" in prompt
+    assert "Forward dividend yield = 0.32%" in prompt
+    assert "Buyback yield (latest fiscal year) = 1.74%" in prompt
+    assert "Market capitalization = $4.98T" in prompt
+    assert "1.4226" not in prompt
+    assert "0.0174" not in prompt
+
+
+async def test_user_prompt_keeps_raw_values_for_unannotated_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tools without unit annotations (the fixtures' plain claims) keep
+    the old ``repr`` form."""
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    captured = _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+
+    await compose_research_report("AAPL", Focus.FULL)
+
+    assert "Trailing Pe = 1.5 (test.tool)" in captured[0]["prompt"]
+
+
+def test_system_prompt_says_values_are_in_display_units() -> None:
+    """The model is told to cite values in the units shown, not to
+    convert them back to raw decimals."""
+    lower = orch_module._SYSTEM_PROMPT.lower()
+    assert "display units" in lower

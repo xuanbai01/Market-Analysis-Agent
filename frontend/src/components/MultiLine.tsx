@@ -1,33 +1,41 @@
 /**
- * MultiLine — 2-4 series on a shared period axis. Hand-rolled SVG.
- * Phase 4.2.
+ * MultiLine — 1–5 series on a shared period axis. Hand-rolled SVG.
+ * Phase 4.2; rebuilt 2026-11 after the owner's dogfood review: "no
+ * baseline, no process shown — I can't read it" (tasks/dogfood-2026-11.md
+ * #8). Every chart now answers "what value, when, compared with what":
  *
- * Used by QualityCard to render gross / operating / FCF margin together
- * on one chart. Replaces the multi-series-on-one-axis use case that
- * SectionChart's ``primary + secondary`` pattern only half-served (only
- * 2 series, only one is "primary"). MultiLine is the symmetric N-series
- * primitive.
+ *   - Value axis: 3–6 clean ticks ("nice" steps of 1 / 2 / 2.5 / 5 × 10^k)
+ *     labelled with the caller's ``formatValue``; solid hairline grid.
+ *   - Baseline: a stronger solid line at zero whenever the scale reaches it
+ *     (``includeZero`` forces that), or at ``baseline`` for indexed charts.
+ *   - Period axis: every period labelled up to 8; longer histories keep
+ *     both ends plus ~3 evenly spaced labels between them.
+ *   - Lines: straight segments between the real points — the previous
+ *     Catmull-Rom smoothing invented shapes between quarters.
+ *   - Markers: every point on histories up to 12 periods, otherwise the
+ *     latest point only.
+ *   - End labels: each line's latest value at its right end, nudged apart
+ *     so lines that finish together stay legible.
+ *   - Hover: a guide at the nearest period and a readout listing every
+ *     series at that period (plus ``formatChange`` vs the prior period).
+ *   - ``yDomain`` lets sibling charts share one scale.
+ *   - Drawn at the container's measured pixel width, so labels stay a
+ *     true 11 px in any card instead of shrinking with a fixed viewBox
+ *     (``width`` is the fallback before measurement and in tests).
  *
- * Layout:
- *   - X axis: period strings, evenly spaced. First and last labels
- *     render as ticks below the chart; intermediate periods just get
- *     a vertical grid line.
- *   - Y axis: auto-detected min/max across all series with 5% padding.
- *     Three faint horizontal grid lines (min, mid, max).
- *   - Series: one ``<path>`` per series with the series' accent color.
- *   - Legend: a row of color-swatch + label chips below the chart.
- *
- * Period axis strategy: each series may have a different period set
- * (some quarters missing data). We collect the union of periods,
- * sort them lexically (works for ``YYYY-Qn`` / ``YYYY-MM`` / ``YYYY``),
- * and plot each series at the X position of its periods. Series with
- * < 2 valid points are dropped (nothing to draw).
+ * Period axis: the sorted union of every series' periods (lexical sort
+ * works for ``YYYY-Qn`` / ``YYYY-MM`` / ``YYYY``). Series with < 2 points
+ * are dropped.
  */
+import { useCallback, useRef, useState } from "react";
+
 import type { ClaimHistoryPoint } from "../lib/schemas";
 
 export interface MultiLineSeries {
   label: string;
-  /** Hex/rgb color for the series stroke. */
+  /** Short name for the end-of-line label, e.g. "Rev" for "Revenue". */
+  shortLabel?: string;
+  /** Hex/rgb color for the series stroke and markers. */
   color: string;
   history: ClaimHistoryPoint[];
 }
@@ -38,185 +46,378 @@ interface Props {
   height?: number;
   /** Whether to render the legend chip row below the chart. */
   showLegend?: boolean;
+  /** Label each line's latest value at its right end. */
+  showEndLabels?: boolean;
+  /** Formats end labels and the hover readout (and ticks, unless formatTick). */
+  formatValue?: (v: number) => string;
+  /** Formats value-axis ticks; defaults to formatValue. */
+  formatTick?: (v: number) => string;
+  /** Hover readout suffix comparing a period with the one before it. */
+  formatChange?: (now: number, prev: number) => string;
+  /** Extend the scale to include zero (and draw the zero baseline). */
+  includeZero?: boolean;
+  /** Fixed raw [min, max] so sibling charts share one scale. */
+  yDomain?: [number, number];
+  /** Emphasized reference line, e.g. 100 for an indexed chart. */
+  baseline?: number;
   ariaLabel?: string;
 }
 
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 180;
+const MAX_ALL_X_LABELS = 8;
+const THINNED_X_LABELS = 5;
+const MAX_MARKED_PERIODS = 12;
+const END_LABEL_GAP = 13;
+const CHAR_W = 6.7; // ~11 px mono glyph width in viewBox units
+const PAD_TOP = 10;
+const PAD_BOTTOM = 22;
 
-/** Build a smooth SVG path through ``points`` using Catmull-Rom-to-Bezier
- *  cubic interpolation. Uses tension 1/6 (the standard CR derivative);
- *  endpoint control points mirror the nearest neighbor so the curve
- *  starts/ends tangent to its data without spurious oscillation. */
-function smoothPath(points: { x: number; y: number }[]): string {
-  if (points.length === 0) return "";
-  const fmt = (n: number) => n.toFixed(2);
-  if (points.length === 1) return `M${fmt(points[0].x)},${fmt(points[0].y)}`;
-  let d = `M${fmt(points[0].x)},${fmt(points[0].y)}`;
-  for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[Math.max(0, i - 1)];
-    const p1 = points[i];
-    const p2 = points[i + 1];
-    const p3 = points[Math.min(points.length - 1, i + 2)];
-    const c1x = p1.x + (p2.x - p0.x) / 6;
-    const c1y = p1.y + (p2.y - p0.y) / 6;
-    const c2x = p2.x - (p3.x - p1.x) / 6;
-    const c2y = p2.y - (p3.y - p1.y) / 6;
-    d += ` C${fmt(c1x)},${fmt(c1y)} ${fmt(c2x)},${fmt(c2y)} ${fmt(p2.x)},${fmt(p2.y)}`;
-  }
-  return d;
+const GRID_COLOR = "#1f2630"; // strata-line
+const BASELINE_COLOR = "#5a6473"; // strata-muted
+const AXIS_LABEL_COLOR = "#5a6473"; // strata-muted
+const END_LABEL_COLOR = "#8892a0"; // strata-dim
+const MARKER_RING = "#0e1116"; // strata-surface
+const LABEL_STYLE = { fontSize: 11, fontFamily: "var(--font-mono, monospace)" };
+
+function defaultFormat(v: number): string {
+  const abs = Math.abs(v);
+  if (abs >= 1e12) return `${(v / 1e12).toFixed(1)}T`;
+  if (abs >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+  return String(Number(v.toFixed(2)));
 }
-const PADDING_TOP = 8;
-const PADDING_BOTTOM = 24; // room for X-axis label
-const PADDING_LEFT = 8;
-const PADDING_RIGHT = 8;
-const GRID_COLOR = "rgb(31, 38, 48)"; // strata-line
-const AXIS_LABEL_COLOR = "rgb(90, 100, 115)"; // strata-muted
+
+function niceStep(raw: number): number {
+  const exp = Math.floor(Math.log10(raw));
+  const base = 10 ** exp;
+  const f = raw / base;
+  const nice = f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10;
+  return nice * base;
+}
+
+/** Clean ticks covering [min, max]; the first/last tick bound the scale. */
+export function niceTicks(min: number, max: number, target = 4): number[] {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return [0, 1];
+  if (min === max) {
+    const pad = Math.abs(min) * 0.1 || 1;
+    min -= pad;
+    max += pad;
+  }
+  const step = niceStep((max - min) / target);
+  const lo = Math.floor(min / step) * step;
+  const hi = Math.ceil(max / step) * step;
+  const ticks: number[] = [];
+  for (let v = lo; v <= hi + step / 2; v += step) {
+    const clean = Number(v.toFixed(10));
+    ticks.push(clean === 0 ? 0 : clean); // no "-0"
+  }
+  return ticks;
+}
+
+/** "2025-Q3" → "Q3 '25"; other period shapes pass through. */
+function shortPeriod(period: string): string {
+  const m = /^(\d{4})-Q([1-4])$/.exec(period);
+  return m ? `Q${m[2]} '${m[1].slice(2)}` : period;
+}
+
+function evenlySpaced(n: number, k: number): number[] {
+  if (k >= n) return Array.from({ length: n }, (_, i) => i);
+  const picks = new Set<number>();
+  for (let i = 0; i < k; i++) picks.add(Math.round((i * (n - 1)) / (k - 1)));
+  return Array.from(picks).sort((a, b) => a - b);
+}
+
+/** Which period indices get a label: as many as fit without touching —
+ *  every period up to 8, otherwise at most 5 — always keeping both ends.
+ *  The first label is anchored at its start and the last at its end, so
+ *  extents are checked per anchor rather than assuming equal spacing. */
+function pickXTicks(n: number, xAt: (i: number) => number, labelPx: number): number[] {
+  const kMax = n <= MAX_ALL_X_LABELS ? n : THINNED_X_LABELS;
+  for (let k = kMax; k >= 2; k--) {
+    const idx = evenlySpaced(n, k);
+    const extents = idx.map((i, j) => {
+      const x = xAt(i);
+      if (j === 0) return [x, x + labelPx];
+      if (j === idx.length - 1) return [x - labelPx, x];
+      return [x - labelPx / 2, x + labelPx / 2];
+    });
+    if (extents.every((e, j) => j === 0 || e[0] >= extents[j - 1][1] + 4)) return idx;
+  }
+  return n > 1 ? [0, n - 1] : [0];
+}
+
+function sortedHistory(h: ClaimHistoryPoint[]): ClaimHistoryPoint[] {
+  return [...h].sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0));
+}
 
 export function MultiLine({
   series,
   width = DEFAULT_WIDTH,
   height = DEFAULT_HEIGHT,
   showLegend = true,
+  showEndLabels = true,
+  formatValue = defaultFormat,
+  formatTick,
+  formatChange,
+  includeZero = false,
+  yDomain,
+  baseline,
   ariaLabel,
 }: Props) {
-  if (series.length === 0) return null;
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
+  const observer = useRef<ResizeObserver | null>(null);
+  const measureRef = useCallback((el: HTMLDivElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.round(entries[0]?.contentRect.width ?? 0);
+      if (w > 0) setMeasuredWidth((prev) => (prev === w ? prev : w));
+    });
+    ro.observe(el);
+    observer.current = ro;
+  }, []);
 
-  // Drop series with < 2 points; they have nothing to draw.
-  const drawable = series.filter((s) => s.history.length >= 2);
+  const drawable = series
+    .filter((s) => s.history.length >= 2)
+    .map((s) => ({ ...s, history: sortedHistory(s.history) }));
   if (drawable.length === 0) return null;
 
-  // Build a canonical period axis as the sorted union of every series's
-  // periods. Sort lexically — works for the cadences our backend emits.
-  const periodSet = new Set<string>();
-  for (const s of drawable) {
-    for (const p of s.history) periodSet.add(p.period);
+  const periods = Array.from(
+    new Set(drawable.flatMap((s) => s.history.map((p) => p.period))),
+  ).sort();
+  const periodIndex = new Map(periods.map((p, i) => [p, i]));
+
+  // ── Scale ──────────────────────────────────────────────────────────
+  const values = drawable.flatMap((s) => s.history.map((p) => p.value));
+  let rawMin = yDomain ? yDomain[0] : Math.min(...values);
+  let rawMax = yDomain ? yDomain[1] : Math.max(...values);
+  if (includeZero) {
+    rawMin = Math.min(rawMin, 0);
+    rawMax = Math.max(rawMax, 0);
   }
-  const periods = Array.from(periodSet).sort();
-  const periodIndex = new Map<string, number>();
-  periods.forEach((p, i) => periodIndex.set(p, i));
-
-  // Y range across every drawable series.
-  const allValues: number[] = [];
-  for (const s of drawable) {
-    for (const p of s.history) allValues.push(p.value);
+  if (baseline !== undefined) {
+    rawMin = Math.min(rawMin, baseline);
+    rawMax = Math.max(rawMax, baseline);
   }
-  const rawMin = Math.min(...allValues);
-  const rawMax = Math.max(...allValues);
-  const span = rawMax - rawMin || 1;
-  const yMin = rawMin - span * 0.05;
-  const yMax = rawMax + span * 0.05;
-  const yRange = yMax - yMin || 1;
+  const ticks = niceTicks(rawMin, rawMax);
+  const yLo = ticks[0];
+  const yHi = ticks[ticks.length - 1];
+  const referenceValue = baseline ?? (yLo <= 0 && yHi >= 0 ? 0 : undefined);
 
-  const innerW = width - PADDING_LEFT - PADDING_RIGHT;
-  const innerH = height - PADDING_TOP - PADDING_BOTTOM;
+  // ── Layout (viewBox units = CSS px once measured) ──────────────────
+  const W = measuredWidth ?? width;
+  const tickLabels = ticks.map(formatTick ?? formatValue);
+  const padLeft = 10 + Math.max(...tickLabels.map((t) => t.length)) * CHAR_W;
+  const endTexts = drawable.map((s) => {
+    const last = s.history[s.history.length - 1];
+    return `${s.shortLabel ?? s.label} ${formatValue(last.value)}`;
+  });
+  const padRight = showEndLabels
+    ? Math.min(130, 14 + Math.max(...endTexts.map((t) => t.length)) * CHAR_W)
+    : 12;
+  const innerW = W - padLeft - padRight;
+  const innerH = height - PAD_TOP - PAD_BOTTOM;
+  const plotRight = padLeft + innerW;
+  const plotBottom = PAD_TOP + innerH;
 
-  function xOf(period: string): number {
-    const i = periodIndex.get(period) ?? 0;
-    if (periods.length === 1) {
-      return PADDING_LEFT + innerW / 2;
+  const xAt = (i: number) =>
+    padLeft + (periods.length === 1 ? innerW / 2 : (i / (periods.length - 1)) * innerW);
+  const xOf = (period: string) => xAt(periodIndex.get(period) ?? 0);
+  const yOf = (v: number) => PAD_TOP + (1 - (v - yLo) / (yHi - yLo || 1)) * innerH;
+
+  // ── End labels, nudged apart top-to-bottom ─────────────────────────
+  const endLabels = drawable
+    .map((s, i) => ({
+      key: s.label,
+      text: endTexts[i],
+      y: yOf(s.history[s.history.length - 1].value),
+    }))
+    .sort((a, b) => a.y - b.y);
+  for (let i = 1; i < endLabels.length; i++) {
+    endLabels[i].y = Math.max(endLabels[i].y, endLabels[i - 1].y + END_LABEL_GAP);
+  }
+  const overflow = endLabels.length ? endLabels[endLabels.length - 1].y - plotBottom : 0;
+  if (overflow > 0) for (const l of endLabels) l.y -= overflow;
+
+  const markAll = periods.length <= MAX_MARKED_PERIODS;
+
+  const xLabelPx = Math.max(...periods.map((p) => shortPeriod(p).length)) * CHAR_W;
+  const xTicks = pickXTicks(periods.length, xAt, xLabelPx);
+
+  // ── Hover ──────────────────────────────────────────────────────────
+  function onMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) {
+      // No layout (tests): show the latest period.
+      setHoverIdx(periods.length - 1);
+      return;
     }
-    return PADDING_LEFT + (i / (periods.length - 1)) * innerW;
-  }
-  function yOf(value: number): number {
-    return PADDING_TOP + (1 - (value - yMin) / yRange) * innerH;
+    const vbX = ((e.clientX - rect.left) / rect.width) * W;
+    const frac = (vbX - padLeft) / (innerW || 1);
+    setHoverIdx(Math.max(0, Math.min(periods.length - 1, Math.round(frac * (periods.length - 1)))));
   }
 
-  const firstPeriod = periods[0];
-  const lastPeriod = periods[periods.length - 1];
-  const midY = PADDING_TOP + innerH / 2;
-  const bottomY = PADDING_TOP + innerH;
+  const hoverPeriod = hoverIdx === null ? null : periods[hoverIdx];
+  const hoverRows =
+    hoverPeriod === null
+      ? []
+      : drawable.flatMap((s) => {
+          const i = s.history.findIndex((p) => p.period === hoverPeriod);
+          if (i < 0) return [];
+          const now = s.history[i].value;
+          const prev = i > 0 ? s.history[i - 1].value : null;
+          const change = formatChange && prev !== null ? formatChange(now, prev) : null;
+          return [{ s, now, change }];
+        });
+  const hoverLeftPct = hoverIdx === null ? 0 : (xAt(hoverIdx) / W) * 100;
 
   return (
     <div>
-      <svg
-        data-testid="multi-line"
-        // Phase 4.3.B.1 — responsive width so MultiLine charts no
-        // longer overflow narrow card columns. Internal coords are
-        // preserved by the viewBox; height stays numeric to keep a
-        // stable visual height across cards.
-        width="100%"
-        height={height}
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-label={
-          ariaLabel ?? `Multi-series chart with ${drawable.length} series`
-        }
-        className="block"
-      >
-        {/* Horizontal grid lines: top, middle, bottom. */}
-        <line
-          x1={PADDING_LEFT}
-          x2={width - PADDING_RIGHT}
-          y1={PADDING_TOP}
-          y2={PADDING_TOP}
-          stroke={GRID_COLOR}
-          strokeWidth={1}
-        />
-        <line
-          x1={PADDING_LEFT}
-          x2={width - PADDING_RIGHT}
-          y1={midY}
-          y2={midY}
-          stroke={GRID_COLOR}
-          strokeWidth={1}
-          strokeDasharray="2 4"
-        />
-        <line
-          x1={PADDING_LEFT}
-          x2={width - PADDING_RIGHT}
-          y1={bottomY}
-          y2={bottomY}
-          stroke={GRID_COLOR}
-          strokeWidth={1}
-        />
-
-        {/* Series paths. Phase 4.3.X — monotone cubic Bézier curves
-            (Catmull-Rom-to-Bezier) instead of straight L-segments to
-            match the design's smooth-curve treatment. The control
-            points use a tension of 1/6 so the curve hugs the data
-            points without overshoot on flat segments. */}
-        {drawable.map((s) => {
-          const sortedPoints = [...s.history].sort((a, b) =>
-            a.period < b.period ? -1 : a.period > b.period ? 1 : 0,
-          );
-          const xy = sortedPoints.map((p) => ({
-            x: xOf(p.period),
-            y: yOf(p.value),
-          }));
-          return (
-            <path
-              key={s.label}
-              data-series-line={s.label}
-              d={smoothPath(xy)}
-              fill="none"
-              stroke={s.color}
-              strokeWidth={1.8}
-              strokeLinecap="round"
-              strokeLinejoin="round"
+      <div className="relative" ref={measureRef}>
+        <svg
+          data-testid="multi-line"
+          // Responsive width; internal coords preserved by the viewBox.
+          width="100%"
+          height={height}
+          viewBox={`0 0 ${W} ${height}`}
+          role="img"
+          aria-label={ariaLabel ?? `Multi-series chart with ${drawable.length} series`}
+          className="block"
+          onMouseMove={onMouseMove}
+          onMouseLeave={() => setHoverIdx(null)}
+        >
+          {/* Value axis: grid + tick labels. */}
+          {ticks.map((t, i) => (
+            <g key={t}>
+              {t !== referenceValue && (
+                <line x1={padLeft} x2={plotRight} y1={yOf(t)} y2={yOf(t)} stroke={GRID_COLOR} strokeWidth={1} />
+              )}
+              <text
+                data-testid="multi-line-y-tick"
+                x={padLeft - 6}
+                y={yOf(t) + 3.5}
+                textAnchor="end"
+                fill={AXIS_LABEL_COLOR}
+                style={LABEL_STYLE}
+              >
+                {tickLabels[i]}
+              </text>
+            </g>
+          ))}
+          {referenceValue !== undefined && (
+            <line
+              data-testid="multi-line-baseline"
+              x1={padLeft}
+              x2={plotRight}
+              y1={yOf(referenceValue)}
+              y2={yOf(referenceValue)}
+              stroke={BASELINE_COLOR}
+              strokeWidth={1}
             />
-          );
-        })}
+          )}
 
-        {/* X-axis labels: first + last period only. */}
-        <text
-          x={PADDING_LEFT}
-          y={height - 6}
-          fill={AXIS_LABEL_COLOR}
-          style={{ fontSize: 10, fontFamily: "var(--font-mono, monospace)" }}
-        >
-          {firstPeriod}
-        </text>
-        <text
-          x={width - PADDING_RIGHT}
-          y={height - 6}
-          fill={AXIS_LABEL_COLOR}
-          textAnchor="end"
-          style={{ fontSize: 10, fontFamily: "var(--font-mono, monospace)" }}
-        >
-          {lastPeriod}
-        </text>
-      </svg>
+          {/* Period axis labels. */}
+          {xTicks.map((i, k, all) => (
+            <text
+              key={periods[i]}
+              data-testid="multi-line-x-tick"
+              data-period={periods[i]}
+              x={xAt(i)}
+              y={height - 6}
+              textAnchor={k === 0 ? "start" : k === all.length - 1 ? "end" : "middle"}
+              fill={AXIS_LABEL_COLOR}
+              style={LABEL_STYLE}
+            >
+              {shortPeriod(periods[i])}
+            </text>
+          ))}
+
+          {hoverIdx !== null && (
+            <line
+              data-testid="multi-line-hover-guide"
+              x1={xAt(hoverIdx)}
+              x2={xAt(hoverIdx)}
+              y1={PAD_TOP}
+              y2={plotBottom}
+              stroke={BASELINE_COLOR}
+              strokeWidth={1}
+            />
+          )}
+
+          {/* Lines + markers. */}
+          {drawable.map((s) => {
+            const pts = s.history.map((p) => ({ x: xOf(p.period), y: yOf(p.value) }));
+            const d = pts
+              .map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
+              .join(" ");
+            const marked = markAll ? pts : pts.slice(-1);
+            return (
+              <g key={s.label}>
+                <path
+                  data-series-line={s.label}
+                  d={d}
+                  fill="none"
+                  stroke={s.color}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                {marked.map((p, i) => (
+                  <circle
+                    key={i}
+                    data-testid="multi-line-marker"
+                    cx={p.x}
+                    cy={p.y}
+                    r={3.5}
+                    fill={s.color}
+                    stroke={MARKER_RING}
+                    strokeWidth={2}
+                  />
+                ))}
+              </g>
+            );
+          })}
+
+          {showEndLabels &&
+            endLabels.map((l) => (
+              <text
+                key={l.key}
+                data-testid="multi-line-end-label"
+                x={plotRight + 8}
+                y={l.y + 3.5}
+                fill={END_LABEL_COLOR}
+                style={LABEL_STYLE}
+              >
+                {l.text}
+              </text>
+            ))}
+        </svg>
+
+        {hoverPeriod !== null && hoverRows.length > 0 && (
+          <div
+            data-testid="multi-line-tooltip"
+            className="pointer-events-none absolute top-0 z-10 rounded-md border border-strata-border bg-strata-raise px-2.5 py-1.5 font-mono text-[10px] text-strata-fg shadow-sm"
+            style={{
+              left: `${hoverLeftPct}%`,
+              transform: hoverLeftPct > 55 ? "translateX(calc(-100% - 8px))" : "translateX(8px)",
+            }}
+          >
+            <div className="mb-1 text-strata-dim">{hoverPeriod}</div>
+            {hoverRows.map(({ s, now, change }) => (
+              <div key={s.label} className="flex items-center gap-1.5 whitespace-nowrap">
+                <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-sm" style={{ backgroundColor: s.color }} />
+                <span className="text-strata-dim">{s.label}</span>
+                <span className="tabular text-strata-hi">{formatValue(now)}</span>
+                {change && <span className="text-strata-muted">{change}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {showLegend && (
         <div className="mt-2 flex flex-wrap gap-3">
           {drawable.map((s) => (
@@ -224,11 +425,7 @@ export function MultiLine({
               key={s.label}
               className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-kicker text-strata-dim"
             >
-              <span
-                aria-hidden="true"
-                className="inline-block h-1.5 w-3 rounded-sm"
-                style={{ backgroundColor: s.color }}
-              />
+              <span aria-hidden="true" className="inline-block h-1.5 w-3 rounded-sm" style={{ backgroundColor: s.color }} />
               {s.label}
             </div>
           ))}

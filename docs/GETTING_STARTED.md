@@ -1,84 +1,80 @@
 # Getting Started
 
-Your first hour on this repo. This project already exists (Story 1 scaffolding is in place), so the setup is about running it locally and understanding the code, not bootstrapping from scratch.
+Run the whole stack locally — Postgres, the FastAPI backend, the React dashboard, and the test suites — then read the troubleshooting section, which collects every setup problem this project has actually hit.
 
 ## 0. Prerequisites
 
-- Python 3.11+
-- Docker + Docker Compose
-- [`uv`](https://docs.astral.sh/uv/) (recommended) or plain `pip`
-- [`gh` CLI](https://cli.github.com/) authenticated (`gh auth login`) if you'll open PRs
-- [Claude Code](https://claude.com/claude-code) installed
+- [`uv`](https://docs.astral.sh/uv/) — installs Python 3.11 itself from `.python-version`
+- Node.js 22 (the frontend toolchain is Vite 5 / Vitest 2 / ESLint 8)
+- Docker Desktop (or any Docker engine) for Postgres
+- [`gh` CLI](https://cli.github.com/), authenticated (`gh auth login`), if you'll open PRs
 
-## 1. Clone and inspect (5 min)
-
-```bash
-git clone https://github.com/xuanbai01/Market-Analysis-Agent.git
-cd Market-Analysis-Agent
-```
-
-Read, in this order:
-1. `design_doc.md` — what this project is and where it's going
-2. `CLAUDE.md` — modular docs index and current-state summary
-3. `docs/architecture.md` — what exists today vs. what's planned
-
-## 2. Environment file (2 min)
-
-Copy the existing `.env` (or ask the repo owner for one). Minimum keys:
-
-```
-APP_ENV=dev
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/marketdb
-TZ=America/New_York
-```
-
-**Never commit a real `.env`.** It is in `.gitignore`.
-
-## 3. Bring up the stack (5 min)
+## 1. Environment file
 
 ```bash
-docker compose up -d db              # just Postgres
-uv sync                              # install deps
+cp .env.example .env
+```
+
+The defaults run everything locally with no API keys. To generate research reports you need one LLM key: `ANTHROPIC_API_KEY` with the default `LLM_PROVIDER=anthropic`, or `LLM_PROVIDER=deepseek` + `DEEPSEEK_API_KEY` ([ADR 0006](adr/0006-pluggable-llm-provider.md)). `FRED_API_KEY` and `NEWSAPI_KEY` are optional — those sections degrade without them. **Never commit `.env`** (it's gitignored).
+
+## 2. Database
+
+```bash
+docker compose up -d db              # Postgres 15 on :5432
+uv sync                              # Python 3.11 + pinned deps
+uv run alembic upgrade head          # schema + seed rows in marketdb
+```
+
+The first start creates two databases: `marketdb` (the app) and `test_db` (the test suite drops and recreates tables there, so never point tests at `marketdb`). Data lives in the named volume `pgdata`, so `docker compose down` keeps it; `docker compose down -v` wipes it.
+
+## 3. Backend
+
+```bash
 uv run uvicorn app.main:app --reload # API on :8000
 ```
 
-Verify:
-- `curl http://localhost:8000/` → `{"message":"Hello from Market Analysis Agent"}`
 - `curl http://localhost:8000/v1/health` → `{"status":"ok","db":true}`
-- `curl http://localhost:8000/v1/symbols` → seeded NVDA + SPY rows
-- Swagger UI: http://localhost:8000/docs
+- Swagger UI: <http://localhost:8000/docs>
+- A full report: `curl -X POST http://localhost:8000/v1/research/AAPL` (~30–90 s cold; needs an LLM key)
 
-If `db` is `false` in the health response, Postgres isn't reachable — check `docker compose logs db`.
+## 4. Frontend
 
-## 4. Read the roadmap (10 min)
+```bash
+cd frontend
+npm ci
+echo "VITE_BACKEND_URL=http://localhost:8000" > .env.local
+npm run dev                          # dashboard on :5173
+```
 
-- `tasks/todo.md` for active sprint items
-- `design_doc.md` sections 12–15 for phased roadmap and near-term enhancements
-- Existing stubs (`app/services/data_ingestion.py`, `app/services/market_repository.py`, `app/services/technicals.py`) mark where the next implementation work lives
+The login screen asks for the backend's `BACKEND_SHARED_SECRET`. Locally that's empty (auth off), so any value gets you in. The backend only answers the browser cross-origin when `FRONTEND_ORIGIN=http://localhost:5173` is set in `.env` (the example file sets it).
 
-## 5. Write your first failing test (15 min)
+## 5. Tests and lint
 
-There is no `tests/` directory yet. Starting one is a worthy first PR:
+```bash
+# backend — the same commands CI runs
+APP_ENV=test DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/test_db uv run pytest -q
+uv run ruff check app tests
 
-1. `mkdir tests && touch tests/__init__.py tests/conftest.py`
-2. Add `pytest`, `pytest-asyncio`, `httpx` to dev deps.
-3. Write `tests/test_health.py` that calls `GET /v1/health` against an `httpx.AsyncClient(app=app)` and asserts the response shape.
-4. `uv run pytest -v`.
+# frontend
+cd frontend && npm run lint && npm run typecheck && npm test
 
-See [testing.md](testing.md) for the layout and async patterns.
+# live LLM eval — costs money, needs the active provider's key; never runs by default
+uv run pytest -m live_llm tests/evals -s
+```
 
-## 6. Branch protection + GitHub App setup (one-time, repo owner)
+## 6. Troubleshooting
 
-When the repo is ready for PR workflow:
-- Settings → Branches → require PR, require status checks (`Backend — Unit Tests`, `Security — Secrets Scan`, `AI — PR Review`), dismiss stale approvals on new commits.
-- Add `ANTHROPIC_API_KEY` as a repo secret so the AI PR review job can run.
+- **Port 5432 is taken (Windows).** A native Postgres service (e.g. `postgresql-x64-18`) silently wins the port and Docker maps to another. Check `docker ps`; if you see `0.0.0.0:5433->5432/tcp`, either `Stop-Service postgresql-x64-18` and `docker compose up -d db` again, or point `DATABASE_URL` at `:5433`.
+- **alembic / uvicorn hangs or fails with `ConnectionRefusedError`.** Check `DATABASE_URL` in `.env`: an old Neon URL (`...neon.tech...?sslmode=require`, `_create_ssl_connection` in tracebacks) when you meant local Docker. And check Docker Desktop is actually running.
+- **The app refuses to start with `extra_forbidden`.** `.env` has a key `Settings` doesn't know (typo, or a key from a newer branch). Pydantic prints the offending *value* in that error — so if the key is a secret, rotate it, and add new settings to `app/core/settings.py` before adding them to `.env`.
+- **A report looks stale.** Reports are cached for 7 days. Use `?refresh=true`, or set `RESEARCH_CACHE_MAX_AGE_HOURS=0` while debugging.
+- **The dashboard shows impossible data.** Browser extensions can rewrite responses; retry in a private window before debugging the backend.
+- **Vite serves stale code in a `.claude/worktrees/...` checkout.** The file watcher misses edits there; trust `npm test` + `npm run build` (see `tasks/lessons.md`).
+- **Tests pass locally but the deploy breaks.** The Dockerfile installs its own dependency list; add new runtime deps there too (`tests/test_dockerfile_deps.py` enforces it, and CI boots the image).
 
 ## What's next
 
-- [`docs/workflow.md`](workflow.md) — day-to-day rhythm with Claude Code
-- [`docs/testing.md`](testing.md) — TDD discipline + async test patterns
-- [`docs/security.md`](security.md) — OWASP Top 10 scoped to this stack
-- [`docs/conventions.md`](conventions.md) — code style
-- [`docs/adr/`](adr/) — architecture decision records (write one for each significant choice)
-- [`tasks/todo.md`](../tasks/todo.md) — active sprint
-- [`tasks/lessons.md`](../tasks/lessons.md) — capture every correction so the same mistake doesn't repeat
+- [`tasks/todo.md`](../tasks/todo.md) — active plan; [`tasks/lessons.md`](../tasks/lessons.md) — past mistakes, read before non-trivial work
+- [`design_doc.md`](../design_doc.md) and [`docs/architecture.md`](architecture.md) — what exists and why
+- [`docs/workflow.md`](workflow.md), [`docs/testing.md`](testing.md), [`docs/security.md`](security.md), [`docs/conventions.md`](conventions.md)
+- [`docs/adr/`](adr/) — architecture decision records

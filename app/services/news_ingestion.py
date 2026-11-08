@@ -203,6 +203,15 @@ async def fetch_news_for_symbol(
     if not all_articles:
         return 0
 
+    # Step 0 — make sure the requested symbol exists. ``news_symbols``
+    # has an FK to ``symbols`` and research runs for any ticker, not
+    # only seeded ones (same fix as the candles path in data_ingestion).
+    await session.execute(
+        pg_insert(Symbol).values(symbol=target).on_conflict_do_nothing(
+            index_elements=["symbol"]
+        )
+    )
+
     # Step 1 — upsert news_items. ON CONFLICT DO UPDATE so a re-fetch
     # picks up a corrected title or source without a duplicate row.
     rows = []

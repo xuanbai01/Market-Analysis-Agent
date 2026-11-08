@@ -4,9 +4,13 @@ Shared-secret bearer auth for protected routes (Phase 3.0).
 The frontend (Phase 3.1) is going to live on a public Vercel URL hitting
 the public Fly URL. Without an auth gate, anyone discovering the
 backend hostname could drain rate-limit tokens (or, worse, fill up the
-Anthropic bill). This module provides one FastAPI dependency,
-``require_shared_secret``, mounted on ``/v1/research/*`` to gate that
-surface.
+LLM bill). This module provides one FastAPI dependency,
+``require_shared_secret``, mounted on every route that spends money or
+upstream quota or writes to the database: ``/v1/research/*``,
+``GET /v1/market/{symbol}/prices`` (yfinance + candle writes on cache
+miss), and every POST (market/news ingest, symbols). Plain database
+reads stay open. ``tests/test_route_auth.py`` fails if a new write
+route ships without it.
 
 ## Operating modes
 

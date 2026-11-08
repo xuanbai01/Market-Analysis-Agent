@@ -11,8 +11,9 @@ goes public. Two operating modes:
    adversary can't probe the secret byte by byte.
 
 The dep is mounted on ``/v1/research/{symbol}`` (POST) by Phase 3.0 PR
-A1; ``GET /v1/research`` picks it up in A3. Other routes deliberately
-stay open — they're either internal or already cheap.
+A1; ``GET /v1/research`` picks it up in A3. Since 2026-11 it also gates
+the prices route and every write route — see ``test_route_auth.py``.
+This module exercises the dep's header parsing via the research route.
 """
 from __future__ import annotations
 

@@ -15,7 +15,7 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { listRecent, pushRecent, RECENT_MAX } from "./recent";
+import { clearRecent, listRecent, pushRecent, RECENT_MAX } from "./recent";
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -60,6 +60,13 @@ describe("recent", () => {
 
   it("survives a corrupted storage payload (returns [])", () => {
     window.localStorage.setItem("market-agent.recent", "{not-json");
+    expect(listRecent()).toEqual([]);
+  });
+
+  it("clearRecent forgets every ticker", () => {
+    pushRecent("NVDA");
+    pushRecent("KO");
+    clearRecent();
     expect(listRecent()).toEqual([]);
   });
 });

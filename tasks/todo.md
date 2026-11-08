@@ -559,6 +559,7 @@ Order — code first (each its own PR; the account steps can run in parallel):
    - Verified 2026-11-08: both secrets show `Deployed`; unauthenticated `GET /v1/research` → 401 "Missing Authorization header." (was 200 with data); `/v1/health` → 200. Prices still answer without a token until #68 deploys; the Vercel login needs #72.
    - After #68–#72 merged and deployed (`33e963d`, CI all green incl. the new frontend + image jobs): from the Vercel origin, `/v1/health` → 200 (CORS works); research, prices and `POST /v1/news/ingest` → 401 without a token, research → 401 "Invalid token." with a wrong one.
    - First live report (owner logged in): 503 "DeepSeek API returned HTTP 401: Authentication Fails" for the key ending `d2af`. The local `.env` holds the same key and DeepSeek's free `/models` endpoint also returns 401 for it, so the key itself is revoked — not an import problem. Fix: a fresh key into `.env`, then piped to Fly from `.env` (no secret on the command line).
+   - Fresh key `…0ae2` validated (`/models` → 200) and deployed (Fly v55). **First successful live report: AAPL in ~20 s, all cards incl. 17 news headlines.** Findings in [`tasks/dogfood-2026-11.md`](dogfood-2026-11.md) — top issue: LLM prose cites raw stored values without units (misleading buyback-vs-dividend comparison).
 6. [ ] **Dogfood** the deployed stack on 8–10 tickers (items below); log in `tasks/dogfood-2026-11.md`; fix the worst.
 7. [ ] **Docs sweep + Phase 5/6 decision gate** (items below).
 

@@ -553,6 +553,7 @@ Order — code first (each its own PR; the account steps can run in parallel):
 3. [ ] **CI coverage** — frontend job (lint, typecheck, vitest, build) + a production-image job (docker build + boot against Postgres). → **#70**, both new jobs green on their first run, awaiting review.
 4. [ ] **Local-dev docs** — folded into a rewritten `docs/GETTING_STARTED.md` (troubleshooting section) rather than a new `LOCAL_DEV.md`; `FRONTEND_ORIGIN=http://localhost:5173` in `.env.example`; compose gets a named volume + auto-created `test_db`. → **#71**, awaiting review.
 5. [ ] **Deploy (needs the owner's accounts)** — Fly CLI login → `BACKEND_SHARED_SECRET`, `LLM_PROVIDER=deepseek` + rotated `DEEPSEEK_API_KEY`, `FRONTEND_ORIGIN`; Vercel project import from `frontend/` with `VITE_BACKEND_URL`.
+   - 2026-11-08: Fly CLI installed + logged in; Vercel project imported and deployed; DeepSeek key rotated. **Fly had only `DATABASE_URL` set — no LLM key ever**, so production could never generate a report; the cached April/May reports in Neon came from local runs whose `.env` pointed at Neon. `market-analysis-agent.vercel.app` is someone else's project, so ours has a suffixed domain.
 6. [ ] **Dogfood** the deployed stack on 8–10 tickers (items below); log in `tasks/dogfood-2026-11.md`; fix the worst.
 7. [ ] **Docs sweep + Phase 5/6 decision gate** (items below).
 

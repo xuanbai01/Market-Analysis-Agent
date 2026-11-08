@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_session
+from app.core.auth import require_shared_secret
 from app.schemas.market import (
     IngestRequest,
     MarketHistoryOut,
@@ -15,7 +16,7 @@ from app.services.market_repository import get_history, get_latest_snapshot
 router = APIRouter()
 
 
-@router.post("/market/ingest")
+@router.post("/market/ingest", dependencies=[Depends(require_shared_secret)])
 async def market_ingest(req: IngestRequest, session: AsyncSession = Depends(get_session)):
     count = await ingest_market_data(session, req.symbol, req.period, req.provider)
     return {"job_id": "local-inline", "ingested": count, "symbol": req.symbol}
@@ -44,11 +45,16 @@ async def market_history(
 # Phase 4.1 — hero price chart endpoint.
 # Read-through cache via `candles` to lower yfinance load on dogfood
 # traffic. Range is restricted to the three Phase-4.1 values; 1D/5D
-# (intraday cadence) land later.
+# (intraday cadence) land later. Gated like the research routes: a
+# cache miss calls yfinance and writes candles.
 _RANGE_PATTERN = "^(" + "|".join(RANGE_TO_PERIOD.keys()) + ")$"
 
 
-@router.get("/market/{symbol}/prices", response_model=MarketPricesOut)
+@router.get(
+    "/market/{symbol}/prices",
+    response_model=MarketPricesOut,
+    dependencies=[Depends(require_shared_secret)],
+)
 async def market_prices(
     symbol: str,
     range: str = Query("60D", pattern=_RANGE_PATTERN),

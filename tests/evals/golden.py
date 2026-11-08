@@ -47,6 +47,16 @@ class GoldenCase:
 # prose backed by claims), neither of which requires external ground
 # truth. Pin specific values once the report shape stabilizes and the
 # eval becomes a regression gate, not just a smoke check.
+#
+# 2026-11 (ADR 0006): widened to five so a provider/model swap is judged
+# across the layout matrix rather than on one mega-cap — healthy
+# mega-caps (AAPL, NVDA), an unprofitable name that triggers the
+# distressed-layout prompt block (RIVN), a bank whose fundamentals look
+# nothing like a tech company's (JPM), and a dividend payer (KO).
 GOLDEN_CASES: list[GoldenCase] = [
     GoldenCase(symbol="AAPL", focus="full"),
+    GoldenCase(symbol="NVDA", focus="full"),
+    GoldenCase(symbol="RIVN", focus="full"),
+    GoldenCase(symbol="JPM", focus="full"),
+    GoldenCase(symbol="KO", focus="full"),
 ]

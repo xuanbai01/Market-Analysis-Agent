@@ -1,15 +1,16 @@
 """
-Real-LLM golden-question tests. Skipped unless ``ANTHROPIC_API_KEY``
-is set so the cost burn is opt-in rather than charged on every push.
+Real-LLM golden-question tests. Marked ``live_llm``, which the default
+pytest addopts deselect, and skipped when the active provider's API key
+is missing — so the cost burn is always opt-in.
 
-Run manually:
+Run manually against whichever provider ``LLM_PROVIDER`` selects:
 
-    ANTHROPIC_API_KEY=... uv run pytest tests/evals/test_golden.py -v
+    uv run pytest -m live_llm tests/evals/test_golden.py -v -s
 
 For each case:
   1. Call ``compose_research_report(symbol, focus)`` end-to-end.
-     Real Anthropic API + real tool fan-out (yfinance, SEC EDGAR,
-     FRED). Wall-clock ~10–30 seconds per case.
+     Real LLM API + real tool fan-out (yfinance, SEC EDGAR, FRED).
+     Wall-clock ~10–60 seconds per case.
   2. Run the rubric scorers (structure + factuality + latency).
   3. Assert ``structure.valid`` and ``factuality.score >= 0.95``.
   4. Print latency + unmatched numbers for post-mortem on flaky cases.
@@ -28,22 +29,22 @@ from typing import Any
 import pytest
 
 from app.core.settings import settings
+from app.services import llm
 from app.services.research_orchestrator import compose_research_report
 from app.services.research_tool_registry import Focus
 from tests.evals.golden import GOLDEN_CASES
 from tests.evals.rubric import grade
 
 # Two reasons to skip golden evals:
-#   - no ANTHROPIC_API_KEY → can't call the model at all
-#   - no GOLDEN_CASES yet  → nothing to test
+#   - the active provider's API key is missing → can't call the model
+#   - no GOLDEN_CASES yet → nothing to test
 # Express both as a *single* placeholder test rather than parametrizing
 # over an empty list (pytest's ``parametrize([], ids=...)`` call still
 # evaluates the ids callback once and errors on the empty parameter).
 #
-# The skipif checks ``settings.ANTHROPIC_API_KEY`` (the same source the
-# LLM client reads) rather than ``os.environ`` directly — that way
-# ``.env``-based config works without also exporting the env var to
-# the shell.
+# The skipif reads the same settings the LLM client reads rather than
+# ``os.environ`` directly — that way ``.env``-based config works without
+# also exporting the env var to the shell.
 if not GOLDEN_CASES:
 
     def test_golden_cases_pending() -> None:
@@ -51,10 +52,11 @@ if not GOLDEN_CASES:
 
 else:
 
+    @pytest.mark.live_llm
     @pytest.mark.skipif(
-        not settings.ANTHROPIC_API_KEY,
-        reason="ANTHROPIC_API_KEY not set (in env or .env); "
-               "skipping live LLM eval suite",
+        not llm.provider_api_key_configured(),
+        reason=f"API key for LLM_PROVIDER={settings.LLM_PROVIDER} not set "
+               "(in env or .env); skipping live LLM eval suite",
     )
     @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: f"{c.symbol}-{c.focus}")
     async def test_golden_case(case) -> None:
@@ -82,7 +84,8 @@ else:
         # summaries so factuality misses are diagnosable from the
         # test output alone (no need to re-run with a debugger).
         print(
-            f"\n{case.symbol}/{case.focus}: "
+            f"\n{case.symbol}/{case.focus} [{settings.LLM_PROVIDER}:"
+            f"{llm.resolve_model('synth')}]: "
             f"latency={elapsed_ms:.0f} ms, "
             f"sections={len(report.sections)}, "
             f"overall={report.overall_confidence.value}, "

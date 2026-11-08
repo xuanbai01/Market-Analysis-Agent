@@ -2,7 +2,7 @@
 Unit tests for the rubric framework. These run on every PR — they prove
 the rubric correctly grades known-good and known-bad reports without
 needing an LLM. The agent-against-golden tests live in test_golden.py
-and are skipped unless ANTHROPIC_API_KEY is set.
+and only run with ``-m live_llm`` plus the active provider's API key.
 """
 from __future__ import annotations
 

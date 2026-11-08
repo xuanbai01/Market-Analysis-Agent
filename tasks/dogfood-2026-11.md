@@ -20,3 +20,20 @@ Generated in ~20 s. Every card rendered: hero + price chart, Quality rings + mar
 | 5 | Info | News categories skew to OTHER (3 of the first 5). | DeepSeek categorizer; check across more tickers before tuning. |
 | 6 | Low | Gross-margin YoY change shows as "up 1.88%" (card and prose); it's 1.88 percentage points. | `gross_margin_trend_1y` is annotated `fraction`; a points-style unit would be more precise. |
 | 7 | — | Rate limit (3 fresh reports/IP/hour) blocked dogfooding. | Raised to 30/h for the dogfood phase in `fly.toml` (#73); lower before sharing publicly. |
+
+## NVDA — chart readability (owner review, 2026-11-08)
+
+> "No baseline, no process shown — the chart has no head or tail; I can't read it."
+
+| # | Severity | Finding | Root cause / note |
+|---|---|---|---|
+| 8 | **High** | Per-share growth chart can't be read: no y-axis or values, the "= 100" baseline isn't drawn, only first/last quarter labelled, no data points, no hover. FCF/OCF draw a smooth hill whose shape between quarters is invented. | `MultiLine`: three unlabeled grid lines (middle one dashed), Catmull-Rom smoothing, first/last x-labels only, no markers/tooltip. Rebasing to the first quarter also exaggerates small bases (NVDA FCF base $0.55 → "3.6×" peak) and inverts direction when the base is negative (RIVN-class FCF). All five series are $/share already, so they can share one real axis without rebasing. |
+| 9 | Medium | Cash & capital mini charts (80 px, no scale, 10 px labels) show flat lines; CapEx $0.11 vs SBC $0.08, or debt tripling to $1.58, aren't readable. | Two `MultiLine`s at 80 px with `showLegend={false}`. These are "current value + trend" data — stat tiles fit better. |
+| 10 | Medium | Quality table trend cells imply trends the data can't support: ROIC/ROE have only 2 points, so the "falling" line is two dots joined; min–max autoscaling makes a 3-pt move look like a crash. | `Sparkline` autoscale, no endpoint markers, no stated change, no minimum point count. |
+
+**Proposed redesign (mocked up with real NVDA data, pending owner approval):**
+
+1. `MultiLine` v2 — y-axis with clean ticks and a solid baseline (0, or 100 when indexed); solid hairline grid; every quarter labelled (thinned past ~8); straight segments with ≥8 px markers; end-of-line value labels with collision nudging; crosshair + tooltip with every series and QoQ change. Used by Quality margins, per-share growth, compare overlays.
+2. Per-share growth — actual $/share, split into Income (Rev / GP / OpI) and Cash flow (OCF / FCF) panels on one shared scale; multiplier + CAGR pills unchanged. Handles negative values with the zero baseline.
+3. Cash & capital — four stat tiles (value, change vs first quarter, sparkline with marked ends) plus the net-cash tile.
+4. Trend cells — marked endpoints + a stated change ("▼ 37.3 pts vs prior quarter"); no line under 3 points ("only 2 quarters of data").

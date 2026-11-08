@@ -23,13 +23,14 @@ If you're picking this up after a gap, the orientation in three lines:
 **Known follow-ups not blocking 4.8:**
 
 - **Vite HMR cache misses file mtime in `.claude/worktrees/...`** — see [tasks/lessons.md](lessons.md). Workaround: trust unit tests + `vite build` for verification when the dev preview shows stale content. Fix candidate: add `server.watch.usePolling: true` to `vite.config.ts`. Low priority.
-- **Pre-existing ValuationCard ESLint warning** (`Unnecessary escape character: \-` at `frontend/src/components/ValuationCard.tsx:36`). Benign; tracking unfix because the regex pattern reads more clearly with the explicit escape. Drop the backslash if you ever want a clean lint pass.
 - **Real-LLM dogfood for 4.5.B's prompt change** (distressed-name framing context block) — unit-tested but not verified end-to-end against a real RIVN report. Naturally lands during 4.8.
 - **Compare narrative dogfood gate** — 4.6.A Compare page ships visual-only. Whether to escalate to 4.6.B is a 4.8 decision.
 - **Per-card sparklines on LandingPage's Recent + Watchlist grids** — current cards are ticker-only (no fetch fan-out). If 4.8 dogfood wants sparklines, plumb the existing `fetchMarketPrices` query through; cache hits are likely warm if those tickers are in recent.
 - **Help overlay (`?` shortcut)** — mockup footer suggests a keyboard-help modal. Defer until ⌘K is dogfooded enough to know what other shortcuts are wanted.
 
-**`tasks/lessons.md`** captured 8 lessons through 4.6.A — read before non-trivial work to avoid retreading them.
+**`tasks/lessons.md`** captured 8 lessons through 4.6.A, plus one from the 2026-11-07 re-pickup (hardcoded dates in time-windowed tests) — read before non-trivial work to avoid retreading them.
+
+**Re-pickup 2026-11-07:** three `test_research_cache.py` tests had expired (hardcoded April dates vs a 7-day lookup window) and frontend lint failed on the ValuationCard `\-` escape; both fixed on `fix/expired-cache-test-dates`. CI still runs backend only — the frontend suite + lint are not gated.
 
 ## Local-dev gotchas (Windows)
 

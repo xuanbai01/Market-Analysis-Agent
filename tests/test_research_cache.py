@@ -285,20 +285,23 @@ async def test_round_trip_preserves_full_report_shape(
 ) -> None:
     """A complex report serialized → JSONB → deserialized still validates
     as a ResearchReport with all its claims, sources, and confidence."""
+    # Timestamps are relative to now: lookup_recent only returns rows
+    # inside the max_age_hours window, so a hardcoded date expires.
+    now = datetime.now(UTC)
     src1 = Source(
         tool="yfinance.fundamentals",
-        fetched_at=datetime(2026, 4, 28, 12, 0, tzinfo=UTC),
+        fetched_at=now - timedelta(days=1),
         url="https://finance.yahoo.com/quote/AAPL",
         detail="Ticker.info[trailingPE]",
     )
     src2 = Source(
         tool="sec.ten_k_risks_diff",
-        fetched_at=datetime(2026, 4, 27, 9, 30, tzinfo=UTC),
+        fetched_at=now - timedelta(days=2),
         detail="0000320193-25-000079 vs 0000320193-24-000123",
     )
     report = ResearchReport(
         symbol="AAPL",
-        generated_at=datetime(2026, 4, 29, 14, 5, tzinfo=UTC),
+        generated_at=now,
         sections=[
             Section(
                 title="Valuation",
@@ -326,7 +329,7 @@ async def test_round_trip_preserves_full_report_shape(
         db_session,
         symbol="AAPL",
         focus="full",
-        report_date=date(2026, 4, 29),
+        report_date=now.date(),
         report=report,
     )
     await db_session.flush()
@@ -358,9 +361,10 @@ async def test_claim_history_round_trips_through_jsonb(
     unchanged. This is the contract the frontend Sparkline reads off
     of — any drift in JSONB serialization here breaks the chart layer.
     """
+    now = datetime.now(UTC)
     src = Source(
         tool="yfinance.fundamentals",
-        fetched_at=datetime(2026, 4, 28, 12, 0, tzinfo=UTC),
+        fetched_at=now - timedelta(days=1),
     )
     history_bearing = Claim(
         description="EPS",
@@ -383,7 +387,7 @@ async def test_claim_history_round_trips_through_jsonb(
 
     report = ResearchReport(
         symbol="AAPL",
-        generated_at=datetime(2026, 4, 29, 14, 5, tzinfo=UTC),
+        generated_at=now,
         sections=[
             Section(
                 title="Earnings",
@@ -405,7 +409,7 @@ async def test_claim_history_round_trips_through_jsonb(
         db_session,
         symbol="AAPL",
         focus="full",
-        report_date=date(2026, 4, 29),
+        report_date=now.date(),
         report=report,
     )
     await db_session.flush()
@@ -441,9 +445,10 @@ async def test_legacy_cache_row_without_history_key_still_parses(
 
     from app.db.models.research_reports import ResearchReportRow
 
+    now = datetime.now(UTC)
     legacy_report_json = {
         "symbol": "AAPL",
-        "generated_at": "2026-04-29T14:05:00+00:00",
+        "generated_at": now.isoformat(),
         "sections": [
             {
                 "title": "Valuation",
@@ -453,7 +458,7 @@ async def test_legacy_cache_row_without_history_key_still_parses(
                         "value": 28.5,
                         "source": {
                             "tool": "yfinance.info",
-                            "fetched_at": "2026-04-29T14:00:00+00:00",
+                            "fetched_at": (now - timedelta(minutes=5)).isoformat(),
                         },
                         # NOTE: no "history" key -- legacy shape
                     },
@@ -469,9 +474,9 @@ async def test_legacy_cache_row_without_history_key_still_parses(
     stmt = pg_insert(ResearchReportRow).values(
         symbol="AAPL",
         focus="full",
-        report_date=date(2026, 4, 29),
+        report_date=now.date(),
         report_json=legacy_report_json,
-        generated_at=datetime(2026, 4, 29, 14, 5, tzinfo=UTC),
+        generated_at=now,
     )
     await db_session.execute(stmt)
     await db_session.flush()

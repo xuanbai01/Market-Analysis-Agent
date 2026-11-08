@@ -73,36 +73,15 @@ describe("LandingPage", () => {
   });
 });
 
-// ── Phase 4.7 — Recent ticker cards + watchlist section ─────────────
-//
-// The landing page surfaces the user's last-visited tickers as cards
-// at the top of the page (above the search bar's history-driven Past
-// Reports list). When the watchlist is non-empty, a separate watchlist
-// section renders below the recent cards.
-
-describe("LandingPage — Phase 4.7 recent + watchlist", () => {
-  it("renders a recent tickers section when localStorage has recent entries", () => {
-    window.localStorage.clear();
-    window.localStorage.setItem(
-      "market-agent.recent",
-      JSON.stringify(["NVDA", "AAPL"]),
-    );
+// 2026-11 — the user's tickers moved to the sidebar (every page), so
+// the landing page no longer repeats them as card grids.
+describe("LandingPage — sidebar owns the user's tickers", () => {
+  it("does not repeat recent or watchlist tickers", () => {
+    window.localStorage.setItem("market-agent.recent", JSON.stringify(["NVDA"]));
+    window.localStorage.setItem("market-agent.watchlist", JSON.stringify(["AVGO"]));
     renderLanding();
-    // Section header.
-    expect(screen.getByText(/recent tickers/i)).toBeInTheDocument();
-    // The two tickers themselves.
-    expect(screen.getAllByText(/^NVDA$/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/^AAPL$/).length).toBeGreaterThan(0);
-  });
-
-  it("renders a watchlist section when localStorage has watchlist entries", () => {
-    window.localStorage.clear();
-    window.localStorage.setItem(
-      "market-agent.watchlist",
-      JSON.stringify(["AVGO"]),
-    );
-    renderLanding();
-    expect(screen.getByText(/watchlist/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/^AVGO$/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/recent tickers/i)).toBeNull();
+    expect(screen.queryByText(/^AVGO$/)).toBeNull();
+    expect(document.querySelector("[data-card='ticker-card']")).toBeNull();
   });
 });

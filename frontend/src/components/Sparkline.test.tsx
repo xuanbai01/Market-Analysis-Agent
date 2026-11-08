@@ -92,3 +92,31 @@ describe("Sparkline", () => {
     ).not.toThrow();
   });
 });
+
+// 2026-11 dogfood #10: mark both ends so a reader can see where the
+// line starts and finishes, and let callers color it per metric.
+describe("Sparkline — marked ends and color", () => {
+  const H = [
+    { period: "2025-Q3", value: 1 },
+    { period: "2025-Q4", value: 2 },
+    { period: "2026-Q1", value: 1.5 },
+  ];
+
+  it("marks the first and last points", () => {
+    const { getByTestId } = render(<Sparkline history={H} />);
+    expect(getByTestId("sparkline-start")).not.toBeNull();
+    expect(getByTestId("sparkline-end")).not.toBeNull();
+  });
+
+  it("uses the caller's color for the line and end marker", () => {
+    const { container, getByTestId } = render(<Sparkline history={H} color="#e8c277" />);
+    expect(container.querySelector("path")?.getAttribute("stroke")).toBe("#e8c277");
+    expect(getByTestId("sparkline-end").getAttribute("fill")).toBe("#e8c277");
+  });
+
+  it("can stretch to its container's width", () => {
+    const { container } = render(<Sparkline history={H} width="100%" />);
+    const svg = container.querySelector("[data-testid='sparkline']");
+    expect(svg?.getAttribute("width")).toBe("100%");
+  });
+});

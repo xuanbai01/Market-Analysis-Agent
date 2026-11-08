@@ -96,6 +96,27 @@ describe("QualityCard", () => {
     ).not.toBeNull();
   });
 
+  // 2026-11 dogfood #8/#10 — the margins chart reads as percentages on a
+  // labelled axis, and trend cells state their change.
+  it("labels the margins chart's value axis in percent", () => {
+    const { container } = render(
+      <QualityCard ticker="NVDA" section={section(FULL_CLAIMS)} />,
+    );
+    const ticks = Array.from(
+      container.querySelectorAll("[data-testid='multi-line-y-tick']"),
+    ).map((t) => t.textContent);
+    expect(ticks).toContain("0%");
+  });
+
+  it("states each claim's change in the trend column", () => {
+    const { container } = render(
+      <QualityCard ticker="NVDA" section={section(FULL_CLAIMS)} />,
+    );
+    expect(
+      container.querySelectorAll("[data-testid='trend-delta']").length,
+    ).toBeGreaterThan(0);
+  });
+
   it("renders the 6 default claims by default (not all 16)", () => {
     const { container } = render(
       <QualityCard ticker="NVDA" section={section(FULL_CLAIMS)} />,

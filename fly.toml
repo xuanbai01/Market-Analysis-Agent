@@ -21,6 +21,12 @@ kill_timeout = '10s'            # give in-flight requests time to drain
   # ADR 0006. Needs the DEEPSEEK_API_KEY secret; switch back to Claude
   # with 'anthropic' + the ANTHROPIC_API_KEY secret.
   LLM_PROVIDER = 'deepseek'
+  # Fresh reports per IP per hour (cache hits are free). The code default
+  # is 3; raised for the Phase 4.8 dogfood phase, when the owner is the
+  # only user and needs many fresh reports. The shared secret gates the
+  # endpoint and a DeepSeek report costs under a cent, so 30/h caps the
+  # worst case near $0.30/h. Lower it before sharing the URL publicly.
+  RESEARCH_RATE_LIMIT_PER_HOUR = '30'
   # Secrets — set via `flyctl secrets set ...`, never hardcoded here:
   #   DATABASE_URL, BACKEND_SHARED_SECRET, DEEPSEEK_API_KEY
   #   (optional: ANTHROPIC_API_KEY, FRED_API_KEY, NEWSAPI_KEY).

@@ -5,7 +5,7 @@ All commands run from the repo root unless stated otherwise.
 ## Local stack (Docker Compose)
 
 ```bash
-docker compose up -d db          # Postgres 15 on :5432 (empty; run `alembic upgrade head` next)
+docker compose up -d db          # Postgres 15 on :5432; first start creates marketdb + test_db (run `alembic upgrade head` next)
 docker compose up --build        # also build + run the FastAPI container on :8000
 docker compose down              # stop everything; add -v to wipe the volume
 ```

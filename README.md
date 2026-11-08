@@ -42,7 +42,7 @@ Verify:
 - `curl http://localhost:8000/v1/symbols` → seeded NVDA + SPY rows
 - Swagger UI: <http://localhost:8000/docs>
 
-See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for the full first-hour checklist.
+See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for the frontend, the test suites, and troubleshooting (Windows port clashes, stale `.env`, and other setup problems this project has hit).
 
 ## What works today
 

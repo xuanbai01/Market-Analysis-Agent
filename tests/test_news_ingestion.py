@@ -73,6 +73,27 @@ async def test_ingest_writes_articles_and_returns_count(
     assert {r.title for r in rows} == {"NVDA earnings beat", "NVDA roadmap update"}
 
 
+async def test_ingest_creates_symbol_row_for_untracked_ticker(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``news_symbols`` has an FK to ``symbols``. Research runs for any
+    ticker, not just seeded ones, so ingest must upsert the parent row
+    first — the same trap PR #51 fixed for candles."""
+    monkeypatch.setitem(
+        PROVIDERS,
+        "fake",
+        lambda _sym: [_article(title="Rivian Q3 deliveries", url="https://ex.com/r")],
+    )
+
+    count = await fetch_news_for_symbol(db_session, "rivn", providers=["fake"])
+
+    assert count == 1
+    symbols = (await db_session.execute(select(Symbol.symbol))).scalars().all()
+    assert symbols == ["RIVN"]
+    tags = (await db_session.execute(select(NewsSymbol.symbol))).scalars().all()
+    assert tags == ["RIVN"]
+
+
 async def test_ingest_unknown_provider_raises(db_session: AsyncSession) -> None:
     await _seed_universe(db_session)
     with pytest.raises(ValueError, match="Unknown news provider"):

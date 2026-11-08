@@ -10,6 +10,9 @@ DB nor the LLM is touched in unit tests.
 """
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -17,6 +20,19 @@ import pytest
 
 from app.schemas.news import NewsItemOut
 from app.schemas.research import Claim
+
+
+@pytest.fixture(autouse=True)
+def _no_live_ingest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``fetch_news`` ingests the symbol's latest headlines before reading.
+    Stub that step so no test reaches Yahoo, NewsAPI or Postgres; the
+    ingest tests at the bottom replace this stub with their own."""
+    from app.services import news as news_module
+
+    async def _ingest(_session: Any, _symbol: str) -> int:
+        return 0
+
+    monkeypatch.setattr(news_module, "fetch_news_for_symbol", _ingest, raising=False)
 
 
 def _news_item(
@@ -173,3 +189,109 @@ async def test_uppercases_symbol_before_querying(
     await news_module.fetch_news("aapl")
 
     assert seen["symbol"] == "AAPL"
+
+
+# ── Fresh headlines per report (2026-11, Phase 4.8 plan item 2) ──────
+#
+# Nothing wrote news_items on its own — the only writer was a manual
+# POST /v1/news/ingest — so the News card stayed empty in production.
+# fetch_news now ingests the symbol's latest headlines first, and any
+# ingest failure or stall degrades to reading whatever the DB has.
+
+
+def _patch_reads(monkeypatch: pytest.MonkeyPatch, calls: list[tuple[str, str]]) -> None:
+    from app.services import news as news_module
+
+    async def _fake_list_news(_session: Any, symbol: str, **_kw: Any) -> tuple[list, None]:
+        calls.append(("list", symbol))
+        return [_news_item()], None
+
+    async def _fake_categorize(headlines: list[str]) -> dict[int, dict[str, str]]:
+        return {i: {"category": "earnings", "sentiment": "positive"} for i in range(len(headlines))}
+
+    monkeypatch.setattr(news_module, "list_news", _fake_list_news)
+    monkeypatch.setattr(news_module, "categorize_news_headlines", _fake_categorize)
+
+
+async def test_ingests_latest_headlines_before_reading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import news as news_module
+
+    calls: list[tuple[str, str]] = []
+
+    async def _ingest(_session: Any, symbol: str) -> int:
+        calls.append(("ingest", symbol))
+        return 3
+
+    monkeypatch.setattr(news_module, "fetch_news_for_symbol", _ingest)
+    _patch_reads(monkeypatch, calls)
+
+    result = await news_module.fetch_news("aapl")
+
+    assert calls == [("ingest", "AAPL"), ("list", "AAPL")]
+    assert len(result) == 1
+
+
+async def test_ingest_failure_still_returns_stored_news(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from app.services import news as news_module
+
+    async def _ingest(_session: Any, _symbol: str) -> int:
+        raise RuntimeError("yahoo rss down")
+
+    monkeypatch.setattr(news_module, "fetch_news_for_symbol", _ingest)
+    calls: list[tuple[str, str]] = []
+    _patch_reads(monkeypatch, calls)
+
+    with caplog.at_level(logging.INFO, logger="app.external"):
+        result = await news_module.fetch_news("AAPL")
+
+    assert len(result) == 1
+    record = next(r for r in caplog.records if r.service_id == "research.news_query")
+    assert record.outcome == "ok"
+    assert record.output_summary["ingest_error"] == "RuntimeError"
+    assert record.output_summary["item_count"] == 1
+
+
+async def test_stalled_ingest_is_abandoned_after_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """feedparser fetches with no timeout of its own; a hung feed must
+    not hold the whole research report hostage."""
+    from app.services import news as news_module
+
+    async def _ingest(_session: Any, _symbol: str) -> int:
+        await asyncio.sleep(30)
+        return 0
+
+    monkeypatch.setattr(news_module, "fetch_news_for_symbol", _ingest)
+    monkeypatch.setattr(news_module, "_INGEST_TIMEOUT_SECONDS", 0.05)
+    calls: list[tuple[str, str]] = []
+    _patch_reads(monkeypatch, calls)
+
+    started = time.perf_counter()
+    result = await news_module.fetch_news("AAPL")
+
+    assert time.perf_counter() - started < 5
+    assert len(result) == 1
+
+
+async def test_ingest_count_is_logged(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from app.services import news as news_module
+
+    async def _ingest(_session: Any, _symbol: str) -> int:
+        return 7
+
+    monkeypatch.setattr(news_module, "fetch_news_for_symbol", _ingest)
+    calls: list[tuple[str, str]] = []
+    _patch_reads(monkeypatch, calls)
+
+    with caplog.at_level(logging.INFO, logger="app.external"):
+        await news_module.fetch_news("AAPL")
+
+    record = next(r for r in caplog.records if r.service_id == "research.news_query")
+    assert record.output_summary["ingested"] == 7

@@ -53,6 +53,12 @@ if not GOLDEN_CASES:
 else:
 
     @pytest.mark.live_llm
+    # One event loop for every case, as in production. The app's DB
+    # engine (fetch_news) and the LLM SDK clients are module-level and
+    # pool connections bound to the loop that opened them; per-test
+    # loops made a later case reuse a dead loop's asyncpg connection
+    # ("Event loop is closed") once the golden set grew past one case.
+    @pytest.mark.asyncio(loop_scope="module")
     @pytest.mark.skipif(
         not llm.provider_api_key_configured(),
         reason=f"API key for LLM_PROVIDER={settings.LLM_PROVIDER} not set "

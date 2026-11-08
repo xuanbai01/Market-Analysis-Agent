@@ -666,6 +666,95 @@ def test_paragraph_diff_handles_empty_inputs() -> None:
     assert kept == 0
 
 
+# 2026-11: RIVN's Item 1A has ~550 paragraphs per year, and the original
+# all-pairs scan (one SequenceMatcher.ratio() per pair, both directions)
+# took ~300 s. The faster _paragraph_diff must return exactly what that
+# scan returned — these tests pin both the equivalence and the speedup.
+
+
+def _reference_paragraph_diff(
+    current: list[str], prior: list[str], threshold: float = 0.6
+) -> tuple[list[str], list[str], int]:
+    """The original O(N·M) implementation, kept verbatim as the oracle."""
+    from difflib import SequenceMatcher
+
+    def max_ratio(text: str, candidates: list[str]) -> float:
+        if not candidates:
+            return 0.0
+        return max(SequenceMatcher(None, text, c).ratio() for c in candidates)
+
+    added = [p for p in current if max_ratio(p, prior) < threshold]
+    removed = [p for p in prior if max_ratio(p, current) < threshold]
+    return added, removed, len(current) - len(added)
+
+
+_WORDS = (
+    "the company may face material adverse effects from supply chain "
+    "disruption regulatory change competition cybersecurity incidents "
+    "interest rates demand for vehicles battery cells export controls "
+    "litigation key personnel capital markets liquidity warranty recall"
+).split()
+
+
+def _random_paragraph(rng, n_words: int) -> str:
+    return " ".join(rng.choice(_WORDS) for _ in range(n_words)).capitalize() + "."
+
+
+def _reword(rng, text: str, rate: float) -> str:
+    words = text.rstrip(".").split()
+    out = [rng.choice(_WORDS) if rng.random() < rate else w for w in words]
+    return " ".join(out) + "."
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3, 4, 5])
+def test_paragraph_diff_matches_all_pairs_reference(seed: int) -> None:
+    """Verbatim carry-overs, light and heavy rewordings straddling the
+    0.6 threshold, duplicates, and >200-char paragraphs (where difflib's
+    autojunk changes ratio()) must classify exactly as the old scan did."""
+    import random
+
+    rng = random.Random(seed)
+    prior = [_random_paragraph(rng, rng.randint(8, 70)) for _ in range(40)]
+    current: list[str] = []
+    for p in prior:
+        roll = rng.random()
+        if roll < 0.45:
+            current.append(p)  # verbatim carry-over
+        elif roll < 0.85:
+            current.append(_reword(rng, p, rng.uniform(0.05, 0.8)))  # reworded
+        # else: dropped this year
+    current += [_random_paragraph(rng, rng.randint(8, 70)) for _ in range(10)]  # new
+    current.append(current[0])  # a duplicated paragraph
+    rng.shuffle(current)
+
+    assert _paragraph_diff(current, prior) == _reference_paragraph_diff(current, prior)
+
+
+def test_paragraph_diff_skips_fuzzy_matching_for_verbatim_paragraphs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Most of a 10-K's risk factors carry over word for word; those must
+    not pay for any SequenceMatcher.ratio() call."""
+    from difflib import SequenceMatcher
+
+    from app.services import ten_k
+
+    calls = {"ratio": 0}
+
+    class CountingMatcher(SequenceMatcher):
+        def ratio(self) -> float:
+            calls["ratio"] += 1
+            return super().ratio()
+
+    monkeypatch.setattr(ten_k, "SequenceMatcher", CountingMatcher)
+
+    paragraphs = [f"Risk factor number {i}: " + "x" * (i % 50) for i in range(300)]
+    added, removed, kept = ten_k._paragraph_diff(list(paragraphs), list(paragraphs))
+
+    assert (added, removed, kept) == ([], [], 300)
+    assert calls["ratio"] == 0
+
+
 # ── extract_10k_risks_diff (fetch_edgar mocked) ────────────────────────
 
 

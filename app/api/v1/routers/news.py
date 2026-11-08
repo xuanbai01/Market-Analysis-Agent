@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_session
+from app.core.auth import require_shared_secret
 from app.schemas.news import NewsItemOut, NewsListResponse
 from app.services.news_ingestion import fetch_news_for_symbol, ingest_news_once
 from app.services.news_repository import get_news_by_id, list_news
@@ -17,7 +18,8 @@ class NewsIngestRequest(BaseModel):
     symbol: str | None = None
 
 
-@router.post("/news/ingest")
+# Gated: spends the NewsAPI free tier's 100 requests/day.
+@router.post("/news/ingest", dependencies=[Depends(require_shared_secret)])
 async def news_ingest(
     payload: NewsIngestRequest | None = None,
     session: AsyncSession = Depends(get_session),

@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_session
+from app.core.auth import require_shared_secret
 from app.db.models.symbols import Symbol
 from app.schemas.symbol import SymbolCreate, SymbolOut
 
@@ -22,7 +23,12 @@ async def list_symbols(
     return [SymbolOut(symbol=r.symbol, name=r.name) for r in rows]
 
 
-@router.post("/symbols", response_model=SymbolOut, status_code=201)
+@router.post(
+    "/symbols",
+    response_model=SymbolOut,
+    status_code=201,
+    dependencies=[Depends(require_shared_secret)],
+)
 async def add_symbol(payload: SymbolCreate, session: AsyncSession = Depends(get_session)):
     sym = Symbol(symbol=payload.symbol.upper(), name=payload.name)
     session.add(sym)

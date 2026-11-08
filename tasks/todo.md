@@ -538,6 +538,28 @@ Headroom under 100 KB main-bundle budget: **1.44 → 16.98 KB**. Phase 4.8 + Pha
 
 ### 4.8 Vercel deploy + dogfood gate
 
+#### Execution plan (2026-11-08)
+
+Survey findings that reorder the original list below:
+
+- **Only `/v1/research/*` checks the shared secret.** `GET /v1/market/{symbol}/prices` (documented as auth-gated; it falls through to a yfinance ingest + DB write on cache miss), `POST /v1/market/ingest`, `POST /v1/news/ingest` (spends the 100/day NewsAPI quota) and `POST /v1/symbols` are open to anyone, even once `BACKEND_SHARED_SECRET` is set. The frontend already sends the bearer token on every call, so gating them breaks nothing.
+- **The News card can never fill on its own.** `fetch_news` only reads `news_items`; the only writer is a manual `POST /v1/news/ingest`, and `news_symbols` has an FK to `symbols`, so ingesting a ticker that isn't already in `symbols` would fail (same trap as the candles FK in `tasks/lessons.md`).
+- **CI never runs the frontend** (lint, typecheck, vitest, build) and never builds the production image.
+
+Order — code first (each its own PR; the account steps can run in parallel):
+
+1. [ ] **Lock down the API** — `require_shared_secret` on prices + every POST that writes or spends quota; tests for 401 without / 200 with the token; fix the architecture doc's claim.
+2. [ ] **Fresh news per report** — `fetch_news` ingests the symbol's latest headlines (Yahoo RSS; NewsAPI when keyed) before reading, upserting the `symbols` row first; any ingest failure degrades to the DB read.
+3. [ ] **CI coverage** — frontend job (lint, typecheck, vitest, build) + a production-image job (docker build, import smoke).
+4. [ ] **Local-dev docs** — `LOCAL_DEV.md` (Windows/Docker/test-DB gotchas) + `FRONTEND_ORIGIN=http://localhost:5173` in `.env.example`.
+5. [ ] **Deploy (needs the owner's accounts)** — Fly CLI login → `BACKEND_SHARED_SECRET`, `LLM_PROVIDER=deepseek` + rotated `DEEPSEEK_API_KEY`, `FRONTEND_ORIGIN`; Vercel project import from `frontend/` with `VITE_BACKEND_URL`.
+6. [ ] **Dogfood** the deployed stack on 8–10 tickers (items below); log in `tasks/dogfood-2026-11.md`; fix the worst.
+7. [ ] **Docs sweep + Phase 5/6 decision gate** (items below).
+
+Not in this pass: Bug 8 (cancel-on-nav — pick up if dogfood hits it), Sonnet comparison run (needs an Anthropic key), branch protection on `main` (a repo setting — owner's call).
+
+#### Original 4.8 items
+
 - [ ] **Vercel push-to-deploy** from `frontend/`. Set `VITE_BACKEND_URL`, set backend `FRONTEND_ORIGIN`, set `BACKEND_SHARED_SECRET` on both sides.
 - [ ] **Backend env-var hardening** — confirm Fly secrets match the new dashboard's needs (`LLM_PROVIDER` + `DEEPSEEK_API_KEY` or `ANTHROPIC_API_KEY` per ADR 0006, `NEWSAPI_KEY`, `FRED_API_KEY`, `BACKEND_SHARED_SECRET`).
 - [ ] **Dogfood** the deployed stack against 8–10 real symbols spanning the layout matrix (healthy mega-cap, growth, distressed, dividend payer, cyclical). Note rough edges.

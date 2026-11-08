@@ -33,7 +33,7 @@ import { PeerScatterV2 } from "./PeerScatterV2";
 function countPeers(claims: readonly Claim[]): number {
   const tickers = new Set<string>();
   for (const c of claims) {
-    const m = /^([A-Z][A-Z0-9.\-]{0,9}):\s/.exec(c.description);
+    const m = /^([A-Z][A-Z0-9.-]{0,9}):\s/.exec(c.description);
     if (m && m[1] && m[1] !== "Peer median") {
       tickers.add(m[1]);
     }

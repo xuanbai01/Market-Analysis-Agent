@@ -31,7 +31,7 @@ Generated in ~20 s. Every card rendered: hero + price chart, Quality rings + mar
 | 9 | Medium | Cash & capital mini charts (80 px, no scale, 10 px labels) show flat lines; CapEx $0.11 vs SBC $0.08, or debt tripling to $1.58, aren't readable. | Two `MultiLine`s at 80 px with `showLegend={false}`. These are "current value + trend" data — stat tiles fit better. |
 | 10 | Medium | Quality table trend cells imply trends the data can't support: ROIC/ROE have only 2 points, so the "falling" line is two dots joined; min–max autoscaling makes a 3-pt move look like a crash. | `Sparkline` autoscale, no endpoint markers, no stated change, no minimum point count. |
 
-**Proposed redesign (mocked up with real NVDA data, pending owner approval):**
+**Redesign — approved and built in #75** (verified on a local NVDA report at 800 and 1440 px: labels a true 11 px, 0 clipped, 0 overlapping):
 
 1. `MultiLine` v2 — y-axis with clean ticks and a solid baseline (0, or 100 when indexed); solid hairline grid; every quarter labelled (thinned past ~8); straight segments with ≥8 px markers; end-of-line value labels with collision nudging; crosshair + tooltip with every series and QoQ change. Used by Quality margins, per-share growth, compare overlays.
 2. Per-share growth — actual $/share, split into Income (Rev / GP / OpI) and Cash flow (OCF / FCF) panels on one shared scale; multiplier + CAGR pills unchanged. Handles negative values with the zero baseline.

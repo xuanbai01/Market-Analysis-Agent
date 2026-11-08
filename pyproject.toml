@@ -15,8 +15,10 @@ dependencies = [
   "alembic==1.13.2",
   # Market data providers
   "yfinance==1.3.0",
-  # LLM provider
+  # LLM providers (switched by LLM_PROVIDER — see ADR 0006). The
+  # openai SDK is DeepSeek's documented client for its OpenAI-format API.
   "anthropic==0.97.0",
+  "openai==3.46.0",
   # News providers
   "feedparser==6.0.12",
   # 10-K HTML parser (Item 1 / Item 1A extraction). Picked over lxml
@@ -41,7 +43,12 @@ dev-dependencies = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+# Live-LLM evals cost money and need network, so they never run by
+# default — opt in with `uv run pytest -m live_llm tests/evals -s`.
+addopts = "-ra --strict-markers -m 'not live_llm'"
+markers = [
+  "live_llm: calls a real LLM provider (opt-in; see tests/evals/README.md)",
+]
 
 [tool.ruff]
 line-length = 100

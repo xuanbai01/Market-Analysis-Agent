@@ -548,10 +548,10 @@ Survey findings that reorder the original list below:
 
 Order — code first (each its own PR; the account steps can run in parallel):
 
-1. [ ] **Lock down the API** — `require_shared_secret` on prices + every POST that writes or spends quota; tests for 401 without / 200 with the token; fix the architecture doc's claim.
-2. [ ] **Fresh news per report** — `fetch_news` ingests the symbol's latest headlines (Yahoo RSS; NewsAPI when keyed) before reading, upserting the `symbols` row first; any ingest failure degrades to the DB read.
-3. [ ] **CI coverage** — frontend job (lint, typecheck, vitest, build) + a production-image job (docker build, import smoke).
-4. [ ] **Local-dev docs** — `LOCAL_DEV.md` (Windows/Docker/test-DB gotchas) + `FRONTEND_ORIGIN=http://localhost:5173` in `.env.example`.
+1. [ ] **Lock down the API** — `require_shared_secret` on prices + every POST that writes or spends quota; tests for 401 without / 200 with the token; fix the architecture doc's claim. → **#68**, awaiting review.
+2. [ ] **Fresh news per report** — `fetch_news` ingests the symbol's latest headlines (Yahoo RSS; NewsAPI when keyed) before reading, upserting the `symbols` row first; any ingest failure degrades to the DB read. → **#69** (live: RIVN 0 → 19 headlines), awaiting review.
+3. [ ] **CI coverage** — frontend job (lint, typecheck, vitest, build) + a production-image job (docker build + boot against Postgres). → **#70**, both new jobs green on their first run, awaiting review.
+4. [ ] **Local-dev docs** — folded into a rewritten `docs/GETTING_STARTED.md` (troubleshooting section) rather than a new `LOCAL_DEV.md`; `FRONTEND_ORIGIN=http://localhost:5173` in `.env.example`; compose gets a named volume + auto-created `test_db`. → **#71**, awaiting review.
 5. [ ] **Deploy (needs the owner's accounts)** — Fly CLI login → `BACKEND_SHARED_SECRET`, `LLM_PROVIDER=deepseek` + rotated `DEEPSEEK_API_KEY`, `FRONTEND_ORIGIN`; Vercel project import from `frontend/` with `VITE_BACKEND_URL`.
 6. [ ] **Dogfood** the deployed stack on 8–10 tickers (items below); log in `tasks/dogfood-2026-11.md`; fix the worst.
 7. [ ] **Docs sweep + Phase 5/6 decision gate** (items below).
@@ -612,7 +612,7 @@ These were sketched during Phase 3 but never landed; either Phase 4 absorbs them
 ## Cross-cutting (do alongside, not blocked on Phase 4)
 
 - [ ] Turn on branch protection for `main` and add `ANTHROPIC_API_KEY` as a repo secret for the AI PR review job
-- [ ] `.python-version` already pinned; verify it's respected by CI's uv setup
+- [x] `.python-version` respected by CI's uv setup — the backend job's log shows "Using CPython 3.11.18" (checked 2026-11-08).
 - [ ] **Set `ANTHROPIC_API_KEY` as a Fly secret** — needed before `/v1/research/*` works in prod: `fly secrets set 'ANTHROPIC_API_KEY=sk-ant-...'`
 - [ ] **Local-dev defaults sweep** — write a `LOCAL_DEV.md` in the repo root capturing the Phase 3 dogfood lessons: (1) `.env` `DATABASE_URL` should default to local Docker (`postgresql+asyncpg://postgres:postgres@localhost:5432/marketdb`) not Neon; (2) Windows users with native Postgres on :5432 need to either stop the service or remap docker to :5433; (3) `RESEARCH_CACHE_MAX_AGE_HOURS=0` disables cache for debug; (4) browser extensions can rewrite responses — test in incognito to isolate.
 - [ ] **`.env.example`** — recommend `FRONTEND_ORIGIN=http://localhost:5173` as the obvious local-dev value (currently empty trips up fresh-clone sessions).

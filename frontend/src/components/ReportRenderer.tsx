@@ -33,7 +33,7 @@ import type { Claim, ResearchReport, Section } from "../lib/schemas";
 import { featuredClaim } from "../lib/featured-claim";
 import { formatClaimValue, formatTimestamp } from "../lib/format";
 import { ConfidenceBadge } from "./ConfidenceBadge";
-import { Sparkline } from "./Sparkline";
+import { TrendCell } from "./TrendCell";
 
 // SectionChart is the only remaining Recharts consumer in this file
 // after Phase 4.2 — Peers moved to PeerScatterV2 (hand-rolled SVG)
@@ -186,12 +186,7 @@ function ClaimRow({ claim }: { claim: Claim }) {
         {formatClaimValue(claim.value, claim.unit)}
       </td>
       <td className="hidden px-3 py-2 sm:table-cell">
-        {claim.history.length >= 2 ? (
-          <Sparkline
-            history={claim.history}
-            ariaLabel={`Trend for ${claim.description}`}
-          />
-        ) : null}
+        <TrendCell history={claim.history} unit={claim.unit} label={claim.description} />
       </td>
       <td className="px-3 py-2 text-xs text-strata-dim">
         {claim.source.url ? (

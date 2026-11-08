@@ -6,6 +6,7 @@
  * end-period multiplier per series so a viewer can read "NVDA Rev 6.2×"
  * at a glance even when the chart is dense.
  */
+import { indexValue } from "../../lib/chart-format";
 import {
   COMPARE_COLOR_A,
   COMPARE_COLOR_B,
@@ -36,7 +37,13 @@ export function CompareGrowthOverlay({ a, b }: Props) {
           Per-share growth · 5Y · rebased to 100
         </div>
       </div>
-      <MultiLine series={series} ariaLabel="Per-share growth overlay" height={180} />
+      <MultiLine
+        series={series}
+        ariaLabel="Per-share growth overlay"
+        height={180}
+        baseline={100}
+        formatValue={indexValue}
+      />
       <div className="mt-3 flex flex-wrap items-center gap-3 font-mono text-[11px] uppercase tracking-wide">
         {multipliers.map((m) => (
           <span key={m.label} className="flex items-center gap-1.5">

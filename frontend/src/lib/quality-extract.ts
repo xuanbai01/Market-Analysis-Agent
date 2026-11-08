@@ -101,6 +101,7 @@ export function extractMarginSeries(section: Section): MultiLineSeries[] {
   if (gross && gross.history.length > 0) {
     out.push({
       label: "Gross margin",
+      shortLabel: "GM",
       color: COLOR_QUALITY,
       history: gross.history,
     });
@@ -110,6 +111,7 @@ export function extractMarginSeries(section: Section): MultiLineSeries[] {
   if (operating && operating.history.length > 0) {
     out.push({
       label: "Operating margin",
+      shortLabel: "OM",
       color: COLOR_GROWTH,
       history: operating.history,
     });
@@ -119,6 +121,7 @@ export function extractMarginSeries(section: Section): MultiLineSeries[] {
   if (fcf && fcf.history.length > 0) {
     out.push({
       label: "FCF margin",
+      shortLabel: "FCF",
       color: COLOR_CASHFLOW,
       history: fcf.history,
     });

@@ -15,7 +15,7 @@
  * 8. Stable on flat data (all values equal — y-range = 0).
  */
 import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 
 import { MultiLine } from "./MultiLine";
 import type { MultiLineSeries } from "./MultiLine";
@@ -137,10 +137,11 @@ describe("MultiLine", () => {
   });
 
   // Phase 4.3.X / cosmetic backlog from PR #50: design uses smooth
-  // (monotone) curves; the prior implementation drew straight L
-  // segments. The fix uses cubic Bézier ('C' commands) — assert at
-  // least one C segment is present in each series path.
-  it("draws monotone curves (cubic Bézier 'C' commands), not straight L lines", () => {
+  // 2026-11 dogfood (tasks/dogfood-2026-11.md #8): smoothing invented
+  // the shape between quarters ("a hill" where FCF actually fell in one
+  // step). Quarterly data is drawn as straight segments between the
+  // real points.
+  it("draws straight segments between the real points, not curves", () => {
     const { container } = render(
       <MultiLine series={[SERIES_A, SERIES_B]} />,
     );
@@ -150,9 +151,173 @@ describe("MultiLine", () => {
     expect(paths.length).toBe(2);
     for (const path of paths) {
       const d = path.getAttribute("d") ?? "";
-      // Move-to is fine; the curve segments must be C, not L.
-      expect(d).toMatch(/[CS]/);
-      expect(d).not.toMatch(/\sL/);
+      expect(d).not.toMatch(/[CS]/);
+      expect(d.match(/L/g)?.length).toBe(3);
     }
+  });
+});
+
+// ── Readable charts (2026-11 dogfood #8) ─────────────────────────────
+//
+// "No baseline, no process shown — I can't read it." Every chart needs a
+// labelled value axis with a visible baseline, every period labelled,
+// the real data points marked, the latest values labelled at the line
+// ends, and a hover readout.
+
+const pct = (v: number) => `${(v * 100).toFixed(0)}%`;
+
+function periods(n: number): string[] {
+  return Array.from({ length: n }, (_, i) => {
+    const year = 2021 + Math.floor(i / 4);
+    return `${year}-Q${(i % 4) + 1}`;
+  });
+}
+
+function longSeries(n: number, label: string): MultiLineSeries {
+  return {
+    label,
+    color: "#6cb6ff",
+    history: periods(n).map((period, i) => ({ period, value: 1 + i * 0.1 })),
+  };
+}
+
+describe("MultiLine — axes, baseline, markers, labels, hover", () => {
+  it("labels the value axis with clean ticks in the caller's format", () => {
+    const { getAllByTestId } = render(
+      <MultiLine series={[SERIES_A, SERIES_B]} formatValue={pct} includeZero />,
+    );
+    const ticks = getAllByTestId("multi-line-y-tick").map((t) => t.textContent);
+    expect(ticks.length).toBeGreaterThanOrEqual(3);
+    expect(ticks).toContain("0%");
+    expect(ticks.every((t) => /^\d+%$/.test(t ?? ""))).toBe(true);
+  });
+
+  it("draws a solid baseline at zero when the scale includes it", () => {
+    const { getByTestId } = render(
+      <MultiLine series={[SERIES_A]} formatValue={pct} includeZero />,
+    );
+    const baseline = getByTestId("multi-line-baseline");
+    expect(baseline.getAttribute("stroke-dasharray")).toBeNull();
+  });
+
+  it("draws the baseline between negative and positive values", () => {
+    const losses: MultiLineSeries = {
+      label: "Operating margin",
+      color: "#e8c277",
+      history: [
+        { period: "2024-Q1", value: -0.41 },
+        { period: "2024-Q2", value: -0.22 },
+        { period: "2024-Q3", value: 0.05 },
+      ],
+    };
+    const { getByTestId, getAllByTestId } = render(
+      <MultiLine series={[losses]} formatValue={pct} />,
+    );
+    expect(getByTestId("multi-line-baseline")).not.toBeNull();
+    const ticks = getAllByTestId("multi-line-y-tick").map((t) => t.textContent);
+    expect(ticks.some((t) => t?.startsWith("-"))).toBe(true);
+  });
+
+  it("uses no dashed grid lines", () => {
+    const { container } = render(<MultiLine series={[SERIES_A, SERIES_B]} />);
+    expect(container.querySelectorAll("line[stroke-dasharray]").length).toBe(0);
+  });
+
+  it("labels every period when there are 8 or fewer", () => {
+    const { getAllByTestId } = render(<MultiLine series={[SERIES_A, SERIES_B]} />);
+    expect(getAllByTestId("multi-line-x-tick")).toHaveLength(4);
+  });
+
+  it("thins period labels on long histories but keeps both ends", () => {
+    const series = longSeries(20, "EPS");
+    const { getAllByTestId } = render(<MultiLine series={[series]} />);
+    const ticks = getAllByTestId("multi-line-x-tick");
+    expect(ticks.length).toBeLessThanOrEqual(6);
+    expect(ticks.length).toBeGreaterThanOrEqual(3);
+    const titles = ticks.map((t) => t.getAttribute("data-period"));
+    expect(titles[0]).toBe("2021-Q1");
+    expect(titles[titles.length - 1]).toBe("2025-Q4");
+  });
+
+  it("marks every data point on short histories", () => {
+    const { getAllByTestId } = render(<MultiLine series={[SERIES_A, SERIES_B]} />);
+    expect(getAllByTestId("multi-line-marker")).toHaveLength(8);
+  });
+
+  it("marks only the latest point on long histories", () => {
+    const { getAllByTestId } = render(<MultiLine series={[longSeries(20, "EPS")]} />);
+    expect(getAllByTestId("multi-line-marker")).toHaveLength(1);
+  });
+
+  it("labels each line's latest value at its end", () => {
+    const { getAllByTestId } = render(
+      <MultiLine series={[SERIES_A, SERIES_B]} formatValue={pct} />,
+    );
+    const labels = getAllByTestId("multi-line-end-label").map((l) => l.textContent);
+    expect(labels).toEqual(
+      expect.arrayContaining(["Gross margin 76%", "Operating margin 48%"]),
+    );
+  });
+
+  it("prefers a series' short label at the line end", () => {
+    const { getAllByTestId } = render(
+      <MultiLine series={[{ ...SERIES_A, shortLabel: "GM" }]} formatValue={pct} />,
+    );
+    expect(getAllByTestId("multi-line-end-label")[0].textContent).toBe("GM 76%");
+  });
+
+  it("keeps end labels from overlapping when lines end together", () => {
+    const twin: MultiLineSeries = { ...SERIES_C, label: "Twin", history: SERIES_A.history };
+    const { getAllByTestId } = render(<MultiLine series={[SERIES_A, twin]} />);
+    const ys = getAllByTestId("multi-line-end-label").map((l) =>
+      Number(l.getAttribute("y")),
+    );
+    expect(Math.abs(ys[0] - ys[1])).toBeGreaterThanOrEqual(11);
+  });
+
+  it("omits end labels when asked", () => {
+    const { queryAllByTestId } = render(
+      <MultiLine series={[SERIES_A]} showEndLabels={false} />,
+    );
+    expect(queryAllByTestId("multi-line-end-label")).toHaveLength(0);
+  });
+
+  it("shares one scale across charts given the same domain", () => {
+    const a = render(<MultiLine series={[SERIES_A]} yDomain={[0, 1]} formatValue={pct} />);
+    const aTicks = a.getAllByTestId("multi-line-y-tick").map((t) => t.textContent);
+    a.unmount();
+    const b = render(<MultiLine series={[SERIES_B]} yDomain={[0, 1]} formatValue={pct} />);
+    const bTicks = b.getAllByTestId("multi-line-y-tick").map((t) => t.textContent);
+    expect(bTicks).toEqual(aTicks);
+  });
+
+  it("shows every series' value for the hovered period, then hides", () => {
+    const { container, getByTestId, queryByTestId } = render(
+      <MultiLine series={[SERIES_A, SERIES_B]} formatValue={pct} />,
+    );
+    const svg = container.querySelector("[data-testid='multi-line']")!;
+    // happy-dom has no layout; the chart falls back to the latest period.
+    fireEvent.mouseMove(svg, { clientX: 10, clientY: 10 });
+    const tip = getByTestId("multi-line-tooltip");
+    expect(tip.textContent).toContain("2024-Q4");
+    expect(tip.textContent).toContain("76%");
+    expect(tip.textContent).toContain("48%");
+    expect(getByTestId("multi-line-hover-guide")).not.toBeNull();
+    fireEvent.mouseLeave(svg);
+    expect(queryByTestId("multi-line-tooltip")).toBeNull();
+  });
+
+  it("adds the change from the previous period when asked", () => {
+    const { container, getByTestId } = render(
+      <MultiLine
+        series={[SERIES_A]}
+        formatValue={pct}
+        formatChange={(now, prev) => `${((now / prev - 1) * 100).toFixed(0)}% QoQ`}
+      />,
+    );
+    const svg = container.querySelector("[data-testid='multi-line']")!;
+    // happy-dom has no layout; the chart falls back to the last period.
+    fireEvent.mouseMove(svg, { clientX: 10, clientY: 10 });
+    expect(getByTestId("multi-line-tooltip").textContent).toMatch(/QoQ/);
   });
 });

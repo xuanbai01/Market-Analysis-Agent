@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,6 +11,23 @@ class Settings(BaseSettings):
     # (LLM-backed routes will 503 until set); production sets it via Fly
     # secrets. Never log this — `app.core.observability` redacts by default.
     ANTHROPIC_API_KEY: str = ""
+    # LLM provider switch (ADR 0006): "anthropic" (Claude) or "deepseek".
+    # Read at call time by ``app.services.llm``, so a restart with a new
+    # value moves every LLM call (synth + both categorizers). A Literal
+    # so a typo fails at boot instead of on the first report. Default
+    # stays "anthropic" so a deploy without DeepSeek secrets is unchanged.
+    LLM_PROVIDER: Literal["anthropic", "deepseek"] = "anthropic"
+    # Optional per-tier model overrides. Empty → the provider default
+    # (anthropic: claude-haiku-4-5 triage / claude-sonnet-4-6 synth;
+    # deepseek: deepseek-flash for both). E.g. LLM_SYNTH_MODEL=claude-haiku-4-5
+    # runs report synthesis on Haiku.
+    LLM_TRIAGE_MODEL: str = ""
+    LLM_SYNTH_MODEL: str = ""
+    # DeepSeek API key + base URL (OpenAI-format API). Same contract as
+    # ANTHROPIC_API_KEY: empty default, LLM routes 503 until it's set
+    # (only matters when LLM_PROVIDER=deepseek). Never log this.
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     # NewsAPI key (https://newsapi.org). Free dev tier = 100 req/day, fine
     # for on-demand research. Empty default; the news-ingestion service
     # silently skips the NewsAPI provider when missing rather than 500ing.

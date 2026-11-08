@@ -562,6 +562,7 @@ Order — code first (each its own PR; the account steps can run in parallel):
    - Fresh key `…0ae2` validated (`/models` → 200) and deployed (Fly v55). **First successful live report: AAPL in ~20 s, all cards incl. 17 news headlines.** Findings in [`tasks/dogfood-2026-11.md`](dogfood-2026-11.md) — top issue: LLM prose cites raw stored values without units (misleading buyback-vs-dividend comparison).
 6. [ ] **Dogfood** the deployed stack on 8–10 tickers (items below); log in `tasks/dogfood-2026-11.md`; fix the worst.
    - In progress. Tickers so far: AAPL (live), NVDA (local). Fixed and merged 2026-11-08: prose units (#74), dogfood rate limit 30/h (#73), readable charts — axes, baselines, $/share panels, stat tiles, trend cells (#75). Still to cover: a distressed name (RIVN), a bank (JPM), a dividend payer (KO), a cyclical.
+   - Verified in production after #73–#75 deployed (Fly + Vercel, `2a06881`): AAPL (cached) renders the new charts — 2 per-share panels, 3 charts with value axes + baselines, 4 cash tiles, stated trend changes; a fresh MSFT report (22 s) cites display units throughout ("67.66% gross margin", "$12.39 of revenue", "dividend yield of 0.74% with a 0.57% buyback yield").
 7. [ ] **Docs sweep + Phase 5/6 decision gate** (items below).
 
 Not in this pass: Bug 8 (cancel-on-nav — pick up if dogfood hits it), Sonnet comparison run (needs an Anthropic key), branch protection on `main` (a repo setting — owner's call).

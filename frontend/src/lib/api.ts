@@ -18,9 +18,11 @@ import { z } from "zod";
 import { getStoredToken } from "./auth";
 import {
   type Focus,
+  type MarketOverview,
   type MarketPrices,
   type ResearchReport,
   type ResearchReportSummary,
+  MarketOverviewSchema,
   MarketPricesSchema,
   ResearchReportSchema,
   ResearchReportSummariesSchema,
@@ -213,4 +215,23 @@ export async function fetchMarketPrices(
     });
   }
   return parseJsonAndValidate(resp, MarketPricesSchema);
+}
+
+/**
+ * The market strip: headline index / rate / commodity quotes plus the
+ * backend's fear & greed estimate. Cached server-side (5 min quotes,
+ * 1 h sentiment), so polling it is cheap.
+ */
+export async function fetchMarketOverview(): Promise<MarketOverview> {
+  const resp = await fetch(`${BACKEND_URL}/v1/market/overview`, {
+    method: "GET",
+    headers: { ...authHeaders() },
+  });
+  if (!resp.ok) {
+    throw new ApiError({
+      status: resp.status,
+      title: await extractErrorTitle(resp),
+    });
+  }
+  return parseJsonAndValidate(resp, MarketOverviewSchema);
 }

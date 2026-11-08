@@ -55,6 +55,7 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + per-call LLM b
 │   │   ├── components/
 │   │   │   ├── AppShell.tsx     # Sidebar + main outlet + global ⌘K listener
 │   │   │   ├── SidebarShell.tsx # Search/Home/Compare + live Watchlist & Recent; collapses to a 64px rail
+│   │   │   ├── MarketStrip.tsx  # markets row above every page + fear & greed (est.) breakdown
 │   │   │   ├── LandingPage.tsx  # / route — search + Recent + Watchlist
 │   │   │   ├── SymbolDetailPage.tsx  # /symbol/:ticker (LAZY chunk, 14.5 KB gz)
 │   │   │   ├── compare/         # /compare/?a&b sub-tree (LAZY chunk, 6.4 KB gz)
@@ -127,11 +128,12 @@ POST /v1/research/{symbol}
 | **Research** | **`POST /v1/research/{symbol}?focus={full,earnings}&refresh={false,true}`** | ✅ **the v2 primary endpoint.** Auth-gated when `BACKEND_SHARED_SECRET` is set. Per-IP rate limit. |
 | Research list | `GET /v1/research?limit=20&offset=0&symbol=...` | ✅ paginated `ResearchReportSummary[]` for the dashboard sidebar |
 | Phase 4 — prices | `GET /v1/market/:ticker/prices?range={60D\|1Y\|5Y}` | ✅ Phase 4.1 — read-through `candles` cache, falls through to yfinance ingest on miss. Auth-gated. |
+| Market strip | `GET /v1/market/overview` | ✅ 2026-11 — headline quotes (S&P 500, Nasdaq 100, Dow, VIX, Russell 2000, US 10Y, dollar, gold, WTI, bitcoin) + our fear & greed estimate (`market_sentiment.py`: momentum, VIX, safe-haven and junk-bond demand, each ranked against its past year). yfinance, in-memory cache (5 min quotes / 1 h sentiment), serves stale on provider failure. Auth-gated. |
 | Legacy | `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ 501 (legacy v1 stubs; will be removed or redirected to `/v1/research`) |
 
 ## Frontend routes (current)
 
-Lazy-loading is the binding bundle constraint — main is at 85.76 KB gz (14.24 KB headroom under the 100 KB budget). Every authenticated route except `/` is split into its own chunk so the entry stays lean.
+Lazy-loading is the binding bundle constraint — main is at 87.69 KB gz (12.31 KB headroom under the 100 KB budget). Every authenticated route except `/` is split into its own chunk so the entry stays lean.
 
 | Route | State | Chunk |
 |---|---|---|

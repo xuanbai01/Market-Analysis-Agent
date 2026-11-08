@@ -194,6 +194,54 @@ export const MarketPricesSchema = z.object({
 });
 export type MarketPrices = z.infer<typeof MarketPricesSchema>;
 
+// Market strip — mirrors MarketOverview in app/schemas/market_overview.py.
+// Units and ratings fall back instead of failing, so a value added on
+// the backend can't blank the whole strip.
+
+export const QuoteUnitSchema = z.enum(["points", "percent", "usd"]).catch("points");
+export type QuoteUnit = z.infer<typeof QuoteUnitSchema>;
+
+export const MarketQuoteSchema = z.object({
+  symbol: z.string().min(1),
+  label: z.string().min(1),
+  kind: z.string(),
+  unit: QuoteUnitSchema,
+  price: z.number(),
+  change: z.number(),
+  change_percent: z.number(),
+  as_of: z.string(),
+});
+export type MarketQuote = z.infer<typeof MarketQuoteSchema>;
+
+export const SentimentRatingSchema = z
+  .enum(["extreme_fear", "fear", "neutral", "greed", "extreme_greed"])
+  .catch("neutral");
+export type SentimentRating = z.infer<typeof SentimentRatingSchema>;
+
+export const SentimentComponentSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  score: z.number(),
+  description: z.string(),
+});
+export type SentimentComponent = z.infer<typeof SentimentComponentSchema>;
+
+export const SentimentEstimateSchema = z.object({
+  score: z.number(),
+  rating: SentimentRatingSchema,
+  components: z.array(SentimentComponentSchema).default([]),
+  as_of: z.string(),
+  methodology: z.string(),
+});
+export type SentimentEstimate = z.infer<typeof SentimentEstimateSchema>;
+
+export const MarketOverviewSchema = z.object({
+  quotes: z.array(MarketQuoteSchema).default([]),
+  sentiment: SentimentEstimateSchema.nullable().default(null),
+  generated_at: z.string(),
+});
+export type MarketOverview = z.infer<typeof MarketOverviewSchema>;
+
 // ── Focus enum (mirrors Focus in research_tool_registry.py) ──────────
 
 export const FocusSchema = z.enum(["full", "earnings"]);

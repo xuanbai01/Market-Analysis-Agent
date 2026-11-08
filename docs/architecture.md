@@ -54,7 +54,7 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + per-call LLM b
 │   │   ├── App.tsx              # Router + auth guard. SymbolDetailPage + ComparePage lazy.
 │   │   ├── components/
 │   │   │   ├── AppShell.tsx     # Sidebar + main outlet + global ⌘K listener
-│   │   │   ├── SidebarShell.tsx # 72px nav rail with count badges
+│   │   │   ├── SidebarShell.tsx # Search/Home/Compare + live Watchlist & Recent; collapses to a 64px rail
 │   │   │   ├── LandingPage.tsx  # / route — search + Recent + Watchlist
 │   │   │   ├── SymbolDetailPage.tsx  # /symbol/:ticker (LAZY chunk, 14.5 KB gz)
 │   │   │   ├── compare/         # /compare/?a&b sub-tree (LAZY chunk, 6.4 KB gz)
@@ -131,7 +131,7 @@ POST /v1/research/{symbol}
 
 ## Frontend routes (current)
 
-Lazy-loading is the binding bundle constraint — main is at 83.02 KB gz (16.98 KB headroom under the 100 KB budget). Every authenticated route except `/` is split into its own chunk so the entry stays lean.
+Lazy-loading is the binding bundle constraint — main is at 85.76 KB gz (14.24 KB headroom under the 100 KB budget). Every authenticated route except `/` is split into its own chunk so the entry stays lean.
 
 | Route | State | Chunk |
 |---|---|---|

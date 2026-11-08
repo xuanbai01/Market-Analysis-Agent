@@ -3,7 +3,7 @@
  * and the sidebar. The sidebar's own rendering is pinned in
  * SidebarShell.test.tsx; these cover what only the whole shell shows.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
@@ -14,6 +14,10 @@ import { getStoredToken, setStoredToken } from "../lib/auth";
 import { pushRecent } from "../lib/recent";
 import { readSidebarCollapsed } from "../lib/sidebar";
 import { addToWatchlist, listWatchlist } from "../lib/watchlist";
+
+// The market strip's request stays pending: these tests are about the
+// sidebar, and must not reach a real backend.
+vi.mock("../lib/api", () => ({ fetchMarketOverview: vi.fn(() => new Promise(() => {})) }));
 
 function SymbolStub() {
   const { ticker = "" } = useParams();
@@ -147,5 +151,12 @@ describe("AppShell — navigation", () => {
     renderShell("/");
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(await screen.findByRole("dialog", { name: /ticker search/i })).toBeInTheDocument();
+  });
+
+  it("shows the market strip above every page", () => {
+    renderShell("/symbol/KO");
+    const strip = screen.getByRole("region", { name: "Markets" });
+    const page = screen.getByTestId("symbol-page");
+    expect(strip.compareDocumentPosition(page) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

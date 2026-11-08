@@ -29,6 +29,7 @@ import {
   writeSidebarCollapsed,
 } from "../lib/sidebar";
 import { removeFromWatchlist, useWatchlist } from "../lib/watchlist";
+import { MarketStrip } from "./MarketStrip";
 import { SidebarShell } from "./SidebarShell";
 
 const SearchModal = lazy(() => import("./search/SearchModal"));
@@ -107,6 +108,7 @@ export function AppShell() {
         onSignOut={handleSignOut}
       />
       <main className="min-w-0 flex-1">
+        <MarketStrip />
         <Outlet />
       </main>
       {searchOpen && (

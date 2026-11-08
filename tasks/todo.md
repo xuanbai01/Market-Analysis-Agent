@@ -561,6 +561,7 @@ Order — code first (each its own PR; the account steps can run in parallel):
    - First live report (owner logged in): 503 "DeepSeek API returned HTTP 401: Authentication Fails" for the key ending `d2af`. The local `.env` holds the same key and DeepSeek's free `/models` endpoint also returns 401 for it, so the key itself is revoked — not an import problem. Fix: a fresh key into `.env`, then piped to Fly from `.env` (no secret on the command line).
    - Fresh key `…0ae2` validated (`/models` → 200) and deployed (Fly v55). **First successful live report: AAPL in ~20 s, all cards incl. 17 news headlines.** Findings in [`tasks/dogfood-2026-11.md`](dogfood-2026-11.md) — top issue: LLM prose cites raw stored values without units (misleading buyback-vs-dividend comparison).
 6. [ ] **Dogfood** the deployed stack on 8–10 tickers (items below); log in `tasks/dogfood-2026-11.md`; fix the worst.
+   - In progress. Tickers so far: AAPL (live), NVDA (local). Fixed and merged 2026-11-08: prose units (#74), dogfood rate limit 30/h (#73), readable charts — axes, baselines, $/share panels, stat tiles, trend cells (#75). Still to cover: a distressed name (RIVN), a bank (JPM), a dividend payer (KO), a cyclical.
 7. [ ] **Docs sweep + Phase 5/6 decision gate** (items below).
 
 Not in this pass: Bug 8 (cancel-on-nav — pick up if dogfood hits it), Sonnet comparison run (needs an Anthropic key), branch protection on `main` (a repo setting — owner's call).

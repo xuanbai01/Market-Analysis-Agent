@@ -1,7 +1,8 @@
 name: CI
 
-# Backend-only pipeline for the Market Analysis Agent (FastAPI + Postgres).
-# Add frontend / e2e jobs later when the web dashboard or Discord bot lands.
+# Backend tests, frontend checks, a production-image boot test, and
+# security gates for the Market Analysis Agent (FastAPI + Postgres +
+# React/Vite dashboard).
 
 on:
   push:
@@ -41,6 +42,71 @@ jobs:
         run: uv run ruff check app tests
       - name: Tests
         run: uv run pytest -v
+
+  # ── Frontend ───────────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend — Lint, Typecheck, Tests, Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install deps
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  # ── Production image ───────────────────────────────────────────────────────
+  # The Dockerfile pip-installs its own dependency list, so the uv-based
+  # backend job can't see what the deployed image lacks (a missing
+  # `openai` would have crashed prod on import — tasks/lessons.md). Build
+  # the image and boot it exactly as Fly does: alembic upgrade + uvicorn.
+  image:
+    name: Production Image — Build + Boot
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: boot_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t market-agent:ci .
+      - name: Boot and health-check
+        run: |
+          docker run -d --name app --network host \
+            -e APP_ENV=prod \
+            -e DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/boot_db \
+            market-agent:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/v1/health; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "::error::container never answered /v1/health"
+          docker logs app
+          exit 1
 
   # ── Security ───────────────────────────────────────────────────────────────
   secrets-scan:

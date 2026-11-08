@@ -63,7 +63,7 @@ The separation makes code review dramatically easier and gives you git history t
 
 - **Pre-commit:** tests for the layer you touched.
 - **Pre-push:** full suite + `ruff check app`.
-- **CI on PR:** everything above + Gitleaks + Claude AI PR review.
+- **CI on PR:** backend `ruff` + `pytest`; frontend lint, typecheck, vitest and build; a production-image job that builds the Dockerfile and boots it against Postgres (alembic upgrade + `/v1/health`); Gitleaks; Claude AI PR review.
 
 ## Fixtures and test data
 

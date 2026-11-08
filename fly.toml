@@ -15,7 +15,16 @@ kill_timeout = '10s'            # give in-flight requests time to drain
   APP_ENV = 'prod'
   PORT = '8000'
   TZ = 'UTC'
-  # DATABASE_URL is set via `flyctl secrets set ...` — never hardcoded here.
+  # The Vercel dashboard's origin — the only one CORS lets the browser
+  # call from (exact match, no trailing slash). Public, so it lives here.
+  FRONTEND_ORIGIN = 'https://market-analysis-agent-red.vercel.app'
+  # ADR 0006. Needs the DEEPSEEK_API_KEY secret; switch back to Claude
+  # with 'anthropic' + the ANTHROPIC_API_KEY secret.
+  LLM_PROVIDER = 'deepseek'
+  # Secrets — set via `flyctl secrets set ...`, never hardcoded here:
+  #   DATABASE_URL, BACKEND_SHARED_SECRET, DEEPSEEK_API_KEY
+  #   (optional: ANTHROPIC_API_KEY, FRED_API_KEY, NEWSAPI_KEY).
+  # A secret with the same name as a key above overrides it.
 
 [http_service]
   internal_port = 8000

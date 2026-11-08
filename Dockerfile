@@ -5,7 +5,9 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Install dependencies (keep pins in sync with pyproject.toml).
+# Install dependencies. Every runtime pin in pyproject.toml must appear
+# here at the same version — tests/test_dockerfile_deps.py fails CI if
+# they drift (a dependency missing here only breaks the deployed app).
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
         fastapi==0.115.0 \
@@ -19,7 +21,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
         httpx==0.27.2 \
         yfinance==1.3.0 \
         anthropic==0.97.0 \
-        feedparser==6.0.12
+        openai==3.46.0 \
+        feedparser==6.0.12 \
+        beautifulsoup4==4.14.3 \
+        lxml==5.3.0
 
 # Copy the app code + migrations.
 COPY app ./app

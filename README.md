@@ -72,7 +72,8 @@ All errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/
 ### Hitting the research endpoint
 
 ```bash
-# In .env: ANTHROPIC_API_KEY=sk-ant-... (required)
+# In .env: ANTHROPIC_API_KEY=sk-ant-... (required with the default LLM_PROVIDER=anthropic)
+#     or:  LLM_PROVIDER=deepseek + DEEPSEEK_API_KEY=sk-...  (see docs/adr/0006)
 # In .env: FRED_API_KEY=... (optional — Macro section degrades gracefully without it)
 
 uv run uvicorn app.main:app --reload

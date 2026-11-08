@@ -26,5 +26,8 @@ You don't need an ADR for "I picked Postgres because it's the default". You do n
 | 0001 | [FastAPI + async SQLAlchemy + PostgreSQL](0001-stack-choice.md) | Accepted |
 | 0002 | [Deploy to Fly.io, Postgres on Neon](0002-deployment.md) | Accepted |
 | 0003 | [Pivot to AI Equity Research Assistant](0003-pivot-equity-research.md) | Accepted |
+| 0004 | [Visual-First, Delta-Driven Report Shape](0004-visual-first-product-shape.md) | Accepted |
+| 0005 | [Pivot from Generated Report to Symbol-Centric Dashboard](0005-symbol-centric-dashboard.md) | Accepted |
+| 0006 | [Make the LLM provider switchable, and add DeepSeek](0006-pluggable-llm-provider.md) | Accepted |
 
 <!-- Add rows as you add ADRs. -->

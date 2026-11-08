@@ -38,6 +38,7 @@ export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/test_d
 uv run pytest -v                       # full suite
 uv run pytest tests/test_symbols.py    # one file
 uv run pytest -k news -v               # filter by name
+uv run pytest -m live_llm tests/evals -v -s   # live golden eval on LLM_PROVIDER (costs money; needs its key)
 uv run pytest --cov=app --cov-report=term-missing
 ```
 

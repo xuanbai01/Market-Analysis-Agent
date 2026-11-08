@@ -63,6 +63,34 @@ The code default stays `anthropic`, so deploying this changes nothing in
 production until `LLM_PROVIDER=deepseek` and `DEEPSEEK_API_KEY` are set
 as Fly secrets. Local `.env` uses DeepSeek.
 
+## Evidence (live golden eval, 2026-11-07, `deepseek-flash`, off-peak)
+
+| Ticker | Factuality | Synth tokens in / out | Cost (off-peak) |
+|---|---|---|---|
+| AAPL | 0.952 | 3,605 / 1,388 | $0.0042 |
+| NVDA | 1.000 | 3,509 / 1,217 | $0.0042 |
+| RIVN | 1.000 | 3,320 / 1,312 | $0.0086 |
+| JPM | 0.762 (0.918 on rerun) | 3,226 / 1,128 | $0.0010 |
+| KO | 0.976 | 3,433 / 1,309 | $0.0023 |
+
+All five reports were structurally valid. Every number the rubric
+flagged was checked by hand against the claims and was grounded: "20"
+(from "last 20 quarters" in a claim *description*), "10" ("10-K"), and
+founding years from the business summary (JPM 1799, KO 1886). The
+rubric only matches claim *values*, so text-sourced numbers count as
+misses; JPM suffers most because a bank has few numeric claims, so
+each false positive weighs more. No fabricated figure was found.
+
+Peak-hour cost is double. The same token counts on Sonnet 4.6 come to
+roughly $0.03 per report for synthesis alone, so DeepSeek is about
+10× cheaper per report in practice.
+
+The run also exposed a provider-independent bug: RIVN's 248-paragraph
+10-K diff overflowed the risk categorizer's fixed 4096-token output
+ceiling (`finish_reason=length`), so the card silently fell back to
+aggregate bars. The categorizer's budget now scales with the paragraph
+count.
+
 ## Consequences
 
 ### Easier
@@ -86,8 +114,10 @@ as Fly secrets. Local `.env` uses DeepSeek.
 
 ## Revisit when
 
-- DeepSeek's factuality on the golden set drops below 0.95, or users
-  notice weaker prose on the dashboard.
+- DeepSeek's factuality on the golden set drops below 0.95 once the
+  rubric stops counting text-sourced numbers, or users notice weaker
+  prose on the dashboard.
+- A Sonnet run on the same golden set shows a clear quality gap.
 - DeepSeek changes the thinking-mode / `tool_choice` rules, or removes
   the `deepseek-flash` alias.
 - Data-residency requirements appear (DeepSeek's first-party API is

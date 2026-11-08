@@ -550,7 +550,11 @@ Headroom under 100 KB main-bundle budget: **1.44 → 16.98 KB**. Phase 4.8 + Pha
 - [x] **`app/services/llm_deepseek.py`** — openai SDK against `https://api.deepseek.com`; forced named function with thinking disabled; Pydantic `$defs` inlined; cache hits from `prompt_cache_hit_tokens`; service ids `deepseek.triage` / `deepseek.synth`.
 - [x] **Both adapters** turn provider API errors into `RuntimeError` → 503 with the provider's message (e.g. DeepSeek 402 out of credit) instead of a bare 500.
 - [x] **Live golden eval** is opt-in (`-m live_llm`), provider-aware, and covers AAPL / NVDA / RIVN / JPM / KO.
-- [x] Backend 607 → **628** tests (+21 LLM adapter tests).
+- [x] Backend 607 → **631** tests (+21 LLM adapter tests, +3 risk-categorizer budget tests).
+- [x] **Live eval on DeepSeek** (ADR 0006 "Evidence"): AAPL 0.952 / NVDA 1.000 / RIVN 1.000 / JPM 0.762→0.918 / KO 0.976; ~$0.001–0.009 per report off-peak. Every flagged number was grounded (claim descriptions / business text).
+- [x] **Risk categorizer output budget** now scales with paragraph count — RIVN's 248-paragraph diff overflowed the fixed 4096 ceiling on both providers.
+- [ ] **RIVN 10-K risk diff takes ~300 s before any LLM call** (seen twice with a warm EDGAR cache, so likely CPU in paragraph matching across ~670 paragraphs). Profile `extract_10k_risks_diff`; the loading copy promises 30–90 s.
+- [ ] **Rubric: count numbers from claim descriptions + text values as grounded** ("last 20 quarters", "10-K", "founded 1799"). Today these are false positives that sink banks (few numeric claims) below 0.95.
 - [ ] **Production switch** — `fly secrets set DEEPSEEK_API_KEY=... LLM_PROVIDER=deepseek` once the dashboard has been dogfooded on DeepSeek prose locally. Code default stays `anthropic`, so merging changes nothing in prod.
 - [ ] **Sonnet comparison run** — same golden set with `LLM_PROVIDER=anthropic` (needs an Anthropic key locally) to compare factuality + prose side by side.
 

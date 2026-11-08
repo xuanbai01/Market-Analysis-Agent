@@ -224,3 +224,39 @@ async def test_user_prompt_includes_each_paragraph_and_action_label(
         assert para in prompt
     # Schema is the categorization shape, not some other type.
     assert captured["schema"] is RiskCategorization
+
+
+@pytest.mark.parametrize(
+    ("n_paragraphs", "expected_floor"),
+    [
+        (3, 4096),     # small diffs keep the client's default ceiling
+        (248, 8000),   # RIVN 2026: 117 added + 131 removed overflowed 4096
+        (2000, 16000), # capped so Anthropic non-streaming calls stay valid
+    ],
+)
+async def test_output_budget_scales_with_paragraph_count(
+    monkeypatch: pytest.MonkeyPatch, n_paragraphs: int, expected_floor: int
+) -> None:
+    """One classification row per paragraph costs ~17 output tokens. A
+    fixed 4096 ceiling truncated RIVN's 248-paragraph diff mid-JSON
+    (finish_reason=length) and the card silently fell back to aggregate
+    bars — on either provider. The budget must grow with the input."""
+    from app.services import risk_categorizer as cat_module
+    from app.services.risk_categorizer import RiskCategorization
+
+    captured: dict[str, Any] = {}
+
+    async def _fake_triage(prompt: str, schema: type, **kwargs: Any) -> Any:
+        captured["max_tokens"] = kwargs.get("max_tokens")
+        return RiskCategorization(categorizations=[])
+
+    monkeypatch.setattr(cat_module.llm, "triage_call", _fake_triage)
+
+    added = [f"Added paragraph {i}." for i in range(n_paragraphs // 2)]
+    removed = [f"Removed paragraph {i}." for i in range(n_paragraphs - n_paragraphs // 2)]
+    await cat_module.categorize_risk_paragraphs(added, removed)
+
+    budget = captured["max_tokens"]
+    assert budget is not None
+    assert budget >= min(expected_floor, 16000)
+    assert budget <= 16000

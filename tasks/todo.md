@@ -539,10 +539,25 @@ Headroom under 100 KB main-bundle budget: **1.44 → 16.98 KB**. Phase 4.8 + Pha
 ### 4.8 Vercel deploy + dogfood gate
 
 - [ ] **Vercel push-to-deploy** from `frontend/`. Set `VITE_BACKEND_URL`, set backend `FRONTEND_ORIGIN`, set `BACKEND_SHARED_SECRET` on both sides.
-- [ ] **Backend env-var hardening** — confirm Fly secrets match the new dashboard's needs (`ANTHROPIC_API_KEY`, `NEWSAPI_KEY`, `FRED_API_KEY`, `BACKEND_SHARED_SECRET`).
+- [ ] **Backend env-var hardening** — confirm Fly secrets match the new dashboard's needs (`LLM_PROVIDER` + `DEEPSEEK_API_KEY` or `ANTHROPIC_API_KEY` per ADR 0006, `NEWSAPI_KEY`, `FRED_API_KEY`, `BACKEND_SHARED_SECRET`).
 - [ ] **Dogfood** the deployed stack against 8–10 real symbols spanning the layout matrix (healthy mega-cap, growth, distressed, dividend payer, cyclical). Note rough edges.
 - [ ] **Decision gate for Phase 5 vs Phase 6:** if dogfooding surfaces "I want a real bull/bear case" repeatedly, escalate to Phase 5 (narrative layer). If it surfaces "I need segment / geography breakdowns", escalate to Phase 6 (XBRL Tier 2). If neither dominates, the dashboard is the product and remaining work is polish.
 - [ ] **README + design_doc + CLAUDE.md** sweep — current state reflects Phase 4, screenshots, deploy URL. Update portfolio framing too.
+
+### LLM provider switch — DeepSeek ✅ done *(ADR 0006, this PR)*
+
+- [x] **`LLM_PROVIDER`** (`anthropic` | `deepseek`, Literal-validated) + per-tier `LLM_TRIAGE_MODEL` / `LLM_SYNTH_MODEL` overrides, read at call time. `triage_call` / `synth_call` signatures unchanged; no caller edits.
+- [x] **`app/services/llm_deepseek.py`** — openai SDK against `https://api.deepseek.com`; forced named function with thinking disabled; Pydantic `$defs` inlined; cache hits from `prompt_cache_hit_tokens`; service ids `deepseek.triage` / `deepseek.synth`.
+- [x] **Both adapters** turn provider API errors into `RuntimeError` → 503 with the provider's message (e.g. DeepSeek 402 out of credit) instead of a bare 500.
+- [x] **Live golden eval** is opt-in (`-m live_llm`), provider-aware, and covers AAPL / NVDA / RIVN / JPM / KO.
+- [x] Backend 607 → **640** tests (+21 LLM adapter tests, +3 risk-categorizer budget tests, +9 rubric tests).
+- [x] **Live eval on DeepSeek** (ADR 0006 "Evidence"): with the fixed rubric AAPL 0.988 / NVDA 1.000 / RIVN 1.000 / JPM 0.967 / KO 0.987 — all pass; ~$0.001–0.009 per report off-peak. First-run misses were all rubric false positives.
+- [x] **Golden cases share one event loop** (`loop_scope="module"`) — per-test loops made a later case reuse a dead loop's pooled asyncpg connection once the set grew past one case.
+- [x] **Risk categorizer output budget** now scales with paragraph count — RIVN's 248-paragraph diff overflowed the fixed 4096 ceiling on both providers.
+- [ ] **RIVN 10-K risk diff takes ~300 s before any LLM call** (seen twice with a warm EDGAR cache, so likely CPU in paragraph matching across ~670 paragraphs). Profile `extract_10k_risks_diff`; the loading copy promises 30–90 s.
+- [x] **Rubric fixes** — unit-suffixed numbers ("14.03x", "$888.27B") are read whole instead of truncated to their integer part (which also let a fabricated "14.9x" pass), and numbers quoted literally in the same section's claim text ("last 20 quarters", "10-K", "founded 1799") count as backed.
+- [ ] **Production switch** — `fly secrets set DEEPSEEK_API_KEY=... LLM_PROVIDER=deepseek` once the dashboard has been dogfooded on DeepSeek prose locally. Code default stays `anthropic`, so merging changes nothing in prod.
+- [ ] **Sonnet comparison run** — same golden set with `LLM_PROVIDER=anthropic` (needs an Anthropic key locally) to compare factuality + prose side by side.
 
 ## Phase 5 — Narrative layer (deferred; after Phase 4 dogfooding)
 

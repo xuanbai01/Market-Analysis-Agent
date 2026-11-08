@@ -10,7 +10,7 @@ A research-report agent that produces beautifully-formatted hallucinations is wo
   3. **Latency** — wall-clock duration of the agent call.
 - **`golden.py`** — a list of golden questions: `(symbol, expected_facts)`. Each `expected_fact` is a value the report is expected to surface (P/E, latest 10-K date, etc.). Empty for now — populated as tools come online.
 - **`test_rubric.py`** — unit tests of the rubric framework itself, run on every PR. Validates that the rubric grades known-good and known-bad reports correctly.
-- **`test_golden.py`** — runs the agent against each golden question and grades it. **Skipped unless `ANTHROPIC_API_KEY` is set** so it doesn't burn cost on every push. Run manually with `pytest tests/evals/test_golden.py` or add a CI job that runs nightly.
+- **`test_golden.py`** — runs the agent against each golden question and grades it, on whichever provider `LLM_PROVIDER` selects ([ADR 0006](../../docs/adr/0006-pluggable-llm-provider.md)). **Marked `live_llm`, which the default pytest options deselect, and skipped when the active provider's API key is missing**, so it never burns cost on a normal test run. Run manually with `uv run pytest -m live_llm tests/evals/test_golden.py -v -s`, or add a CI job that runs nightly.
 
 ## When evals run
 
@@ -25,7 +25,7 @@ A research-report agent that produces beautifully-formatted hallucinations is wo
 1. Pick a symbol whose report we expect to be stable (large-cap, established, recently filed).
 2. Identify 1–3 facts whose ground truth is unambiguous and verifiable from the source data (e.g. "P/E from yfinance.info on date X = Y").
 3. Append to `GOLDEN_CASES` in [`golden.py`](golden.py) with the symbol, expected facts, and a tolerance.
-4. Run `pytest tests/evals/test_golden.py -k <symbol>` once with a real key — confirm the case passes — before committing.
+4. Run `uv run pytest -m live_llm tests/evals/test_golden.py -k <symbol>` once with a real key — confirm the case passes — before committing.
 
 The rubric is permissive on prose tone but strict on numbers. If a case starts flapping, the most common cause is upstream data shifting (yfinance returning a refreshed P/E); widen the tolerance, don't loosen the rubric.
 

@@ -8,7 +8,7 @@ The **AI Equity Research Assistant** — a FastAPI backend that exposes one prim
 
 The original v1 vision (real-time multi-agent platform with scheduled news firehose, Discord bot, Pinecone vector store, Polygon paid feed) was [explicitly cut](adr/0003-pivot-equity-research.md) in favour of depth-over-freshness on free data.
 
-Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + Anthropic per-call billing under cost-tier routing).
+Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + per-call LLM billing under cost-tier routing; under a cent per fresh report on DeepSeek Flash).
 
 ## Tech Stack
 
@@ -20,14 +20,14 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + Anthropic per-
 | Config | pydantic-settings | ✅ |
 | Database | PostgreSQL 15 (Docker locally; Neon free tier in prod) | ✅ |
 | Schema migrations | Alembic 1.13 (async mode) | ✅ |
-| LLM | Anthropic — Claude Haiku 4.5 (triage; currently unused) + Claude Sonnet 4.6 (synth) | ✅ |
+| LLM | Switchable via `LLM_PROVIDER` ([ADR 0006](adr/0006-pluggable-llm-provider.md)): Anthropic — Claude Haiku 4.5 (triage: risk + news categorizers) + Sonnet 4.6 (synth), the default; or DeepSeek V4.1 Flash (`deepseek-flash`) for both tiers. Per-tier override via `LLM_TRIAGE_MODEL` / `LLM_SYNTH_MODEL` | ✅ |
 | Market data | yfinance | ✅ |
 | News | NewsAPI free tier + Yahoo per-ticker RSS | ✅ |
 | Filings | SEC EDGAR (with disk cache + polite-crawl) | ✅ |
 | Macro | FRED API | ✅ |
 | Hosting | Fly.io (auto-stop machines) + Neon (Postgres) + Vercel (frontend) | ✅ backend, 🟡 frontend deploy held |
 | Frontend stack | Vite + React 18 + Tailwind + TanStack Query + Zod | ✅ |
-| Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ 607 backend / 447 frontend |
+| Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ 640 backend (+5 opt-in live-LLM golden cases) / 447 frontend |
 | Lint | ruff (backend), ESLint (frontend) | ✅ |
 | CI | GitHub Actions (tests + Gitleaks + Claude PR review) + push-to-deploy | ✅ |
 
@@ -87,7 +87,7 @@ Route handler → Service (or repository) → Model/DB. Never put business logic
 FastAPI router  ─▶  services/<domain>_<role>.py
                          │
                          ▶  db/models/<domain>.py  (SQLAlchemy)
-                         ▶  external providers (yfinance, EDGAR, FRED, Anthropic)
+                         ▶  external providers (yfinance, EDGAR, FRED, Anthropic / DeepSeek)
 ```
 
 For the v2 research endpoint specifically:
@@ -151,7 +151,8 @@ Errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/
 | SEC EDGAR | Filings (10-K, Form 4, 13F-HR) | Disk-cached; SEC `User-Agent` mandatory; 0.15s sleep between requests for polite-crawl |
 | NewsAPI | News articles | Optional — skipped silently when `NEWSAPI_KEY` empty |
 | FRED | Macro series | Optional — `fetch_macro` emits metadata claims with None values when `FRED_API_KEY` empty |
-| Anthropic Claude | Synth (Sonnet 4.6); triage (Haiku 4.5) wired but currently unused | `RuntimeError` → 503 problem+json (key not configured / provider down) |
+| Anthropic Claude | Synth (Sonnet 4.6) + triage (Haiku 4.5) when `LLM_PROVIDER=anthropic` (default) | `RuntimeError` → 503 problem+json (key not configured / provider API error) |
+| DeepSeek | Synth + triage (`deepseek-flash`, thinking disabled) when `LLM_PROVIDER=deepseek`. OpenAI-format API via the `openai` SDK (`app/services/llm_deepseek.py`) | `RuntimeError` → 503 problem+json (key not configured / provider API error, e.g. 402 out of credit) |
 
 Every external call is logged via `log_external_call` (service id, input/output summary, latency ms, timestamp, outcome). See [security.md §A09](security.md#a09) for why.
 

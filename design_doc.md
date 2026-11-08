@@ -134,7 +134,7 @@ Non-negotiable. Every Phase 2 PR is gated on these.
 
 1. **Citation discipline.** [`app/schemas/research.py`](app/schemas/research.py) makes citations the *only* path. `Source` is frozen (`tool, fetched_at, url, detail`); `Claim` carries `value + source`; `Section` has `claims: list[Claim] + summary: str`. Free-form text exists only inside `summary`, and the eval rubric checks every number in `summary` is also in `claims`.
 2. **Per-section confidence** (`high|medium|low`), set programmatically by the agent based on data freshness + sparsity. Never set by the LLM directly.
-3. **Eval harness.** [`tests/evals/`](tests/evals/) runs rubric unit tests on every PR (free, no LLM). Real-LLM golden tests in `test_golden.py` skip without `ANTHROPIC_API_KEY` so they don't run on every PR; can be triggered locally or on a separate cost-aware CI lane.
+3. **Eval harness.** [`tests/evals/`](tests/evals/) runs rubric unit tests on every PR (free, no LLM). Real-LLM golden tests in `test_golden.py` are opt-in (`-m live_llm`) and skip without the active provider's API key, so they don't run on every PR; can be triggered locally or on a separate cost-aware CI lane. The provider itself is switchable between Anthropic and DeepSeek ([ADR 0006](docs/adr/0006-pluggable-llm-provider.md)).
 4. **`last_updated` per data point.** Every `Claim.source.fetched_at` is the wall time the upstream call returned, not when the report was generated. `Section.last_updated` is the max across its claims.
 
 ## API surface

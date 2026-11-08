@@ -2,7 +2,7 @@
 Unit tests for the rubric framework. These run on every PR — they prove
 the rubric correctly grades known-good and known-bad reports without
 needing an LLM. The agent-against-golden tests live in test_golden.py
-and are skipped unless ANTHROPIC_API_KEY is set.
+and only run with ``-m live_llm`` plus the active provider's API key.
 """
 from __future__ import annotations
 
@@ -502,6 +502,166 @@ def test_factuality_skips_card_narrative_when_none() -> None:
     assert result.score == 1.0
     # Only summary's "32.5" was extracted; card_narrative contributed nothing.
     assert result.summary_numbers == [32.5]
+
+
+# ── Unit-suffixed numbers (2026-11, ADR 0006 eval) ───────────────────
+#
+# The number regex ended in ``\b``, which can't sit between a digit and
+# a letter — so "14.03x" was read as 14 and "$888.27B" as 888. That
+# flagged correct multiples and could also wave a fabricated one through
+# on its integer part.
+
+
+def test_factuality_reads_multiple_suffix_as_whole_number() -> None:
+    section = Section(
+        title="Valuation",
+        claims=[Claim(description="Trailing P/E", value=14.03, source=_src())],
+        summary="JPM trades at 14.03x trailing earnings.",
+    )
+    result = score_factuality(_report([section]))
+    assert result.summary_numbers == [14.03]
+    assert result.unmatched_numbers == []
+
+
+def test_factuality_reads_scaled_suffix_as_whole_number() -> None:
+    section = Section(
+        title="Capital Allocation",
+        claims=[
+            Claim(description="Market cap", value=888_270_000_000, source=_src()),
+            Claim(description="Shares short", value=164_100_000, source=_src()),
+        ],
+        summary="Market cap of $888.27B with 164.1M shares sold short.",
+    )
+    result = score_factuality(_report([section]))
+    assert result.summary_numbers == [888.27, 164.1]
+    assert result.unmatched_numbers == []
+
+
+def test_factuality_flags_fabricated_multiple_despite_matching_integer_part() -> None:
+    """14.03 is real; "14.9x" is not, and must not pass on its "14"."""
+    section = Section(
+        title="Valuation",
+        claims=[
+            Claim(description="Trailing P/E", value=14.03, source=_src()),
+            Claim(description="Analyst count", value=14, source=_src()),
+        ],
+        summary="Trades at 14.9x forward earnings.",
+    )
+    result = score_factuality(_report([section]))
+    assert result.unmatched_numbers == [14.9]
+
+
+def test_factuality_still_ignores_alphanumeric_labels() -> None:
+    """Labels like "Item 1A", "20Q" and "5Y" are not numeric claims."""
+    section = Section(
+        title="Risk Factors",
+        claims=[Claim(description="Paragraphs added", value=44, source=_src())],
+        summary="Item 1A added 44 paragraphs; the 20Q and 5Y views agree.",
+    )
+    result = score_factuality(_report([section]))
+    assert result.summary_numbers == [44.0]
+
+
+# ── Numbers quoted in claim text (2026-11, ADR 0006 eval) ────────────
+#
+# The first live DeepSeek eval flagged JPM at 0.76 on numbers that were
+# all grounded — they sat in claim *text*, not claim *values*: "last 20
+# quarters" (a description), "10-K" (a description), "founded in 1799"
+# (the business-summary string value). A number quoted literally in one
+# of the section's claims is data, not a fabrication.
+
+
+def test_factuality_accepts_number_from_claim_description() -> None:
+    section = Section(
+        title="Earnings",
+        claims=[
+            Claim(
+                description="Number of EPS beats over the last 20 quarters "
+                "(or fewer if history is shorter)",
+                value=15,
+                source=_src(),
+            ),
+        ],
+        summary="JPM has beaten EPS estimates in 15 of the last 20 quarters.",
+    )
+    result = score_factuality(_report([section]))
+    assert result.unmatched_numbers == []
+    assert result.score == 1.0
+
+
+def test_factuality_accepts_number_from_text_claim_value() -> None:
+    section = Section(
+        title="Business",
+        claims=[
+            Claim(
+                description="Business summary",
+                value="JPMorgan Chase & Co. was founded in 1799 and is "
+                "headquartered in New York, New York.",
+                source=_src("yfinance.business_info"),
+            ),
+        ],
+        summary="A bank holding company founded in 1799.",
+    )
+    result = score_factuality(_report([section]))
+    assert result.unmatched_numbers == []
+
+
+def test_factuality_accepts_filing_form_number_from_description() -> None:
+    section = Section(
+        title="Risk Factors",
+        claims=[
+            Claim(
+                description="10-K Business section length (characters)",
+                value=39135,
+                source=_src("sec.ten_k_business"),
+            ),
+        ],
+        summary="The 10-K business section runs 39,135 characters.",
+    )
+    result = score_factuality(_report([section]))
+    assert result.unmatched_numbers == []
+
+
+def test_factuality_claim_text_only_grounds_its_own_section() -> None:
+    """Text-sourced grounding is section-scoped: "last 20 quarters" in an
+    Earnings description must not excuse a "20x" in the Valuation prose."""
+    earnings = Section(
+        title="Earnings",
+        claims=[
+            Claim(
+                description="Number of EPS beats over the last 20 quarters",
+                value=15,
+                source=_src(),
+            ),
+        ],
+        summary="Beat in 15 quarters.",
+    )
+    valuation = Section(
+        title="Valuation",
+        claims=[Claim(description="P/E", value=32.5, source=_src())],
+        summary="Trades at 32.5x, well above a 20x sector multiple.",
+    )
+    result = score_factuality(_report([earnings, valuation]))
+    assert result.unmatched_numbers == [20.0]
+
+
+def test_factuality_claim_text_matches_literally_not_scaled() -> None:
+    """Text-sourced numbers match only as written. The percent and
+    scaled-unit rules exist for numeric values; applying them to "20"
+    from "last 20 quarters" would excuse a fabricated "2,000"."""
+    section = Section(
+        title="Earnings",
+        claims=[
+            Claim(
+                description="Number of EPS beats over the last 20 quarters",
+                value=15,
+                source=_src(),
+            ),
+        ],
+        summary="Beat in 15 quarters on 2,000 analyst notes.",
+    )
+    result = score_factuality(_report([section]))
+    assert result.unmatched_numbers == [2000.0]
 
 
 # ── Combined grade ───────────────────────────────────────────────────

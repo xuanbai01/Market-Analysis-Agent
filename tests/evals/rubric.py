@@ -17,7 +17,10 @@ Three dimensions, in order of how cheap they are to enforce:
    ever produced. After Phase 3.4 the value pool widened to include
    each ``Claim.history[*].value`` so trend prose like "EPS rose
    from 1.40 to 2.18" matches even when neither endpoint is the
-   point-in-time snapshot.
+   point-in-time snapshot. Since 2026-11 a number quoted literally in
+   the same section's claim text (a description like "last 20
+   quarters", or a string value like the business summary) also
+   counts as backed.
 
 3. **Latency** — wall-clock duration of the run. Recorded by the test
    harness, not derived from the report itself.
@@ -34,13 +37,21 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from app.schemas.research import ResearchReport
+from app.schemas.research import ResearchReport, Section
 
 # Match a decimal number, optionally with thousands separators and a
 # decimal part. Excludes leading + / - so we don't grab the "-" out of
 # date ranges. Excludes trailing % so we treat "12.3%" the same as
 # "12.3" (the source claim might be stored either way).
-_NUMBER_RE = re.compile(r"\b(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\b")
+#
+# A finance unit suffix may follow directly — multiples ("14.03x") and
+# scaled amounts ("$888.27B", "164.1M", "$4.51T", "3.2bn"). Without it
+# the closing ``\b`` can't sit between "3" and "x", so "14.03x" was read
+# as 14. Any other trailing letter ("Item 1A", "20Q", "5Y") still means
+# a label, not a number, and is skipped.
+_NUMBER_RE = re.compile(
+    r"\b(?P<num>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(?:x|bn|[BTMK])?\b"
+)
 
 # ISO dates ("2026-01-29") are stripped whole. Without this, the year
 # regex below would only catch "2026" and leave "01" / "29" to be
@@ -100,7 +111,7 @@ def _extract_numbers(text: str) -> list[float]:
     cleaned = _YEAR_RE.sub(" ", cleaned)
     out: list[float] = []
     for match in _NUMBER_RE.finditer(cleaned):
-        raw = match.group(0).replace(",", "")
+        raw = match.group("num").replace(",", "")
         try:
             out.append(float(raw))
         except ValueError:
@@ -141,6 +152,23 @@ def _claim_numeric_values(report: ResearchReport) -> list[float]:
             # guard is needed — the schema already rejects str/bool.
             for point in claim.history:
                 out.append(float(point.value))
+    return out
+
+
+def _claim_text_numbers(section: Section) -> list[float]:
+    """Numbers quoted in a section's claim *text* — every description,
+    plus string values such as the business summary or a news headline.
+
+    These ground prose that repeats them ("15 of the last 20 quarters",
+    "the 10-K", "founded in 1799"): the number is in the tool output,
+    just not as a value. Same extraction as prose, so years and ISO
+    dates drop out on both sides.
+    """
+    out: list[float] = []
+    for claim in section.claims:
+        out.extend(_extract_numbers(claim.description))
+        if isinstance(claim.value, str):
+            out.extend(_extract_numbers(claim.value))
     return out
 
 
@@ -217,12 +245,21 @@ def score_factuality(
     Phase 4.4.B: ``card_narrative`` joined ``summary`` as a policed
     surface so the LLM can't dodge the rubric by writing the
     hallucination into the card-strip instead of the section narrative.
+
+    2026-11 (ADR 0006 eval): a number also counts as backed when it is
+    quoted in the text of one of the *same section's* claims (see
+    ``_claim_text_numbers``). That match is literal only — the percent,
+    sign-flip and scaled-unit rules are for numeric values, and applying
+    them to the "20" in "last 20 quarters" would excuse a fabricated
+    "2,000". Section scoping keeps an Earnings description from
+    excusing a stray number in the Valuation prose.
     """
     claim_values = _claim_numeric_values(report)
     found: list[float] = []
     unmatched: list[float] = []
 
     for section in report.sections:
+        text_numbers = _claim_text_numbers(section)
         prose_fields: list[str] = []
         if section.summary:
             prose_fields.append(section.summary)
@@ -231,8 +268,11 @@ def score_factuality(
         for prose in prose_fields:
             for n in _extract_numbers(prose):
                 found.append(n)
-                if not any(_matches_claim(n, v, tolerance) for v in claim_values):
-                    unmatched.append(n)
+                if any(_matches_claim(n, v, tolerance) for v in claim_values):
+                    continue
+                if any(abs(n - t) <= tolerance for t in text_numbers):
+                    continue
+                unmatched.append(n)
 
     if not found:
         # Pure-prose section with no numbers — vacuously factual.

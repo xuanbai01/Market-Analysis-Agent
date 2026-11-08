@@ -75,6 +75,21 @@ class RiskCategorization(BaseModel):
 # Anthropic side accumulates hits when the orchestrator processes
 # multiple symbols in one cache window.
 
+# Output budget: one classification row costs ~17 tokens, so a fixed
+# 4096 ceiling truncated big diffs mid-JSON (RIVN's 248-paragraph 10-K
+# diff, 2026) and the card silently fell back to aggregate bars. Scale
+# with the paragraph count; cap below the point where the Anthropic SDK
+# refuses large non-streaming requests.
+_TOKENS_PER_PARAGRAPH = 32
+_BASE_OUTPUT_TOKENS = 1024
+_MAX_OUTPUT_TOKENS = 16_000
+
+
+def _output_budget(n_paragraphs: int) -> int:
+    scaled = _BASE_OUTPUT_TOKENS + _TOKENS_PER_PARAGRAPH * n_paragraphs
+    return max(llm.DEFAULT_MAX_TOKENS, min(_MAX_OUTPUT_TOKENS, scaled))
+
+
 _SYSTEM_PROMPT = """You are a financial-disclosure classifier.
 
 You are given a list of paragraphs from the Item 1A "Risk Factors"
@@ -135,7 +150,8 @@ async def categorize_risk_paragraphs(
 
     Short-circuits to ``{}`` when there's nothing to classify — no LLM
     cost on stable disclosures. Otherwise issues one ``triage_call``
-    (Haiku) with the forced ``RiskCategorization`` tool schema.
+    (cheap tier) with the forced ``RiskCategorization`` tool schema and
+    an output budget sized to the paragraph count.
 
     Returns a dict keyed by ``RiskCategory`` with int values. Buckets
     that net to zero across added + removed are dropped so the bar
@@ -148,6 +164,7 @@ async def categorize_risk_paragraphs(
         prompt=_build_user_prompt(added, removed),
         schema=RiskCategorization,
         system=_SYSTEM_PROMPT,
+        max_tokens=_output_budget(len(added) + len(removed)),
     )
 
     deltas: dict[RiskCategory, int] = {}

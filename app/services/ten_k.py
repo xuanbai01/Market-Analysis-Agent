@@ -61,6 +61,7 @@ or Risks sections of the report.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -276,27 +277,85 @@ def _paragraph_diff(
 ) -> tuple[list[str], list[str], int]:
     """Bucket paragraphs into ``(added, removed, kept_count)``.
 
-    For each paragraph in ``current``, compute its max
-    ``SequenceMatcher.ratio()`` against any paragraph in ``prior``;
-    below ``similarity_threshold`` → added. Symmetric pass for removed.
-    ``kept_count`` is ``len(current) - len(added)`` — the number of
-    this year's risks that already appeared (verbatim or reworded) in
-    last year's. Order is preserved.
+    A paragraph in ``current`` is added when its best
+    ``SequenceMatcher(None, paragraph, candidate).ratio()`` against every
+    paragraph in ``prior`` is below ``similarity_threshold``. Symmetric
+    pass for removed. ``kept_count`` is ``len(current) - len(added)`` —
+    the number of this year's risks that already appeared (verbatim or
+    reworded) in last year's. Order is preserved.
 
-    Cost: O(N·M) ratio calls, each O(n·m) on the underlying strings.
-    For a typical Item 1A (~50 paragraphs × ~50 paragraphs × ~1KB each)
-    this is well under a second.
+    The result is exactly that all-pairs definition, computed without
+    paying for all pairs. A real Item 1A runs to hundreds of paragraphs
+    (RIVN 2026: ~550 a side, ~300 s for the naive scan), most of them
+    carried over word for word:
+
+      1. A paragraph present verbatim on the other side is kept with no
+         fuzzy comparison.
+      2. Each candidate gets one reusable matcher with the candidate as
+         ``seq2`` (difflib indexes ``seq2`` up front; ``set_seq1`` swaps
+         the paragraph in cheaply). Argument order — and so autojunk,
+         which only applies to ``seq2`` — matches the naive scan.
+      3. ``real_quick_ratio()`` and ``quick_ratio()`` are difflib's
+         documented upper bounds on ``ratio()``, so a candidate that fails
+         either can't reach the threshold and is skipped.
+      4. Only "is the best ratio ≥ threshold" matters, so the scan stops
+         at the first candidate that reaches it — and starts at the
+         paragraph's proportional position, fanning outward, because
+         risk factors mostly keep their order year to year. (Scan order
+         can't change an any-match answer.)
+
+    On real filings this returns byte-identical results to the naive
+    scan; see the equivalence tests in ``tests/test_ten_k.py``.
     """
-
-    def _max_ratio(text: str, candidates: list[str]) -> float:
-        if not candidates:
-            return 0.0
-        return max(SequenceMatcher(None, text, c).ratio() for c in candidates)
-
-    added = [p for p in current if _max_ratio(p, prior) < similarity_threshold]
-    removed = [p for p in prior if _max_ratio(p, current) < similarity_threshold]
+    added = _unmatched(current, prior, similarity_threshold)
+    removed = _unmatched(prior, current, similarity_threshold)
     kept_count = len(current) - len(added)
     return added, removed, kept_count
+
+
+def _outward_from(start: int, n: int) -> Iterator[int]:
+    """Every index in ``range(n)``, nearest to ``start`` first:
+    start, start+1, start-1, start+2, ..."""
+    yield start
+    for step in range(1, n):
+        hi, lo = start + step, start - step
+        if hi >= n and lo < 0:
+            return
+        if hi < n:
+            yield hi
+        if lo >= 0:
+            yield lo
+
+
+def _unmatched(
+    paragraphs: list[str], candidates: list[str], threshold: float
+) -> list[str]:
+    """Paragraphs with no candidate at ``ratio() >= threshold`` (see
+    ``_paragraph_diff`` for why this equals the all-pairs max)."""
+    if not candidates:
+        return list(paragraphs)
+    verbatim = set(candidates)
+    matchers: list[SequenceMatcher] | None = None  # built on first fuzzy need
+    scale = (len(candidates) - 1) / max(len(paragraphs) - 1, 1)
+
+    def has_match(index: int, text: str) -> bool:
+        nonlocal matchers
+        if text in verbatim:
+            return True
+        if matchers is None:
+            matchers = [SequenceMatcher(None, "", c) for c in candidates]
+        for j in _outward_from(round(index * scale), len(matchers)):
+            m = matchers[j]
+            m.set_seq1(text)
+            if (
+                m.real_quick_ratio() >= threshold
+                and m.quick_ratio() >= threshold
+                and m.ratio() >= threshold
+            ):
+                return True
+        return False
+
+    return [p for i, p in enumerate(paragraphs) if not has_match(i, p)]
 
 
 # ── Async entry points ────────────────────────────────────────────────

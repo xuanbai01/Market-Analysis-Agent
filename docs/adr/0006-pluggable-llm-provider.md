@@ -65,21 +65,32 @@ as Fly secrets. Local `.env` uses DeepSeek.
 
 ## Evidence (live golden eval, 2026-11-07, `deepseek-flash`, off-peak)
 
-| Ticker | Factuality | Synth tokens in / out | Cost (off-peak) |
-|---|---|---|---|
-| AAPL | 0.952 | 3,605 / 1,388 | $0.0042 |
-| NVDA | 1.000 | 3,509 / 1,217 | $0.0042 |
-| RIVN | 1.000 | 3,320 / 1,312 | $0.0086 |
-| JPM | 0.762 (0.918 on rerun) | 3,226 / 1,128 | $0.0010 |
-| KO | 0.976 | 3,433 / 1,309 | $0.0023 |
+| Ticker | Factuality, first run | Factuality, fixed rubric (fresh run) | Synth tokens in / out | Cost (off-peak) |
+|---|---|---|---|---|
+| AAPL | 0.952 | 0.988 | 3,605 / 1,388 | $0.0042 |
+| NVDA | 1.000 | 1.000 | 3,509 / 1,217 | $0.0042 |
+| RIVN | 1.000 | 1.000 | 3,320 / 1,312 | $0.0086 |
+| JPM | 0.762 (0.918 on rerun) | 0.967 | 3,226 / 1,128 | $0.0010 |
+| KO | 0.976 | 0.987 | 3,433 / 1,309 | $0.0023 |
+
+The second column is a fresh generation, so its prose differs from the
+first run's; all five clear the 0.95 gate.
 
 All five reports were structurally valid. Every number the rubric
-flagged was checked by hand against the claims and was grounded: "20"
-(from "last 20 quarters" in a claim *description*), "10" ("10-K"), and
-founding years from the business summary (JPM 1799, KO 1886). The
-rubric only matches claim *values*, so text-sourced numbers count as
-misses; JPM suffers most because a bank has few numeric claims, so
-each false positive weighs more. No fabricated figure was found.
+flagged was checked by hand against the claims and was grounded. The
+misses came from two rubric bugs, both fixed alongside this ADR:
+
+- **Unit suffixes were truncated.** The number regex ended in `\b`, so
+  "14.03x" was read as 14 and "$888.27B" as 888 (JPM's 14, 13, 11, 888).
+  The same bug could pass a fabricated "14.9x" on its integer part.
+- **Numbers in claim text didn't count.** "20" from "last 20 quarters"
+  (a claim *description*), "10" from "10-K", and founding years from the
+  business summary (JPM 1799, KO 1886) were flagged because only claim
+  *values* were matched. They now count when quoted literally in the
+  same section's claims.
+
+JPM suffered most because a bank has few numeric claims, so each false
+positive weighed more. No fabricated figure was found.
 
 Peak-hour cost is double. The same token counts on Sonnet 4.6 come to
 roughly $0.03 per report for synthesis alone, so DeepSeek is about
@@ -114,9 +125,8 @@ count.
 
 ## Revisit when
 
-- DeepSeek's factuality on the golden set drops below 0.95 once the
-  rubric stops counting text-sourced numbers, or users notice weaker
-  prose on the dashboard.
+- DeepSeek's factuality on the golden set drops below 0.95, or users
+  notice weaker prose on the dashboard.
 - A Sonnet run on the same golden set shows a clear quality gap.
 - DeepSeek changes the thinking-mode / `tool_choice` rules, or removes
   the `deepseek-flash` alias.

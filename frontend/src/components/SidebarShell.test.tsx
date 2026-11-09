@@ -78,6 +78,13 @@ describe("SidebarShell — navigation", () => {
     expect(screen.getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
   });
 
+  it("links to the lenses and marks them active on a lens page", () => {
+    renderSidebar({ pathname: "/lens/megacap-capex" });
+    const lenses = screen.getByRole("link", { name: "Lenses" });
+    expect(lenses).toHaveAttribute("href", "/lens");
+    expect(lenses).toHaveAttribute("aria-current", "page");
+  });
+
   it("signs out from a button", () => {
     const { props } = renderSidebar();
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));

@@ -9,6 +9,9 @@ export const ROUTES = {
   symbol: (ticker: string) => `/symbol/${ticker.toUpperCase()}`,
   /** Phase 4.6 — placeholder until that PR ships. */
   compare: "/compare",
+  /** Cross-company lenses (ADR 0007 layer 3). */
+  lenses: "/lens",
+  lens: (id: string) => `/lens/${encodeURIComponent(id)}`,
 } as const;
 
 export const ROUTE_PATHS = {
@@ -16,4 +19,6 @@ export const ROUTE_PATHS = {
   landing: "/",
   symbol: "/symbol/:ticker",
   compare: "/compare",
+  lenses: "/lens",
+  lens: "/lens/:id",
 } as const;

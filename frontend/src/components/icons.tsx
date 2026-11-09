@@ -52,6 +52,19 @@ export function IconCompare() {
   );
 }
 
+/** A distribution: dots over an axis (cross-company lenses). */
+export function IconLens() {
+  return (
+    <Icon>
+      <path d="M2.5 13.5h11" />
+      <circle cx="4.5" cy="9.5" r="1" />
+      <circle cx="7" cy="6" r="1" />
+      <circle cx="9.5" cy="8.5" r="1" />
+      <circle cx="12" cy="4" r="1" />
+    </Icon>
+  );
+}
+
 export function IconStar() {
   return (
     <Icon>

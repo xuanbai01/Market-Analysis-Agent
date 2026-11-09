@@ -192,7 +192,7 @@ def _quoted(quotes: Sequence[tuple[float, int]], claim: Claim) -> bool:
     )
 
 
-def _resolve(
+def resolve_points(
     points: Sequence[ThesisDraftPoint],
     ids: Mapping[str, ClaimRef],
     limit: int,
@@ -232,7 +232,7 @@ def resolve_draft(
     text (when the point quotes any numbers) to count as its evidence."""
     headline = draft.headline.strip()
     resolved = {
-        name: _resolve(getattr(draft, name), ids, limit, section_claims)
+        name: resolve_points(getattr(draft, name), ids, limit, section_claims)
         for name, limit in MAX_POINTS.items()
     }
     if not headline or not (resolved["bull"] or resolved["bear"]):

@@ -14,12 +14,16 @@ interface Props {
   ticker: string;
   businessSection?: Section;
   newsSection?: Section;
+  sector?: string | null;
+  peers?: string[];
 }
 
 export function ContextBand({
   ticker,
   businessSection,
   newsSection,
+  sector = null,
+  peers = [],
 }: Props) {
   if (!businessSection && !newsSection) return null;
 
@@ -30,7 +34,7 @@ export function ContextBand({
     >
       {businessSection && (
         <div className="lg:col-span-2">
-          <BusinessCard ticker={ticker} section={businessSection} />
+          <BusinessCard ticker={ticker} section={businessSection} sector={sector} peers={peers} />
         </div>
       )}
       {newsSection && (

@@ -29,12 +29,16 @@ export function NarrativeStrip({ text }: Props) {
   if (text === null || text === undefined) return null;
   if (!text.trim()) return null;
 
+  // ``mt-auto`` pins the strip to the bottom of a card stretched to its
+  // row's height (cards are flex columns); ``pt-4`` keeps the gap.
   return (
-    <p
-      data-testid="card-narrative"
-      className="mt-4 rounded-md bg-strata-raise px-3 py-2 text-xs leading-relaxed text-strata-fg"
-    >
-      {text}
-    </p>
+    <div className="mt-auto pt-4">
+      <p
+        data-testid="card-narrative"
+        className="rounded-md bg-strata-raise px-3 py-2 text-xs leading-relaxed text-strata-fg"
+      >
+        {text}
+      </p>
+    </div>
   );
 }

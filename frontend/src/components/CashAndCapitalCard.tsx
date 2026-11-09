@@ -55,7 +55,7 @@ function MetricTile({ series }: { series: MultiLineSeries }) {
     <div
       data-testid="cash-capital-tile"
       data-metric={series.label}
-      className="rounded-md bg-strata-raise px-3 py-2"
+      className="flex flex-col rounded-md bg-strata-raise px-3 py-2"
     >
       <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-kicker text-strata-dim">
         <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-sm" style={{ backgroundColor: series.color }} />
@@ -67,7 +67,9 @@ function MetricTile({ series }: { series: MultiLineSeries }) {
       <div className="font-mono text-[10px] text-strata-dim">
         {changeSinceFirst(first.value, last.value)} vs {first.period}
       </div>
-      <div className="mt-1">
+      {/* mt-auto: when the row stretches the card, the tile grows and
+          the sparkline stays at the tile's bottom. */}
+      <div className="mt-auto pt-1">
         <Sparkline history={sorted} width="100%" height={26} color={series.color} ariaLabel={`${series.label} per share by quarter`} />
       </div>
     </div>
@@ -99,13 +101,15 @@ export function CashAndCapitalCard({
     netCash === null ? "—" : formatClaimValue(netCash, "usd_per_share");
 
   return (
-    <section className="rounded-md border border-strata-border bg-strata-surface p-5">
+    <section className="flex h-full flex-col rounded-md border border-strata-border bg-strata-surface p-5">
       <div className="mb-3 font-mono text-[10px] uppercase tracking-kicker text-strata-cashflow">
         Cash &amp; capital · / share
       </div>
 
       {tiles.length > 0 && (
-        <div className="mb-3 grid grid-cols-2 gap-2">
+        // flex-1 + auto-rows-fr: in a stretched row the tiles share the
+        // spare height instead of leaving a blank band under the card.
+        <div className="mb-3 grid flex-1 auto-rows-fr grid-cols-2 gap-2">
           {tiles.map((s) => (
             <MetricTile key={s.label} series={s} />
           ))}

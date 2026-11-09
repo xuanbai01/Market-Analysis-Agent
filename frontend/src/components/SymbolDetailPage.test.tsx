@@ -422,10 +422,10 @@ describe("SymbolDetailPage", () => {
     expect(row4?.getAttribute("data-card-count")).toBe("3");
   });
 
-  it("uses items-start on every multi-column row for honest height alignment", async () => {
-    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(
-      reportWithSections("AAPL"),
-    );
+  // 2026-11 layout pass — rows stretch so side-by-side cards share a
+  // height (top-aligned rows left holes beside short cards).
+  it("stretches rows instead of top-aligning them", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(reportWithSections("AAPL"));
     vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
       ticker: "AAPL",
       range: "60D",
@@ -433,17 +433,81 @@ describe("SymbolDetailPage", () => {
       latest: { ts: "2026-04-02T00:00:00Z", close: 182, delta_abs: 0, delta_pct: 0 },
     });
     const { container } = renderAt("AAPL");
-    await waitFor(() =>
-      expect(container.querySelector("[data-row='dashboard-row-3']")).not.toBeNull(),
-    );
-    // Every row's grid wrapper carries ``items-start`` so cards align
-    // top instead of stretching to row height — 4.5.C layout polish.
-    const rows = container.querySelectorAll("[data-row^='dashboard-row-']");
-    expect(rows.length).toBeGreaterThan(0);
-    rows.forEach((row) => {
-      const gridChild = row.querySelector(".grid");
-      expect(gridChild?.className ?? "").toMatch(/items-start/);
+    await waitFor(() => expect(container.querySelector("[data-row='dashboard-row-3']")).not.toBeNull());
+    container.querySelectorAll("[data-row^='dashboard-row-'] .grid").forEach((grid) => {
+      expect(grid.className).not.toMatch(/items-start/);
     });
+  });
+
+  // The bug behind the empty third column: Macro had claims (no FRED
+  // data, so every value None) and was counted, but MacroPanel rendered
+  // nothing.
+  it("leaves no slot for a Macro card that has nothing to draw", async () => {
+    const report = reportWithSections("AAPL");
+    const macro = report.sections.find((s) => s.title === "Macro");
+    if (macro) {
+      macro.claims = [
+        {
+          description: "10Y Treasury yield (latest observation)",
+          value: null,
+          source: { tool: "fred.macro", fetched_at: "2026-05-04T14:00:00+00:00" },
+          history: [],
+        },
+      ];
+    }
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(report);
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
+      ticker: "AAPL",
+      range: "60D",
+      prices: [],
+      latest: { ts: "2026-04-02T00:00:00Z", close: 182, delta_abs: 0, delta_pct: 0 },
+    });
+    const { container } = renderAt("AAPL");
+    await waitFor(() => expect(container.querySelector("[data-row='dashboard-row-4']")).not.toBeNull());
+    const row4 = container.querySelector("[data-row='dashboard-row-4']");
+    expect(row4?.getAttribute("data-card-count")).toBe("1");
+    expect(container.querySelector("[data-section-anchor='Macro']")).toBeNull();
+  });
+
+  it("shows a Capital returns card instead of the old generic table", async () => {
+    const report = reportWithSections("KO");
+    const capAlloc = report.sections.find((s) => s.title === "Capital Allocation");
+    const src = { tool: "computed.analytics", fetched_at: "2026-05-04T14:00:00+00:00" };
+    if (capAlloc) {
+      capAlloc.claims = [
+        { description: "Shareholder yield (forward dividend + latest-year buybacks)", value: 0.024, unit: "fraction", source: src, history: [] },
+        { description: "Free cash flow ÷ dividends paid (coverage)", value: 1.56, unit: "ratio", source: src, history: [] },
+      ];
+    }
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(report);
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
+      ticker: "KO",
+      range: "60D",
+      prices: [],
+      latest: { ts: "2026-04-02T00:00:00Z", close: 70, delta_abs: 0, delta_pct: 0 },
+    });
+    renderAt("KO");
+    const card = await screen.findByTestId("capital-returns-card");
+    expect(card).toHaveTextContent("2.40%");
+    expect(card).toHaveTextContent("1.56×");
+    // Every section has a dedicated card now: no trailing report block.
+    expect(screen.queryByText(/^Capital Allocation$/)).toBeNull();
+  });
+
+  it("lists the sections on the page in the sticky nav", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(reportWithSections("AAPL"));
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
+      ticker: "AAPL",
+      range: "60D",
+      prices: [],
+      latest: { ts: "2026-04-02T00:00:00Z", close: 182, delta_abs: 0, delta_pct: 0 },
+    });
+    renderAt("AAPL");
+    const nav = await screen.findByRole("navigation", { name: "Dashboard sections" });
+    const labels = Array.from(nav.querySelectorAll("button")).map((b) => b.textContent);
+    expect(labels.slice(0, 4)).toEqual(["Overview", "Analyst view", "Quality", "Earnings"]);
+    expect(labels).toContain("Valuation");
+    expect(labels).not.toContain("Macro"); // nothing to draw, so not listed
   });
 
   it("uses a wider container (max-w-screen-2xl) so dashboards breathe on big monitors", async () => {

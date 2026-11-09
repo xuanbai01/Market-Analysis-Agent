@@ -138,6 +138,29 @@ export const HEALTHY_LAYOUT_SIGNALS: LayoutSignals = {
 
 // ── Top-level shapes returned by the backend ─────────────────────────
 
+// Phase 5 — the analyst view. Mirrors Thesis in app/schemas/research.py.
+// A claim_ref points at report.sections[title].claims[index].
+export const ClaimRefSchema = z.object({
+  section: z.string().min(1),
+  index: z.number().int().min(0),
+});
+export type ClaimRef = z.infer<typeof ClaimRefSchema>;
+
+export const ThesisPointSchema = z.object({
+  text: z.string().min(1),
+  claim_refs: z.array(ClaimRefSchema).default([]),
+});
+export type ThesisPoint = z.infer<typeof ThesisPointSchema>;
+
+export const ThesisSchema = z.object({
+  headline: z.string().min(1),
+  bull: z.array(ThesisPointSchema).default([]),
+  bear: z.array(ThesisPointSchema).default([]),
+  changed: z.array(ThesisPointSchema).default([]),
+  watch: z.array(ThesisPointSchema).default([]),
+});
+export type Thesis = z.infer<typeof ThesisSchema>;
+
 export const ResearchReportSchema = z.object({
   symbol: z.string().min(1),
   generated_at: z.string().datetime({ offset: true }),
@@ -154,6 +177,10 @@ export const ResearchReportSchema = z.object({
   // pre-4.5 cached JSONB rows hydrate as a healthy report and the
   // dashboard's adaptive UI stays in its non-distressed mode.
   layout_signals: LayoutSignalsSchema.default(HEALTHY_LAYOUT_SIGNALS),
+  // Phase 5 — null for reports from before the analyst view shipped, or
+  // when its call failed. A malformed thesis reads as null rather than
+  // failing the whole report.
+  thesis: ThesisSchema.nullable().default(null).catch(null),
 });
 export type ResearchReport = z.infer<typeof ResearchReportSchema>;
 

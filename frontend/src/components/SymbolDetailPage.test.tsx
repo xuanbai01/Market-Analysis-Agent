@@ -26,6 +26,7 @@ function fakeReport(symbol: string): ResearchReport {
     generated_at: "2026-05-02T14:00:00+00:00",
     overall_confidence: "high",
     tool_calls_audit: [],
+    thesis: null,
     layout_signals: HEALTHY_LAYOUT_SIGNALS,
     sections: [
       {
@@ -89,6 +90,29 @@ describe("SymbolDetailPage", () => {
     expect(screen.getAllByText("AAPL").length).toBeGreaterThan(0);
   });
 
+  // Phase 5 — the analyst view sits under the hero; reports without a
+  // thesis get a one-line regenerate hint instead.
+  it("renders the analyst view with its evidence", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue({
+      ...fakeReport("AAPL"),
+      thesis: {
+        headline: "Priced for quality.",
+        bull: [{ text: "Margins are high.", claim_refs: [] }],
+        bear: [],
+        changed: [],
+        watch: [],
+      },
+    });
+    renderAt("AAPL");
+    expect(await screen.findByTestId("analyst-view")).toHaveTextContent("Priced for quality.");
+  });
+
+  it("hints to regenerate when the report has no analyst view", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(fakeReport("AAPL"));
+    renderAt("AAPL");
+    expect(await screen.findByTestId("analyst-view-missing")).toBeInTheDocument();
+  });
+
   // 2026-11 — cached reports can predate a fix; say how old they are
   // and offer a fresh one.
   it("shows the report's age with a Regenerate button", async () => {
@@ -148,6 +172,7 @@ describe("SymbolDetailPage", () => {
       generated_at: "2026-05-04T14:00:00+00:00",
       overall_confidence: "low",
       tool_calls_audit: [],
+      thesis: null,
       layout_signals: HEALTHY_LAYOUT_SIGNALS,
       sections: [
         // The reorder logic only cares about which sections exist;

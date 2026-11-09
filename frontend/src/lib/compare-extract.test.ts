@@ -46,6 +46,7 @@ function fakeReport(symbol: string, name: string, opts: Partial<{ sections: Sect
     generated_at: "2026-05-04T14:00:00+00:00",
     overall_confidence: "high",
     tool_calls_audit: [],
+    thesis: null,
     layout_signals: HEALTHY_LAYOUT_SIGNALS,
     sections: opts.sections ?? [],
   };

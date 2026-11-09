@@ -246,6 +246,9 @@ def score_factuality(
     surface so the LLM can't dodge the rubric by writing the
     hallucination into the card-strip instead of the section narrative.
 
+    Phase 5: the analyst view (``report.thesis`` headline and every
+    point) is policed too.
+
     2026-11 (ADR 0006 eval): a number also counts as backed when it is
     quoted in the text of one of the *same section's* claims (see
     ``_claim_text_numbers``). That match is literal only — the percent,
@@ -271,6 +274,24 @@ def score_factuality(
                 if any(_matches_claim(n, v, tolerance) for v in claim_values):
                     continue
                 if any(abs(n - t) <= tolerance for t in text_numbers):
+                    continue
+                unmatched.append(n)
+
+    # Phase 5: the analyst view argues across sections, so its numbers may
+    # come from any claim — values (as above) or claim text anywhere in
+    # the report.
+    if report.thesis is not None:
+        all_text_numbers = [n for section in report.sections for n in _claim_text_numbers(section)]
+        thesis = report.thesis
+        thesis_prose = [thesis.headline] + [
+            point.text for points in (thesis.bull, thesis.bear, thesis.changed, thesis.watch) for point in points
+        ]
+        for prose in thesis_prose:
+            for n in _extract_numbers(prose):
+                found.append(n)
+                if any(_matches_claim(n, v, tolerance) for v in claim_values):
+                    continue
+                if any(abs(n - t) <= tolerance for t in all_text_numbers):
                     continue
                 unmatched.append(n)
 

@@ -377,3 +377,34 @@ describe("ClaimSchema unit", () => {
     expect(claim.value).toBe(1.5);
   });
 });
+
+describe("ResearchReportSchema thesis", () => {
+  const base = {
+    symbol: "KO",
+    generated_at: "2026-11-08T14:00:00+00:00",
+    overall_confidence: "high",
+    sections: [],
+  };
+
+  it("defaults to null for reports from before the analyst view", () => {
+    expect(ResearchReportSchema.parse(base).thesis).toBeNull();
+  });
+
+  it("parses a thesis with claim refs", () => {
+    const report = ResearchReportSchema.parse({
+      ...base,
+      thesis: {
+        headline: "Priced for durability.",
+        bull: [{ text: "Margins widen.", claim_refs: [{ section: "Quality", index: 1 }] }],
+      },
+    });
+    expect(report.thesis?.bull[0].claim_refs[0]).toEqual({ section: "Quality", index: 1 });
+    expect(report.thesis?.watch).toEqual([]);
+  });
+
+  it("reads a malformed thesis as null instead of failing the report", () => {
+    const report = ResearchReportSchema.parse({ ...base, thesis: { bull: "nope" } });
+    expect(report.thesis).toBeNull();
+    expect(report.symbol).toBe("KO");
+  });
+});

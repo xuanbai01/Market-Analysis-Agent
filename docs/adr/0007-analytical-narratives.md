@@ -74,3 +74,13 @@ still one click from its source.
   Phase 5) and a cross-company distribution view (Phase 6, needs XBRL
   history) build on these derived claims later; they are not part of this
   decision.
+
+## Follow-up (2026-11-09)
+
+Layer 2 shipped: `ResearchReport.thesis`, the analyst view (headline, bull,
+bear, what changed, what to watch). It is a second synthesis call over the
+same claims, run in parallel with the section prose. Each claim is tagged
+with an id in that prompt (`[Q3]`), points cite ids, and code keeps only
+points whose ids resolve — so every argument links to its evidence on the
+dashboard. The factuality rubric covers the thesis text.
+

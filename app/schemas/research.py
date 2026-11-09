@@ -228,6 +228,37 @@ class LayoutSignals(BaseModel):
     Requires >= 3 history points on each."""
 
 
+class ClaimRef(BaseModel):
+    """Points an analyst-view line at a claim backing it: the claim at
+    ``index`` in the section titled ``section`` of the same report."""
+
+    section: str = Field(min_length=1, max_length=80)
+    index: int = Field(ge=0)
+
+
+class ThesisPoint(BaseModel):
+    text: str = Field(min_length=1, max_length=600)
+    claim_refs: list[ClaimRef] = Field(default_factory=list)
+
+
+class Thesis(BaseModel):
+    """Phase 5 (ADR 0005) / ADR 0007 layer 2 — the report-level analyst
+    view: a headline, the bull and bear cases, what changed over the past
+    year, and what to watch.
+
+    Written by the LLM from the same claims as the section prose, under
+    the same citation rule; every point carries at least one
+    ``claim_refs`` entry (the orchestrator drops points that cite nothing
+    real), so each argument is one click from its evidence.
+    """
+
+    headline: str = Field(min_length=1, max_length=600)
+    bull: list[ThesisPoint] = Field(default_factory=list)
+    bear: list[ThesisPoint] = Field(default_factory=list)
+    changed: list[ThesisPoint] = Field(default_factory=list)
+    watch: list[ThesisPoint] = Field(default_factory=list)
+
+
 class ResearchReport(BaseModel):
     """
     Top-level Pydantic model returned by ``POST /v1/research/{symbol}``.
@@ -252,6 +283,9 @@ class ResearchReport(BaseModel):
     # ``LayoutSignals()`` so pre-4.5 cached JSONB rows (no
     # ``layout_signals`` key) hydrate as a healthy-shape report.
     layout_signals: LayoutSignals = Field(default_factory=LayoutSignals)
+    # Analyst view (Phase 5). None for cached rows from before it shipped
+    # and when the thesis call failed — the report stands without it.
+    thesis: Thesis | None = None
 
     @property
     def all_claims(self) -> list[Claim]:
@@ -331,3 +365,28 @@ class SectionSummaries(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     sections: list[SectionSummary] = Field(default_factory=list)
+
+
+# ── Thesis-call output schema (internal) ──────────────────────────────
+#
+# The model cites claims by the short ids the thesis prompt assigns
+# ("Q3" = third Quality claim). Deliberately loose — no length caps — so
+# an over-long list doesn't fail validation and lose the whole thesis;
+# ``research_thesis`` trims, maps ids to ``ClaimRef``s and drops points
+# whose ids don't resolve.
+
+
+class ThesisDraftPoint(BaseModel):
+    text: str = Field(description="One or two sentences, at most 40 words.")
+    claim_ids: list[str] = Field(
+        default_factory=list,
+        description="Ids of the claims this point relies on, e.g. ['Q3', 'V1'].",
+    )
+
+
+class ThesisDraft(BaseModel):
+    headline: str = Field(description="One sentence: the central conclusion or tension.")
+    bull: list[ThesisDraftPoint] = Field(default_factory=list)
+    bear: list[ThesisDraftPoint] = Field(default_factory=list)
+    changed: list[ThesisDraftPoint] = Field(default_factory=list)
+    watch: list[ThesisDraftPoint] = Field(default_factory=list)

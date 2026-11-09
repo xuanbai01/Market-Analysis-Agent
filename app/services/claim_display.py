@@ -16,6 +16,8 @@ with the eval rubric: it accepts fraction→percent and $T/$B/$M forms.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from app.schemas.research import ClaimUnit
 
 _SCALES = ((1e12, "T"), (1e9, "B"), (1e6, "M"))
@@ -69,3 +71,37 @@ def format_claim_value(value: object, unit: ClaimUnit | None) -> str:
             return "0.00 pts"  # not "-0.00" for a tiny negative
         return f"{'+' if pts > 0 else ''}{pts:.2f} pts"
     return repr(value)
+
+
+def format_claim_line(c: Any, claim_id: str | None = None) -> str:
+    """One prompt line per claim: ``- description = value (tool)``.
+
+    Unit-annotated values go in display form ("142.26%", "$4.98T"), the
+    same text the dashboard card shows, so prose matches the cards and
+    never compares numbers stored in different forms. Unannotated claims
+    keep ``repr``.
+
+    ADR 0007: a claim with history adds its path — first → last, low and
+    high, in the same display units — so the model can describe a trend
+    using numbers that are history points (and pass the rubric).
+    ``claim_id`` prefixes the line ("- [Q3] ...") for prompts that ask
+    the model to cite claims by id (the analyst view).
+    """
+    unit = getattr(c, "unit", None)
+    tag = f"[{claim_id}] " if claim_id else ""
+    line = f"- {tag}{c.description} = {format_claim_value(c.value, unit)} ({c.source.tool})"
+    history = list(getattr(c, "history", None) or [])
+    if len(history) < 2:
+        return line
+
+    def fmt(point: Any) -> str:
+        return format_claim_value(point.value, unit)
+
+    first, last = history[0], history[-1]
+    low = min(history, key=lambda p: p.value)
+    high = max(history, key=lambda p: p.value)
+    return (
+        f"{line} · history {len(history)} periods: {first.period} {fmt(first)} → "
+        f"{last.period} {fmt(last)}; low {fmt(low)} ({low.period}), "
+        f"high {fmt(high)} ({high.period})"
+    )

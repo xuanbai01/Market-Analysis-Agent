@@ -112,7 +112,10 @@ function SectionCard({
   const featured = featuredClaim(section);
 
   return (
-    <section className="rounded-md border border-strata-border bg-strata-surface p-5">
+    <section
+      data-section-anchor={section.title}
+      className="rounded-md border border-strata-border bg-strata-surface p-5"
+    >
       <header className="mb-3 flex items-center justify-between gap-3">
         <h3 className="text-lg font-semibold text-strata-hi">
           {section.title}

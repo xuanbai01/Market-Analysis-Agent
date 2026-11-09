@@ -49,7 +49,7 @@ export const LENS: LensReport = {
   ],
   narrative: {
     headline: "Spending is concentrated in one heavy investor.",
-    points: [{ text: "AAA spends 25.00% of revenue.", claim_refs: [{ section: "Lens", index: 0 }] }],
+    points: [{ title: null, text: "AAA spends 25.00% of revenue.", claim_refs: [{ section: "Lens", index: 0 }] }],
   },
   generated_at: "2026-11-09T00:00:00+00:00",
 };

@@ -103,6 +103,7 @@ POST /v1/research/{symbol}
        │    fetch_macro / extract_10k_business / extract_10k_risks_diff
        ├▶ deterministic claim builders   (per-section, code picks claims, not LLM)
        ├▶ llm.synth_call                 (Sonnet writes summary prose under forced schema)
+       ├▶ research_thesis.compose_thesis (in parallel: the analyst view, claim-id citations)
        └▶ research_confidence.score_section  (programmatic, not LLM-set)
   └▶ research_cache.upsert
 ```

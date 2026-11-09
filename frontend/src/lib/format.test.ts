@@ -133,3 +133,16 @@ describe("formatClaimValue with unit hint", () => {
     expect(formatClaimValue(null, "usd_per_share")).toBe("—");
   });
 });
+
+// 2026-11 (tasks/dogfood-2026-11.md #6) — a change between two margins
+// is percentage points: "up 1.88%" was 1.88 points.
+describe("formatClaimValue with percentage_points", () => {
+  it("signs the change and labels it pts", () => {
+    expect(formatClaimValue(0.0188, "percentage_points")).toBe("+1.88 pts");
+    expect(formatClaimValue(-0.005, "percentage_points")).toBe("-0.50 pts");
+  });
+
+  it("prints no sign for a change that rounds to zero", () => {
+    expect(formatClaimValue(-0.00001, "percentage_points")).toBe("0.00 pts");
+  });
+});

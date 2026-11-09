@@ -63,4 +63,9 @@ def format_claim_value(value: object, unit: ClaimUnit | None) -> str:
         return _grouped(n) if float(n).is_integer() else f"{n:.2f}"
     if unit == "basis_points":
         return f"{n * 10_000:.0f} bps"
+    if unit == "percentage_points":
+        pts = round(n * 100, 2)
+        if pts == 0:
+            return "0.00 pts"  # not "-0.00" for a tiny negative
+        return f"{'+' if pts > 0 else ''}{pts:.2f} pts"
     return repr(value)

@@ -156,7 +156,9 @@ async def test_claim_units_match_expected_categories(
     assert result["roic"].unit == "fraction"
     assert result["buyback_yield"].unit == "fraction"
     assert result["sbc_pct_revenue"].unit == "fraction"
-    assert result["gross_margin_trend_1y"].unit == "fraction"
+    # A change between two margins — percentage points, not percent
+    # (tasks/dogfood-2026-11.md #6: "up 1.88%" was 1.88 points).
+    assert result["gross_margin_trend_1y"].unit == "percentage_points"
 
     # Percent-form (already in percent units; just append %).
     # yfinance returns dividendYield this way (0.39 meaning 0.39%).

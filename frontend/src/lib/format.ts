@@ -100,6 +100,12 @@ export function formatClaimValue(
         case "basis_points":
           // 0.0007 (= 7 bps) → "7 bps". 0.012 → "120 bps".
           return `${(n * 10000).toFixed(0)} bps`;
+        case "percentage_points": {
+          // A change between two fractions: 0.0188 → "+1.88 pts".
+          const pts = Number((n * 100).toFixed(2));
+          if (pts === 0) return "0.00 pts";
+          return `${pts > 0 ? "+" : ""}${pts.toFixed(2)} pts`;
+        }
       }
     }
   }
@@ -137,3 +143,4 @@ export function formatTimestamp(iso: string): string {
     minute: "2-digit",
   });
 }
+

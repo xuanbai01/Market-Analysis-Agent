@@ -26,8 +26,8 @@ interface Props {
 const MIN_POINTS_FOR_LINE = 3;
 
 function describeChange(first: number, last: number, unit?: ClaimUnit | null): string {
-  if (unit === "fraction" || unit === "percent") {
-    const pts = (last - first) * (unit === "fraction" ? 100 : 1);
+  if (unit === "fraction" || unit === "percent" || unit === "percentage_points") {
+    const pts = (last - first) * (unit === "percent" ? 1 : 100);
     if (Math.abs(pts) < 0.05) return "flat";
     return `${pts > 0 ? "▲" : "▼"} ${Math.abs(pts).toFixed(1)} pts`;
   }

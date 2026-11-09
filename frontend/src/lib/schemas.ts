@@ -294,3 +294,61 @@ export const ProblemDetailSchema = z.object({
   instance: z.string().nullable().optional(),
 });
 export type ProblemDetail = z.infer<typeof ProblemDetailSchema>;
+
+// ── Cross-company lens (ADR 0007 layer 3) — mirrors app/schemas/lens.py ──
+
+export const LensSummarySchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string(),
+  tickers: z.array(z.string()).default([]),
+});
+export type LensSummary = z.infer<typeof LensSummarySchema>;
+
+export const LensPointSchema = z.object({
+  year: z.number().int(),
+  capex: z.number().nullable().default(null),
+  revenue: z.number().nullable().default(null),
+  ocf: z.number().nullable().default(null),
+  capex_intensity: z.number().nullable().default(null),
+  capex_to_ocf: z.number().nullable().default(null),
+});
+export type LensPoint = z.infer<typeof LensPointSchema>;
+
+export const LensCompanySchema = z.object({
+  ticker: z.string().min(1),
+  name: z.string(),
+  points: z.array(LensPointSchema),
+});
+export type LensCompany = z.infer<typeof LensCompanySchema>;
+
+export const LensYearStatsSchema = z.object({
+  year: z.number().int(),
+  companies: z.number().int(),
+  median: z.number(),
+  p25: z.number(),
+  p75: z.number(),
+  low: z.number(),
+  low_ticker: z.string(),
+  high: z.number(),
+  high_ticker: z.string(),
+  total_capex: z.number(),
+});
+export type LensYearStats = z.infer<typeof LensYearStatsSchema>;
+
+export const LensNarrativeSchema = z.object({
+  headline: z.string().min(1),
+  points: z.array(ThesisPointSchema).default([]),
+});
+export type LensNarrative = z.infer<typeof LensNarrativeSchema>;
+
+export const LensReportSchema = LensSummarySchema.extend({
+  method: z.string(),
+  years: z.array(z.number().int()),
+  companies: z.array(LensCompanySchema),
+  stats: z.array(LensYearStatsSchema),
+  facts: z.array(ClaimSchema).default([]),
+  narrative: LensNarrativeSchema.nullable().default(null).catch(null),
+  generated_at: z.string(),
+});
+export type LensReport = z.infer<typeof LensReportSchema>;

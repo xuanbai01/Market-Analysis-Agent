@@ -3,7 +3,8 @@
  *
  * Rewritten 2026-11. It answers two questions and nothing else:
  *
- *   Where can I go?        Search (opens the ⌘K modal), Home, Compare
+ *   Where can I go?        Search (opens the ⌘K modal), Home, Compare,
+ *                          Lenses (cross-company views)
  *   What was I looking at? Watchlist (starred tickers), Recent (opened
  *                          tickers not already starred)
  *
@@ -36,6 +37,7 @@ import {
   IconCompare,
   IconExpand,
   IconHome,
+  IconLens,
   IconSearch,
   IconSignOut,
   IconStar,
@@ -140,6 +142,13 @@ export function SidebarShell(props: SidebarShellProps) {
           detail={compareLabel}
           icon={<IconCompare />}
           active={pathname.startsWith(ROUTES.compare)}
+          collapsed={collapsed}
+        />
+        <NavItem
+          to={ROUTES.lenses}
+          label="Lenses"
+          icon={<IconLens />}
+          active={pathname.startsWith(ROUTES.lenses)}
           collapsed={collapsed}
         />
       </nav>

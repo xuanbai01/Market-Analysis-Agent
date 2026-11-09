@@ -6,6 +6,7 @@
  *   /                → LandingPage (entry; stays in main)
  *   /symbol/:ticker  → SymbolDetailPage (lazy chunk; Phase 4.7)
  *   /compare         → ComparePage (lazy chunk; Phase 4.6.A)
+ *   /lens, /lens/:id → lens index + LensPage (lazy chunks; ADR 0007 layer 3)
  *
  * Authenticated routes wrap in RequireAuth (redirects to /login when
  * no token is in localStorage) and AppShell (sidebar + main outlet).
@@ -25,9 +26,12 @@ import { LoadingState } from "./components/LoadingState";
 import { LoginScreen } from "./components/LoginScreen";
 import { RequireAuth } from "./components/RequireAuth";
 import { getStoredToken } from "./lib/auth";
-import { ROUTES } from "./lib/routes";
+import { ROUTE_PATHS, ROUTES } from "./lib/routes";
 
 const ComparePage = lazy(() => import("./components/compare/ComparePage"));
+// Cross-company lenses (ADR 0007 layer 3) — their own chunks.
+const LensIndexPage = lazy(() => import("./components/lens/LensIndexPage"));
+const LensPage = lazy(() => import("./components/lens/LensPage"));
 const SymbolDetailPage = lazy(() => import("./components/SymbolDetailPage"));
 
 /**
@@ -81,6 +85,22 @@ export function App() {
             element={
               <Suspense fallback={<LoadingState />}>
                 <ComparePage />
+              </Suspense>
+            }
+          />
+          <Route
+            path={ROUTE_PATHS.lenses}
+            element={
+              <Suspense fallback={null}>
+                <LensIndexPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path={ROUTE_PATHS.lens}
+            element={
+              <Suspense fallback={null}>
+                <LensPage />
               </Suspense>
             }
           />

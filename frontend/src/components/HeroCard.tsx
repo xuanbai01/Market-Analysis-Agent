@@ -4,7 +4,8 @@
  * Three columns:
  *   left:   ticker meta (logo placeholder, ticker eyebrow, sector
  *           tag, name, big tabular price, delta, MCAP/VOL/52W meta)
- *   center: 60-day price chart with 1D/5D/1M/3M/1Y/5Y range pills
+ *   center: price chart with 5D/1M/3M/1Y/5Y range pills; the kicker
+ *           names the range and the price change over it
  *   right:  3 featured stats (Forward P/E, ROIC TTM, FCF Margin) with
  *           peer/historical sub-context where available
  *
@@ -24,14 +25,14 @@ import { fetchMarketPrices } from "../lib/api";
 import { formatClaimValue } from "../lib/format";
 import { extractHeroData } from "../lib/hero-extract";
 import { sliceForRange } from "../lib/price-range";
-import type { ResearchReport } from "../lib/schemas";
+import type { PricePoint, ResearchReport } from "../lib/schemas";
 import { LineChart } from "./LineChart";
 
 interface Props {
   report: ResearchReport;
 }
 
-const RANGES = ["1D", "5D", "1M", "3M", "1Y", "5Y"] as const;
+const RANGES = ["5D", "1M", "3M", "1Y", "5Y"] as const;
 type Range = (typeof RANGES)[number];
 
 // Backend currently accepts 60D / 1Y / 5Y; map UI ranges accordingly.
@@ -39,30 +40,34 @@ type Range = (typeof RANGES)[number];
 // design fidelity but coerce to the closest backend-supported value.
 function backendRangeFor(uiRange: Range): "60D" | "1Y" | "5Y" {
   if (uiRange === "1Y" || uiRange === "5Y") return uiRange;
-  // 1D / 5D / 1M / 3M all coerce to 60D for now (the backend doesn't
-  // support intraday cadence yet — that's Phase 4.7+). The frontend
-  // then slices the 60D dataset client-side via ``sliceForRange``
-  // so each pill produces a visibly different chart.
+  // 5D / 1M / 3M all coerce to 60D (daily closes; no intraday). The
+  // frontend then slices the 60D dataset client-side via
+  // ``sliceForRange`` so each pill produces a visibly different chart.
   return "60D";
 }
 
-function priceRangeLabel(uiRange: Range): string {
-  // Subtitle text mirrors the actual sliced range so the pill click
-  // is visibly meaningful. 1Y / 5Y pass through verbatim.
-  switch (uiRange) {
-    case "1D":
-      return "2 trading days";
-    case "5D":
-      return "5 trading days";
-    case "1M":
-      return "22 trading days";
-    case "3M":
-      return "60 trading days";
-    case "1Y":
-      return "1 year";
-    case "5Y":
-      return "5 years";
-  }
+const RANGE_LABEL: Record<Range, string> = {
+  "5D": "5 days",
+  "1M": "1 month",
+  "3M": "3 months",
+  "1Y": "1 year",
+  "5Y": "5 years",
+};
+
+/** Close-to-close change across the plotted points, as a fraction. The
+ *  delta beside the price is always the day's move; this is the move
+ *  over the range the chart shows. */
+function rangeChange(points: readonly PricePoint[]): number | null {
+  if (points.length < 2) return null;
+  const first = points[0].close;
+  const last = points[points.length - 1].close;
+  return first > 0 ? last / first - 1 : null;
+}
+
+/** "consumer_staples" → "Consumer staples". */
+function sectorLabel(sector: string): string {
+  const words = sector.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function formatPrice(n: number): string {
@@ -98,6 +103,8 @@ export function HeroCard({ report }: Props) {
   });
 
   const latest = pricesQuery.data?.latest;
+  const plotted = pricesQuery.data ? sliceForRange(pricesQuery.data.prices, range) : [];
+  const change = rangeChange(plotted);
   const isUp = (latest?.delta_abs ?? 0) >= 0;
   const deltaClass = isUp ? "text-strata-pos" : "text-strata-neg";
   const deltaSign = isUp ? "+" : "";
@@ -146,7 +153,7 @@ export function HeroCard({ report }: Props) {
                 {hero?.sector && (
                   <>
                     <span aria-hidden className="text-strata-line">·</span>
-                    <span className="text-strata-dim">{hero.sector}</span>
+                    <span className="text-strata-dim">{sectorLabel(hero.sector)}</span>
                   </>
                 )}
               </div>
@@ -182,8 +189,16 @@ export function HeroCard({ report }: Props) {
         {/* ── CENTER: chart + range pills ── */}
         <div>
           <div className="mb-2 flex items-center justify-between">
-            <span className="font-mono text-[10px] uppercase tracking-kicker text-strata-highlight">
-              Price · {priceRangeLabel(range)}
+            <span
+              data-testid="hero-range-label"
+              className="font-mono text-[10px] uppercase tracking-kicker text-strata-highlight"
+            >
+              Price · {RANGE_LABEL[range]}
+              {change !== null && (
+                <span className={`ml-2 normal-case tracking-normal ${change >= 0 ? "text-strata-pos" : "text-strata-neg"}`}>
+                  {change >= 0 ? "▲" : "▼"} {Math.abs(change * 100).toFixed(1)}%
+                </span>
+              )}
             </span>
             <div className="flex gap-1 font-mono text-xs">
               {RANGES.map((r) => (
@@ -211,7 +226,7 @@ export function HeroCard({ report }: Props) {
             </div>
           ) : pricesQuery.data?.prices.length ? (
             <LineChart
-              data={sliceForRange(pricesQuery.data.prices, range)}
+              data={plotted}
               areaFill={true}
               showAxes={true}
               showTooltip={true}

@@ -136,8 +136,8 @@ describe("HeroCard", () => {
     renderHero(fakeReport());
     await waitFor(() => expect(screen.getByText("NVDA")).toBeInTheDocument());
     expect(screen.getByText("NVIDIA Corporation")).toBeInTheDocument();
-    // Sector tag rendered (case-insensitive — design uppercases).
-    expect(screen.getByText(/megacap_tech/i)).toBeInTheDocument();
+    // Sector tag rendered as words (case-insensitive — design uppercases).
+    expect(screen.getByText(/megacap tech/i)).toBeInTheDocument();
   });
 
   it("renders the latest price with positive delta in pos color", async () => {
@@ -151,13 +151,23 @@ describe("HeroCard", () => {
     expect(positives.length).toBeGreaterThan(0);
   });
 
-  it("renders 6 range pills (1D / 5D / 1M / 3M / 1Y / 5Y)", async () => {
+  it("renders 5 range pills (5D / 1M / 3M / 1Y / 5Y) and no 1D", async () => {
     vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
     renderHero(fakeReport());
     await waitFor(() => expect(screen.getByText("3M")).toBeInTheDocument());
-    for (const pill of ["1D", "5D", "1M", "3M", "1Y", "5Y"]) {
+    for (const pill of ["5D", "1M", "3M", "1Y", "5Y"]) {
       expect(screen.getByText(pill)).toBeInTheDocument();
     }
+    // Daily closes only: a "1D" chart was a line between two of them.
+    expect(screen.queryByText("1D")).toBeNull();
+  });
+
+  it("names the range and the price change over it", async () => {
+    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
+    renderHero(fakeReport());
+    const label = await screen.findByTestId("hero-range-label");
+    await waitFor(() => expect(label.textContent).toMatch(/3 months/i));
+    expect(label.textContent).toMatch(/[▲▼] \d+\.\d%/);
   });
 
   it("re-fetches prices when a different range pill is clicked", async () => {
@@ -234,7 +244,9 @@ describe("HeroCard", () => {
     // exact prose is the implementation's call, but both must appear.
     const text = chip!.textContent ?? "";
     expect(text).toMatch(/NVDA/);
-    expect(text.toLowerCase()).toMatch(/megacap_tech|tech/);
+    // Snake-case sector tags read as words.
+    expect(text).toMatch(/Megacap tech/);
+    expect(text).not.toMatch(/megacap_tech/);
   });
 
   // Phase 4.3.B.1 — sub-3M range pills (1D / 5D / 1M / 3M) all backed
@@ -297,25 +309,6 @@ describe("HeroCard", () => {
           ?.getAttribute("d") ?? "";
       const segmentCount = (d.match(/[ML]/g) ?? []).length;
       expect(segmentCount).toBe(5);
-    });
-  });
-
-  it("slices to 2 points when 1D range is selected", async () => {
-    vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
-    const { container } = renderHero(fakeReport());
-    await waitFor(() =>
-      expect(
-        container.querySelector("[data-testid='line-chart']"),
-      ).not.toBeNull(),
-    );
-    fireEvent.click(screen.getByText("1D"));
-    await waitFor(() => {
-      const d =
-        container
-          .querySelector("[data-testid='line-chart'] path[data-line-stroke]")
-          ?.getAttribute("d") ?? "";
-      const segmentCount = (d.match(/[ML]/g) ?? []).length;
-      expect(segmentCount).toBe(2);
     });
   });
 

@@ -24,6 +24,7 @@ import {
 } from "../lib/cash-capital-extract";
 import type { Section } from "../lib/schemas";
 import type { MultiLineSeries } from "./MultiLine";
+import { useMeasuredSize } from "../lib/use-measured-width";
 import { Sparkline } from "./Sparkline";
 
 interface Props {
@@ -47,7 +48,13 @@ function changeSinceFirst(first: number, last: number): string {
   return `${diff >= 0 ? "+" : "-"}${usdPerShare(Math.abs(diff))}`;
 }
 
+const SPARK_MIN_H = 26;
+const SPARK_MAX_H = 96;
+
 function MetricTile({ series }: { series: MultiLineSeries }) {
+  // The tiles stretch with the row; the sparkline takes the spare
+  // height instead of sitting under a blank band (2026-11 chart audit).
+  const [sparkRef, spark] = useMeasuredSize();
   const sorted = [...series.history].sort((a, b) => (a.period < b.period ? -1 : 1));
   const first = sorted[0];
   const last = sorted[sorted.length - 1];
@@ -67,10 +74,14 @@ function MetricTile({ series }: { series: MultiLineSeries }) {
       <div className="font-mono text-[10px] text-strata-dim">
         {changeSinceFirst(first.value, last.value)} vs {first.period}
       </div>
-      {/* mt-auto: when the row stretches the card, the tile grows and
-          the sparkline stays at the tile's bottom. */}
-      <div className="mt-auto pt-1">
-        <Sparkline history={sorted} width="100%" height={26} color={series.color} ariaLabel={`${series.label} per share by quarter`} />
+      <div ref={sparkRef} data-testid="cash-capital-spark" className="mt-1 min-h-[26px] flex-1 overflow-hidden">
+        <Sparkline
+          history={sorted}
+          width={spark ? spark.width : "100%"}
+          height={spark ? Math.min(SPARK_MAX_H, Math.max(SPARK_MIN_H, spark.height)) : SPARK_MIN_H}
+          color={series.color}
+          ariaLabel={`${series.label} per share by quarter`}
+        />
       </div>
     </div>
   );

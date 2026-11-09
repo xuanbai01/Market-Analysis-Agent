@@ -38,6 +38,7 @@ ClaimUnit = Literal[
     "count",           # 12,345 → "12,345" with locale grouping
     "shares",          # 134.42M → "134.42M" abbreviated, no $
     "basis_points",    # rare, reserved for explicit bp-shaped deltas
+    "percentage_points",  # 0.0188 → "+1.88 pts" — change between two fractions (margin YoY)
     "date",            # ISO string passthrough
     "string",          # name, sector tag
 ]

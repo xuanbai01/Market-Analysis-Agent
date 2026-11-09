@@ -35,6 +35,7 @@ import { CashAndCapitalCard } from "./CashAndCapitalCard";
 import { ContextBand } from "./ContextBand";
 import { EarningsCard } from "./EarningsCard";
 import { ErrorBanner } from "./ErrorBanner";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { HeaderPills } from "./HeaderPills";
 import { HeroCard } from "./HeroCard";
 import { LoadingState } from "./LoadingState";
@@ -42,6 +43,7 @@ import { MacroPanel } from "./MacroPanel";
 import { PerShareGrowthCard } from "./PerShareGrowthCard";
 import { QualityCard } from "./QualityCard";
 import { ReportRenderer } from "./ReportRenderer";
+import { ReportFreshness } from "./ReportFreshness";
 import { RiskDiffCard } from "./RiskDiffCard";
 import { ValuationCard } from "./ValuationCard";
 import { WatchlistButton } from "./WatchlistButton";
@@ -92,6 +94,7 @@ export function SymbolDetailPage() {
   const macroSection = sections.find((s) => s.title === "Macro");
   const businessSection = sections.find((s) => s.title === "Business");
   const newsSection = sections.find((s) => s.title === "News");
+  const reportKey = `${upperTicker}:${reportQuery.data?.generated_at ?? ""}`;
 
   return (
     <div
@@ -105,13 +108,24 @@ export function SymbolDetailPage() {
       {reportQuery.data && (
         <>
           {/* Phase 4.5.A — diagnostic pills above the hero.
-              Phase 4.7 — Watchlist toggle button next to the pills. */}
+              Phase 4.7 — Watchlist toggle button next to the pills.
+              2026-11 — report age + Regenerate on the left. */}
           <div className="mb-3 flex items-center justify-end gap-2">
+            <ReportFreshness
+              ticker={upperTicker}
+              generatedAt={reportQuery.data.generated_at}
+            />
             <HeaderPills signals={reportQuery.data.layout_signals} />
             <WatchlistButton ticker={upperTicker} />
           </div>
 
-          <HeroCard report={reportQuery.data} />
+          {/* 2026-11 — every card sits in its own ErrorBoundary: one
+              that meets data it can't draw shows a notice in its place
+              instead of blanking the page. ``reportKey`` retries them
+              when the ticker or report changes. */}
+          <ErrorBoundary label="Overview" resetKey={reportKey}>
+            <HeroCard report={reportQuery.data} />
+          </ErrorBoundary>
 
           {/* Row 2 — Quality | Earnings.
               40/60 rhythm; ``items-start`` so cards align top with
@@ -119,18 +133,22 @@ export function SymbolDetailPage() {
           <div className="mb-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-5">
             {qualitySection && (
               <div className="lg:col-span-2">
-                <QualityCard ticker={upperTicker} section={qualitySection} />
+                <ErrorBoundary label="Quality" resetKey={reportKey}>
+                  <QualityCard ticker={upperTicker} section={qualitySection} />
+                </ErrorBoundary>
               </div>
             )}
             {earningsSection && (
               <div className="lg:col-span-3">
-                <EarningsCard
-                  section={earningsSection}
-                  distressed={{
-                    beat_rate_below_30pct:
-                      reportQuery.data.layout_signals.beat_rate_below_30pct,
-                  }}
-                />
+                <ErrorBoundary label="Earnings" resetKey={reportKey}>
+                  <EarningsCard
+                    section={earningsSection}
+                    distressed={{
+                      beat_rate_below_30pct:
+                        reportQuery.data.layout_signals.beat_rate_below_30pct,
+                    }}
+                  />
+                </ErrorBoundary>
               </div>
             )}
           </div>
@@ -149,6 +167,7 @@ export function SymbolDetailPage() {
             RiskDiffCard / MacroPanel don't leave blank slots.
           */}
           <DashboardRows
+            reportKey={reportKey}
             ticker={upperTicker}
             report={reportQuery.data}
             qualitySection={qualitySection}
@@ -163,28 +182,32 @@ export function SymbolDetailPage() {
               bottom avoids burying the hero stat trio. Returns null
               when both sections are absent so older cached reports
               without these fields stay clean. */}
-          <ContextBand
-            ticker={upperTicker}
-            businessSection={businessSection}
-            newsSection={newsSection}
-          />
+          <ErrorBoundary label="Business & news" resetKey={reportKey}>
+            <ContextBand
+              ticker={upperTicker}
+              businessSection={businessSection}
+              newsSection={newsSection}
+            />
+          </ErrorBoundary>
 
-          <ReportRenderer
-            report={reportQuery.data}
-            excludeSections={[
-              // Business + News render in the ContextBand above; exclude
-              // them from the trailing ReportRenderer so they don't
-              // appear twice.
-              "Business",
-              "News",
-              "Earnings",
-              "Valuation",
-              "Quality",
-              "Peers",
-              "Risk Factors",
-              "Macro",
-            ]}
-          />
+          <ErrorBoundary label="Other sections" resetKey={reportKey}>
+            <ReportRenderer
+              report={reportQuery.data}
+              excludeSections={[
+                // Business + News render in the ContextBand above; exclude
+                // them from the trailing ReportRenderer so they don't
+                // appear twice.
+                "Business",
+                "News",
+                "Earnings",
+                "Valuation",
+                "Quality",
+                "Peers",
+                "Risk Factors",
+                "Macro",
+              ]}
+            />
+          </ErrorBoundary>
         </>
       )}
     </div>
@@ -192,6 +215,7 @@ export function SymbolDetailPage() {
 }
 
 interface DashboardRowsProps {
+  reportKey: string;
   ticker: string;
   report: ResearchReport;
   qualitySection: Section | undefined;
@@ -205,6 +229,7 @@ interface DashboardRowsProps {
  *  keep the inner JSX readable. */
 function DashboardRows(props: DashboardRowsProps) {
   const {
+    reportKey,
     ticker,
     report,
     qualitySection,
@@ -224,18 +249,27 @@ function DashboardRows(props: DashboardRowsProps) {
   // null on unavailable data (Phase 4.5.C); CashAndCapitalCard always
   // renders (it has its own internal fallback for missing data).
   const cashRiskMacroCards: ReactNode[] = [
-    <CashAndCapitalCard
-      key="cash"
-      capAllocSection={capAllocSection}
-      qualitySection={qualitySection}
-      runwayQuarters={signals.cash_runway_quarters}
-    />,
+    <ErrorBoundary key="cash" label="Cash & capital" resetKey={reportKey}>
+      <CashAndCapitalCard
+        capAllocSection={capAllocSection}
+        qualitySection={qualitySection}
+        runwayQuarters={signals.cash_runway_quarters}
+      />
+    </ErrorBoundary>,
   ];
   if (riskSection && riskSection.claims.length > 0) {
-    cashRiskMacroCards.push(<RiskDiffCard key="risk" section={riskSection} />);
+    cashRiskMacroCards.push(
+      <ErrorBoundary key="risk" label="Risk factors" resetKey={reportKey}>
+        <RiskDiffCard section={riskSection} />
+      </ErrorBoundary>,
+    );
   }
   if (macroSection && macroSection.claims.length > 0) {
-    cashRiskMacroCards.push(<MacroPanel key="macro" section={macroSection} />);
+    cashRiskMacroCards.push(
+      <ErrorBoundary key="macro" label="Macro" resetKey={reportKey}>
+        <MacroPanel section={macroSection} />
+      </ErrorBoundary>,
+    );
   }
   const cashRiskMacroCount = cashRiskMacroCards.length;
   // Tailwind needs literal class names; switch on count.
@@ -249,14 +283,18 @@ function DashboardRows(props: DashboardRowsProps) {
   const valuationGrowthRow = (
     <div className="mb-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-5">
       <div className="lg:col-span-2">
-        <ValuationCard report={report} />
+        <ErrorBoundary label="Valuation" resetKey={reportKey}>
+          <ValuationCard report={report} />
+        </ErrorBoundary>
       </div>
       {qualitySection && (
         <div className="lg:col-span-3">
-          <PerShareGrowthCard
-            ticker={ticker}
-            section={{ ...qualitySection, card_narrative: null }}
-          />
+          <ErrorBoundary label="Per-share growth" resetKey={reportKey}>
+            <PerShareGrowthCard
+              ticker={ticker}
+              section={{ ...qualitySection, card_narrative: null }}
+            />
+          </ErrorBoundary>
         </div>
       )}
     </div>

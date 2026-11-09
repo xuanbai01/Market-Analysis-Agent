@@ -29,6 +29,10 @@ function SymbolStub() {
   );
 }
 
+function BrokenPage(): never {
+  throw new Error("bad data shape");
+}
+
 function CompareStub() {
   const { search } = useLocation();
   return <div data-testid="compare-page">{search}</div>;
@@ -45,6 +49,7 @@ function renderShell(path: string) {
             <Route path="/" element={<div data-testid="landing-page" />} />
             <Route path="/symbol/:ticker" element={<SymbolStub />} />
             <Route path="/compare" element={<CompareStub />} />
+            <Route path="/broken" element={<BrokenPage />} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -158,5 +163,16 @@ describe("AppShell — navigation", () => {
     const strip = screen.getByRole("region", { name: "Markets" });
     const page = screen.getByTestId("symbol-page");
     expect(strip.compareDocumentPosition(page) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("keeps the sidebar working when a page crashes, and recovers on navigation", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    pushRecent("JPM");
+    renderShell("/broken");
+    expect(screen.getByTestId("page-error")).toBeInTheDocument();
+    fireEvent.click(within(recentSection()).getByRole("link", { name: "JPM" }));
+    expect(screen.queryByTestId("page-error")).toBeNull();
+    expect(screen.getByTestId("symbol-page")).toHaveTextContent("JPM");
+    consoleError.mockRestore();
   });
 });

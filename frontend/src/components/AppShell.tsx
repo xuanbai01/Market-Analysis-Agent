@@ -29,6 +29,7 @@ import {
   writeSidebarCollapsed,
 } from "../lib/sidebar";
 import { removeFromWatchlist, useWatchlist } from "../lib/watchlist";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { MarketStrip } from "./MarketStrip";
 import { SidebarShell } from "./SidebarShell";
 
@@ -108,8 +109,14 @@ export function AppShell() {
         onSignOut={handleSignOut}
       />
       <main className="min-w-0 flex-1">
-        <MarketStrip />
-        <Outlet />
+        {/* A crash in the strip or the page stays there: the sidebar
+            keeps working, and moving to another route retries. */}
+        <ErrorBoundary label="Market strip" variant="silent">
+          <MarketStrip />
+        </ErrorBoundary>
+        <ErrorBoundary label="This page" variant="page" resetKey={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
       {searchOpen && (
         <Suspense fallback={null}>

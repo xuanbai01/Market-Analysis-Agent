@@ -100,6 +100,12 @@ export function formatClaimValue(
         case "basis_points":
           // 0.0007 (= 7 bps) → "7 bps". 0.012 → "120 bps".
           return `${(n * 10000).toFixed(0)} bps`;
+        case "percentage_points": {
+          // A change between two fractions: 0.0188 → "+1.88 pts".
+          const pts = Number((n * 100).toFixed(2));
+          if (pts === 0) return "0.00 pts";
+          return `${pts > 0 ? "+" : ""}${pts.toFixed(2)} pts`;
+        }
       }
     }
   }
@@ -136,4 +142,20 @@ export function formatTimestamp(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/**
+ * How long ago ``iso`` was, for "Generated 2 days ago": "just now",
+ * "12 min ago", "5 h ago", "1 day ago", "6 days ago".
+ */
+export function formatAge(iso: string, now: number = Date.now()): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
+  const minutes = Math.max(0, Math.floor((now - then) / 60_000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
 }

@@ -356,3 +356,24 @@ describe("ClaimSchema with history", () => {
     ).toThrow();
   });
 });
+
+describe("ClaimSchema unit", () => {
+  const source = { tool: "yfinance.fundamentals", fetched_at: "2026-11-08T14:00:00+00:00" };
+
+  it("accepts percentage_points", () => {
+    const claim = ClaimSchema.parse({
+      description: "Gross margin, year-over-year change",
+      value: 0.0188,
+      source,
+      unit: "percentage_points",
+    });
+    expect(claim.unit).toBe("percentage_points");
+  });
+
+  it("reads a unit it doesn't know as null instead of rejecting the claim", () => {
+    // The backend can add a unit and deploy before the frontend does.
+    const claim = ClaimSchema.parse({ description: "New metric", value: 1.5, source, unit: "furlongs" });
+    expect(claim.unit).toBeNull();
+    expect(claim.value).toBe(1.5);
+  });
+});

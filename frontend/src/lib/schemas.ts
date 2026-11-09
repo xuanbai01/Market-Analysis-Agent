@@ -51,6 +51,7 @@ export const ClaimUnitSchema = z.enum([
   "count",
   "shares",
   "basis_points",
+  "percentage_points",
   "date",
   "string",
 ]);
@@ -82,7 +83,11 @@ export const ClaimSchema = z.object({
   // ``unit === undefined`` and existing test fixtures don't have to
   // be updated. The formatter treats undefined and null identically —
   // both fall back to the legacy heuristic.
-  unit: ClaimUnitSchema.nullable().optional(),
+  //
+  // 2026-11: a unit this build doesn't know (the backend added one and
+  // deployed first) reads as null — the heuristic formatter — instead of
+  // failing the whole report's parse.
+  unit: ClaimUnitSchema.nullable().optional().catch(null),
 });
 export type Claim = z.infer<typeof ClaimSchema>;
 

@@ -109,25 +109,46 @@ describe("PerShareGrowthCard", () => {
     expect(container.textContent).toMatch(/\$ \/ share/i);
   });
 
-  it("renders 5 multiplier pills", () => {
+  it("renders 5 change pills", () => {
     const { container } = render(
       <PerShareGrowthCard ticker="NVDA" section={section(FULL)} />,
     );
-    const pills = container.querySelectorAll("[data-pill='growth-multiplier']");
-    expect(pills.length).toBe(5);
+    expect(container.querySelectorAll("[data-pill='growth-change']")).toHaveLength(5);
+    // The multiplier and per-quarter rate are gone.
+    expect(container.textContent).not.toMatch(/×|\/ Q/);
   });
 
-  it("renders the multiplier value formatted with × suffix", () => {
-    const { getAllByText } = render(
+  it("states the change since the first point when no year-earlier quarter exists", () => {
+    const { container } = render(
       <PerShareGrowthCard ticker="NVDA" section={section(FULL)} />,
     );
-    // 62 / 10 = 6.2 → "6.2×". Test fixture uses the same HIST for
-    // every series so multiple pills share the value; assert at
-    // least one matches.
-    expect(getAllByText("6.2×").length).toBeGreaterThan(0);
+    const pill = container.querySelector("[data-pill='growth-change']");
+    // 10 → 62: +520%, since Q1 '21.
+    expect(pill?.textContent).toContain("+520%");
+    expect(pill?.textContent).toContain("since Q1 '21");
   });
 
-  it("renders an em-dash in pills whose multiplier is null", () => {
+  it("labels year-over-year changes once below the pills", () => {
+    const yoy: ClaimHistoryPoint[] = [
+      { period: "2025-Q3", value: 2.8 },
+      { period: "2025-Q4", value: 2.7 },
+      { period: "2026-Q1", value: 2.85 },
+      { period: "2026-Q2", value: 3.05 },
+      { period: "2026-Q3", value: 3.1 },
+    ];
+    const { container } = render(
+      <PerShareGrowthCard
+        ticker="KO"
+        section={section([claim("Revenue per share", 3.1, yoy), claim("Gross profit per share", 1.9, yoy)])}
+      />,
+    );
+    const pill = container.querySelector("[data-pill='growth-change']");
+    expect(pill?.textContent).toContain("+10.7%");
+    expect(pill?.textContent).toContain("YoY");
+    expect(container.textContent).toContain("YoY: Q3 '26 vs Q3 '25");
+  });
+
+  it("renders an em-dash in pills without enough history", () => {
     const partial: Claim[] = [
       claim("Revenue per share", 62, HIST),
       claim("Gross profit per share", null, []),
@@ -138,12 +159,8 @@ describe("PerShareGrowthCard", () => {
     const { container } = render(
       <PerShareGrowthCard ticker="NVDA" section={section(partial)} />,
     );
-    const pills = container.querySelectorAll("[data-pill='growth-multiplier']");
-    // 4 of 5 pills should show the em-dash.
-    const emDashCount = Array.from(pills).filter((p) =>
-      p.textContent?.includes("—"),
-    ).length;
-    expect(emDashCount).toBe(4);
+    const pills = Array.from(container.querySelectorAll("[data-pill='growth-change']"));
+    expect(pills.filter((p) => p.textContent?.includes("—"))).toHaveLength(4);
   });
 
   // Phase 4.3.X / Bug 5: PerShareGrowthCard reads from the Quality
@@ -179,57 +196,6 @@ describe("PerShareGrowthCard", () => {
     expect(() =>
       render(<PerShareGrowthCard ticker="NVDA" section={section([])} />),
     ).not.toThrow();
-  });
-
-  // Phase 4.3.B.1 — CAGR annotations. Each multiplier pill grows a
-  // sub-line showing the per-quarter compound growth rate over the
-  // visible period. Adds vertical density so the card grows closer to
-  // its row partner (ValuationCard) without changing the layout.
-  // CAGR per period = multiplier^(1/n_periods) − 1, expressed as a %.
-
-  it("renders a CAGR sub-line under each multiplier pill", () => {
-    const { container } = render(
-      <PerShareGrowthCard ticker="NVDA" section={section(FULL)} />,
-    );
-    const pills = container.querySelectorAll("[data-pill='growth-multiplier']");
-    expect(pills.length).toBe(5);
-    // Every pill must have a CAGR annotation (data-attribute scoped).
-    for (const pill of pills) {
-      const cagr = pill.querySelector("[data-testid='growth-cagr']");
-      expect(cagr).not.toBeNull();
-    }
-  });
-
-  it("formats CAGR as a signed percent per quarter", () => {
-    const { container } = render(
-      <PerShareGrowthCard ticker="NVDA" section={section(FULL)} />,
-    );
-    // HIST has 5 points: 10 → 62 (multiplier 6.2×). CAGR over 4 periods
-    // = 6.2^(1/4) − 1 ≈ 0.578 ≈ 58% per quarter. Match the integer
-    // part — the formatter chooses 0 or 1 decimal. Allow either form.
-    const firstPillCagr = container
-      .querySelector("[data-pill='growth-multiplier'] [data-testid='growth-cagr']");
-    expect(firstPillCagr).not.toBeNull();
-    expect(firstPillCagr!.textContent).toMatch(/\+?(57|58|59)/);
-  });
-
-  it("renders an em-dash for CAGR when the multiplier is null", () => {
-    const partial: Claim[] = [
-      claim("Revenue per share", null, []),
-      claim("Gross profit per share", 43, HIST),
-      claim("Operating income per share", 24, HIST),
-      claim("Free cash flow per share", 21, HIST),
-      claim("Operating cash flow per share", 25.5, HIST),
-    ];
-    const { container } = render(
-      <PerShareGrowthCard ticker="NVDA" section={section(partial)} />,
-    );
-    const pills = container.querySelectorAll("[data-pill='growth-multiplier']");
-    const revPillCagr = pills[0].querySelector(
-      "[data-testid='growth-cagr']",
-    );
-    expect(revPillCagr).not.toBeNull();
-    expect(revPillCagr!.textContent).toContain("—");
   });
 
   // Phase 4.4.B — per-card narrative strip. Restores the bottom prose

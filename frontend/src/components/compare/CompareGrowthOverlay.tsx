@@ -42,7 +42,14 @@ function Panel({
     <div data-testid="compare-growth-panel">
       <div className="mb-1 font-mono text-[10px] uppercase tracking-kicker text-strata-muted">{title}</div>
       {series.length > 0 ? (
-        <MultiLine series={series} height={170} baseline={100} formatValue={indexValue} ariaLabel={`${title}, indexed`} />
+        <MultiLine
+          series={series}
+          height={170}
+          baseline={100}
+          formatValue={indexValue}
+          showLegend={false}
+          ariaLabel={`${title}, indexed`}
+        />
       ) : (
         <div className="flex h-[170px] items-center justify-center font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
           Not comparable (no positive starting value)

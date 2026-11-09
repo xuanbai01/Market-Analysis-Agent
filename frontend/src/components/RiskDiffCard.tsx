@@ -37,6 +37,11 @@ const KEPT_CLASS = "bg-strata-muted";
 /** A net change of ±1 must not fill a bar: scales never go below this. */
 const MIN_CATEGORY_SCALE = 5;
 
+/** The bar scale for a set of topic changes: the largest, at least 5. */
+export function riskCategoryScale(deltas: readonly RiskCategoryDelta[]): number {
+  return Math.max(MIN_CATEGORY_SCALE, ...deltas.map((d) => Math.abs(d.delta)));
+}
+
 const FRAME_TEXT: Record<RiskDiffFraming, string> = {
   expanded: "Disclosure expanded.",
   shrank: "Disclosure shrank.",
@@ -103,15 +108,16 @@ export function RiskDiffCard({ section }: Props) {
  * dropped to the left of the centre line, added to the right. The scale
  * never goes below ±5, so a ±1 change draws a short bar instead of a
  * full one (2026-11 chart audit: every KO bar filled its track, and the
- * labels rendered at about 7 px inside a shrunken SVG).
+ * labels rendered at about 7 px inside a shrunken SVG). ``scale`` lets
+ * the Compare page put both tickers on one scale.
  */
-function CategoryBars({ deltas }: { deltas: RiskCategoryDelta[] }) {
-  const scale = Math.max(MIN_CATEGORY_SCALE, ...deltas.map((d) => Math.abs(d.delta)));
+export function CategoryBars({ deltas, scale: sharedScale }: { deltas: RiskCategoryDelta[]; scale?: number }) {
+  const scale = sharedScale ?? riskCategoryScale(deltas);
   return (
     <div>
-      <div className="mb-2 flex items-baseline justify-between font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
         <span>Net paragraphs by topic</span>
-        <span className="normal-case tracking-normal">◀ dropped · added ▶</span>
+        <span className="whitespace-nowrap normal-case tracking-normal">◀ dropped · added ▶</span>
       </div>
       <ul data-testid="risk-category-bars" className="space-y-1.5" aria-label="Net change in risk paragraphs by topic">
         {deltas.map((d) => {
@@ -148,7 +154,7 @@ function CategoryBars({ deltas }: { deltas: RiskCategoryDelta[] }) {
  * character change used to be a fourth bar on its own scale; it now
  * sits in the summary line.
  */
-function AggregateBars({ bars }: { bars: RiskDiffBars }) {
+export function AggregateBars({ bars }: { bars: RiskDiffBars }) {
   const rows = [
     { label: "Added", value: bars.added, cls: ADDED_CLASS },
     { label: "Dropped", value: bars.removed, cls: DROPPED_CLASS },

@@ -137,6 +137,9 @@ export function extractPerSharePanels(section: Section): PerSharePanels {
   return { income: pick(INCOME_ORDER), cashFlow: pick(CASH_FLOW_ORDER) };
 }
 
+/** Beyond this (as a fraction, i.e. ±300%), a change shows as dollars. */
+const MAX_PERCENT_CHANGE = 3;
+
 /** "2026-Q3" → "2025-Q3"; null for other period shapes. */
 function yearEarlier(period: string): string | null {
   const m = /^(\d{4})-Q([1-4])$/.exec(period);
@@ -167,8 +170,11 @@ export function extractGrowthChanges(section: Section): Record<GrowthKey, Growth
     const basis = yearAgo
       ? `${shortPeriod(last.period)} vs ${shortPeriod(base.period)}`
       : `since ${shortPeriod(base.period)}`;
-    if (base.value > 0) {
-      return { kind: "pct", value: last.value / base.value - 1, basis, yearOverYear: !!yearAgo };
+    // A percent of a near-zero base reads as noise (RIVN's operating cash
+    // flow per share: "-2560%"), so past ±300% the dollar move is shown.
+    const pct = base.value > 0 ? last.value / base.value - 1 : null;
+    if (pct !== null && Math.abs(pct) <= MAX_PERCENT_CHANGE) {
+      return { kind: "pct", value: pct, basis, yearOverYear: !!yearAgo };
     }
     return { kind: "usd", value: last.value - base.value, basis, yearOverYear: !!yearAgo };
   }

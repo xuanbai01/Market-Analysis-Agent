@@ -42,8 +42,14 @@ export function CapitalReturnsCard({ ticker, section }: Props) {
           <p className="mt-0.5 font-mono text-2xl text-strata-hi tabular">{r.shareholderYield}</p>
           {split.length > 0 && <p className="font-mono text-[11px] text-strata-dim">{split.join(" + ")}</p>}
         </div>
+      ) : split.length > 0 ? (
+        <p className="font-mono text-sm text-strata-fg">{split.join(" · ")}</p>
       ) : (
-        split.length > 0 && <p className="font-mono text-sm text-strata-fg">{split.join(" · ")}</p>
+        r.paysDividend === false && (
+          <p data-testid="no-dividend" className="text-sm text-strata-fg">
+            No dividend
+          </p>
+        )
       )}
 
       {r.stats.length > 0 && (

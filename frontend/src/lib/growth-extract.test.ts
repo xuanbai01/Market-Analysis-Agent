@@ -141,9 +141,14 @@ describe("extractGrowthChanges", () => {
   });
 
   it("falls back to the change since the first point without a year-earlier quarter", () => {
-    const noYearAgo = REV_HIST.filter((p) => p.period !== "2021-Q4");
-    const out = extractGrowthChanges(section([claim("Revenue per share", 62, noYearAgo)]));
-    expect(out.rev?.value).toBeCloseTo(62 / 10 - 1, 6);
+    const noYearAgo: ClaimHistoryPoint[] = [
+      { period: "2021-Q1", value: 10 },
+      { period: "2021-Q3", value: 15 },
+      { period: "2022-Q2", value: 25 },
+    ];
+    const out = extractGrowthChanges(section([claim("Revenue per share", 25, noYearAgo)]));
+    expect(out.rev?.kind).toBe("pct");
+    expect(out.rev?.value).toBeCloseTo(1.5, 6);
     expect(out.rev?.basis).toBe("since Q1 '21");
     expect(out.rev?.yearOverYear).toBe(false);
   });
@@ -156,6 +161,16 @@ describe("extractGrowthChanges", () => {
     const out = extractGrowthChanges(section([claim("Free cash flow per share", -0.78, losses)]));
     expect(out.fcf?.kind).toBe("usd");
     expect(out.fcf?.value).toBeCloseTo(-0.43, 6);
+  });
+
+  it("states a dollar move when a tiny base would give a percent beyond ±300%", () => {
+    const tinyBase: ClaimHistoryPoint[] = [
+      { period: "2025-Q3", value: 0.01 },
+      { period: "2026-Q3", value: -0.25 },
+    ];
+    const out = extractGrowthChanges(section([claim("Operating cash flow per share", -0.25, tinyBase)]));
+    expect(out.ocf?.kind).toBe("usd");
+    expect(out.ocf?.value).toBeCloseTo(-0.26, 6);
   });
 
   it("returns null for a series with fewer than 2 points", () => {

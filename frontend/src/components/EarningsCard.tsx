@@ -165,7 +165,7 @@ export function EarningsCard({ section, distressed }: Props) {
       <div className="grid flex-1 grid-cols-1 gap-x-8 gap-y-4 lg:grid-cols-5">
         <div className="lg:col-span-3">
           {actualHistory.length > 0 ? (
-            <EpsChart actual={actualHistory} estimate={estimateHistory} />
+            <EpsChart actual={actualHistory} estimate={estimateHistory} height={240} />
           ) : (
             <div className="flex h-[120px] items-center justify-center font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
               No earnings history available

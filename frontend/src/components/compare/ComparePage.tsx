@@ -192,7 +192,8 @@ function ComparePageBody({ reportA, reportB, onSwap }: BodyProps) {
         <CompareMarginOverlay a={reportA} b={reportB} />
       </div>
 
-      <div className="mb-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[3fr_2fr]">
+      {/* Full-width rows: two growth panels and two risk columns need the room. */}
+      <div className="mb-6 flex flex-col gap-6">
         <CompareGrowthOverlay a={reportA} b={reportB} />
         <CompareRiskDiff a={reportA} b={reportB} />
       </div>

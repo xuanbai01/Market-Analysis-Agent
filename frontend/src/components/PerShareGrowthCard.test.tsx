@@ -123,8 +123,8 @@ describe("PerShareGrowthCard", () => {
       <PerShareGrowthCard ticker="NVDA" section={section(FULL)} />,
     );
     const pill = container.querySelector("[data-pill='growth-change']");
-    // 10 → 62: +520%, since Q1 '21.
-    expect(pill?.textContent).toContain("+520%");
+    // 10 → 62 is +520%, past the ±300% cap, so the pill shows the dollar move.
+    expect(pill?.textContent).toContain("+$52.00");
     expect(pill?.textContent).toContain("since Q1 '21");
   });
 

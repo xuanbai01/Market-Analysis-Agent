@@ -50,6 +50,12 @@ describe("EpsChart", () => {
     expect(container.querySelector("[data-result='beat']")).toBeNull();
   });
 
+  it("draws the zero line when every quarter is a loss and the axis tops out at $0", () => {
+    const allLosses = series(P.slice(0, 4), [-5.6, -1.2, -0.8, -0.63]);
+    const { container } = render(<EpsChart actual={allLosses} estimate={[]} />);
+    expect(container.querySelector("[data-testid='eps-zero-line']")).not.toBeNull();
+  });
+
   it("explains a quarter on hover", () => {
     const { container } = render(<EpsChart actual={ACTUAL} estimate={ESTIMATE} />);
     const target = container.querySelectorAll("[data-testid='eps-hit']")[2];

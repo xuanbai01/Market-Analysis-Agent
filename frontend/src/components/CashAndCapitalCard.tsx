@@ -49,7 +49,9 @@ function changeSinceFirst(first: number, last: number): string {
 }
 
 const SPARK_MIN_H = 26;
-const SPARK_MAX_H = 96;
+// Capped: the sparkline autoscales to its own min–max, so a tall one
+// turns a few cents into a cliff.
+const SPARK_MAX_H = 48;
 
 function MetricTile({ series }: { series: MultiLineSeries }) {
   // The tiles stretch with the row; the sparkline takes the spare
@@ -74,7 +76,7 @@ function MetricTile({ series }: { series: MultiLineSeries }) {
       <div className="font-mono text-[10px] text-strata-dim">
         {changeSinceFirst(first.value, last.value)} vs {first.period}
       </div>
-      <div ref={sparkRef} data-testid="cash-capital-spark" className="mt-1 min-h-[26px] flex-1 overflow-hidden">
+      <div ref={sparkRef} data-testid="cash-capital-spark" className="mt-1 flex min-h-[26px] flex-1 items-end overflow-hidden">
         <Sparkline
           history={sorted}
           width={spark ? spark.width : "100%"}

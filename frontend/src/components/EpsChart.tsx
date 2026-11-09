@@ -125,7 +125,7 @@ export function EpsChart({ actual, estimate, width = DEFAULT_WIDTH, height = DEF
               </text>
             </g>
           ))}
-          {yLo < 0 && yHi > 0 && (
+          {yLo <= 0 && yHi >= 0 && (
             <line data-testid="eps-zero-line" x1={padLeft} x2={W - PAD_RIGHT} y1={yOf(0)} y2={yOf(0)} stroke={ZERO_LINE} strokeWidth={1} />
           )}
 

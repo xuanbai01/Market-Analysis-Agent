@@ -6,23 +6,9 @@ Write failing tests first. Implement minimum code to pass. Refactor. This is not
 
 ## State today
 
-There is **no test suite yet**. The first task that touches a service (market repo, ingestion, technicals) should introduce `tests/` and write the failing test first.
-
-Suggested layout:
-
-```
-tests/
-├── conftest.py              # pytest-asyncio config, db fixtures, httpx AsyncClient
-├── test_health.py
-├── test_symbols.py
-├── test_news.py
-├── test_market.py
-└── services/
-    ├── test_market_repository.py
-    └── test_news_repository.py
-```
-
-Install deps (once): `uv add --dev pytest pytest-asyncio httpx` (or add to `[tool.uv]` dev-dependencies and `uv sync`).
+- **Backend:** 831 tests in `tests/` (flat, one `test_<module>.py` per service or router), plus `tests/evals/` — the factuality rubric's unit tests (run on every PR) and 5 live golden cases (AAPL, NVDA, RIVN, JPM, KO) that call the real LLM and run only with `-m live_llm`. `tests/conftest.py` provides the async client and the rollback-per-test DB session.
+- **Frontend:** 587 vitest + Testing Library tests under `frontend/src`, next to the component or helper they cover (`HeroCard.test.tsx`, `lib/format.test.ts`), on happy-dom.
+- **CI** runs both suites, lint and typecheck, and boots the production image (see "When to run tests").
 
 ## What to test (by layer)
 

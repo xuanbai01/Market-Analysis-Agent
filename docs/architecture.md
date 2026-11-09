@@ -25,9 +25,9 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + per-call LLM b
 | News | NewsAPI free tier + Yahoo per-ticker RSS | ✅ |
 | Filings | SEC EDGAR (with disk cache + polite-crawl) | ✅ |
 | Macro | FRED API | ✅ |
-| Hosting | Fly.io (auto-stop machines) + Neon (Postgres) + Vercel (frontend) | ✅ backend, 🟡 frontend deploy held |
+| Hosting | Fly.io (auto-stop machines) + Neon (Postgres) + Vercel (frontend) | ✅ API https://market-analysis-agent.fly.dev, dashboard https://market-analysis-agent-red.vercel.app |
 | Frontend stack | Vite + React 18 + Tailwind + TanStack Query + Zod | ✅ |
-| Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ 640 backend (+5 opt-in live-LLM golden cases) / 447 frontend |
+| Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ 831 backend (+5 opt-in live-LLM golden cases) / 587 frontend |
 | Lint | ruff (backend), ESLint (frontend) | ✅ |
 | CI | GitHub Actions (tests + Gitleaks + Claude PR review) + push-to-deploy | ✅ |
 
@@ -56,19 +56,21 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + per-call LLM b
 │   │   │   ├── AppShell.tsx     # Sidebar + main outlet + global ⌘K listener
 │   │   │   ├── SidebarShell.tsx # Search/Home/Compare + live Watchlist & Recent; collapses to a 64px rail
 │   │   │   ├── MarketStrip.tsx  # markets row above every page + fear & greed (est.) breakdown
-│   │   │   ├── LandingPage.tsx  # / route — search + Recent + Watchlist
-│   │   │   ├── SymbolDetailPage.tsx  # /symbol/:ticker (LAZY chunk, 14.5 KB gz)
+│   │   │   ├── LandingPage.tsx  # / route — search + past reports
+│   │   │   ├── SymbolDetailPage.tsx  # /symbol/:ticker (LAZY chunk, 20.3 KB gz)
 │   │   │   ├── compare/         # /compare/?a&b sub-tree (LAZY chunk, 6.4 KB gz)
+│   │   │   ├── lens/            # /lens, /lens/:id (LAZY chunks, 0.7 + 4.4 KB gz)
 │   │   │   ├── search/          # SearchModal (LAZY chunk, 1.3 KB gz)
-│   │   │   └── ...              # Strata cards: HeroCard, QualityCard, EarningsCard,
-│   │   │                        #   ValuationCard, PerShareGrowthCard, CashAndCapitalCard,
-│   │   │                        #   RiskDiffCard, MacroPanel, BusinessCard, NewsList,
-│   │   │                        #   ContextBand, HeaderPills, NarrativeStrip,
-│   │   │                        #   WatchlistButton + SVG primitives
+│   │   │   └── ...              # Strata cards: HeroCard, AnalystViewCard, QualityCard,
+│   │   │                        #   EarningsCard, ValuationCard, PerShareGrowthCard,
+│   │   │                        #   CashAndCapitalCard, CapitalReturnsCard, RiskDiffCard,
+│   │   │                        #   MacroPanel, BusinessCard, NewsList, ContextBand,
+│   │   │                        #   SectionNav, ReportFreshness, ErrorBoundary,
+│   │   │                        #   HeaderPills, NarrativeStrip, WatchlistButton + SVG primitives
 │   │   └── lib/                 # Zod schemas, API client, auth helpers, format helpers,
 │   │                            #   per-card extractors, watchlist + recent localStorage,
 │   │                            #   popular-tickers
-│   └── vercel.json              # Vercel deploy config (held until 4.8)
+│   └── vercel.json              # Vercel deploy config (SPA rewrites; builds on push to main)
 ├── tests/                       # pytest-asyncio; per-test SAVEPOINT rollback. Plus tests/evals/ (rubric + golden)
 ├── docs/                        # this directory (architecture, security, testing, commands, ADRs)
 ├── tasks/                       # active sprint (todo.md) + lessons learned
@@ -135,12 +137,12 @@ POST /v1/research/{symbol}
 
 ## Frontend routes (current)
 
-Lazy-loading is the binding bundle constraint — main is at 87.69 KB gz (12.31 KB headroom under the 100 KB budget). Every authenticated route except `/` is split into its own chunk so the entry stays lean.
+Lazy-loading is the binding bundle constraint — main is at 88.86 KB gz (11.14 KB headroom under the 100 KB budget). Every authenticated route except `/` is split into its own chunk so the entry stays lean.
 
 | Route | State | Chunk |
 |---|---|---|
 | `/login` | ✅ Pre-auth screen. | main |
-| `/` | ✅ LandingPage — search bar + Recent Tickers + Watchlist + Past Reports. | main |
+| `/` | ✅ LandingPage — search bar + Past Reports (Watchlist and Recent live in the sidebar on every page). | main |
 | `/symbol/:ticker` | ✅ The dashboard: sticky section nav, HeroCard, AnalystViewCard, full-width Quality / Earnings / Valuation / Per-share growth, an equal-height row of Cash & capital · Capital returns · Risk · Macro (only the cards with data), Business + News. | **lazy** (20.3 KB gz) |
 | `/compare?a=X&b=Y` | ✅ Phase 4.6.A — two-ticker side-by-side. Per-side distress chrome. | **lazy** (6.4 KB gz) |
 | `/lens`, `/lens/:id` | ✅ ADR 0007 layer 3 — cross-company lenses: the yearly distribution of a metric across a group (DistributionChart), dollars by company (CapexBars), a latest-year table and a cited AI read. | **lazy** (4.6 KB gz) |

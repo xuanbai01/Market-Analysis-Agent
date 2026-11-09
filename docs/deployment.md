@@ -1,6 +1,8 @@
 # Deployment
 
-Runbook for deploying the Market Analysis Agent to Fly.io with a Neon Postgres backend. Architectural rationale is in [ADR 0002](adr/0002-deployment.md); this document is purely operational.
+Runbook for deploying the Market Analysis Agent: the API on Fly.io with a Neon Postgres backend, the dashboard on Vercel. Architectural rationale is in [ADR 0002](adr/0002-deployment.md); this document is purely operational.
+
+**Production today:** API <https://market-analysis-agent.fly.dev> (Fly app `market-analysis-agent`, region IAD), dashboard <https://market-analysis-agent-red.vercel.app> (Vercel project `market-analysis-agent`; `market-analysis-agent.vercel.app` belongs to someone else), `LLM_PROVIDER=deepseek`. A push to `main` deploys both.
 
 ## First-time setup (~20 minutes, done once)
 
@@ -106,6 +108,34 @@ The output is a `FlyV1 fm2_...` string. Copy it, then on GitHub:
 - Value: the `FlyV1 fm2_...` string
 
 Now `git push origin main` runs [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml), which calls `flyctl deploy --remote-only`. The workflow skips when only docs / tasks / markdown changed (see the `paths-ignore` list).
+
+### 7. Production configuration: the dashboard, LLM and access (10 min)
+
+Plain settings live in `fly.toml` `[env]` (public, reviewed in PRs): `FRONTEND_ORIGIN` (the Vercel origin, exact match, no trailing slash — CORS allows only it), `LLM_PROVIDER`, `RESEARCH_RATE_LIMIT_PER_HOUR`.
+
+Secrets, besides `DATABASE_URL`:
+
+| Secret | Needed for |
+|---|---|
+| `BACKEND_SHARED_SECRET` | Gates research, prices, overview, lenses and every write. Also typed at the dashboard's sign-in. Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. |
+| `DEEPSEEK_API_KEY` (with `LLM_PROVIDER=deepseek`) or `ANTHROPIC_API_KEY` (with `anthropic`) | Report prose, the analyst view, lens reads, risk + news categorizers. Without it fresh reports return 503. |
+| `FRED_API_KEY`, `NEWSAPI_KEY` | Optional — Macro and NewsAPI headlines degrade without them. |
+
+Set secrets from stdin so the value never appears on a command line or in shell history (PowerShell's PSReadLine history file records typed commands, values included):
+
+```bash
+# one NAME=value per line; read from a file you then delete, or from .env
+grep -E '^(BACKEND_SHARED_SECRET|DEEPSEEK_API_KEY)=' .env | fly secrets import
+fly secrets list        # names + digests only; each should show "Deployed"
+```
+
+Vercel (once): import the repo, Root Directory `frontend`, framework Vite, environment variable `VITE_BACKEND_URL=https://<your-app>.fly.dev`. `frontend/vercel.json` rewrites every path to `index.html` so deep links like `/symbol/KO` load.
+
+Verify from outside:
+
+- `GET /v1/health` → 200.
+- `GET /v1/research` without a token → 401 "Missing Authorization header."; with a wrong token → 401 "Invalid token.".
+- Sign in on the dashboard and open a ticker. A first report takes ~20–90 s; a DeepSeek 401/402 in the error banner means the key is revoked or out of credit (DeepSeek's free `GET /models` checks a key without spending).
 
 ## Ongoing operations
 

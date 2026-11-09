@@ -84,3 +84,10 @@ with an id in that prompt (`[Q3]`), points cite ids, and code keeps only
 points whose ids resolve — so every argument links to its evidence on the
 dashboard. The factuality rubric covers the thesis text.
 
+Layer 3's first lens shipped the same day: `/lens/megacap-capex`, ten years
+of SEC XBRL annual filings for the seven megacaps. Facts (medians,
+quartiles, ends of the range, concentration, spend vs revenue growth,
+capex vs operating cash flow) are computed in `app/services/lens.py`; the
+narrative cites them by id under the same rules, and the same
+quoted-value check keeps only citations the text actually quotes.
+

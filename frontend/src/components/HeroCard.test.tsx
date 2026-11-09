@@ -32,6 +32,7 @@ function fakeReport(opts: Partial<ResearchReport> = {}): ResearchReport {
     generated_at: "2026-05-02T14:00:00+00:00",
     overall_confidence: "high",
     tool_calls_audit: [],
+    thesis: null,
     layout_signals: HEALTHY_LAYOUT_SIGNALS,
     sections: [
       {

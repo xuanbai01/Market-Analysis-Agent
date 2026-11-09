@@ -31,6 +31,7 @@ import { clearStoredToken } from "../lib/auth";
 import { pushRecent } from "../lib/recent";
 import { ROUTES } from "../lib/routes";
 import type { ResearchReport, Section } from "../lib/schemas";
+import { AnalystViewCard } from "./AnalystViewCard";
 import { CashAndCapitalCard } from "./CashAndCapitalCard";
 import { ContextBand } from "./ContextBand";
 import { EarningsCard } from "./EarningsCard";
@@ -127,19 +128,26 @@ export function SymbolDetailPage() {
             <HeroCard report={reportQuery.data} />
           </ErrorBoundary>
 
+          {/* Phase 5 — the analyst view: headline, bull / bear, what
+              changed, what to watch. Its evidence chips scroll to the
+              cards below via ``data-section-anchor``. */}
+          <ErrorBoundary label="Analyst view" resetKey={reportKey}>
+            <AnalystViewCard report={reportQuery.data} />
+          </ErrorBoundary>
+
           {/* Row 2 — Quality | Earnings.
               40/60 rhythm; ``items-start`` so cards align top with
               honest height gaps rather than stretch-fill. */}
           <div className="mb-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-5">
             {qualitySection && (
-              <div className="lg:col-span-2">
+              <div className="lg:col-span-2" data-section-anchor="Quality">
                 <ErrorBoundary label="Quality" resetKey={reportKey}>
                   <QualityCard ticker={upperTicker} section={qualitySection} />
                 </ErrorBoundary>
               </div>
             )}
             {earningsSection && (
-              <div className="lg:col-span-3">
+              <div className="lg:col-span-3" data-section-anchor="Earnings">
                 <ErrorBoundary label="Earnings" resetKey={reportKey}>
                   <EarningsCard
                     section={earningsSection}
@@ -183,11 +191,13 @@ export function SymbolDetailPage() {
               when both sections are absent so older cached reports
               without these fields stay clean. */}
           <ErrorBoundary label="Business & news" resetKey={reportKey}>
-            <ContextBand
-              ticker={upperTicker}
-              businessSection={businessSection}
-              newsSection={newsSection}
-            />
+            <div data-section-anchor="News">
+              <ContextBand
+                ticker={upperTicker}
+                businessSection={businessSection}
+                newsSection={newsSection}
+              />
+            </div>
           </ErrorBoundary>
 
           <ErrorBoundary label="Other sections" resetKey={reportKey}>
@@ -259,16 +269,20 @@ function DashboardRows(props: DashboardRowsProps) {
   ];
   if (riskSection && riskSection.claims.length > 0) {
     cashRiskMacroCards.push(
-      <ErrorBoundary key="risk" label="Risk factors" resetKey={reportKey}>
-        <RiskDiffCard section={riskSection} />
-      </ErrorBoundary>,
+      <div key="risk" data-section-anchor="Risk Factors">
+        <ErrorBoundary label="Risk factors" resetKey={reportKey}>
+          <RiskDiffCard section={riskSection} />
+        </ErrorBoundary>
+      </div>,
     );
   }
   if (macroSection && macroSection.claims.length > 0) {
     cashRiskMacroCards.push(
-      <ErrorBoundary key="macro" label="Macro" resetKey={reportKey}>
-        <MacroPanel section={macroSection} />
-      </ErrorBoundary>,
+      <div key="macro" data-section-anchor="Macro">
+        <ErrorBoundary label="Macro" resetKey={reportKey}>
+          <MacroPanel section={macroSection} />
+        </ErrorBoundary>
+      </div>,
     );
   }
   const cashRiskMacroCount = cashRiskMacroCards.length;
@@ -282,7 +296,7 @@ function DashboardRows(props: DashboardRowsProps) {
 
   const valuationGrowthRow = (
     <div className="mb-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-5">
-      <div className="lg:col-span-2">
+      <div className="lg:col-span-2" data-section-anchor="Valuation">
         <ErrorBoundary label="Valuation" resetKey={reportKey}>
           <ValuationCard report={report} />
         </ErrorBoundary>

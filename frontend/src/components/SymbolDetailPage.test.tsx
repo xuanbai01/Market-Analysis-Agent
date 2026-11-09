@@ -89,6 +89,16 @@ describe("SymbolDetailPage", () => {
     expect(screen.getAllByText("AAPL").length).toBeGreaterThan(0);
   });
 
+  // 2026-11 — cached reports can predate a fix; say how old they are
+  // and offer a fresh one.
+  it("shows the report's age with a Regenerate button", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(fakeReport("AAPL"));
+    renderAt("AAPL");
+    const freshness = await screen.findByTestId("report-freshness");
+    expect(freshness).toHaveTextContent(/Generated \d+ days ago/);
+    expect(screen.getByRole("button", { name: "Regenerate" })).toBeEnabled();
+  });
+
   it("renders the HeroCard once the report resolves (Phase 4.1)", async () => {
     vi.spyOn(api, "fetchResearchReport").mockResolvedValue(
       fakeReport("AAPL"),

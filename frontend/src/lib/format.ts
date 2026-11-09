@@ -144,3 +144,18 @@ export function formatTimestamp(iso: string): string {
   });
 }
 
+/**
+ * How long ago ``iso`` was, for "Generated 2 days ago": "just now",
+ * "12 min ago", "5 h ago", "1 day ago", "6 days ago".
+ */
+export function formatAge(iso: string, now: number = Date.now()): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
+  const minutes = Math.max(0, Math.floor((now - then) / 60_000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
+}

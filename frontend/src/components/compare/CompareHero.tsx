@@ -2,8 +2,9 @@
  * CompareHero — Phase 4.6.A.
  *
  * Two ticker cards side-by-side with a "VS" badge between them. Each
- * card shows ticker + sector chip + name + price + delta + market cap
- * + a mini area chart in the side's accent color.
+ * card shows ticker + sector chip + name + price + delta + market cap.
+ * The per-card mini price charts (each on its own unlabelled scale) were
+ * replaced by ComparePriceChart, which puts both on one % scale.
  *
  * The card itself is intentionally simpler than the symbol-detail
  * HeroCard: no range-pill sub-controls, no axes/tooltip, no featured-
@@ -21,7 +22,6 @@ import {
 import { formatClaimValue } from "../../lib/format";
 import type { LayoutSignals } from "../../lib/schemas";
 import { HeaderPills } from "../HeaderPills";
-import { LineChart } from "../LineChart";
 
 interface CompareHeroColumnProps {
   side: "a" | "b";
@@ -41,6 +41,12 @@ function formatPrice(n: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+/** "consumer_staples" → "Consumer staples". */
+function sectorLabel(sector: string): string {
+  const words = sector.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function CompareHeroColumn({ side, hero, signals }: CompareHeroColumnProps) {
@@ -64,12 +70,13 @@ function CompareHeroColumn({ side, hero, signals }: CompareHeroColumnProps) {
     >
       <div className="mb-2 flex items-start justify-between">
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-highlight">
+          <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-kicker text-strata-highlight">
+            <span aria-hidden="true" className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: accent }} />
             {hero.symbol}
             {hero.sector && (
               <>
-                <span className="mx-1 text-strata-line">·</span>
-                <span className="text-strata-dim">{hero.sector}</span>
+                <span className="text-strata-line">·</span>
+                <span className="text-strata-dim">{sectorLabel(hero.sector)}</span>
               </>
             )}
           </div>
@@ -106,22 +113,6 @@ function CompareHeroColumn({ side, hero, signals }: CompareHeroColumnProps) {
         </div>
       )}
 
-      <div className="mt-4">
-        {pricesQuery.data?.prices.length ? (
-          <LineChart
-            data={pricesQuery.data.prices}
-            strokeColor={accent}
-            fillColor={accent}
-            areaFill={true}
-            ariaLabel={`${hero.symbol} price chart, 60D`}
-            height={120}
-          />
-        ) : (
-          <div className="flex h-[120px] w-full items-center justify-center font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
-            {pricesQuery.isPending ? "Loading…" : "No price data"}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

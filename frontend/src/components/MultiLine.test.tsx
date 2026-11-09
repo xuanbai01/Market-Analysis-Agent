@@ -299,7 +299,8 @@ describe("MultiLine — axes, baseline, markers, labels, hover", () => {
     // happy-dom has no layout; the chart falls back to the latest period.
     fireEvent.mouseMove(svg, { clientX: 10, clientY: 10 });
     const tip = getByTestId("multi-line-tooltip");
-    expect(tip.textContent).toContain("2024-Q4");
+    // Same "Q4 '24" form as the axis (was the raw "2024-Q4").
+    expect(tip.textContent).toContain("Q4 '24");
     expect(tip.textContent).toContain("76%");
     expect(tip.textContent).toContain("48%");
     expect(getByTestId("multi-line-hover-guide")).not.toBeNull();

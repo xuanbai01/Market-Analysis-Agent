@@ -9,9 +9,10 @@
  *   - Reads ?a + ?b from the URL, uppercases both.
  *   - Missing either param → redirect to landing.
  *   - Fires both fetchResearchReport calls in parallel via useQueries.
- *   - Renders CompareHero (with per-side HeaderPills), CompareMetricRow
- *     for Valuation + Quality, CompareMarginOverlay, CompareGrowthOverlay,
- *     CompareRiskDiff, and CompareFooter.
+ *   - Renders CompareHero (with per-side HeaderPills), ComparePriceChart,
+ *     CompareMetricRow for Valuation + Quality, CompareMarginOverlay,
+ *     CompareGrowthOverlay and CompareRiskDiff. (The "What survives /
+ *     What's cut" footer was a development note and is gone.)
  *   - Swap button mutates the URL (?a, ?b exchange).
  *   - Add-ticker button is rendered but disabled — the search modal
  *     lands in 4.7.
@@ -38,11 +39,11 @@ import {
 } from "../../lib/schemas";
 import { ErrorBanner } from "../ErrorBanner";
 import { LoadingState } from "../LoadingState";
-import { CompareFooter } from "./CompareFooter";
 import { CompareGrowthOverlay } from "./CompareGrowthOverlay";
 import { CompareHero } from "./CompareHero";
 import { CompareMarginOverlay } from "./CompareMarginOverlay";
 import { CompareMetricRow } from "./CompareMetricRow";
+import { ComparePriceChart } from "./ComparePriceChart";
 import { CompareRiskDiff } from "./CompareRiskDiff";
 
 function readTickers(params: URLSearchParams): { a: string | null; b: string | null } {
@@ -178,6 +179,10 @@ function ComparePageBody({ reportA, reportB, onSwap }: BodyProps) {
         />
       </div>
 
+      <div className="mb-6">
+        <ComparePriceChart a={reportA.symbol} b={reportB.symbol} />
+      </div>
+
       <div className="mb-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
         <CompareMetricRow title="Valuation" cells={valuationCells} />
         <CompareMetricRow title="Quality" cells={qualityCells} />
@@ -192,7 +197,6 @@ function ComparePageBody({ reportA, reportB, onSwap }: BodyProps) {
         <CompareRiskDiff a={reportA} b={reportB} />
       </div>
 
-      <CompareFooter />
     </div>
   );
 }

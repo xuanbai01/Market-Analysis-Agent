@@ -19,12 +19,14 @@ interface Props {
 export function CompareMarginOverlay({ a, b }: Props) {
   const series = extractCompareMarginOverlay(a, b);
   if (series.length === 0) return null;
+  // The title used to say "20Q"; the history is ~5 quarters.
+  const quarters = Math.max(0, ...series.map((s) => s.history.length));
 
   return (
     <section className="rounded-md border border-strata-border bg-strata-surface p-5">
       <div className="mb-3 flex items-center justify-between">
         <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-quality">
-          Operating margin · 20Q · both tickers
+          Operating margin by quarter · {quarters}Q
         </div>
       </div>
       <MultiLine

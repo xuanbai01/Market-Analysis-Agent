@@ -61,6 +61,8 @@ interface Props {
   yDomain?: [number, number];
   /** Emphasized reference line, e.g. 100 for an indexed chart. */
   baseline?: number;
+  /** Formats period labels and the hover header; defaults to "Q3 '25". */
+  formatPeriod?: (period: string) => string;
   ariaLabel?: string;
 }
 
@@ -158,6 +160,7 @@ export function MultiLine({
   includeZero = false,
   yDomain,
   baseline,
+  formatPeriod = shortPeriod,
   ariaLabel,
 }: Props) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -239,7 +242,7 @@ export function MultiLine({
 
   const markAll = periods.length <= MAX_MARKED_PERIODS;
 
-  const xLabelPx = Math.max(...periods.map((p) => shortPeriod(p).length)) * CHAR_W;
+  const xLabelPx = Math.max(...periods.map((p) => formatPeriod(p).length)) * CHAR_W;
   const xTicks = pickXTicks(periods.length, xAt, xLabelPx);
 
   // ── Hover ──────────────────────────────────────────────────────────
@@ -326,7 +329,7 @@ export function MultiLine({
               fill={AXIS_LABEL_COLOR}
               style={LABEL_STYLE}
             >
-              {shortPeriod(periods[i])}
+              {formatPeriod(periods[i])}
             </text>
           ))}
 
@@ -400,7 +403,7 @@ export function MultiLine({
               transform: hoverLeftPct > 55 ? "translateX(calc(-100% - 8px))" : "translateX(8px)",
             }}
           >
-            <div className="mb-1 text-strata-dim">{hoverPeriod}</div>
+            <div className="mb-1 text-strata-dim">{formatPeriod(hoverPeriod)}</div>
             {hoverRows.map(({ s, now, change }) => (
               <div key={s.label} className="flex items-center gap-1.5 whitespace-nowrap">
                 <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-sm" style={{ backgroundColor: s.color }} />

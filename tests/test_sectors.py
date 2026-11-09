@@ -50,3 +50,21 @@ def test_industry_map_values_are_real_sector_ids() -> None:
     """Every industry-fallback target must be a key in SECTOR_PEERS."""
     for sector_id in INDUSTRY_TO_SECTOR.values():
         assert sector_id in SECTOR_PEERS, f"unknown sector id: {sector_id}"
+
+
+def test_branded_staples_and_staples_retailers_are_separate_peer_sets() -> None:
+    """ADR 0007: a 60%-margin brand measured against 10%-margin warehouses
+    made every valuation gap meaningless."""
+    from app.services.sectors import SECTOR_PEERS
+
+    assert resolve_sector("KO") == "consumer_staples"
+    assert resolve_sector("WMT") == "staples_retail"
+    assert not {"WMT", "COST"} & set(SECTOR_PEERS["consumer_staples"])
+    assert resolve_sector("XYZ", industry="Discount Stores") == "staples_retail"
+
+
+def test_every_sector_has_macro_series() -> None:
+    from app.services.macro import SECTOR_SERIES
+    from app.services.sectors import SECTOR_PEERS
+
+    assert set(SECTOR_PEERS) <= set(SECTOR_SERIES)

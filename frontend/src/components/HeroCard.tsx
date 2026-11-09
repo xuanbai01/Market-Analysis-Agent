@@ -305,7 +305,7 @@ export function HeroCard({ report }: Props) {
                 <FeaturedStat
                   label="ROIC TTM"
                   value={formatClaimValue(hero.roicTTM, "fraction")}
-                  sub={hero.roicTTM > 0.4 ? "top decile" : null}
+                  sub={null}
                   accentClass="text-strata-quality"
                 />
               )}

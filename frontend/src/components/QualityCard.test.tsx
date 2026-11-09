@@ -4,18 +4,18 @@
  * Replaces ReportRenderer's Quality section. Layout:
  *
  *   header (kicker + ticker)
- *   3 MetricRings: ROE / ROIC / FCF margin
+ *   3 headline stat tiles: ROE / ROIC / FCF margin
  *   MultiLine: gross / operating / FCF margins
  *   claims table — 6 default + "Show all 16" disclosure
  *
  * Pinned behaviors:
  *
- * 1. Renders 3 MetricRing primitives.
+ * 1. Renders 3 headline stat tiles, each naming its basis.
  * 2. Renders a MultiLine when at least 2 margin series have history.
  * 3. Renders 6 claim rows by default (the 6 default-display set).
  * 4. Clicking "Show all" expands to the full claim list.
  * 5. Renders the section's summary prose when present.
- * 6. Falls back gracefully when ring values are absent.
+ * 6. Falls back gracefully when headline values are absent.
  */
 import { describe, expect, it } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
@@ -77,14 +77,19 @@ const FULL_CLAIMS: Claim[] = [
 ];
 
 describe("QualityCard", () => {
-  it("renders 3 MetricRing primitives (ROE / ROIC / FCF margin)", () => {
+  it("renders 3 headline stat tiles (ROE / ROIC / FCF margin) with their basis", () => {
     const { container } = render(
       <QualityCard ticker="NVDA" section={section(FULL_CLAIMS)} />,
     );
-    const rings = container.querySelectorAll(
-      "[data-testid='metric-ring']",
-    );
-    expect(rings.length).toBe(3);
+    const stats = Array.from(container.querySelectorAll("[data-testid='quality-stat']"));
+    expect(stats).toHaveLength(3);
+    expect(stats[0].textContent).toContain("ROE");
+    expect(stats[0].textContent).toContain("32.00%");
+    expect(stats[0].textContent).toContain("trailing 12 months");
+    expect(stats[2].textContent).toContain("latest quarter");
+    // No meter graphic and no unsourced ranking.
+    expect(container.querySelector("[data-testid='metric-ring']")).toBeNull();
+    expect(container.textContent).not.toMatch(/decile/i);
   });
 
   it("renders a MultiLine when margin series have history", () => {
@@ -160,7 +165,7 @@ describe("QualityCard", () => {
     expect(getByText("Margins are expanding across the stack.")).not.toBeNull();
   });
 
-  it("renders without throwing when ring values are absent", () => {
+  it("renders without throwing when headline values are absent", () => {
     expect(() =>
       render(<QualityCard ticker="NVDA" section={section([])} />),
     ).not.toThrow();
@@ -172,29 +177,18 @@ describe("QualityCard", () => {
     expect(queryByRole("button", { name: /show all/i })).toBeNull();
   });
 
-  // Phase 4.3.X / cosmetic backlog from PR #50: design calls for a
-  // "MARGINS · 5Y" sub-kicker above the MultiLine with inline values
-  // matching the legend chips ("● GM 74.0 · ● OM 48.0 · ● FCF 42.0").
-  it("renders a MARGINS sub-kicker with inline GM/OM/FCF values", () => {
+  // 2026-11 chart audit: the sub-kicker used to repeat snapshot values,
+  // but gross margin's snapshot is trailing-12-month while the line ends
+  // at the latest quarter — two "GM" numbers on one card. It now only
+  // says what the chart plots; the end labels carry the values.
+  it("labels the margins chart as quarterly without repeating values", () => {
     const { container } = render(
       <QualityCard ticker="NVDA" section={section(FULL_CLAIMS)} />,
     );
-    const subkicker = container.querySelector(
-      "[data-testid='quality-margins-subkicker']",
-    );
-    expect(subkicker).not.toBeNull();
-    const text = subkicker!.textContent ?? "";
-    // Sub-kicker must label itself as MARGINS.
-    expect(text.toUpperCase()).toMatch(/MARGINS/);
-    // And carry the snapshot values from the matching FULL_CLAIMS:
-    //   Gross margin = 0.74         → "74"
-    //   Operating margin = 0.48     → "48"
-    //   Free cash flow margin = 0.42 → "42"
-    // Display goes through formatClaimValue so the rendered form is
-    // "74.00%" etc.; assert the integer parts appear.
-    expect(text).toMatch(/74/);
-    expect(text).toMatch(/48/);
-    expect(text).toMatch(/42/);
+    const text =
+      container.querySelector("[data-testid='quality-margins-subkicker']")?.textContent ?? "";
+    expect(text).toMatch(/margins by quarter/i);
+    expect(text).not.toMatch(/74/);
   });
 
   // Phase 4.4.B — per-card narrative strip at bottom of card body.
@@ -220,61 +214,30 @@ describe("QualityCard", () => {
     expect(queryByTestId("card-narrative")).toBeNull();
   });
 
-  // ── Phase 4.5.B — distressed-mode ring color flip ────────────────
+  // ── Phase 4.5.B — negative headline values read as losses ─────────
 
-  it("colors the ROE ring red when ROE is negative", () => {
+  it("marks each negative headline value as a loss", () => {
     const distressed: Claim[] = [
       claim("Return on equity", -0.62),
-      claim("Return on invested capital (TTM)", 0.05),
-      claim("Free cash flow margin", 0.10, HIST),
-    ];
-    const { container } = render(
-      <QualityCard ticker="RIVN" section={section(distressed)} />,
-    );
-    // The ROE ring is the first MetricRing in the trio. Its accent
-    // class flips to ``text-strata-neg`` so the eyebrow + arc both
-    // render in the loss color.
-    const rings = container.querySelectorAll("[data-testid='metric-ring']");
-    const roeWrapper = rings[0]?.parentElement;
-    expect(roeWrapper?.innerHTML ?? "").toMatch(/text-strata-neg/);
-  });
-
-  it("colors the ROIC ring red when ROIC TTM is negative", () => {
-    const distressed: Claim[] = [
-      claim("Return on equity", 0.05),
-      claim("Return on invested capital (TTM)", -0.41),
-      claim("Free cash flow margin", 0.10, HIST),
-    ];
-    const { container } = render(
-      <QualityCard ticker="RIVN" section={section(distressed)} />,
-    );
-    const rings = container.querySelectorAll("[data-testid='metric-ring']");
-    const roicWrapper = rings[1]?.parentElement;
-    expect(roicWrapper?.innerHTML ?? "").toMatch(/text-strata-neg/);
-  });
-
-  it("colors the FCF margin ring red when FCF margin is negative", () => {
-    const distressed: Claim[] = [
-      claim("Return on equity", 0.05),
       claim("Return on invested capital (TTM)", 0.05),
       claim("Free cash flow margin", -0.52, HIST),
     ];
     const { container } = render(
       <QualityCard ticker="RIVN" section={section(distressed)} />,
     );
-    const rings = container.querySelectorAll("[data-testid='metric-ring']");
-    const fcfWrapper = rings[2]?.parentElement;
-    expect(fcfWrapper?.innerHTML ?? "").toMatch(/text-strata-neg/);
+    const flags = Array.from(container.querySelectorAll("[data-testid='quality-stat']")).map((s) =>
+      s.getAttribute("data-negative"),
+    );
+    expect(flags).toEqual(["true", "false", "true"]);
+    const roe = container.querySelectorAll("[data-testid='quality-stat']")[0];
+    expect(roe.innerHTML).toMatch(/text-strata-neg/);
   });
 
-  it("keeps default ring colors when all values are non-negative", () => {
+  it("keeps default colors when all values are non-negative", () => {
     const { container } = render(
       <QualityCard ticker="NVDA" section={section(FULL_CLAIMS)} />,
     );
-    // FULL_CLAIMS has positive ROE/ROIC/FCF margin. None of the rings
-    // should pick up the distressed accent. Assertion via "the rings
-    // section's HTML doesn't contain the neg accent class anywhere".
-    const ringSection = container.querySelector(".grid.grid-cols-3");
-    expect(ringSection?.innerHTML ?? "").not.toMatch(/text-strata-neg/);
+    const stats = container.querySelector("[data-testid='quality-headline-stats']");
+    expect(stats?.innerHTML ?? "").not.toMatch(/text-strata-neg/);
   });
 });

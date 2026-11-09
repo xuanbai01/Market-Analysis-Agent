@@ -19,6 +19,7 @@ import {
   extractRiskDiffSummary,
   type RiskCategoryDelta,
   type RiskDiffBars,
+  type RiskDiffFraming,
 } from "../lib/risk-extract";
 import type { Section } from "../lib/schemas";
 import { NarrativeStrip } from "./NarrativeStrip";
@@ -27,31 +28,21 @@ interface Props {
   section: Section;
 }
 
-const COLOR_RISK = "#e57c6e";
-const COLOR_QUAL = "#7ad0a6";
-const COLOR_DIM = "#5a6473";
-const COLOR_HI = "#f5f7fb";
+// Added risk text in the risk accent, dropped in green: the two poles of
+// one diverging scale. Kept paragraphs are neutral context.
+const ADDED_CLASS = "bg-strata-neg";
+const DROPPED_CLASS = "bg-strata-pos";
+const KEPT_CLASS = "bg-strata-muted";
 
-interface BarRow {
-  label: string;
-  value: number;
-  color: string;
-}
+/** A net change of ±1 must not fill a bar: scales never go below this. */
+const MIN_CATEGORY_SCALE = 5;
 
-function buildRows(bars: RiskDiffBars): BarRow[] {
-  return [
-    { label: "Added", value: bars.added, color: COLOR_RISK },
-    { label: "Removed", value: bars.removed, color: COLOR_QUAL },
-    { label: "Kept", value: bars.kept, color: COLOR_DIM },
-    { label: "Char delta", value: bars.charDelta, color: COLOR_HI },
-  ];
-}
-
-function frameWord(framing: "expanded" | "shrank" | "stable"): string {
-  if (framing === "expanded") return "Disclosure expanded.";
-  if (framing === "shrank") return "Disclosure shrank.";
-  return "Disclosure stable.";
-}
+const FRAME_TEXT: Record<RiskDiffFraming, string> = {
+  expanded: "Disclosure expanded.",
+  shrank: "Disclosure shrank.",
+  reworked: "About the same length, reworked.",
+  stable: "Disclosure stable.",
+};
 
 function formatNetDelta(n: number): string {
   if (n > 0) return `+${n} ¶`;
@@ -59,115 +50,35 @@ function formatNetDelta(n: number): string {
   return "0 ¶";
 }
 
-const W = 360;
-const H = 132;
-const ROW_GAP = 8;
-const LABEL_W = 80;
-const VALUE_W = 56;
-const BAR_X = LABEL_W;
-const BAR_W = W - LABEL_W - VALUE_W;
-const ROW_H = (H - ROW_GAP * 3) / 4;
+function formatChars(n: number): string {
+  const abs = Math.abs(n).toLocaleString("en-US");
+  return `${n > 0 ? "+" : n < 0 ? "−" : ""}${abs}`;
+}
 
 export function RiskDiffCard({ section }: Props) {
   const bars = extractRiskDiffBars(section);
   const summary = extractRiskDiffSummary(section);
-  // Phase 4.3.B — when the Haiku categorizer has stamped per-category
-  // deltas onto the section, prefer that view over the 4-bar
-  // aggregate. ``null`` here means pre-4.3.B cached row OR a stable
-  // disclosure (no paragraphs to categorize), so we fall back below.
+  // Phase 4.3.B — when the categorizer has stamped per-category deltas
+  // onto the section, prefer that view over the aggregate bars.
   const categoryDeltas = extractRiskCategoryDeltas(section);
 
-  // Phase 4.5.C — return null when the diff isn't computable so
-  // ``SymbolDetailPage``'s row 4 can collapse cleanly to populated
-  // cards. Used to render a placeholder card with "Risk diff
-  // unavailable" copy; that wasted a column slot on cached reports
-  // without 10-K data.
+  // Phase 4.5.C — null when the diff isn't computable, so the dashboard
+  // row collapses to the cards that have data.
   if (!bars || !summary) {
     return null;
   }
 
-  const rows = buildRows(bars);
-  // Normalize bar widths to the absolute max value across rows so the
-  // visual scale is consistent. Char delta dwarfs paragraph counts;
-  // we keep them on separate scales by computing two scales: paragraphs
-  // scale on rows[0..2], char delta solo. Simpler: |max|-relative width
-  // per row, all on a 0..1 fraction of BAR_W with abs value mapping.
-  const paraMax = Math.max(bars.added, bars.removed, bars.kept) || 1;
-  const charScale = Math.abs(bars.charDelta) || 1;
-
-  function barLength(row: BarRow): number {
-    if (row.label === "Char delta") {
-      return (Math.abs(row.value) / charScale) * BAR_W;
-    }
-    return (Math.abs(row.value) / paraMax) * BAR_W;
-  }
-
   return (
     <section className="flex h-full flex-col rounded-md border border-strata-border bg-strata-surface p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-risk">
-          10-K risk diff · vs prior
-        </div>
+      <div className="mb-3 font-mono text-[10px] uppercase tracking-kicker text-strata-risk">
+        10-K risk factors · vs prior year
       </div>
 
-      {categoryDeltas ? (
-        <CategoryBars deltas={categoryDeltas} />
-      ) : (
-        <svg
-          data-testid="risk-diff-bars"
-          // Phase 4.3.B.1 — responsive width; the value labels no longer
-          // overflow the narrow row-4 column when the chart is rendered
-          // at a card width < 360 px.
-          width="100%"
-          height={H}
-          viewBox={`0 0 ${W} ${H}`}
-          role="img"
-          aria-label="Risk diff bars"
-          className="block"
-        >
-          {rows.map((row, i) => {
-            const y = i * (ROW_H + ROW_GAP);
-            const barLen = Math.max(2, barLength(row));
-            return (
-              <g key={row.label} data-row="risk-diff-bar">
-                <text
-                  x={0}
-                  y={y + ROW_H / 2 + 4}
-                  fill={COLOR_DIM}
-                  style={{ fontSize: 10, fontFamily: "var(--font-mono, monospace)" }}
-                >
-                  {row.label}
-                </text>
-                <rect
-                  x={BAR_X}
-                  y={y + ROW_H / 4}
-                  width={barLen}
-                  height={ROW_H / 2}
-                  fill={row.color}
-                  rx={2}
-                />
-                <text
-                  x={W}
-                  y={y + ROW_H / 2 + 4}
-                  fill={COLOR_HI}
-                  textAnchor="end"
-                  style={{
-                    fontSize: 11,
-                    fontFamily: "var(--font-mono, monospace)",
-                    fontWeight: 500,
-                  }}
-                >
-                  {row.value > 0 && row.label === "Char delta" ? `+${row.value}` : row.value}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-      )}
+      {categoryDeltas ? <CategoryBars deltas={categoryDeltas} /> : <AggregateBars bars={bars} />}
 
-      <div className="mt-3 rounded-md bg-strata-raise px-3 py-2 text-xs leading-relaxed text-strata-dim">
-        <span className="text-strata-fg">{frameWord(summary.framing)}</span>{" "}
-        Net{" "}
+      <div className="mt-4 rounded-md bg-strata-raise px-3 py-2 text-xs leading-relaxed text-strata-dim">
+        <span className="text-strata-fg">{FRAME_TEXT[summary.framing]}</span>{" "}
+        {bars.added} added · {bars.removed} dropped · {bars.kept} kept (net{" "}
         <span
           className={
             summary.netDelta > 0
@@ -178,8 +89,8 @@ export function RiskDiffCard({ section }: Props) {
           }
         >
           {formatNetDelta(summary.netDelta)}
-        </span>{" "}
-        ({bars.added} added · {bars.removed} dropped · {bars.kept} kept).
+        </span>
+        ; {formatChars(bars.charDelta)} characters).
       </div>
 
       <NarrativeStrip text={section.card_narrative} />
@@ -187,75 +98,78 @@ export function RiskDiffCard({ section }: Props) {
   );
 }
 
-// Phase 4.3.B — per-category bar chart. One row per non-zero
-// RiskCategory bucket; positive deltas (more added than removed) draw
-// in the risk accent, negative deltas (more removed) draw in the
-// quality accent. Bars scale to the absolute max delta in the set.
-const CAT_COLOR_POS = COLOR_RISK;
-const CAT_COLOR_NEG = COLOR_QUAL;
-
+/**
+ * Net paragraphs per topic (added − dropped) on one diverging scale:
+ * dropped to the left of the centre line, added to the right. The scale
+ * never goes below ±5, so a ±1 change draws a short bar instead of a
+ * full one (2026-11 chart audit: every KO bar filled its track, and the
+ * labels rendered at about 7 px inside a shrunken SVG).
+ */
 function CategoryBars({ deltas }: { deltas: RiskCategoryDelta[] }) {
-  const maxAbs = Math.max(1, ...deltas.map((d) => Math.abs(d.delta)));
-  const rowH = 18;
-  const rowGap = 4;
-  const labelW = 140;
-  const valueW = 36;
-  const width = 360;
-  const barW = width - labelW - valueW;
-  const height = deltas.length * rowH + Math.max(0, deltas.length - 1) * rowGap;
-
+  const scale = Math.max(MIN_CATEGORY_SCALE, ...deltas.map((d) => Math.abs(d.delta)));
   return (
-    <svg
-      data-testid="risk-category-bars"
-      // Phase 4.3.B.2 — responsive width matching the aggregate bars
-      // chart, so per-category labels don't overflow the narrow row-4
-      // column on narrow viewports.
-      width="100%"
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      role="img"
-      aria-label="Risk diff by category"
-      className="block"
-    >
-      {deltas.map((d, i) => {
-        const y = i * (rowH + rowGap);
-        const barLen = Math.max(2, (Math.abs(d.delta) / maxAbs) * barW);
-        const color = d.delta >= 0 ? CAT_COLOR_POS : CAT_COLOR_NEG;
-        return (
-          <g key={d.category} data-row="risk-category-bar">
-            <text
-              x={0}
-              y={y + rowH / 2 + 4}
-              fill={COLOR_DIM}
-              style={{ fontSize: 10, fontFamily: "var(--font-mono, monospace)" }}
+    <div>
+      <div className="mb-2 flex items-baseline justify-between font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
+        <span>Net paragraphs by topic</span>
+        <span className="normal-case tracking-normal">◀ dropped · added ▶</span>
+      </div>
+      <ul data-testid="risk-category-bars" className="space-y-1.5" aria-label="Net change in risk paragraphs by topic">
+        {deltas.map((d) => {
+          const pct = `${(Math.abs(d.delta) / scale) * 100}%`;
+          return (
+            <li
+              key={d.category}
+              data-row="risk-category-bar"
+              className="grid grid-cols-[minmax(0,8.5rem)_1fr_1fr_2.25rem] items-center text-xs"
             >
-              {d.label}
-            </text>
-            <rect
-              x={labelW}
-              y={y + rowH / 4}
-              width={barLen}
-              height={rowH / 2}
-              fill={color}
-              rx={2}
-            />
-            <text
-              x={width}
-              y={y + rowH / 2 + 4}
-              fill={COLOR_HI}
-              textAnchor="end"
-              style={{
-                fontSize: 11,
-                fontFamily: "var(--font-mono, monospace)",
-                fontWeight: 500,
-              }}
-            >
-              {d.delta > 0 ? `+${d.delta}` : `${d.delta}`}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+              <span className="truncate pr-2 text-strata-fg" title={d.label}>
+                {d.label}
+              </span>
+              <span className="flex h-2.5 justify-end">
+                {d.delta < 0 && <span className={`h-full rounded-l ${DROPPED_CLASS}`} style={{ width: pct }} />}
+              </span>
+              <span className="flex h-2.5 border-l border-strata-muted">
+                {d.delta > 0 && <span className={`h-full rounded-r ${ADDED_CLASS}`} style={{ width: pct }} />}
+              </span>
+              <span className="text-right font-mono tabular text-strata-hi">
+                {d.delta > 0 ? `+${d.delta}` : `${d.delta}`}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
+/**
+ * Fallback without per-topic data: added, dropped and kept paragraphs on
+ * one shared scale, so churn reads against the size of the section. The
+ * character change used to be a fourth bar on its own scale; it now
+ * sits in the summary line.
+ */
+function AggregateBars({ bars }: { bars: RiskDiffBars }) {
+  const rows = [
+    { label: "Added", value: bars.added, cls: ADDED_CLASS },
+    { label: "Dropped", value: bars.removed, cls: DROPPED_CLASS },
+    { label: "Kept", value: bars.kept, cls: KEPT_CLASS },
+  ];
+  const max = Math.max(1, ...rows.map((r) => r.value));
+  return (
+    <ul data-testid="risk-diff-bars" className="space-y-1.5" aria-label="Risk paragraphs added, dropped and kept">
+      {rows.map((r) => (
+        <li
+          key={r.label}
+          data-row="risk-diff-bar"
+          className="grid grid-cols-[4.5rem_1fr_3rem] items-center text-xs"
+        >
+          <span className="text-strata-fg">{r.label}</span>
+          <span className="flex h-2.5">
+            <span className={`h-full rounded-r ${r.cls}`} style={{ width: `${Math.max(1, (r.value / max) * 100)}%` }} />
+          </span>
+          <span className="text-right font-mono tabular text-strata-hi">{r.value}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}

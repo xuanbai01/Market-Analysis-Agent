@@ -122,17 +122,45 @@ describe("extractRiskDiffSummary", () => {
     expect(out?.netDelta).toBe(-4);
   });
 
-  it("returns 'stable' when net delta == 0", () => {
+  it("returns 'stable' when little changed", () => {
     const out = extractRiskDiffSummary(
       section([
-        claim("Newly added risk paragraphs vs prior 10-K", 3),
-        claim("Risk paragraphs dropped vs prior 10-K", 3),
+        claim("Newly added risk paragraphs vs prior 10-K", 1),
+        claim("Risk paragraphs dropped vs prior 10-K", 1),
         claim("Risk paragraphs kept (carryover)", 50),
         claim("Item 1A char delta vs prior 10-K", 100),
       ]),
     );
     expect(out?.framing).toBe("stable");
     expect(out?.netDelta).toBe(0);
+  });
+
+  // 2026-11 chart audit: KO's 10-K added 18 paragraphs and dropped 15 of
+  // 259 — net +3, about 1%. "Expanded" overstated it (and contradicted
+  // the LLM's "churned, not expanded" on the same card).
+  it("returns 'reworked' when the length barely moved but many paragraphs changed", () => {
+    const out = extractRiskDiffSummary(
+      section([
+        claim("Newly added risk paragraphs vs prior 10-K", 18),
+        claim("Risk paragraphs dropped vs prior 10-K", 15),
+        claim("Risk paragraphs kept (carryover)", 244),
+        claim("Item 1A char delta vs prior 10-K", 1993),
+      ]),
+    );
+    expect(out?.framing).toBe("reworked");
+    expect(out?.netDelta).toBe(3);
+  });
+
+  it("calls a small net change 'stable' rather than 'expanded'", () => {
+    const out = extractRiskDiffSummary(
+      section([
+        claim("Newly added risk paragraphs vs prior 10-K", 3),
+        claim("Risk paragraphs dropped vs prior 10-K", 1),
+        claim("Risk paragraphs kept (carryover)", 200),
+        claim("Item 1A char delta vs prior 10-K", 500),
+      ]),
+    );
+    expect(out?.framing).toBe("stable");
   });
 
   it("returns null when underlying bars are unavailable", () => {

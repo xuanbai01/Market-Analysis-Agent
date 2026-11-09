@@ -71,7 +71,16 @@ export interface RiskDiffBars {
   charDelta: number;
 }
 
-export type RiskDiffFraming = "expanded" | "shrank" | "stable";
+export type RiskDiffFraming = "expanded" | "shrank" | "reworked" | "stable";
+
+/** Net change, as a share of the prior 10-K's paragraphs, that counts
+ *  as the disclosure growing or shrinking. Below it the length is
+ *  "about the same" — KO's +3 of 259 used to read "Disclosure
+ *  expanded" beside an LLM line saying "churned, not expanded". */
+export const RISK_NET_CHANGE_THRESHOLD = 0.05;
+/** Added + dropped, as a share of the prior paragraphs, that makes a
+ *  same-length disclosure "reworked" rather than "stable". */
+export const RISK_CHURN_THRESHOLD = 0.1;
 
 export interface RiskDiffSummary {
   framing: RiskDiffFraming;
@@ -153,8 +162,10 @@ export function extractRiskCategoryDeltas(
 }
 
 /**
- * Derives the prose summary's framing word from the bars. Returns null
- * when bars themselves are unavailable.
+ * Derives the summary's framing word from the bars, sized against the
+ * prior 10-K (kept + dropped paragraphs): a net change of 5% or more is
+ * "expanded" / "shrank"; otherwise 10%+ churn is "reworked", and less
+ * is "stable". Returns null when the bars are unavailable.
  */
 export function extractRiskDiffSummary(
   section: Section,
@@ -162,9 +173,14 @@ export function extractRiskDiffSummary(
   const bars = extractRiskDiffBars(section);
   if (!bars) return null;
   const netDelta = bars.added - bars.removed;
+  const prior = Math.max(1, bars.kept + bars.removed);
   let framing: RiskDiffFraming;
-  if (netDelta > 0) framing = "expanded";
-  else if (netDelta < 0) framing = "shrank";
-  else framing = "stable";
+  if (Math.abs(netDelta) / prior >= RISK_NET_CHANGE_THRESHOLD) {
+    framing = netDelta > 0 ? "expanded" : "shrank";
+  } else if ((bars.added + bars.removed) / prior >= RISK_CHURN_THRESHOLD) {
+    framing = "reworked";
+  } else {
+    framing = "stable";
+  }
   return { framing, netDelta };
 }

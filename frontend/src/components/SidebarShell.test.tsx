@@ -1,194 +1,191 @@
 /**
- * SidebarShell tests (Phase 4.0).
+ * SidebarShell tests — the 2026-11 rewrite.
  *
- * The sidebar is a 72px-wide left rail visible on every authenticated
- * route. It carries the brand logo and 5 nav icons (Search, Compare,
- * Watch, Recent, Export). The "active" state is passed in via prop —
- * SidebarShell stays router-agnostic so it's testable in isolation.
- *
- * Behavior pinned here:
- *
- * 1. Renders with the documented width (72px) so layout is predictable.
- * 2. Renders all five nav icons + the logo.
- * 3. Active prop highlights the matching nav button.
- * 4. Disabled nav buttons (Compare/Watch/Recent/Export — those land in
- *    later phases) are visually present but not clickable.
- * 5. Search button fires its onClick handler.
+ * Pinned:
+ *   1. Navigation is links with real hrefs; actions are buttons.
+ *   2. Active state follows the URL (Home, Compare, the ticker row).
+ *   3. Compare names the pair it opens.
+ *   4. Watchlist / Recent list the tickers, with empty states, and the
+ *      row actions (unstar, clear) call their handlers.
+ *   5. Collapsed: labels and empty sections go, accessible names stay.
+ *   6. No dead controls (the old always-disabled Export is gone).
  */
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
-import { SidebarShell } from "./SidebarShell";
+import { SidebarShell, type SidebarShellProps } from "./SidebarShell";
 
-describe("SidebarShell", () => {
-  it("renders the brand logo", () => {
-    render(<SidebarShell active="search" onSearchClick={() => {}} />);
-    expect(screen.getByLabelText(/logo|brand/i)).toBeInTheDocument();
+function renderSidebar(overrides: Partial<SidebarShellProps> = {}) {
+  const props: SidebarShellProps = {
+    collapsed: false,
+    onToggleCollapsed: vi.fn(),
+    pathname: "/",
+    currentTicker: null,
+    compare: { a: "AAPL", b: "MSFT" },
+    compareHref: "/compare?a=AAPL&b=MSFT",
+    watchlist: [],
+    recent: [],
+    searchShortcut: "Ctrl K",
+    onSearch: vi.fn(),
+    onUnwatch: vi.fn(),
+    onClearRecent: vi.fn(),
+    onSignOut: vi.fn(),
+    ...overrides,
+  };
+  const utils = render(
+    <MemoryRouter>
+      <SidebarShell {...props} />
+    </MemoryRouter>,
+  );
+  return { ...utils, props };
+}
+
+describe("SidebarShell — navigation", () => {
+  it("links the brand mark and Home to the landing page", () => {
+    renderSidebar();
+    expect(
+      screen.getByRole("link", { name: /market analysis agent home/i }),
+    ).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute("href", "/");
   });
 
-  it("renders 5 nav buttons (Search / Compare / Watch / Recent / Export)", () => {
-    render(<SidebarShell active="search" onSearchClick={() => {}} />);
-    for (const label of ["Search", "Compare", "Watchlist", "Recent", "Export"]) {
-      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
-    }
+  it("opens search from a button that shows the shortcut", () => {
+    const { props } = renderSidebar();
+    const search = screen.getByRole("button", { name: /search tickers/i });
+    expect(search).toHaveTextContent("Ctrl K");
+    expect(search).toHaveAttribute("aria-keyshortcuts", "Control+K");
+    fireEvent.click(search);
+    expect(props.onSearch).toHaveBeenCalledOnce();
   });
 
-  it("highlights the active nav button via aria-current", () => {
-    render(<SidebarShell active="search" onSearchClick={() => {}} />);
-    expect(screen.getByRole("button", { name: "Search" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    // Other buttons should NOT carry aria-current.
-    expect(screen.getByRole("button", { name: "Compare" })).not.toHaveAttribute(
-      "aria-current",
-    );
+  it("Compare is a link that names the pair it opens", () => {
+    renderSidebar();
+    const compare = screen.getByRole("link", { name: "Compare AAPL vs MSFT" });
+    expect(compare).toHaveAttribute("href", "/compare?a=AAPL&b=MSFT");
+    expect(compare).toHaveTextContent("AAPL vs MSFT");
   });
 
-  it("calls onSearchClick when Search is clicked", () => {
-    const onSearch = vi.fn();
-    render(<SidebarShell active="search" onSearchClick={onSearch} />);
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
-    expect(onSearch).toHaveBeenCalledOnce();
+  it("marks Home active on the landing page only", () => {
+    renderSidebar({ pathname: "/" });
+    expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: /^compare/i })).not.toHaveAttribute("aria-current");
   });
 
-  it("disables Compare / Watch / Recent / Export until later phases", () => {
-    render(<SidebarShell active="search" onSearchClick={() => {}} />);
-    for (const label of ["Compare", "Watchlist", "Recent", "Export"]) {
-      expect(screen.getByRole("button", { name: label })).toBeDisabled();
-    }
-    expect(screen.getByRole("button", { name: "Search" })).not.toBeDisabled();
+  it("marks Compare active on the compare page", () => {
+    renderSidebar({ pathname: "/compare" });
+    expect(screen.getByRole("link", { name: /^compare/i })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
   });
 
-  it("uses a 72px width via the strata-sidebar class marker", () => {
-    const { container } = render(
-      <SidebarShell active="search" onSearchClick={() => {}} />,
-    );
-    // The width is enforced via Tailwind class; we test the marker
-    // attribute that the component sets so the test isn't tied to
-    // the specific Tailwind classname.
-    const aside = container.querySelector("aside[data-sidebar='strata']");
-    expect(aside).not.toBeNull();
+  it("links to the lenses and marks them active on a lens page", () => {
+    renderSidebar({ pathname: "/lens/megacap-capex" });
+    const lenses = screen.getByRole("link", { name: "Lenses" });
+    expect(lenses).toHaveAttribute("href", "/lens");
+    expect(lenses).toHaveAttribute("aria-current", "page");
+  });
+
+  it("signs out from a button", () => {
+    const { props } = renderSidebar();
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(props.onSignOut).toHaveBeenCalledOnce();
+  });
+
+  it("has no disabled or placeholder controls", () => {
+    const { container } = renderSidebar();
+    expect(container.querySelector("button:disabled")).toBeNull();
+    expect(screen.queryByRole("button", { name: /export/i })).toBeNull();
   });
 });
 
-// ── Phase 4.7 — count badges + new click handlers ────────────────────
-//
-// Each Nav button (Compare / Watchlist / Recent) becomes enabled when
-// the corresponding optional onClick handler is passed. Watchlist and
-// Recent additionally render a count badge when the corresponding
-// numeric prop is > 0. Export stays permanently disabled until that
-// phase lands (TBD).
-
-describe("SidebarShell — Phase 4.7 count badges + click handlers", () => {
-  it("Compare becomes enabled and clickable when onCompareClick is provided", () => {
-    const onCompare = vi.fn();
-    render(
-      <SidebarShell
-        active="none"
-        onSearchClick={() => {}}
-        onCompareClick={onCompare}
-      />,
+describe("SidebarShell — ticker sections", () => {
+  it("lists watchlist tickers as links to their pages", () => {
+    renderSidebar({ watchlist: ["NVDA", "KO"] });
+    const section = screen.getByRole("region", { name: "Watchlist" });
+    expect(within(section).getByRole("link", { name: "NVDA" })).toHaveAttribute(
+      "href",
+      "/symbol/NVDA",
     );
-    const button = screen.getByRole("button", { name: "Compare" });
-    expect(button).not.toBeDisabled();
-    fireEvent.click(button);
-    expect(onCompare).toHaveBeenCalledOnce();
+    expect(within(section).getByRole("link", { name: "KO" })).toHaveAttribute(
+      "href",
+      "/symbol/KO",
+    );
   });
 
-  it("Watchlist becomes enabled when onWatchlistClick is provided", () => {
-    const onWatchlist = vi.fn();
-    render(
-      <SidebarShell
-        active="none"
-        onSearchClick={() => {}}
-        onWatchlistClick={onWatchlist}
-      />,
-    );
-    const button = screen.getByRole("button", { name: /watchlist/i });
-    expect(button).not.toBeDisabled();
-    fireEvent.click(button);
-    expect(onWatchlist).toHaveBeenCalledOnce();
+  it("lists recent tickers as links", () => {
+    renderSidebar({ recent: ["RIVN", "JPM"] });
+    const section = screen.getByRole("region", { name: "Recent" });
+    expect(within(section).getAllByRole("link").map((a) => a.textContent)).toEqual([
+      "RIVN",
+      "JPM",
+    ]);
   });
 
-  it("Recent becomes enabled when onRecentClick is provided", () => {
-    const onRecent = vi.fn();
-    render(
-      <SidebarShell
-        active="none"
-        onSearchClick={() => {}}
-        onRecentClick={onRecent}
-      />,
-    );
-    const button = screen.getByRole("button", { name: /recent/i });
-    expect(button).not.toBeDisabled();
-    fireEvent.click(button);
-    expect(onRecent).toHaveBeenCalledOnce();
+  it("marks the ticker on screen as the current page", () => {
+    renderSidebar({
+      pathname: "/symbol/KO",
+      currentTicker: "KO",
+      watchlist: ["NVDA", "KO"],
+    });
+    expect(screen.getByRole("link", { name: "KO" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "NVDA" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
   });
 
-  it("Watchlist count badge renders when watchlistCount > 0", () => {
-    const { container } = render(
-      <SidebarShell
-        active="none"
-        onSearchClick={() => {}}
-        onWatchlistClick={() => {}}
-        watchlistCount={3}
-      />,
-    );
-    const badge = container.querySelector("[data-badge='watchlist-count']");
-    expect(badge).not.toBeNull();
-    expect(badge?.textContent).toContain("3");
+  it("removes a ticker from the watchlist with its row button", () => {
+    const { props } = renderSidebar({ watchlist: ["NVDA"] });
+    fireEvent.click(screen.getByRole("button", { name: "Remove NVDA from watchlist" }));
+    expect(props.onUnwatch).toHaveBeenCalledWith("NVDA");
   });
 
-  it("Watchlist count badge is hidden when watchlistCount is 0 or undefined", () => {
-    const { container, rerender } = render(
-      <SidebarShell
-        active="none"
-        onSearchClick={() => {}}
-        onWatchlistClick={() => {}}
-        watchlistCount={0}
-      />,
-    );
-    expect(
-      container.querySelector("[data-badge='watchlist-count']"),
-    ).toBeNull();
-
-    rerender(
-      <SidebarShell
-        active="none"
-        onSearchClick={() => {}}
-        onWatchlistClick={() => {}}
-      />,
-    );
-    expect(
-      container.querySelector("[data-badge='watchlist-count']"),
-    ).toBeNull();
+  it("clears recent tickers from the section header", () => {
+    const { props } = renderSidebar({ recent: ["RIVN"] });
+    fireEvent.click(screen.getByRole("button", { name: "Clear recent tickers" }));
+    expect(props.onClearRecent).toHaveBeenCalledOnce();
   });
 
-  it("Recent count badge renders when recentCount > 0", () => {
-    const { container } = render(
-      <SidebarShell
-        active="none"
-        onSearchClick={() => {}}
-        onRecentClick={() => {}}
-        recentCount={5}
-      />,
+  it("explains empty sections instead of showing nothing", () => {
+    renderSidebar();
+    expect(screen.getByText(/star a ticker's page to pin it here/i)).toBeInTheDocument();
+    expect(screen.getByText(/tickers you open show up here/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear recent tickers" })).toBeNull();
+  });
+});
+
+describe("SidebarShell — collapsed rail", () => {
+  it("drops the text labels but keeps every accessible name", () => {
+    renderSidebar({ collapsed: true, watchlist: ["NVDA"] });
+    expect(screen.queryByText("Home")).toBeNull();
+    expect(screen.queryByText("Ctrl K")).toBeNull();
+    expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute("title", "Home");
+    expect(screen.getByRole("button", { name: /search tickers/i })).toHaveAttribute(
+      "title",
+      "Search (Ctrl K)",
     );
-    const badge = container.querySelector("[data-badge='recent-count']");
-    expect(badge).not.toBeNull();
-    expect(badge?.textContent).toContain("5");
+    // Ticker rows stay — as compact symbols.
+    expect(screen.getByRole("link", { name: "NVDA" })).toBeInTheDocument();
   });
 
-  it("Export stays disabled regardless of other props (TBD phase)", () => {
-    render(
-      <SidebarShell
-        active="none"
-        onSearchClick={() => {}}
-        onCompareClick={() => {}}
-        onWatchlistClick={() => {}}
-        onRecentClick={() => {}}
-      />,
+  it("hides empty sections and row actions", () => {
+    renderSidebar({ collapsed: true, watchlist: ["NVDA"] });
+    expect(screen.queryByRole("region", { name: "Recent" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /remove nvda/i })).toBeNull();
+  });
+
+  it("toggles with a button that reports its state", () => {
+    const { props, container } = renderSidebar({ collapsed: true });
+    expect(container.querySelector("aside")).toHaveAttribute("data-collapsed", "true");
+    const toggle = screen.getByRole("button", { name: "Expand sidebar" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(props.onToggleCollapsed).toHaveBeenCalledOnce();
+  });
+
+  it("offers to collapse when expanded", () => {
+    renderSidebar({ collapsed: false });
+    expect(screen.getByRole("button", { name: "Collapse sidebar" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
     );
-    expect(screen.getByRole("button", { name: "Export" })).toBeDisabled();
   });
 });

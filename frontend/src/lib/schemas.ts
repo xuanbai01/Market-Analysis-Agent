@@ -51,6 +51,7 @@ export const ClaimUnitSchema = z.enum([
   "count",
   "shares",
   "basis_points",
+  "percentage_points",
   "date",
   "string",
 ]);
@@ -82,7 +83,11 @@ export const ClaimSchema = z.object({
   // ``unit === undefined`` and existing test fixtures don't have to
   // be updated. The formatter treats undefined and null identically —
   // both fall back to the legacy heuristic.
-  unit: ClaimUnitSchema.nullable().optional(),
+  //
+  // 2026-11: a unit this build doesn't know (the backend added one and
+  // deployed first) reads as null — the heuristic formatter — instead of
+  // failing the whole report's parse.
+  unit: ClaimUnitSchema.nullable().optional().catch(null),
 });
 export type Claim = z.infer<typeof ClaimSchema>;
 
@@ -133,6 +138,29 @@ export const HEALTHY_LAYOUT_SIGNALS: LayoutSignals = {
 
 // ── Top-level shapes returned by the backend ─────────────────────────
 
+// Phase 5 — the analyst view. Mirrors Thesis in app/schemas/research.py.
+// A claim_ref points at report.sections[title].claims[index].
+export const ClaimRefSchema = z.object({
+  section: z.string().min(1),
+  index: z.number().int().min(0),
+});
+export type ClaimRef = z.infer<typeof ClaimRefSchema>;
+
+export const ThesisPointSchema = z.object({
+  text: z.string().min(1),
+  claim_refs: z.array(ClaimRefSchema).default([]),
+});
+export type ThesisPoint = z.infer<typeof ThesisPointSchema>;
+
+export const ThesisSchema = z.object({
+  headline: z.string().min(1),
+  bull: z.array(ThesisPointSchema).default([]),
+  bear: z.array(ThesisPointSchema).default([]),
+  changed: z.array(ThesisPointSchema).default([]),
+  watch: z.array(ThesisPointSchema).default([]),
+});
+export type Thesis = z.infer<typeof ThesisSchema>;
+
 export const ResearchReportSchema = z.object({
   symbol: z.string().min(1),
   generated_at: z.string().datetime({ offset: true }),
@@ -149,6 +177,10 @@ export const ResearchReportSchema = z.object({
   // pre-4.5 cached JSONB rows hydrate as a healthy report and the
   // dashboard's adaptive UI stays in its non-distressed mode.
   layout_signals: LayoutSignalsSchema.default(HEALTHY_LAYOUT_SIGNALS),
+  // Phase 5 — null for reports from before the analyst view shipped, or
+  // when its call failed. A malformed thesis reads as null rather than
+  // failing the whole report.
+  thesis: ThesisSchema.nullable().default(null).catch(null),
 });
 export type ResearchReport = z.infer<typeof ResearchReportSchema>;
 
@@ -194,6 +226,54 @@ export const MarketPricesSchema = z.object({
 });
 export type MarketPrices = z.infer<typeof MarketPricesSchema>;
 
+// Market strip — mirrors MarketOverview in app/schemas/market_overview.py.
+// Units and ratings fall back instead of failing, so a value added on
+// the backend can't blank the whole strip.
+
+export const QuoteUnitSchema = z.enum(["points", "percent", "usd"]).catch("points");
+export type QuoteUnit = z.infer<typeof QuoteUnitSchema>;
+
+export const MarketQuoteSchema = z.object({
+  symbol: z.string().min(1),
+  label: z.string().min(1),
+  kind: z.string(),
+  unit: QuoteUnitSchema,
+  price: z.number(),
+  change: z.number(),
+  change_percent: z.number(),
+  as_of: z.string(),
+});
+export type MarketQuote = z.infer<typeof MarketQuoteSchema>;
+
+export const SentimentRatingSchema = z
+  .enum(["extreme_fear", "fear", "neutral", "greed", "extreme_greed"])
+  .catch("neutral");
+export type SentimentRating = z.infer<typeof SentimentRatingSchema>;
+
+export const SentimentComponentSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  score: z.number(),
+  description: z.string(),
+});
+export type SentimentComponent = z.infer<typeof SentimentComponentSchema>;
+
+export const SentimentEstimateSchema = z.object({
+  score: z.number(),
+  rating: SentimentRatingSchema,
+  components: z.array(SentimentComponentSchema).default([]),
+  as_of: z.string(),
+  methodology: z.string(),
+});
+export type SentimentEstimate = z.infer<typeof SentimentEstimateSchema>;
+
+export const MarketOverviewSchema = z.object({
+  quotes: z.array(MarketQuoteSchema).default([]),
+  sentiment: SentimentEstimateSchema.nullable().default(null),
+  generated_at: z.string(),
+});
+export type MarketOverview = z.infer<typeof MarketOverviewSchema>;
+
 // ── Focus enum (mirrors Focus in research_tool_registry.py) ──────────
 
 export const FocusSchema = z.enum(["full", "earnings"]);
@@ -214,3 +294,61 @@ export const ProblemDetailSchema = z.object({
   instance: z.string().nullable().optional(),
 });
 export type ProblemDetail = z.infer<typeof ProblemDetailSchema>;
+
+// ── Cross-company lens (ADR 0007 layer 3) — mirrors app/schemas/lens.py ──
+
+export const LensSummarySchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string(),
+  tickers: z.array(z.string()).default([]),
+});
+export type LensSummary = z.infer<typeof LensSummarySchema>;
+
+export const LensPointSchema = z.object({
+  year: z.number().int(),
+  capex: z.number().nullable().default(null),
+  revenue: z.number().nullable().default(null),
+  ocf: z.number().nullable().default(null),
+  capex_intensity: z.number().nullable().default(null),
+  capex_to_ocf: z.number().nullable().default(null),
+});
+export type LensPoint = z.infer<typeof LensPointSchema>;
+
+export const LensCompanySchema = z.object({
+  ticker: z.string().min(1),
+  name: z.string(),
+  points: z.array(LensPointSchema),
+});
+export type LensCompany = z.infer<typeof LensCompanySchema>;
+
+export const LensYearStatsSchema = z.object({
+  year: z.number().int(),
+  companies: z.number().int(),
+  median: z.number(),
+  p25: z.number(),
+  p75: z.number(),
+  low: z.number(),
+  low_ticker: z.string(),
+  high: z.number(),
+  high_ticker: z.string(),
+  total_capex: z.number(),
+});
+export type LensYearStats = z.infer<typeof LensYearStatsSchema>;
+
+export const LensNarrativeSchema = z.object({
+  headline: z.string().min(1),
+  points: z.array(ThesisPointSchema).default([]),
+});
+export type LensNarrative = z.infer<typeof LensNarrativeSchema>;
+
+export const LensReportSchema = LensSummarySchema.extend({
+  method: z.string(),
+  years: z.array(z.number().int()),
+  companies: z.array(LensCompanySchema),
+  stats: z.array(LensYearStatsSchema),
+  facts: z.array(ClaimSchema).default([]),
+  narrative: LensNarrativeSchema.nullable().default(null).catch(null),
+  generated_at: z.string(),
+});
+export type LensReport = z.infer<typeof LensReportSchema>;

@@ -356,3 +356,55 @@ describe("ClaimSchema with history", () => {
     ).toThrow();
   });
 });
+
+describe("ClaimSchema unit", () => {
+  const source = { tool: "yfinance.fundamentals", fetched_at: "2026-11-08T14:00:00+00:00" };
+
+  it("accepts percentage_points", () => {
+    const claim = ClaimSchema.parse({
+      description: "Gross margin, year-over-year change",
+      value: 0.0188,
+      source,
+      unit: "percentage_points",
+    });
+    expect(claim.unit).toBe("percentage_points");
+  });
+
+  it("reads a unit it doesn't know as null instead of rejecting the claim", () => {
+    // The backend can add a unit and deploy before the frontend does.
+    const claim = ClaimSchema.parse({ description: "New metric", value: 1.5, source, unit: "furlongs" });
+    expect(claim.unit).toBeNull();
+    expect(claim.value).toBe(1.5);
+  });
+});
+
+describe("ResearchReportSchema thesis", () => {
+  const base = {
+    symbol: "KO",
+    generated_at: "2026-11-08T14:00:00+00:00",
+    overall_confidence: "high",
+    sections: [],
+  };
+
+  it("defaults to null for reports from before the analyst view", () => {
+    expect(ResearchReportSchema.parse(base).thesis).toBeNull();
+  });
+
+  it("parses a thesis with claim refs", () => {
+    const report = ResearchReportSchema.parse({
+      ...base,
+      thesis: {
+        headline: "Priced for durability.",
+        bull: [{ text: "Margins widen.", claim_refs: [{ section: "Quality", index: 1 }] }],
+      },
+    });
+    expect(report.thesis?.bull[0].claim_refs[0]).toEqual({ section: "Quality", index: 1 });
+    expect(report.thesis?.watch).toEqual([]);
+  });
+
+  it("reads a malformed thesis as null instead of failing the report", () => {
+    const report = ResearchReportSchema.parse({ ...base, thesis: { bull: "nope" } });
+    expect(report.thesis).toBeNull();
+    expect(report.symbol).toBe("KO");
+  });
+});

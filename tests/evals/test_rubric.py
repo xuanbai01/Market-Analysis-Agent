@@ -11,10 +11,13 @@ from datetime import UTC, datetime
 from app.schemas.research import (
     Claim,
     ClaimHistoryPoint,
+    ClaimRef,
     Confidence,
     ResearchReport,
     Section,
     Source,
+    Thesis,
+    ThesisPoint,
 )
 from tests.evals.rubric import (
     grade,
@@ -678,3 +681,37 @@ def test_grade_bundles_all_three_scorers() -> None:
     assert result.structure.valid
     assert result.factuality.score == 1.0
     assert result.latency.elapsed_ms == 1234.5
+
+
+# ── Phase 5 — the analyst view is policed too ────────────────────────
+
+
+def _with_thesis(thesis: Thesis) -> ResearchReport:
+    section = Section(
+        title="Quality",
+        claims=[Claim(description="Operating margin", value=0.3337, source=_src())],
+        summary="Margins are healthy.",
+    )
+    report = _report([section])
+    report.thesis = thesis
+    return report
+
+
+def _point(text: str) -> ThesisPoint:
+    return ThesisPoint(text=text, claim_refs=[ClaimRef(section="Quality", index=0)])
+
+
+def test_factuality_scores_numbers_in_the_analyst_view() -> None:
+    result = score_factuality(
+        _with_thesis(Thesis(headline="Margins carry the story.", bull=[_point("Operating margin is 33.37%.")]))
+    )
+    assert result.score == 1.0
+    assert 33.37 in result.summary_numbers
+
+
+def test_factuality_flags_a_fabricated_number_in_the_analyst_view() -> None:
+    result = score_factuality(
+        _with_thesis(Thesis(headline="Margins carry the story.", bear=[_point("Margins could fall to 25.5%.")]))
+    )
+    assert 25.5 in result.unmatched_numbers
+    assert result.score < 1.0

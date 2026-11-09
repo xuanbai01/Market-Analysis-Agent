@@ -80,11 +80,18 @@ TICKER_TO_CUSIP: dict[str, str] = {
     "EOG": "26875P101",
     "OXY": "674599105",
     "XOM": "30231G102",
-    # Consumer staples
-    "COST": "22160K105",
+    # Consumer staples (branded)
+    "CL": "194162103",
+    "KMB": "494368103",
     "KO": "191216100",
+    "MDLZ": "609207105",
     "PEP": "713448108",
     "PG": "742718109",
+    # Staples retail
+    "COST": "22160K105",
+    "DG": "256677105",
+    "KR": "501044101",
+    "TGT": "87612E106",
     "WMT": "931142103",
 }
 

@@ -20,6 +20,7 @@ snapshot/history, health) stay open.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -28,17 +29,23 @@ from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
 from app.api.v1.dependencies import get_session
+from app.api.v1.routers import lens as lens_router
 from app.api.v1.routers import market as market_router
 from app.api.v1.routers import news as news_router
 from app.core import settings as settings_module
 from app.core.auth import require_shared_secret
 from app.main import app
+from app.schemas.lens import LensReport
+from app.schemas.market_overview import MarketOverview
 
 _SECRET = "the-secret"
 
 # (method, path, json body) for every route that writes or spends quota.
 _GATED_CALLS: list[tuple[str, str, dict[str, Any] | None]] = [
     ("GET", "/v1/market/AAPL/prices?range=60D", None),
+    ("GET", "/v1/market/overview", None),
+    ("GET", "/v1/lens", None),
+    ("GET", "/v1/lens/megacap-capex", None),
     ("POST", "/v1/market/ingest", {"symbol": "AAPL"}),
     ("POST", "/v1/news/ingest", {"symbol": "AAPL"}),
     ("POST", "/v1/news/ingest", None),
@@ -79,9 +86,20 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
     async def _ingest(*_a: Any, **_kw: Any) -> int:
         return 0
 
+    async def _overview() -> MarketOverview:
+        return MarketOverview(quotes=[], sentiment=None, generated_at=datetime.now(UTC))
+
+    async def _lens(lens_id: str) -> LensReport:
+        return LensReport(
+            id=lens_id, title="t", description="d", tickers=[], method="m", years=[],
+            companies=[], stats=[], facts=[], narrative=None, generated_at=datetime.now(UTC),
+        )
+
     app.dependency_overrides[get_session] = _session
     monkeypatch.setattr(market_router, "get_prices_with_cache", _prices)
     monkeypatch.setattr(market_router, "ingest_market_data", _ingest)
+    monkeypatch.setattr(market_router, "get_market_overview", _overview)
+    monkeypatch.setattr(lens_router, "get_lens", _lens)
     monkeypatch.setattr(news_router, "fetch_news_for_symbol", _ingest)
     monkeypatch.setattr(news_router, "ingest_news_once", _ingest)
     monkeypatch.setattr(settings_module.settings, "BACKEND_SHARED_SECRET", _SECRET)

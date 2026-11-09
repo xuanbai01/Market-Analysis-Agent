@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.ten_k import RiskCategory
 from app.services import llm
@@ -58,6 +58,17 @@ class ParagraphCategory(BaseModel):
     action: Literal["added", "removed"]
     index: int = Field(ge=0)
     category: RiskCategory
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def _unknown_category_is_other(cls, value: object) -> object:
+        """A category the model invented ("micro_placeholder", seen live on
+        DeepSeek) files under OTHER instead of failing validation for the
+        whole batch — which used to drop every per-category bar."""
+        valid = {c.value for c in RiskCategory}
+        if isinstance(value, str) and value not in valid:
+            return RiskCategory.OTHER.value
+        return value
 
 
 class RiskCategorization(BaseModel):

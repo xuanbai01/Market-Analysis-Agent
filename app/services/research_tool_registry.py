@@ -40,6 +40,7 @@ from typing import Any
 
 from app.schemas.research import Claim, Source
 from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
+from app.services import research_derived
 
 
 class Focus(str, Enum):
@@ -133,18 +134,28 @@ def _filter_keys(claims: dict[str, Claim] | None, keys: tuple[str, ...]) -> list
     return [claims[k] for k in keys if k in claims]
 
 
+# ADR 0007 — each numeric section ends with derived comparison claims
+# (change over time, gap to peers, one metric against another) so the
+# synthesis call can interpret without computing numbers of its own.
+
+
 def _build_valuation(outputs: dict[str, Any]) -> list[Claim]:
-    return _filter_keys(outputs.get("fetch_fundamentals"), _VALUATION_KEYS)
+    fundamentals = outputs.get("fetch_fundamentals")
+    return _filter_keys(fundamentals, _VALUATION_KEYS) + research_derived.valuation_claims(
+        fundamentals, outputs.get("fetch_peers")
+    )
 
 
 def _build_quality(outputs: dict[str, Any]) -> list[Claim]:
-    return _filter_keys(outputs.get("fetch_fundamentals"), _QUALITY_KEYS)
+    fundamentals = outputs.get("fetch_fundamentals")
+    return _filter_keys(fundamentals, _QUALITY_KEYS) + research_derived.quality_claims(fundamentals)
 
 
 def _build_capital_allocation(outputs: dict[str, Any]) -> list[Claim]:
+    fundamentals = outputs.get("fetch_fundamentals")
     return _filter_keys(
-        outputs.get("fetch_fundamentals"), _CAPITAL_ALLOCATION_KEYS
-    )
+        fundamentals, _CAPITAL_ALLOCATION_KEYS
+    ) + research_derived.capital_allocation_claims(fundamentals)
 
 
 def _all_claims(claims: dict[str, Claim] | None) -> list[Claim]:
@@ -155,7 +166,8 @@ def _all_claims(claims: dict[str, Claim] | None) -> list[Claim]:
 
 
 def _build_earnings(outputs: dict[str, Any]) -> list[Claim]:
-    return _all_claims(outputs.get("fetch_earnings"))
+    earnings = outputs.get("fetch_earnings")
+    return _all_claims(earnings) + research_derived.earnings_claims(earnings)
 
 
 def _build_peers(outputs: dict[str, Any]) -> list[Claim]:
@@ -304,7 +316,8 @@ SECTIONS_BY_FOCUS: dict[Focus, list[SectionSpec]] = {
         # ``Section[]`` order matches the page's visual order.
         SectionSpec("Business", ("fetch_business_info",), _build_business),
         SectionSpec("News", ("fetch_news",), _build_news),
-        SectionSpec("Valuation", ("fetch_fundamentals",), _build_valuation),
+        # Peers feed Valuation's premium/discount claims (ADR 0007).
+        SectionSpec("Valuation", ("fetch_fundamentals", "fetch_peers"), _build_valuation),
         SectionSpec("Quality", ("fetch_fundamentals",), _build_quality),
         SectionSpec(
             "Capital Allocation",

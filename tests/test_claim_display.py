@@ -41,6 +41,9 @@ from tests.evals.rubric import score_factuality
         (12_345, "count", "12,345"),
         (2.5, "count", "2.50"),
         (0.0043, "basis_points", "43 bps"),
+        (0.0188, "percentage_points", "+1.88 pts"),
+        (-0.005, "percentage_points", "-0.50 pts"),
+        (0.0, "percentage_points", "0.00 pts"),
         ("2027-01-28", "date", "2027-01-28"),
         ("Apple Inc.", "string", "Apple Inc."),
         (True, "count", "yes"),
@@ -74,6 +77,7 @@ def test_display_values_still_pass_the_factuality_rubric() -> None:
         (0.1689, "usd_per_share"),
         (38.1306, "ratio"),
         (131_590_000, "shares"),
+        (0.0188, "percentage_points"),
     ]
     claims = [
         Claim(description=f"metric {i}", value=v, unit=u, source=src)

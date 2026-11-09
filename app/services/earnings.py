@@ -50,7 +50,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.core.observability import log_external_call
-from app.schemas.research import Claim, ClaimHistoryPoint, ClaimValue, Source
+from app.schemas.research import Claim, ClaimHistoryPoint, ClaimUnit, ClaimValue, Source
 from app.services.fundamentals_history import format_period
 
 # How far back to keep in ``Claim.history``. yfinance can return more
@@ -126,6 +126,22 @@ _DETAILS: dict[str, str] = {
         "computed: mean of past quarters' non-null surprises, capped at last 20"
     ),
 }
+
+# Display units (ADR 0007): the synthesis prompt prints values the way the
+# reader sees them ("$0.89", "7.74%") instead of raw floats like 0.89071.
+# Surprise percentages are already percent-form.
+_UNITS: dict[str, ClaimUnit] = {
+    "latest_report_date": "date",
+    "eps_actual": "usd_per_share",
+    "eps_estimate": "usd_per_share",
+    "eps_surprise_pct": "percent",
+    "next.report_date": "date",
+    "next.eps_estimate": "usd_per_share",
+    "next.revenue_estimate": "usd",
+    "last_20q.beat_count": "count",
+    "last_20q.avg_surprise_pct": "percent",
+}
+assert set(_UNITS) == set(CLAIM_KEYS), "every earnings claim needs a display unit"
 
 
 # Provider signature: returns ``(values, history_map)``. Sync — yfinance
@@ -431,5 +447,6 @@ async def fetch_earnings(
                 detail=_DETAILS[key],
             ),
             history=history_map.get(key, []),
+            unit=_UNITS[key],
         )
     return out

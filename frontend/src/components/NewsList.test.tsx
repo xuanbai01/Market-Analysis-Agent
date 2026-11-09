@@ -62,10 +62,10 @@ describe("NewsList", () => {
     expect(pills.length).toBe(8);
   });
 
-  it("renders 5 items by default", () => {
+  it("renders 3 items by default", () => {
     const { container } = render(<NewsList section={section(SEVEN_ITEMS)} />);
     const rows = container.querySelectorAll("[data-row='news-item']");
-    expect(rows.length).toBe(5);
+    expect(rows.length).toBe(3);
   });
 
   it("expands to all items when 'View more' is clicked", () => {

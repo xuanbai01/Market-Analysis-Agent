@@ -9,7 +9,9 @@ from app.schemas.market import (
     MarketPricesOut,
     MarketSnapshotOut,
 )
+from app.schemas.market_overview import MarketOverview
 from app.services.data_ingestion import ingest_market_data
+from app.services.market_overview import get_market_overview
 from app.services.market_prices import RANGE_TO_PERIOD, get_prices_with_cache
 from app.services.market_repository import get_history, get_latest_snapshot
 
@@ -20,6 +22,18 @@ router = APIRouter()
 async def market_ingest(req: IngestRequest, session: AsyncSession = Depends(get_session)):
     count = await ingest_market_data(session, req.symbol, req.period, req.provider)
     return {"job_id": "local-inline", "ingested": count, "symbol": req.symbol}
+
+
+# Registered before ``/market/{symbol}`` so "overview" isn't read as a
+# ticker. Gated: a cache miss calls yfinance.
+@router.get(
+    "/market/overview",
+    response_model=MarketOverview,
+    dependencies=[Depends(require_shared_secret)],
+)
+async def market_overview() -> MarketOverview:
+    """Headline quotes + our fear & greed estimate for the market strip."""
+    return await get_market_overview()
 
 
 @router.get("/market/{symbol}", response_model=MarketSnapshotOut)

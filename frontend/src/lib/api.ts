@@ -18,9 +18,15 @@ import { z } from "zod";
 import { getStoredToken } from "./auth";
 import {
   type Focus,
+  type LensReport,
+  type LensSummary,
+  type MarketOverview,
   type MarketPrices,
   type ResearchReport,
   type ResearchReportSummary,
+  LensReportSchema,
+  LensSummarySchema,
+  MarketOverviewSchema,
   MarketPricesSchema,
   ResearchReportSchema,
   ResearchReportSummariesSchema,
@@ -213,4 +219,47 @@ export async function fetchMarketPrices(
     });
   }
   return parseJsonAndValidate(resp, MarketPricesSchema);
+}
+
+/**
+ * The market strip: headline index / rate / commodity quotes plus the
+ * backend's fear & greed estimate. Cached server-side (5 min quotes,
+ * 1 h sentiment), so polling it is cheap.
+ */
+export async function fetchMarketOverview(): Promise<MarketOverview> {
+  const resp = await fetch(`${BACKEND_URL}/v1/market/overview`, {
+    method: "GET",
+    headers: { ...authHeaders() },
+  });
+  if (!resp.ok) {
+    throw new ApiError({
+      status: resp.status,
+      title: await extractErrorTitle(resp),
+    });
+  }
+  return parseJsonAndValidate(resp, MarketOverviewSchema);
+}
+
+/** The cross-company lenses on offer (ADR 0007 layer 3). */
+export async function listLenses(): Promise<LensSummary[]> {
+  const resp = await fetch(`${BACKEND_URL}/v1/lens`, { headers: { ...authHeaders() } });
+  if (!resp.ok) {
+    throw new ApiError({ status: resp.status, title: await extractErrorTitle(resp) });
+  }
+  return parseJsonAndValidate(resp, z.array(LensSummarySchema));
+}
+
+/**
+ * One lens: per-company series, the yearly distribution and the AI read.
+ * Built from SEC filings and cached server-side for a day; a cold build
+ * takes ~20 s.
+ */
+export async function fetchLens(id: string): Promise<LensReport> {
+  const resp = await fetch(`${BACKEND_URL}/v1/lens/${encodeURIComponent(id)}`, {
+    headers: { ...authHeaders() },
+  });
+  if (!resp.ok) {
+    throw new ApiError({ status: resp.status, title: await extractErrorTitle(resp) });
+  }
+  return parseJsonAndValidate(resp, LensReportSchema);
 }

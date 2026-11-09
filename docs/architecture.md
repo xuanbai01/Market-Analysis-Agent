@@ -54,7 +54,8 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + per-call LLM b
 │   │   ├── App.tsx              # Router + auth guard. SymbolDetailPage + ComparePage lazy.
 │   │   ├── components/
 │   │   │   ├── AppShell.tsx     # Sidebar + main outlet + global ⌘K listener
-│   │   │   ├── SidebarShell.tsx # 72px nav rail with count badges
+│   │   │   ├── SidebarShell.tsx # Search/Home/Compare + live Watchlist & Recent; collapses to a 64px rail
+│   │   │   ├── MarketStrip.tsx  # markets row above every page + fear & greed (est.) breakdown
 │   │   │   ├── LandingPage.tsx  # / route — search + Recent + Watchlist
 │   │   │   ├── SymbolDetailPage.tsx  # /symbol/:ticker (LAZY chunk, 14.5 KB gz)
 │   │   │   ├── compare/         # /compare/?a&b sub-tree (LAZY chunk, 6.4 KB gz)
@@ -102,6 +103,7 @@ POST /v1/research/{symbol}
        │    fetch_macro / extract_10k_business / extract_10k_risks_diff
        ├▶ deterministic claim builders   (per-section, code picks claims, not LLM)
        ├▶ llm.synth_call                 (Sonnet writes summary prose under forced schema)
+       ├▶ research_thesis.compose_thesis (in parallel: the analyst view, claim-id citations)
        └▶ research_confidence.score_section  (programmatic, not LLM-set)
   └▶ research_cache.upsert
 ```
@@ -127,18 +129,21 @@ POST /v1/research/{symbol}
 | **Research** | **`POST /v1/research/{symbol}?focus={full,earnings}&refresh={false,true}`** | ✅ **the v2 primary endpoint.** Auth-gated when `BACKEND_SHARED_SECRET` is set. Per-IP rate limit. |
 | Research list | `GET /v1/research?limit=20&offset=0&symbol=...` | ✅ paginated `ResearchReportSummary[]` for the dashboard sidebar |
 | Phase 4 — prices | `GET /v1/market/:ticker/prices?range={60D\|1Y\|5Y}` | ✅ Phase 4.1 — read-through `candles` cache, falls through to yfinance ingest on miss. Auth-gated. |
+| Market strip | `GET /v1/market/overview` | ✅ 2026-11 — headline quotes (S&P 500, Nasdaq 100, Dow, VIX, Russell 2000, US 10Y, dollar, gold, WTI, bitcoin) + our fear & greed estimate (`market_sentiment.py`: momentum, VIX, safe-haven and junk-bond demand, each ranked against its past year). yfinance, in-memory cache (5 min quotes / 1 h sentiment), serves stale on provider failure. Auth-gated. |
+| Lenses | `GET /v1/lens`, `GET /v1/lens/{id}` | ✅ 2026-11 (ADR 0007 layer 3) — cross-company lens built from SEC XBRL annual filings (`xbrl.py`: tag merging per year, SEC calendar frames, 24 h disk cache) and `lens.py` (10-year window ending at the latest year every company filed; per-year distribution stats; computed facts; cited AI narrative). First lens: megacap tech capex. In-memory cache 24 h, stale on failure, 503 when nothing cached. Auth-gated. |
 | Legacy | `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ 501 (legacy v1 stubs; will be removed or redirected to `/v1/research`) |
 
 ## Frontend routes (current)
 
-Lazy-loading is the binding bundle constraint — main is at 83.02 KB gz (16.98 KB headroom under the 100 KB budget). Every authenticated route except `/` is split into its own chunk so the entry stays lean.
+Lazy-loading is the binding bundle constraint — main is at 87.69 KB gz (12.31 KB headroom under the 100 KB budget). Every authenticated route except `/` is split into its own chunk so the entry stays lean.
 
 | Route | State | Chunk |
 |---|---|---|
 | `/login` | ✅ Pre-auth screen. | main |
 | `/` | ✅ LandingPage — search bar + Recent Tickers + Watchlist + Past Reports. | main |
-| `/symbol/:ticker` | ✅ The dashboard. All Strata cards live here (HeroCard, QualityCard, EarningsCard, ValuationCard, PerShareGrowthCard, CashAndCapitalCard, RiskDiffCard, MacroPanel, ContextBand, etc.). | **lazy** (14.5 KB gz) |
+| `/symbol/:ticker` | ✅ The dashboard: sticky section nav, HeroCard, AnalystViewCard, full-width Quality / Earnings / Valuation / Per-share growth, an equal-height row of Cash & capital · Capital returns · Risk · Macro (only the cards with data), Business + News. | **lazy** (20.3 KB gz) |
 | `/compare?a=X&b=Y` | ✅ Phase 4.6.A — two-ticker side-by-side. Per-side distress chrome. | **lazy** (6.4 KB gz) |
+| `/lens`, `/lens/:id` | ✅ ADR 0007 layer 3 — cross-company lenses: the yearly distribution of a metric across a group (DistributionChart), dollars by company (CapexBars), a latest-year table and a cited AI read. | **lazy** (4.6 KB gz) |
 | (overlay) `SearchModal` | ✅ Phase 4.7 — ⌘K-triggered. | **lazy** (1.3 KB gz) |
 
 Errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](../app/core/errors.py). The handler propagates `HTTPException.headers` so `Retry-After` (429) and `WWW-Authenticate` (401) survive the wrap.
@@ -165,3 +170,5 @@ ADRs in [docs/adr/](adr/):
 - [0003](adr/0003-pivot-equity-research.md) — Pivot from v1 (real-time multi-agent platform) to v2 (AI Equity Research Assistant).
 - [0004](adr/0004-visual-first-product-shape.md) — Visual-first, delta-driven; not chasing Morningstar-narrative depth.
 - [0005](adr/0005-symbol-centric-dashboard.md) — **Read this before proposing surface-shape changes.** Pivot from "click Generate → static report" to symbol-centric dashboard with adaptive layouts (Phase 4).
+- [0006](adr/0006-pluggable-llm-provider.md) — LLM provider switchable per `LLM_PROVIDER` (Anthropic default, DeepSeek Flash).
+- [0007](adr/0007-analytical-narratives.md) — Card prose interprets: derived comparison claims (`research_derived.py`), history in the prompt, sector-aware framing; citation rule unchanged.

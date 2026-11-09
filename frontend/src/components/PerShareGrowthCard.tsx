@@ -107,7 +107,7 @@ export function PerShareGrowthCard({ ticker, section }: Props) {
 
   return (
     // No mb-6 — vertical spacing comes from the parent grid's gap-6.
-    <section className="rounded-md border border-strata-border bg-strata-surface p-5">
+    <section className="flex h-full flex-col rounded-md border border-strata-border bg-strata-surface p-5">
       <header className="mb-4 flex items-start justify-between gap-3">
         <div>
           <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-growth">

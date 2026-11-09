@@ -17,7 +17,11 @@
  */
 import { useState } from "react";
 
-import { fractionPct, fractionPctTick, pointsChange } from "../lib/chart-format";
+import {
+  fractionPct,
+  fractionPctTick,
+  pointsChange,
+} from "../lib/chart-format";
 import { formatClaimValue } from "../lib/format";
 import {
   extractAllQualityClaims,
@@ -56,22 +60,26 @@ export function QualityCard({ ticker, section }: Props) {
 
   return (
     // No mb-6 — vertical spacing comes from the parent grid's gap-6.
-    <section className="rounded-md border border-strata-border bg-strata-surface p-5">
+    <section className="flex h-full flex-col rounded-md border border-strata-border bg-strata-surface p-5">
       <header className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-quality">
-            Quality · {ticker}
-          </div>
-          {section.summary && (
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-strata-fg">
-              {section.summary}
-            </p>
-          )}
+        <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-quality">
+          Quality · {ticker}
         </div>
         <ConfidenceBadge confidence={section.confidence} size="sm" />
       </header>
 
-      {/* 3 MetricRings — bail to em-dash when value missing. ROE / ROIC
+      {/* 2026-11 layout pass: full-width card, two columns at lg —
+          the read (prose, rings, strip) beside the evidence (margins
+          chart, metric table). */}
+      <div className="grid flex-1 grid-cols-1 gap-x-8 gap-y-5 lg:grid-cols-2">
+        <div className="flex flex-col">
+          {section.summary && (
+            <p className="mb-5 text-sm leading-relaxed text-strata-fg">
+              {section.summary}
+            </p>
+          )}
+
+          {/* 3 MetricRings — bail to em-dash when value missing. ROE / ROIC
           / FCF margin are all fraction-form values; pass the unit hint
           explicitly so high-ROE companies (e.g. AAPL ROE = 1.41) render
           as "141.00%" instead of dropping the % suffix.
@@ -81,48 +89,62 @@ export function QualityCard({ ticker, section }: Props) {
           loss color. Distressed names (RIVN ROE = -62%, ROIC = -41%,
           FCF margin = -52%) get a visually consistent loss treatment
           across the trio. */}
-      <div className="mb-5 grid grid-cols-3 gap-3 border-y border-strata-line py-5">
-        <MetricRing
-          label="ROE"
-          value={rings.roe !== null ? formatClaimValue(rings.roe, "fraction") : "—"}
-          ratio={rings.roe}
-          accentClass={
-            rings.roe !== null && rings.roe < 0
-              ? "text-strata-neg"
-              : "text-strata-quality"
-          }
-        />
-        <MetricRing
-          label="ROIC TTM"
-          value={rings.roic !== null ? formatClaimValue(rings.roic, "fraction") : "—"}
-          ratio={rings.roic}
-          sub={rings.roic !== null && rings.roic > 0.4 ? "top decile" : null}
-          accentClass={
-            rings.roic !== null && rings.roic < 0
-              ? "text-strata-neg"
-              : "text-strata-quality"
-          }
-        />
-        <MetricRing
-          label="FCF margin"
-          value={
-            rings.fcfMargin !== null
-              ? formatClaimValue(rings.fcfMargin, "fraction")
-              : "—"
-          }
-          ratio={rings.fcfMargin}
-          accentClass={
-            rings.fcfMargin !== null && rings.fcfMargin < 0
-              ? "text-strata-neg"
-              : "text-strata-cashflow"
-          }
-        />
-      </div>
+          <div className="grid grid-cols-3 gap-3 border-y border-strata-line py-5">
+            <MetricRing
+              label="ROE"
+              value={
+                rings.roe !== null
+                  ? formatClaimValue(rings.roe, "fraction")
+                  : "—"
+              }
+              ratio={rings.roe}
+              accentClass={
+                rings.roe !== null && rings.roe < 0
+                  ? "text-strata-neg"
+                  : "text-strata-quality"
+              }
+            />
+            <MetricRing
+              label="ROIC TTM"
+              value={
+                rings.roic !== null
+                  ? formatClaimValue(rings.roic, "fraction")
+                  : "—"
+              }
+              ratio={rings.roic}
+              sub={
+                rings.roic !== null && rings.roic > 0.4 ? "top decile" : null
+              }
+              accentClass={
+                rings.roic !== null && rings.roic < 0
+                  ? "text-strata-neg"
+                  : "text-strata-quality"
+              }
+            />
+            <MetricRing
+              label="FCF margin"
+              value={
+                rings.fcfMargin !== null
+                  ? formatClaimValue(rings.fcfMargin, "fraction")
+                  : "—"
+              }
+              ratio={rings.fcfMargin}
+              accentClass={
+                rings.fcfMargin !== null && rings.fcfMargin < 0
+                  ? "text-strata-neg"
+                  : "text-strata-cashflow"
+              }
+            />
+          </div>
 
-      {/* Multi-line margin chart. */}
-      {series.length >= 2 && (
-        <div className="mb-5">
-          {/*
+          <NarrativeStrip text={section.card_narrative} />
+        </div>
+
+        <div>
+          {/* Multi-line margin chart. */}
+          {series.length >= 2 && (
+            <div className="mb-5">
+              {/*
             Phase 4.3.X — MARGINS sub-kicker (cosmetic backlog from PR
             #50). Inline current GM / OM / FCF values matching the
             legend chips below. Shows snapshot point values (not
@@ -130,65 +152,67 @@ export function QualityCard({ ticker, section }: Props) {
             also display, so the user reads one consistent number per
             metric across the whole card.
           */}
-          <div
-            data-testid="quality-margins-subkicker"
-            className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-kicker"
-          >
-            <span className="text-strata-quality">Margins · {marginPeriods}Q</span>
-            <MarginsInline section={section} />
-          </div>
-          <MultiLine
-            series={series}
-            includeZero
-            formatValue={fractionPct}
-            formatTick={fractionPctTick}
-            formatChange={pointsChange}
-            ariaLabel="Gross, operating and FCF margin by quarter"
-          />
-        </div>
-      )}
+              <div
+                data-testid="quality-margins-subkicker"
+                className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-kicker"
+              >
+                <span className="text-strata-quality">
+                  Margins · {marginPeriods}Q
+                </span>
+                <MarginsInline section={section} />
+              </div>
+              <MultiLine
+                series={series}
+                includeZero
+                formatValue={fractionPct}
+                formatTick={fractionPctTick}
+                formatChange={pointsChange}
+                ariaLabel="Gross, operating and FCF margin by quarter"
+              />
+            </div>
+          )}
 
-      {/* Claims table. */}
-      {visibleClaims.length > 0 && (
-        <div className="overflow-hidden rounded-md border border-strata-line">
-          <table className="w-full text-sm">
-            <thead className="bg-strata-raise text-left text-xs uppercase tracking-wide text-strata-muted">
-              <tr>
-                <th className="px-3 py-2 font-medium">Metric</th>
-                <th className="px-3 py-2 font-medium text-right">Value</th>
-                <th
-                  scope="col"
-                  className="hidden px-3 py-2 font-medium sm:table-cell"
-                >
-                  Trend
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-strata-line">
-              {visibleClaims.map((claim, i) => (
-                <ClaimRow key={`${claim.description}-${i}`} claim={claim} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+          {/* Claims table. */}
+          {visibleClaims.length > 0 && (
+            <div className="overflow-hidden rounded-md border border-strata-line">
+              <table className="w-full text-sm">
+                <thead className="bg-strata-raise text-left text-xs uppercase tracking-wide text-strata-muted">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Metric</th>
+                    <th className="px-3 py-2 font-medium text-right">Value</th>
+                    <th
+                      scope="col"
+                      className="hidden px-3 py-2 font-medium sm:table-cell"
+                    >
+                      Trend
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-strata-line">
+                  {visibleClaims.map((claim, i) => (
+                    <ClaimRow key={`${claim.description}-${i}`} claim={claim} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
-      {showDisclosure && (
-        <div className="mt-3 flex justify-end">
-          <button
-            type="button"
-            onClick={() => setExpanded((x) => !x)}
-            className="font-mono text-[11px] uppercase tracking-kicker text-strata-dim transition hover:text-strata-fg"
-            aria-expanded={expanded}
-          >
-            {expanded
-              ? `Show fewer · ${primaryClaims.length}`
-              : `Show all · ${allClaims.length}`}
-          </button>
+          {showDisclosure && (
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setExpanded((x) => !x)}
+                className="font-mono text-[11px] uppercase tracking-kicker text-strata-dim transition hover:text-strata-fg"
+                aria-expanded={expanded}
+              >
+                {expanded
+                  ? `Show fewer · ${primaryClaims.length}`
+                  : `Show all · ${allClaims.length}`}
+              </button>
+            </div>
+          )}
         </div>
-      )}
-
-      <NarrativeStrip text={section.card_narrative} />
+      </div>
     </section>
   );
 }
@@ -201,7 +225,11 @@ function ClaimRow({ claim }: { claim: Claim }) {
         {formatClaimValue(claim.value, claim.unit)}
       </td>
       <td className="hidden px-3 py-2 sm:table-cell">
-        <TrendCell history={claim.history} unit={claim.unit} label={claim.description} />
+        <TrendCell
+          history={claim.history}
+          unit={claim.unit}
+          label={claim.description}
+        />
       </td>
     </tr>
   );

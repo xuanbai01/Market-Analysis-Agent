@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from app.api.v1.routers import (
     analysis,
     forecasts,
+    lens,
     market,
     news,
     reports,
@@ -38,6 +39,7 @@ app.include_router(reports.router, prefix="/v1")
 app.include_router(forecasts.router, prefix="/v1")
 app.include_router(research.router, prefix="/v1")
 app.include_router(symbol.router, prefix="/v1")
+app.include_router(lens.router, prefix="/v1")
 
 @app.get("/")
 def root():

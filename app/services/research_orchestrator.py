@@ -58,9 +58,9 @@ from app.schemas.research import (
     Section,
     SectionSummaries,
 )
-from app.services import llm
+from app.services import llm, research_thesis
 from app.services.business_info import fetch_business_info
-from app.services.claim_display import format_claim_value
+from app.services.claim_display import format_claim_line as _format_claim_line
 from app.services.earnings import fetch_earnings
 from app.services.fundamentals import fetch_fundamentals
 from app.services.macro import fetch_macro
@@ -96,14 +96,15 @@ TOOL_DISPATCH: dict[str, Callable[[str], Awaitable[Any]]] = {
 # ── Prompt construction ───────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """\
-You are a financial analyst writing the prose for a structured equity \
-research report. The report is composed of sections (Valuation, \
-Quality, Earnings, etc.). For each section the user gives you a list \
-of factual Claims — each Claim has a description, a numeric or text \
-value, and a source identifier. Your job is to write TWO prose fields \
-per section:
+You are an equity analyst writing the prose for a research dashboard. \
+The report is composed of sections (Valuation, Quality, Earnings, etc.). \
+For each section the user gives you a list of factual Claims — each has \
+a description, a value and a source; many also show their history \
+(first → last, low, high). The reader can already see every one of \
+these numbers on the dashboard card. Your job is the "so what": what \
+the numbers mean together. Write TWO prose fields per section:
 
-- ``summary``: a broad 2–4 sentence narrative covering the section.
+- ``summary``: 2–4 sentences of analysis.
 - ``card_narrative``: a SHORTER 1–2 sentence punchy headline tagline \
 distinct from the summary. Lead with the takeaway, follow with the \
 supporting delta. Style examples (do NOT copy verbatim — match the \
@@ -117,25 +118,54 @@ AI / regulatory and export controls."
 The card_narrative is what users see first on each dashboard card; it \
 should be the single most informative one-liner the data supports.
 
+How to write the analysis:
+
+a. **Lead with the conclusion, not an inventory.** Open with what \
+stands out and what it means for the business. Never walk through the \
+metrics one by one — the card already lists them.
+b. **Argue from comparisons.** Back the conclusion with the two or three \
+comparisons that carry it. Many come ready-made as claims sourced \
+``computed.analytics``: changes between two named quarters, trailing-12-\
+month figures, premiums or discounts to the peer median, payout and \
+coverage ratios, years to repay debt. History lines show each \
+metric's path.
+c. **Connect metrics where the data allows** — margins and returns, free \
+cash flow and what it funds (dividends, buybacks, capex), debt and cash \
+generation, a valuation premium and the margin gap to peers.
+d. **Name the tension.** When the data pulls in two directions (a \
+premium multiple with slowing growth, a dividend close to free cash \
+flow, capex rising faster than revenue), say so plainly — it is the \
+thing to watch.
+e. **Fewer, meaningful numbers.** At most four numbers in a summary; \
+pick the ones that carry the argument.
+Shape example (do NOT copy; X and Y stand for claim values): "Margins \
+are widening while the multiple compresses: operating margin is up X \
+pts on the same quarter last year, yet the shares trade at a Y% \
+discount to the peer median."
+
 Hard rules — these are non-negotiable, and they apply to BOTH ``summary`` \
 and ``card_narrative``:
 
 1. **Cite only values present in the claim list.** Every number, \
 percentage, dollar amount, ratio, ticker symbol, or named entity that \
-appears in your prose MUST appear in that section's claim list (either \
-as a snapshot ``value`` or a ``history[*].value``). Do not introduce \
-values you weren't given. This is the project's anti-hallucination \
-contract.
+appears in your prose MUST appear in that section's claim list (as a \
+snapshot value, a history point, or in a description). Never compute \
+a number yourself — no differences, ratios, growth rates or averages \
+of your own; if a comparison you want isn't a claim, describe it in \
+words ("higher than a year ago") instead. This is the project's \
+anti-hallucination contract.
 
 2. **Round responsibly.** Numbers may be rounded to 1–2 decimal places \
 or to natural units ($24.6M instead of $24,594,922.77) but the rounded \
 form must clearly correspond to a value in the claim list.
 
 2b. **Keep the display units you're given.** Values shown with a unit \
-("142.26%", "0.32%", "$4.98T", "$0.17") are already in display units — \
+("142.26%", "0.32%", "$4.98T", "$0.17", "+1.88 pts") are already in display units — \
 the same text the reader sees on the dashboard. Cite them in those \
 units ("ROE of 142.26%"), never as the raw decimal behind them \
-("ROE of 1.42"), and only compare values once they're in the same unit.
+("ROE of 1.42"), and only compare values once they're in the same unit. \
+For a signed change, say the direction in words and drop the sign: \
+"down 2.65 pts", never "down -2.65 pts".
 
 3. **Acknowledge missing data.** If a section's claim list is empty or \
 every value is None, ``summary`` is one sentence explaining that data \
@@ -147,8 +177,15 @@ inside either field.
 
 5. **Length discipline.** ``summary`` stays 2–4 sentences. \
 ``card_narrative`` stays 1–2 sentences and reads punchier — the \
-takeaway, then the delta. No editorializing, no speculation, no \
-investment advice in either.
+takeaway, then the delta. Interpretation may be hedged ("suggests", \
+"leaves less room for"); forecasts, price targets and buy/sell \
+language are out.
+
+5b. **No outside facts.** Explain what the numbers imply, not why they \
+happened. Whatever you know about the company from elsewhere stays \
+out: no product, model or brand names, events, management actions, \
+competitors' news or macro causes unless they appear in the claims. \
+If a sector note is given, follow it.
 
 6. **Match the section title exactly.** The user gives you a list of \
 section titles to populate; emit one entry per title using that title \
@@ -163,17 +200,6 @@ _FALLBACK_SUMMARY_TEMPLATE = (
     "Summary unavailable: the model did not return prose for the {title} "
     "section. The section's claims are still attached to this report."
 )
-
-
-def _format_claim_line(c: Any) -> str:
-    """One line per claim for the prompt: ``- description = value (tool)``.
-
-    Unit-annotated values go in display form ("142.26%", "$4.98T"), the
-    same text the dashboard card shows, so the prose matches the cards
-    and never compares numbers stored in different forms. Unannotated
-    claims keep ``repr`` (see ``claim_display``)."""
-    value = format_claim_value(c.value, getattr(c, "unit", None))
-    return f"- {c.description} = {value} ({c.source.tool})"
 
 
 def _format_layout_signals_block(signals: LayoutSignals) -> list[str]:
@@ -224,19 +250,39 @@ def _format_layout_signals_block(signals: LayoutSignals) -> list[str]:
     return lines
 
 
+# ADR 0007 — where a sector's business model makes standard metrics
+# misleading, say so; the derived claims already skip them.
+_SECTOR_NOTES: dict[str, str] = {
+    "banks": (
+        "This is a bank: free cash flow, capex, gross margin and net debt "
+        "describe its loan book and deposit funding, not the business. "
+        "Don't analyze them; lean on returns, net margin, valuation, "
+        "earnings and capital returns."
+    ),
+}
+
+
 def _build_user_prompt(
     symbol: str,
     focus: Focus,
     section_claims: dict[str, list[Any]],
     layout_signals: LayoutSignals | None = None,
+    sector: str | None = None,
 ) -> str:
     lines: list[str] = [
         f"Symbol: {symbol}",
         f"Focus: {focus.value}",
+    ]
+    if sector:
+        lines.append(f"Sector: {sector}")
+        if sector in _SECTOR_NOTES:
+            lines.append(f"Sector note: {_SECTOR_NOTES[sector]}")
+    lines += [
         "",
         "Write a SectionSummaries response with one entry per section "
-        "below. Each summary must be 2–4 sentences and reference only "
-        "values from that section's claim list.",
+        "below. Each summary is 2–4 sentences of analysis — the so what, "
+        "argued from comparisons — citing only values from that "
+        "section's claim list (snapshots, history points, descriptions).",
         "",
     ]
     if layout_signals is not None:
@@ -387,13 +433,43 @@ async def compose_research_report(
     )
     derived_signals = derive_layout_signals(stub_report)
 
+    # Phase 4.1 — name + sector from fetch_fundamentals' metadata claims,
+    # lifted to top-level report fields below. ADR 0007: the sector also
+    # frames the prompt (banks read differently).
+    fundamentals_out = outputs.get("fetch_fundamentals")
+    name_value: str | None = None
+    sector_value: str | None = None
+    if isinstance(fundamentals_out, dict):
+        name_claim = fundamentals_out.get("name")
+        sector_claim = fundamentals_out.get("sector_tag")
+        if name_claim is not None and isinstance(name_claim.value, str):
+            name_value = name_claim.value
+        if sector_claim is not None and isinstance(sector_claim.value, str):
+            sector_value = sector_claim.value
+
     # 3. One synth call covering every section.
-    prompt = _build_user_prompt(target, focus, section_claims, derived_signals)
-    summaries = await llm.synth_call(
+    prompt = _build_user_prompt(target, focus, section_claims, derived_signals, sector_value)
+    section_call = llm.synth_call(
         prompt=prompt,
         schema=SectionSummaries,
         system=_SYSTEM_PROMPT,
     )
+    # Phase 5 — the analyst view, written in parallel from the same
+    # claims (full reports only). It never raises; None if it fails.
+    thesis = None
+    if focus is Focus.FULL:
+        summaries, thesis = await asyncio.gather(
+            section_call,
+            research_thesis.compose_thesis(
+                target,
+                section_claims,
+                sector=sector_value,
+                sector_note=_SECTOR_NOTES.get(sector_value or ""),
+                layout_signals=derived_signals,
+            ),
+        )
+    else:
+        summaries = await section_call
 
     # 4. Stitch together Sections with claims + summary +
     #    card_narrative + confidence.
@@ -410,22 +486,11 @@ async def compose_research_report(
             )
         )
 
-    # Phase 4.1 — lift name + sector from fetch_fundamentals' metadata
-    # claims to top-level ResearchReport fields so the dashboard hero
-    # card can read them without traversing claims. Underlying claims
-    # stay in place (citation discipline). Both default to None when
+    # Phase 4.1 — name + sector (read above) become top-level
+    # ResearchReport fields so the dashboard hero card can read them
+    # without traversing claims. Underlying claims stay in place
+    # (citation discipline). Both default to None when
     # fetch_fundamentals failed or omitted them.
-    fundamentals_out = outputs.get("fetch_fundamentals")
-    name_value: str | None = None
-    sector_value: str | None = None
-    if isinstance(fundamentals_out, dict):
-        name_claim = fundamentals_out.get("name")
-        sector_claim = fundamentals_out.get("sector_tag")
-        if name_claim is not None and isinstance(name_claim.value, str):
-            name_value = name_claim.value
-        if sector_claim is not None and isinstance(sector_claim.value, str):
-            sector_value = sector_claim.value
-
     return ResearchReport(
         symbol=target,
         generated_at=datetime.now(UTC),
@@ -439,6 +504,7 @@ async def compose_research_report(
         # framing context); reuse the same value here rather than
         # re-deriving over identical claims.
         layout_signals=derived_signals,
+        thesis=thesis,
     )
 
 

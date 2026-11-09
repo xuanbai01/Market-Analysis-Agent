@@ -38,7 +38,11 @@ SECTOR_PEERS: dict[str, list[str]] = {
     "auto_ev": ["TSLA", "F", "GM", "RIVN", "LCID"],
     "pharma": ["PFE", "JNJ", "MRK", "ABBV", "LLY"],
     "oil_gas": ["XOM", "CVX", "COP", "OXY", "EOG"],
-    "consumer_staples": ["PG", "KO", "PEP", "COST", "WMT"],
+    # Branded staples (60%-ish gross margins) and the retailers that sell
+    # them (10–25%) price and earn differently; comparing KO's P/S with
+    # WMT's made every valuation gap meaningless (ADR 0007).
+    "consumer_staples": ["PG", "KO", "PEP", "CL", "KMB", "MDLZ"],
+    "staples_retail": ["WMT", "COST", "TGT", "KR", "DG"],
 }
 
 # Reverse-index from each ticker to the sector that lists it. A ticker
@@ -72,7 +76,10 @@ INDUSTRY_TO_SECTOR: dict[str, str] = {
     "Oil & Gas E&P": "oil_gas",
     "Household & Personal Products": "consumer_staples",
     "Beverages—Non-Alcoholic": "consumer_staples",
-    "Discount Stores": "consumer_staples",
+    "Confectioners": "consumer_staples",
+    "Packaged Foods": "consumer_staples",
+    "Discount Stores": "staples_retail",
+    "Grocery Stores": "staples_retail",
 }
 
 

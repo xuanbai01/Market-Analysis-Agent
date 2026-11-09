@@ -22,12 +22,16 @@ import pytest
 
 from app.schemas.research import (
     Claim,
+    ClaimHistoryPoint,
+    ClaimRef,
     Confidence,
     ResearchReport,
     Section,
     SectionSummaries,
     SectionSummary,
     Source,
+    Thesis,
+    ThesisPoint,
 )
 from app.schemas.ten_k import Extracted10KSection, Risk10KDiff
 from app.services import research_orchestrator as orch_module
@@ -1117,8 +1121,10 @@ async def test_user_prompt_includes_layout_signals_when_distressed(
 
     await compose_research_report("RIVN", Focus.FULL)
 
-    assert len(captured) == 1
-    prompt = captured[0]["prompt"]
+    # One section-prose call (the analyst view is a second, separate call).
+    section_calls = [c for c in captured if c["schema"] is SectionSummaries]
+    assert len(section_calls) == 1
+    prompt = section_calls[0]["prompt"]
     # The prompt mentions the distressed framing explicitly so Sonnet
     # can adapt its tone. We don't pin the exact wording — assert the
     # signals' names land in the prompt + a framing word.
@@ -1278,3 +1284,139 @@ def test_system_prompt_says_values_are_in_display_units() -> None:
     convert them back to raw decimals."""
     lower = orch_module._SYSTEM_PROMPT.lower()
     assert "display units" in lower
+
+
+# ── ADR 0007 — history, derived comparisons, interpretation ──────────
+
+
+def test_claim_line_carries_its_history_in_display_units() -> None:
+    claim = Claim(
+        description="Operating margin",
+        value=0.34,
+        unit="fraction",
+        source=Source(tool="yfinance.fundamentals", fetched_at=datetime.now(UTC)),
+        history=[
+            ClaimHistoryPoint(period="2025-Q3", value=0.30),
+            ClaimHistoryPoint(period="2025-Q4", value=0.25),
+            ClaimHistoryPoint(period="2026-Q1", value=0.31),
+            ClaimHistoryPoint(period="2026-Q2", value=0.33),
+            ClaimHistoryPoint(period="2026-Q3", value=0.34),
+        ],
+    )
+    line = orch_module._format_claim_line(claim)
+    assert line.startswith("- Operating margin = 34.00% (yfinance.fundamentals)")
+    assert "5 periods: 2025-Q3 30.00% → 2026-Q3 34.00%" in line
+    assert "low 25.00% (2025-Q4)" in line
+    assert "high 34.00% (2026-Q3)" in line
+
+
+def test_claim_line_without_history_is_unchanged() -> None:
+    claim = Claim(
+        description="Return on equity",
+        value=1.4226,
+        unit="fraction",
+        source=Source(tool="yfinance.fundamentals", fetched_at=datetime.now(UTC)),
+    )
+    assert orch_module._format_claim_line(claim) == "- Return on equity = 142.26% (yfinance.fundamentals)"
+
+
+async def test_prompt_includes_derived_comparison_claims(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    captured = _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+    await compose_research_report("AAPL", Focus.FULL)
+    assert "(computed.analytics)" in captured[0]["prompt"]
+
+
+def test_system_prompt_asks_for_interpretation_without_new_numbers() -> None:
+    lower = orch_module._SYSTEM_PROMPT.lower()
+    assert "so what" in lower
+    assert "never compute" in lower
+    # Grounding: no causes or events the claims don't contain.
+    assert "outside facts" in lower
+
+
+def test_prompt_names_the_sector_and_adds_the_bank_note() -> None:
+    prompt = orch_module._build_user_prompt("JPM", Focus.FULL, {"Quality": []}, None, "banks")
+    assert "Sector: banks" in prompt
+    assert "Sector note: This is a bank" in prompt
+    plain = orch_module._build_user_prompt("KO", Focus.FULL, {"Quality": []}, None, "consumer_staples")
+    assert "Sector: consumer_staples" in plain
+    assert "Sector note" not in plain
+    assert "Sector:" not in orch_module._build_user_prompt("ZZZ", Focus.FULL, {"Quality": []})
+
+
+def test_system_prompt_keeps_outside_knowledge_out() -> None:
+    lower = orch_module._SYSTEM_PROMPT.lower()
+    assert "no product, model or brand names" in lower
+    assert "never \"down -2.65 pts\"" in lower
+
+
+# ── Phase 5 — the analyst view ────────────────────────────────────────
+
+
+def _all_tools() -> dict[str, Any]:
+    return {
+        "fetch_fundamentals": _fundamentals_output(),
+        "fetch_earnings": _earnings_output(),
+        "fetch_peers": _peers_output(),
+        "fetch_macro": _macro_output(),
+        "extract_10k_risks_diff": _risks_diff_output(),
+        "extract_10k_business": _business_output(),
+    }
+
+
+_SECTIONS = ("Valuation", "Quality", "Capital Allocation", "Earnings", "Peers", "Risk Factors", "Macro")
+
+
+async def test_full_report_carries_the_analyst_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_tools(monkeypatch, _all_tools())
+    _patch_synth(monkeypatch, _summaries_for(*_SECTIONS))
+    seen: dict[str, Any] = {}
+
+    async def _fake_thesis(symbol: str, section_claims: Any, **kwargs: Any) -> Thesis:
+        seen.update(kwargs, symbol=symbol, titles=list(section_claims))
+        return Thesis(
+            headline="A strong business priced for it.",
+            bull=[ThesisPoint(text="Margins expand.", claim_refs=[ClaimRef(section="Quality", index=0)])],
+        )
+
+    monkeypatch.setattr(orch_module.research_thesis, "compose_thesis", _fake_thesis)
+    report = await compose_research_report("AAPL", Focus.FULL)
+    assert report.thesis is not None
+    assert report.thesis.headline == "A strong business priced for it."
+    assert seen["symbol"] == "AAPL"
+    assert "Quality" in seen["titles"]
+
+
+async def test_report_stands_when_the_analyst_view_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real compose_thesis gets the stub's SectionSummaries back, not a
+    ThesisDraft, and must degrade to None instead of failing the report."""
+    _patch_tools(monkeypatch, _all_tools())
+    _patch_synth(monkeypatch, _summaries_for(*_SECTIONS))
+    report = await compose_research_report("AAPL", Focus.FULL)
+    assert report.thesis is None
+    assert {s.title for s in report.sections} >= set(_SECTIONS)
+
+
+async def test_earnings_focus_skips_the_analyst_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_tools(monkeypatch, _all_tools())
+    captured = _patch_synth(monkeypatch, _summaries_for("Earnings", "Valuation", "Risk Factors"))
+    report = await compose_research_report("AAPL", Focus.EARNINGS)
+    assert report.thesis is None
+    assert all(c["schema"] is SectionSummaries for c in captured)

@@ -4,7 +4,7 @@
  * stay in step.
  */
 import { describe, it, expect } from "vitest";
-import { formatClaimValue } from "./format";
+import { formatAge, formatClaimValue } from "./format";
 
 describe("formatClaimValue", () => {
   it("renders null as an em-dash", () => {
@@ -131,5 +131,33 @@ describe("formatClaimValue with unit hint", () => {
   it("renders null-value verbatim regardless of unit", () => {
     expect(formatClaimValue(null, "fraction")).toBe("—");
     expect(formatClaimValue(null, "usd_per_share")).toBe("—");
+  });
+});
+
+// 2026-11 (tasks/dogfood-2026-11.md #6) — a change between two margins
+// is percentage points: "up 1.88%" was 1.88 points.
+describe("formatClaimValue with percentage_points", () => {
+  it("signs the change and labels it pts", () => {
+    expect(formatClaimValue(0.0188, "percentage_points")).toBe("+1.88 pts");
+    expect(formatClaimValue(-0.005, "percentage_points")).toBe("-0.50 pts");
+  });
+
+  it("prints no sign for a change that rounds to zero", () => {
+    expect(formatClaimValue(-0.00001, "percentage_points")).toBe("0.00 pts");
+  });
+});
+
+describe("formatAge", () => {
+  const now = Date.parse("2026-11-08T18:00:00Z");
+  it("reads like a person would say it", () => {
+    expect(formatAge("2026-11-08T17:59:40Z", now)).toBe("just now");
+    expect(formatAge("2026-11-08T17:48:00Z", now)).toBe("12 min ago");
+    expect(formatAge("2026-11-08T13:00:00Z", now)).toBe("5 h ago");
+    expect(formatAge("2026-11-07T17:00:00Z", now)).toBe("1 day ago");
+    expect(formatAge("2026-11-02T18:00:00Z", now)).toBe("6 days ago");
+  });
+
+  it("never reports a negative age for a clock a little ahead", () => {
+    expect(formatAge("2026-11-08T18:00:30Z", now)).toBe("just now");
   });
 });

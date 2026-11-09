@@ -262,7 +262,7 @@ _UNITS: dict[str, str] = {
     "market_cap": "usd",
     "buyback_yield": "fraction",
     "sbc_pct_revenue": "fraction",
-    "gross_margin_trend_1y": "fraction",
+    "gross_margin_trend_1y": "percentage_points",
     "name": "string",
     "sector_tag": "string",
     "fifty_two_week_high": "usd",

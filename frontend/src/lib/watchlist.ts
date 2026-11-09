@@ -1,70 +1,50 @@
 /**
- * watchlist — localStorage-backed list of tickers the user wants to
- * track. Phase 4.7.
+ * watchlist — tickers the user starred. Phase 4.7; live updates 2026-11.
  *
- * Pure helpers: no React, no fetch. The sidebar reads ``listWatchlist``
- * for its count badge; the WatchlistButton on /symbol/:ticker writes
- * via toggleWatchlist; the SearchModal surfaces watchlist tickers
- * inline alongside recents.
+ * Written by the star button on /symbol/:ticker and the sidebar's
+ * remove button; read by the sidebar's Watchlist section and the
+ * search modal. ``useWatchlist`` re-renders on every change, wherever
+ * it came from (see stored-list.ts).
  *
- * Storage shape: a plain JSON ``string[]`` of uppercased tickers under
- * ``market-agent.watchlist``. Order is insertion-order (most-recently-
- * added at the back). Corrupt payloads are treated as empty rather
- * than crashing the app.
+ * Storage shape: a JSON ``string[]`` of uppercased tickers under
+ * ``market-agent.watchlist``, in the order they were added.
  */
+import { readStoredList, useStoredList, writeStoredList } from "./stored-list";
 
 const STORAGE_KEY = "market-agent.watchlist";
 
-function read(): string[] {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    // Defensive: drop non-string entries silently.
-    return parsed.filter((v): v is string => typeof v === "string");
-  } catch {
-    // Corrupt JSON or quota / private-mode error — treat as empty.
-    return [];
-  }
-}
-
-function write(list: string[]): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  } catch {
-    // Quota / private-mode — silent. Same posture as auth.ts.
-  }
-}
-
 /** Return the current watchlist as an array of uppercased tickers. */
 export function listWatchlist(): string[] {
-  return read();
+  return readStoredList(STORAGE_KEY);
+}
+
+/** The watchlist, kept current across components and tabs. */
+export function useWatchlist(): string[] {
+  return useStoredList(STORAGE_KEY);
 }
 
 /** True when the ticker is in the watchlist (case-insensitive). */
 export function isWatched(ticker: string): boolean {
-  const normalized = ticker.toUpperCase();
-  return read().includes(normalized);
+  return listWatchlist().includes(ticker.toUpperCase());
 }
 
 /** Add a ticker. No-op when already present. Returns the new list. */
 export function addToWatchlist(ticker: string): string[] {
   const normalized = ticker.toUpperCase();
-  const current = read();
+  const current = listWatchlist();
   if (current.includes(normalized)) return current;
   const next = [...current, normalized];
-  write(next);
+  writeStoredList(STORAGE_KEY, next);
   return next;
 }
 
 /** Remove a ticker. No-op when absent. Returns the new list. */
 export function removeFromWatchlist(ticker: string): string[] {
   const normalized = ticker.toUpperCase();
-  const current = read();
+  const current = listWatchlist();
   const next = current.filter((t) => t !== normalized);
   if (next.length === current.length) return current;
-  write(next);
+  writeStoredList(STORAGE_KEY, next);
   return next;
 }
 

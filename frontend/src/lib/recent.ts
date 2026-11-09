@@ -1,47 +1,28 @@
 /**
- * recent — localStorage-backed MRU list of last-visited tickers.
- * Phase 4.7.
+ * recent — most-recently-opened tickers. Phase 4.7; live updates 2026-11.
  *
- * SymbolDetailPage pushes onto this on report-resolved; the sidebar
- * shows a count badge; the SearchModal + LandingPage surface recent
- * tickers inline.
+ * SymbolDetailPage pushes a ticker once its report loads (so typos and
+ * 404s never land here); the sidebar's Recent section and the search
+ * modal read it. ``useRecent`` re-renders on every change.
  *
- * Storage shape: a plain JSON ``string[]`` of uppercased tickers under
- * ``market-agent.recent``. Front of the array = most recent. Cap at
- * RECENT_MAX so the list stays bounded; oldest entries drop off when
- * the cap is hit.
- *
- * Same defensive posture as watchlist.ts — corrupt payloads → [].
+ * Storage shape: a JSON ``string[]`` of uppercased tickers under
+ * ``market-agent.recent``, most recent first, capped at RECENT_MAX.
  */
+import { readStoredList, useStoredList, writeStoredList } from "./stored-list";
 
 const STORAGE_KEY = "market-agent.recent";
 
 /** Maximum entries retained. The 11th push drops the oldest. */
 export const RECENT_MAX = 10;
 
-function read(): string[] {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((v): v is string => typeof v === "string");
-  } catch {
-    return [];
-  }
-}
-
-function write(list: string[]): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  } catch {
-    // see watchlist.ts
-  }
-}
-
 /** Return the recent list as an array of uppercased tickers, most-recent first. */
 export function listRecent(): string[] {
-  return read();
+  return readStoredList(STORAGE_KEY);
+}
+
+/** The recent list, kept current across components and tabs. */
+export function useRecent(): string[] {
+  return useStoredList(STORAGE_KEY);
 }
 
 /**
@@ -53,9 +34,17 @@ export function listRecent(): string[] {
  */
 export function pushRecent(ticker: string): string[] {
   const normalized = ticker.toUpperCase();
-  const current = read();
-  const dedup = current.filter((t) => t !== normalized);
-  const next = [normalized, ...dedup].slice(0, RECENT_MAX);
-  write(next);
+  const current = listRecent();
+  if (current[0] === normalized) return current;
+  const next = [normalized, ...current.filter((t) => t !== normalized)].slice(
+    0,
+    RECENT_MAX,
+  );
+  writeStoredList(STORAGE_KEY, next);
   return next;
+}
+
+/** Forget every recent ticker. */
+export function clearRecent(): void {
+  writeStoredList(STORAGE_KEY, []);
 }

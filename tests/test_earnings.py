@@ -511,3 +511,15 @@ def test_yfinance_history_is_oldest_first(
     for key in HISTORY_KEYS:
         periods = [p.period for p in history[key]]
         assert periods == sorted(periods), f"{key} history not oldest-first"
+
+
+async def test_claims_carry_display_units(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ADR 0007: the synthesis prompt shows "$0.89" and "7.74%", not 0.89071."""
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider())
+    claims = await fetch_earnings("AAPL", provider="fake")
+    assert claims["eps_actual"].unit == "usd_per_share"
+    assert claims["next.eps_estimate"].unit == "usd_per_share"
+    assert claims["eps_surprise_pct"].unit == "percent"
+    assert claims["last_20q.avg_surprise_pct"].unit == "percent"
+    assert claims["last_20q.beat_count"].unit == "count"
+    assert all(c.unit is not None for c in claims.values())

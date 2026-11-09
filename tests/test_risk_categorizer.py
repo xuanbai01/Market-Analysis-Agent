@@ -260,3 +260,20 @@ async def test_output_budget_scales_with_paragraph_count(
     assert budget is not None
     assert budget >= min(expected_floor, 16000)
     assert budget <= 16000
+
+
+def test_an_invented_category_files_under_other() -> None:
+    """DeepSeek once returned 'micro_placeholder'; one bad label must not
+    fail the whole batch."""
+    from app.schemas.ten_k import RiskCategory
+    from app.services.risk_categorizer import RiskCategorization
+
+    parsed = RiskCategorization.model_validate(
+        {
+            "categorizations": [
+                {"action": "added", "index": 0, "category": "micro_placeholder"},
+                {"action": "added", "index": 1, "category": "cybersecurity"},
+            ]
+        }
+    )
+    assert [c.category for c in parsed.categorizations] == [RiskCategory.OTHER, RiskCategory.CYBERSECURITY]

@@ -48,6 +48,7 @@ function report(opts: {
     generated_at: "2026-05-02T14:00:00+00:00",
     overall_confidence: "high",
     tool_calls_audit: [],
+    thesis: null,
     name: ("name" in opts ? opts.name : "NVIDIA Corporation") ?? null,
     sector: ("sector" in opts ? opts.sector : "megacap_tech") ?? null,
     layout_signals: HEALTHY_LAYOUT_SIGNALS,

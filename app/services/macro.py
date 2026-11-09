@@ -53,7 +53,7 @@ NEWSAPI_KEY pattern in ``news_ingestion``.
 | semiconductors | DGS10, MANEMP | Rate-sensitive cap-ex; manufacturing employment as ISM-PMI proxy (PMI is paywalled) |
 | banks | DGS10, DGS2 | Yield curve = NIM driver |
 | megacap_tech, cloud_saas | DGS10 | Long-duration cash flows; rate-sensitive |
-| consumer_staples, ecommerce_retail | UMCSENT, RSAFS | Consumer health |
+| consumer_staples, staples_retail, ecommerce_retail | UMCSENT, RSAFS | Consumer health |
 | auto_ev | UMCSENT, DGS10 | Consumer health + financing rates |
 | oil_gas | DCOILWTICO, DCOILBRENTEU | Direct revenue driver |
 | pharma | DGS10 | Less macro-coupled but still rate-sensitive in valuation |
@@ -122,6 +122,10 @@ SECTOR_SERIES: dict[str, list[FredSeries]] = {
         FredSeries(id="DGS10", label="10Y Treasury yield", units="%"),
     ],
     "consumer_staples": [
+        FredSeries(id="UMCSENT", label="Consumer sentiment", units="index"),
+        FredSeries(id="RSAFS", label="Retail sales", units="$M"),
+    ],
+    "staples_retail": [
         FredSeries(id="UMCSENT", label="Consumer sentiment", units="index"),
         FredSeries(id="RSAFS", label="Retail sales", units="$M"),
     ],

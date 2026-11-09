@@ -63,50 +63,57 @@ export function ValuationCard({ report }: Props) {
 
   return (
     // No mb-6 — vertical spacing comes from the parent grid's gap-6.
-    <section className="rounded-md border border-strata-border bg-strata-surface p-5">
+    <section className="flex h-full flex-col rounded-md border border-strata-border bg-strata-surface p-5">
       <header className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-valuation">
-            Valuation · {report.symbol}
-          </div>
-          {summary && (
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-strata-fg">
-              {summary}
-            </p>
-          )}
+        <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-valuation">
+          Valuation · {report.symbol}
         </div>
         <ConfidenceBadge confidence={confidence} size="sm" />
       </header>
 
-      {/* 4-cell matrix. */}
-      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {cells.map((c) => (
-          <MetricCell key={c.metric} cell={c} />
-        ))}
-      </div>
+      {/* 2026-11 layout pass: full-width card — the read and the
+          multiples on the left, the peer scatter on the right at lg. */}
+      <div className="grid flex-1 grid-cols-1 gap-x-8 gap-y-5 lg:grid-cols-2">
+        <div>
+          {summary && (
+            <p className="mb-5 text-sm leading-relaxed text-strata-fg">
+              {summary}
+            </p>
+          )}
 
-      {peers && peers.claims.length > 0 && (
-        <div
-          data-testid="valuation-peer-count"
-          className="mb-3 font-mono text-[10px] uppercase tracking-kicker text-strata-dim"
-        >
-          n = {countPeers(peers.claims)} peers · sector medians
+          {/* 4-cell matrix. */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-2 2xl:grid-cols-4">
+            {cells.map((c) => (
+              <MetricCell key={c.metric} cell={c} />
+            ))}
+          </div>
         </div>
-      )}
 
-      {/* PeerScatterV2.
+        <div>
+          {peers && peers.claims.length > 0 && (
+            <div
+              data-testid="valuation-peer-count"
+              className="mb-3 font-mono text-[10px] uppercase tracking-kicker text-strata-dim"
+            >
+              n = {countPeers(peers.claims)} peers · sector medians
+            </div>
+          )}
+
+          {/* PeerScatterV2.
           Width constrained so the SVG fits the 2/5 column the
           ValuationCard now lives in (Phase 4.3 layout pass). The
           PeerScatterV2 default is 500px which would overflow the
           card body at lg breakpoints. */}
-      {peers && peers.claims.length > 0 && (
-        <PeerScatterV2
-          peerClaims={peers.claims}
-          subject={subject}
-          width={380}
-          height={260}
-        />
-      )}
+          {peers && peers.claims.length > 0 && (
+            <PeerScatterV2
+              peerClaims={peers.claims}
+              subject={subject}
+              width={520}
+              height={300}
+            />
+          )}
+        </div>
+      </div>
     </section>
   );
 }
@@ -115,7 +122,11 @@ function gmSubjectFor(report: ResearchReport): number | null {
   const quality = report.sections.find((s) => s.title === "Quality");
   if (!quality) return null;
   const claim = quality.claims.find((c) => c.description === "Gross margin");
-  if (!claim || typeof claim.value !== "number" || !Number.isFinite(claim.value)) {
+  if (
+    !claim ||
+    typeof claim.value !== "number" ||
+    !Number.isFinite(claim.value)
+  ) {
     return null;
   }
   return claim.value;

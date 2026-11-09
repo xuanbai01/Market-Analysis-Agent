@@ -21,7 +21,9 @@ interface Props {
   section: Section;
 }
 
-const DEFAULT_VISIBLE = 5;
+// 2026-11 layout pass: 3 (was 5) so the news card sits level with the
+// Business card beside it; "View N more" still opens the rest.
+const DEFAULT_VISIBLE = 3;
 
 const CATEGORY_LABELS: Record<NewsCategory, string> = {
   earnings: "Earnings",
@@ -70,7 +72,7 @@ export function NewsList({ section }: Props) {
 
   if (items.length === 0) {
     return (
-      <section className="rounded-md border border-strata-border bg-strata-surface p-5">
+      <section className="flex h-full flex-col rounded-md border border-strata-border bg-strata-surface p-5">
         <div className="mb-3 font-mono text-[10px] uppercase tracking-kicker text-strata-earnings">
           News · last 7 days
         </div>
@@ -82,7 +84,7 @@ export function NewsList({ section }: Props) {
   }
 
   return (
-    <section className="rounded-md border border-strata-border bg-strata-surface p-5">
+    <section className="flex h-full flex-col rounded-md border border-strata-border bg-strata-surface p-5">
       <header
         data-testid="news-header"
         className="mb-3 flex items-center justify-between"

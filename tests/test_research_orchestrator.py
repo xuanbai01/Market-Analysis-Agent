@@ -22,6 +22,7 @@ import pytest
 
 from app.schemas.research import (
     Claim,
+    ClaimHistoryPoint,
     Confidence,
     ResearchReport,
     Section,
@@ -1278,3 +1279,84 @@ def test_system_prompt_says_values_are_in_display_units() -> None:
     convert them back to raw decimals."""
     lower = orch_module._SYSTEM_PROMPT.lower()
     assert "display units" in lower
+
+
+# ── ADR 0007 — history, derived comparisons, interpretation ──────────
+
+
+def test_claim_line_carries_its_history_in_display_units() -> None:
+    claim = Claim(
+        description="Operating margin",
+        value=0.34,
+        unit="fraction",
+        source=Source(tool="yfinance.fundamentals", fetched_at=datetime.now(UTC)),
+        history=[
+            ClaimHistoryPoint(period="2025-Q3", value=0.30),
+            ClaimHistoryPoint(period="2025-Q4", value=0.25),
+            ClaimHistoryPoint(period="2026-Q1", value=0.31),
+            ClaimHistoryPoint(period="2026-Q2", value=0.33),
+            ClaimHistoryPoint(period="2026-Q3", value=0.34),
+        ],
+    )
+    line = orch_module._format_claim_line(claim)
+    assert line.startswith("- Operating margin = 34.00% (yfinance.fundamentals)")
+    assert "5 periods: 2025-Q3 30.00% → 2026-Q3 34.00%" in line
+    assert "low 25.00% (2025-Q4)" in line
+    assert "high 34.00% (2026-Q3)" in line
+
+
+def test_claim_line_without_history_is_unchanged() -> None:
+    claim = Claim(
+        description="Return on equity",
+        value=1.4226,
+        unit="fraction",
+        source=Source(tool="yfinance.fundamentals", fetched_at=datetime.now(UTC)),
+    )
+    assert orch_module._format_claim_line(claim) == "- Return on equity = 142.26% (yfinance.fundamentals)"
+
+
+async def test_prompt_includes_derived_comparison_claims(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "fetch_peers": _peers_output(),
+            "fetch_macro": _macro_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    captured = _patch_synth(
+        monkeypatch,
+        _summaries_for(
+            "Valuation", "Quality", "Capital Allocation",
+            "Earnings", "Peers", "Risk Factors", "Macro",
+        ),
+    )
+    await compose_research_report("AAPL", Focus.FULL)
+    assert "(computed.analytics)" in captured[0]["prompt"]
+
+
+def test_system_prompt_asks_for_interpretation_without_new_numbers() -> None:
+    lower = orch_module._SYSTEM_PROMPT.lower()
+    assert "so what" in lower
+    assert "never compute" in lower
+    # Grounding: no causes or events the claims don't contain.
+    assert "outside facts" in lower
+
+
+def test_prompt_names_the_sector_and_adds_the_bank_note() -> None:
+    prompt = orch_module._build_user_prompt("JPM", Focus.FULL, {"Quality": []}, None, "banks")
+    assert "Sector: banks" in prompt
+    assert "Sector note: This is a bank" in prompt
+    plain = orch_module._build_user_prompt("KO", Focus.FULL, {"Quality": []}, None, "consumer_staples")
+    assert "Sector: consumer_staples" in plain
+    assert "Sector note" not in plain
+    assert "Sector:" not in orch_module._build_user_prompt("ZZZ", Focus.FULL, {"Quality": []})
+
+
+def test_system_prompt_keeps_outside_knowledge_out() -> None:
+    lower = orch_module._SYSTEM_PROMPT.lower()
+    assert "no product, model or brand names" in lower
+    assert "never \"down -2.65 pts\"" in lower

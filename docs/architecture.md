@@ -167,3 +167,5 @@ ADRs in [docs/adr/](adr/):
 - [0003](adr/0003-pivot-equity-research.md) — Pivot from v1 (real-time multi-agent platform) to v2 (AI Equity Research Assistant).
 - [0004](adr/0004-visual-first-product-shape.md) — Visual-first, delta-driven; not chasing Morningstar-narrative depth.
 - [0005](adr/0005-symbol-centric-dashboard.md) — **Read this before proposing surface-shape changes.** Pivot from "click Generate → static report" to symbol-centric dashboard with adaptive layouts (Phase 4).
+- [0006](adr/0006-pluggable-llm-provider.md) — LLM provider switchable per `LLM_PROVIDER` (Anthropic default, DeepSeek Flash).
+- [0007](adr/0007-analytical-narratives.md) — Card prose interprets: derived comparison claims (`research_derived.py`), history in the prompt, sector-aware framing; citation rule unchanged.

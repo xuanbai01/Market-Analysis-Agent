@@ -9,8 +9,8 @@
  * 1. Headline shows "X of N beat consensus" using last_20q.beat_count
  *    when available.
  * 2. Next-print date renders when next.report_date claim exists.
- * 3. EpsBars rendered with the eps_actual and eps_estimate histories.
- * 4. Three stat tiles below: Beat rate, Surprise μ, EPS TTM.
+ * 3. EpsChart rendered with the eps_actual and eps_estimate histories.
+ * 4. Three stat tiles: Beat rate, Avg surprise, EPS TTM.
  * 5. Falls back gracefully when claims are missing (renders what's
  *    available, omits what isn't, never crashes).
  */
@@ -37,7 +37,7 @@ function fakeEarningsSection(): Section {
         value: 2.18,
         source: { tool: "yfinance.earnings", fetched_at: "2026-05-02T14:00:00+00:00" },
         history: Array.from({ length: 20 }, (_, i) => ({
-          period: `2020-Q${(i % 4) + 1}`,
+          period: `${2021 + Math.floor(i / 4)}-Q${(i % 4) + 1}`,
           value: 1 + i * 0.1,
         })),
       },
@@ -46,7 +46,7 @@ function fakeEarningsSection(): Section {
         value: 2.1,
         source: { tool: "yfinance.earnings", fetched_at: "2026-05-02T14:00:00+00:00" },
         history: Array.from({ length: 20 }, (_, i) => ({
-          period: `2020-Q${(i % 4) + 1}`,
+          period: `${2021 + Math.floor(i / 4)}-Q${(i % 4) + 1}`,
           value: 0.95 + i * 0.1,
         })),
       },
@@ -58,7 +58,13 @@ function fakeEarningsSection(): Section {
       },
       {
         description: "Next earnings report date (expected)",
-        value: "2026-05-21",
+        value: "2099-05-21",
+        source: { tool: "yfinance.earnings", fetched_at: "2026-05-02T14:00:00+00:00" },
+        history: [],
+      },
+      {
+        description: "Next quarter consensus EPS estimate",
+        value: 2.35,
         source: { tool: "yfinance.earnings", fetched_at: "2026-05-02T14:00:00+00:00" },
         history: [],
       },
@@ -84,27 +90,35 @@ describe("EarningsCard", () => {
     expect(screen.getByText(/17 of 20 beat/i)).toBeInTheDocument();
   });
 
-  it("renders the next-print date", () => {
+  it("renders the next print's date and its consensus", () => {
     render(<EarningsCard section={fakeEarningsSection()} />);
-    expect(screen.getByText(/2026-05-21/)).toBeInTheDocument();
+    const next = screen.getByTestId("next-print");
+    expect(next.textContent).toContain("May 21, 2099");
+    expect(next.textContent).toContain("consensus $2.35");
+    // No invented session timing.
+    expect(next.textContent).not.toMatch(/after market/i);
   });
 
-  it("embeds EpsBars with the actual + estimate histories", () => {
+  it("hides a next-print date that has already passed", () => {
+    const sec = fakeEarningsSection();
+    const next = sec.claims.find((c) => c.description.startsWith("Next earnings report date"));
+    if (next) next.value = "2026-10-27";
+    render(<EarningsCard section={sec} />);
+    expect(screen.queryByTestId("next-print")).toBeNull();
+  });
+
+  it("embeds the EPS chart with the actual + estimate histories", () => {
     const { container } = render(
       <EarningsCard section={fakeEarningsSection()} />,
     );
-    expect(
-      container.querySelector("[data-testid='eps-bars']"),
-    ).not.toBeNull();
+    expect(container.querySelector("[data-testid='eps-chart']")).not.toBeNull();
+    expect(container.querySelectorAll("[data-mark='actual']")).toHaveLength(20);
   });
 
-  it("renders 3 stat tiles (Beat rate, Surprise μ, EPS TTM)", () => {
+  it("renders 3 stat tiles (Beat rate, Avg surprise, EPS TTM)", () => {
     render(<EarningsCard section={fakeEarningsSection()} />);
     expect(screen.getByText(/beat rate/i)).toBeInTheDocument();
-    // Surprise μ tile — match the μ glyph specifically so the search
-    // doesn't collide with the RecentPrints header which also says
-    // "actual · estimate · surprise" (Phase 4.3.B.1).
-    expect(screen.getByText(/surprise\s*μ/i)).toBeInTheDocument();
+    expect(screen.getByText(/avg surprise/i)).toBeInTheDocument();
     expect(screen.getByText(/eps ttm/i)).toBeInTheDocument();
   });
 
@@ -168,6 +182,8 @@ describe("EarningsCard", () => {
     )[3]; // most recent
     expect(lastRow).toBeTruthy();
     const text = lastRow.textContent ?? "";
+    // Quarter in the same "Q4 '25" form the other cards use.
+    expect(text).toContain("Q4 '25");
     // The fixture's history index 19 is the latest: actual = 1 + 19*0.1 = 2.9,
     // estimate = 0.95 + 19*0.1 = 2.85, surprise = (2.9-2.85)/2.85 ≈ 1.75%
     // → "+1.8%" with one-decimal rounding.
@@ -214,15 +230,15 @@ describe("EarningsCard", () => {
 
   // ── Phase 4.5.B — bottom-decile beat-rate annotation ─────────────
 
-  it("renders 'bottom decile' annotation in the headline when distressed", () => {
+  it("renders the low-beat-rate annotation in the headline when distressed", () => {
     const { getByTestId } = render(
       <EarningsCard
         section={fakeEarningsSection()}
         distressed={{ beat_rate_below_30pct: true }}
       />,
     );
-    expect(getByTestId("earnings-bottom-decile").textContent).toMatch(
-      /bottom decile/i,
+    expect(getByTestId("earnings-low-beat-rate").textContent).toMatch(
+      /beats under 30%/i,
     );
   });
 
@@ -233,13 +249,13 @@ describe("EarningsCard", () => {
         distressed={{ beat_rate_below_30pct: false }}
       />,
     );
-    expect(queryByTestId("earnings-bottom-decile")).toBeNull();
+    expect(queryByTestId("earnings-low-beat-rate")).toBeNull();
   });
 
   it("omits the bottom-decile annotation when distressed prop is omitted", () => {
     const { queryByTestId } = render(
       <EarningsCard section={fakeEarningsSection()} />,
     );
-    expect(queryByTestId("earnings-bottom-decile")).toBeNull();
+    expect(queryByTestId("earnings-low-beat-rate")).toBeNull();
   });
 });

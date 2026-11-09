@@ -7,7 +7,7 @@
  *
  *   - is_unprofitable_ttm OR gross_margin_negative → "● UNPROFITABLE · TTM"
  *   - cash_runway_quarters !== null AND < 6           → "⚠ LIQUIDITY WATCH"
- *   - beat_rate_below_30pct                          → "● BOTTOM DECILE BEAT RATE"
+ *   - beat_rate_below_30pct                          → "● BEATS UNDER 30% OF QUARTERS"
  *   - debt_rising_cash_falling                       → "▲ DEBT RISING · CASH FALLING"
  *
  * Returns null when every signal is healthy so the page header stays
@@ -87,11 +87,11 @@ describe("HeaderPills", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders BOTTOM DECILE BEAT RATE pill when beat_rate_below_30pct", () => {
+  it("renders the BEATS UNDER 30% pill when beat_rate_below_30pct", () => {
     const { getByText } = render(
       <HeaderPills signals={signals({ beat_rate_below_30pct: true })} />,
     );
-    expect(getByText(/bottom decile/i)).not.toBeNull();
+    expect(getByText(/beats under 30%/i)).not.toBeNull();
   });
 
   it("renders DEBT RISING pill when debt_rising_cash_falling", () => {

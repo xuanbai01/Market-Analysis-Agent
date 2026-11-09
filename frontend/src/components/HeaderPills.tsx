@@ -11,7 +11,8 @@
  *
  *   ● UNPROFITABLE · TTM           — red dot, strata-neg accent
  *   ⚠ LIQUIDITY WATCH              — warning glyph, strata-risk accent
- *   ● BOTTOM DECILE BEAT RATE      — strata-neg
+ *   ● BEATS UNDER 30% OF QUARTERS  — strata-neg (was "bottom decile",
+ *     a ranking we never computed)
  *   ▲ DEBT RISING · CASH FALLING   — strata-risk
  *
  * The runway threshold is < 6 quarters (≈ 18 months — short enough
@@ -51,7 +52,7 @@ const PILL_LIQUIDITY: PillSpec = {
 };
 
 const PILL_BEAT_RATE: PillSpec = {
-  label: "BOTTOM DECILE BEAT RATE",
+  label: "BEATS UNDER 30% OF QUARTERS",
   glyph: "●",
   glyphClass: "text-strata-neg",
   accentClass: "text-strata-fg",

@@ -29,6 +29,7 @@
  */
 import { useCallback, useRef, useState } from "react";
 
+import { shortPeriod } from "../lib/chart-format";
 import type { ClaimHistoryPoint } from "../lib/schemas";
 
 export interface MultiLineSeries {
@@ -113,12 +114,6 @@ export function niceTicks(min: number, max: number, target = 4): number[] {
     ticks.push(clean === 0 ? 0 : clean); // no "-0"
   }
   return ticks;
-}
-
-/** "2025-Q3" → "Q3 '25"; other period shapes pass through. */
-function shortPeriod(period: string): string {
-  const m = /^(\d{4})-Q([1-4])$/.exec(period);
-  return m ? `Q${m[2]} '${m[1].slice(2)}` : period;
 }
 
 function evenlySpaced(n: number, k: number): number[] {

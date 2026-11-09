@@ -9,6 +9,12 @@ function trimmed(n: number, decimals: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(decimals);
 }
 
+/** "2025-Q3" → "Q3 '25"; other period shapes pass through. */
+export function shortPeriod(period: string): string {
+  const m = /^(\d{4})-Q([1-4])$/.exec(period);
+  return m ? `Q${m[2]} '${m[1].slice(2)}` : period;
+}
+
 /** Dollars per share: "$2.62", "-$0.55". */
 export function usdPerShare(v: number): string {
   return `${v < 0 ? "-" : ""}$${Math.abs(v).toFixed(2)}`;

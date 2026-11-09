@@ -141,7 +141,7 @@ Lazy-loading is the binding bundle constraint — main is at 87.69 KB gz (12.31 
 |---|---|---|
 | `/login` | ✅ Pre-auth screen. | main |
 | `/` | ✅ LandingPage — search bar + Recent Tickers + Watchlist + Past Reports. | main |
-| `/symbol/:ticker` | ✅ The dashboard. All Strata cards live here (HeroCard, QualityCard, EarningsCard, ValuationCard, PerShareGrowthCard, CashAndCapitalCard, RiskDiffCard, MacroPanel, ContextBand, etc.). | **lazy** (14.5 KB gz) |
+| `/symbol/:ticker` | ✅ The dashboard: sticky section nav, HeroCard, AnalystViewCard, full-width Quality / Earnings / Valuation / Per-share growth, an equal-height row of Cash & capital · Capital returns · Risk · Macro (only the cards with data), Business + News. | **lazy** (20.3 KB gz) |
 | `/compare?a=X&b=Y` | ✅ Phase 4.6.A — two-ticker side-by-side. Per-side distress chrome. | **lazy** (6.4 KB gz) |
 | `/lens`, `/lens/:id` | ✅ ADR 0007 layer 3 — cross-company lenses: the yearly distribution of a metric across a group (DistributionChart), dollars by company (CapexBars), a latest-year table and a cited AI read. | **lazy** (4.6 KB gz) |
 | (overlay) `SearchModal` | ✅ Phase 4.7 — ⌘K-triggered. | **lazy** (1.3 KB gz) |

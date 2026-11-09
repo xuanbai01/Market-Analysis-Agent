@@ -6,7 +6,7 @@
  * the ContextBand can collapse cleanly for thinly-covered tickers.
  */
 import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import { BusinessCard } from "./BusinessCard";
 import type { Claim, ClaimValue, Section } from "../lib/schemas";
@@ -73,5 +73,27 @@ describe("BusinessCard", () => {
     expect(() =>
       render(<BusinessCard ticker="AAPL" section={section([])} />),
     ).not.toThrow();
+  });
+});
+
+// tasks/dogfood-2026-11.md #3 — long summaries clamp to ~3 lines.
+describe("BusinessCard — long summaries", () => {
+  const LONG = "Apple Inc. designs, manufactures, and markets smartphones. ".repeat(10);
+
+  it("clamps a long summary and offers Show more", () => {
+    render(<BusinessCard ticker="AAPL" section={section([claim("Business description (from 10-K filing)", LONG)])} />);
+    const summary = screen.getByTestId("business-summary");
+    expect(summary.className).toContain("line-clamp-3");
+    const toggle = screen.getByRole("button", { name: "Show more" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(summary.className).not.toContain("line-clamp-3");
+    expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("leaves a short summary alone", () => {
+    render(<BusinessCard ticker="AAPL" section={section(FULL)} />);
+    expect(screen.getByTestId("business-summary").className).not.toContain("line-clamp-3");
+    expect(screen.queryByRole("button", { name: /show more/i })).toBeNull();
   });
 });

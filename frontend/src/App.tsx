@@ -71,7 +71,7 @@ export function App() {
           <Route
             path="/symbol/:ticker"
             element={
-              <Suspense fallback={<LoadingState symbol="loading" />}>
+              <Suspense fallback={<LoadingState />}>
                 <SymbolDetailPage />
               </Suspense>
             }
@@ -79,7 +79,7 @@ export function App() {
           <Route
             path={ROUTES.compare}
             element={
-              <Suspense fallback={<LoadingState symbol="compare" />}>
+              <Suspense fallback={<LoadingState />}>
                 <ComparePage />
               </Suspense>
             }

@@ -10,21 +10,28 @@
  * loading. The skeleton uses ``animate-pulse`` for the canonical
  * "loading" affordance and matches the layout SymbolDetailPage will
  * render once the report arrives.
+ *
+ * Without a ``symbol`` (the page's code is still loading, no report has
+ * been requested yet) only the skeleton shows — the "Generating report"
+ * message would be false, and used to read "for loading…"
+ * (tasks/dogfood-2026-11.md #2).
  */
-export function LoadingState({ symbol }: { symbol: string }) {
+export function LoadingState({ symbol }: { symbol?: string }) {
   return (
     <div className="space-y-6">
-      <div className="rounded-md border border-strata-border bg-strata-surface p-6 text-center">
-        <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-strata-line border-t-strata-fg" />
-        <p className="text-sm font-medium text-strata-hi">
-          Generating report for {symbol}…
-        </p>
-        <p className="mt-2 text-xs text-strata-dim">
-          First generation takes 30–90 seconds (LLM synthesis + SEC
-          filings, longer on uncached filings). Subsequent reads of
-          the same symbol are instant.
-        </p>
-      </div>
+      {symbol && (
+        <div className="rounded-md border border-strata-border bg-strata-surface p-6 text-center">
+          <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-strata-line border-t-strata-fg" />
+          <p className="text-sm font-medium text-strata-hi">
+            Generating report for {symbol}…
+          </p>
+          <p className="mt-2 text-xs text-strata-dim">
+            First generation takes 30–90 seconds (LLM synthesis + SEC
+            filings, longer on uncached filings). Subsequent reads of
+            the same symbol are instant.
+          </p>
+        </div>
+      )}
 
       {/* Ghost skeleton matching SymbolDetailPage's row layout. The
           shapes intentionally mirror the real component widths so the

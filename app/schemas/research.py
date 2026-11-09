@@ -239,6 +239,12 @@ class ClaimRef(BaseModel):
 class ThesisPoint(BaseModel):
     text: str = Field(min_length=1, max_length=600)
     claim_refs: list[ClaimRef] = Field(default_factory=list)
+    # 2026-11 analyst-view redesign: a few plain words the dashboard
+    # lists by default ("Margins still expanding"), with the full text a
+    # click away. No digits (enforced in code), so it never carries an
+    # unchecked number. None on reports from before it, and on lens
+    # points, which don't ask for one.
+    title: str | None = Field(default=None, max_length=80)
 
 
 class Thesis(BaseModel):
@@ -377,6 +383,10 @@ class SectionSummaries(BaseModel):
 
 
 class ThesisDraftPoint(BaseModel):
+    title: str = Field(
+        default="",
+        description="2-6 plain words naming the point, e.g. 'Margins still expanding'. No numbers.",
+    )
     text: str = Field(description="One or two sentences, at most 40 words.")
     claim_ids: list[str] = Field(
         default_factory=list,

@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 from app.schemas.research import Claim, Source
 from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
+from app.services.research_derived import DERIVED_TOOL
 from app.services.research_tool_registry import (
     SECTIONS_BY_FOCUS,
     Focus,
@@ -162,11 +163,16 @@ def _spec(focus: Focus, title: str):
     return next(s for s in SECTIONS_BY_FOCUS[focus] if s.title == title)
 
 
+def _tool_claims(claims: list[Claim]) -> list[Claim]:
+    """The claims that came from the tool, without ADR 0007's derived ones."""
+    return [c for c in claims if c.source.tool != DERIVED_TOOL]
+
+
 def test_valuation_builder_takes_only_valuation_keys() -> None:
     fundamentals = _make_fundamentals_output()
     outputs = {"fetch_fundamentals": fundamentals}
 
-    claims = _spec(Focus.FULL, "Valuation").builder(outputs)
+    claims = _tool_claims(_spec(Focus.FULL, "Valuation").builder(outputs))
     descriptions = {c.description for c in claims}
 
     # 5 valuation metrics
@@ -186,7 +192,7 @@ def test_quality_builder_takes_only_quality_keys() -> None:
     fundamentals = _make_fundamentals_output()
     outputs = {"fetch_fundamentals": fundamentals}
 
-    claims = _spec(Focus.FULL, "Quality").builder(outputs)
+    claims = _tool_claims(_spec(Focus.FULL, "Quality").builder(outputs))
     descriptions = {c.description for c in claims}
 
     expected_quality = {
@@ -228,7 +234,7 @@ def test_capital_allocation_builder_takes_only_cap_alloc_keys() -> None:
     fundamentals = _make_fundamentals_output()
     outputs = {"fetch_fundamentals": fundamentals}
 
-    claims = _spec(Focus.FULL, "Capital Allocation").builder(outputs)
+    claims = _tool_claims(_spec(Focus.FULL, "Capital Allocation").builder(outputs))
     descriptions = {c.description for c in claims}
 
     expected = {
@@ -249,6 +255,35 @@ def test_capital_allocation_builder_takes_only_cap_alloc_keys() -> None:
     assert "Revenue per share" not in descriptions
     assert "Total debt per share" not in descriptions
     assert "Trailing P/E" not in descriptions
+
+
+# ── ADR 0007 — derived comparison claims ─────────────────────────────
+
+
+def test_numeric_sections_end_with_derived_comparisons() -> None:
+    outputs = {"fetch_fundamentals": _make_fundamentals_output()}
+    for title in ("Valuation", "Quality", "Capital Allocation"):
+        claims = _spec(Focus.FULL, title).builder(outputs)
+        tool = _tool_claims(claims)
+        derived = claims[len(tool):]
+        assert derived, f"{title} should carry derived claims"
+        assert all(c.source.tool == DERIVED_TOOL for c in derived), "derived claims come last"
+
+
+def test_full_valuation_reads_peers_for_premium_claims() -> None:
+    spec = _spec(Focus.FULL, "Valuation")
+    assert "fetch_peers" in spec.tools_required
+    outputs = {
+        "fetch_fundamentals": _make_fundamentals_output(),
+        "fetch_peers": {"median.trailing_pe": _claim("Median P/E", 30.0)},
+    }
+    descriptions = [c.description for c in spec.builder(outputs)]
+    assert "Trailing P/E vs peer median of 30.00: premium (+) or discount (−)" in descriptions
+
+
+def test_earnings_focus_valuation_does_not_add_a_peers_fetch() -> None:
+    """The earnings lens stays lean: no extra yfinance fan-out for peers."""
+    assert "fetch_peers" not in _spec(Focus.EARNINGS, "Valuation").tools_required
 
 
 def test_section_builders_return_empty_when_tool_output_missing() -> None:

@@ -23,12 +23,15 @@ import pytest
 from app.schemas.research import (
     Claim,
     ClaimHistoryPoint,
+    ClaimRef,
     Confidence,
     ResearchReport,
     Section,
     SectionSummaries,
     SectionSummary,
     Source,
+    Thesis,
+    ThesisPoint,
 )
 from app.schemas.ten_k import Extracted10KSection, Risk10KDiff
 from app.services import research_orchestrator as orch_module
@@ -1118,8 +1121,10 @@ async def test_user_prompt_includes_layout_signals_when_distressed(
 
     await compose_research_report("RIVN", Focus.FULL)
 
-    assert len(captured) == 1
-    prompt = captured[0]["prompt"]
+    # One section-prose call (the analyst view is a second, separate call).
+    section_calls = [c for c in captured if c["schema"] is SectionSummaries]
+    assert len(section_calls) == 1
+    prompt = section_calls[0]["prompt"]
     # The prompt mentions the distressed framing explicitly so Sonnet
     # can adapt its tone. We don't pin the exact wording — assert the
     # signals' names land in the prompt + a framing word.
@@ -1360,3 +1365,58 @@ def test_system_prompt_keeps_outside_knowledge_out() -> None:
     lower = orch_module._SYSTEM_PROMPT.lower()
     assert "no product, model or brand names" in lower
     assert "never \"down -2.65 pts\"" in lower
+
+
+# ── Phase 5 — the analyst view ────────────────────────────────────────
+
+
+def _all_tools() -> dict[str, Any]:
+    return {
+        "fetch_fundamentals": _fundamentals_output(),
+        "fetch_earnings": _earnings_output(),
+        "fetch_peers": _peers_output(),
+        "fetch_macro": _macro_output(),
+        "extract_10k_risks_diff": _risks_diff_output(),
+        "extract_10k_business": _business_output(),
+    }
+
+
+_SECTIONS = ("Valuation", "Quality", "Capital Allocation", "Earnings", "Peers", "Risk Factors", "Macro")
+
+
+async def test_full_report_carries_the_analyst_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_tools(monkeypatch, _all_tools())
+    _patch_synth(monkeypatch, _summaries_for(*_SECTIONS))
+    seen: dict[str, Any] = {}
+
+    async def _fake_thesis(symbol: str, section_claims: Any, **kwargs: Any) -> Thesis:
+        seen.update(kwargs, symbol=symbol, titles=list(section_claims))
+        return Thesis(
+            headline="A strong business priced for it.",
+            bull=[ThesisPoint(text="Margins expand.", claim_refs=[ClaimRef(section="Quality", index=0)])],
+        )
+
+    monkeypatch.setattr(orch_module.research_thesis, "compose_thesis", _fake_thesis)
+    report = await compose_research_report("AAPL", Focus.FULL)
+    assert report.thesis is not None
+    assert report.thesis.headline == "A strong business priced for it."
+    assert seen["symbol"] == "AAPL"
+    assert "Quality" in seen["titles"]
+
+
+async def test_report_stands_when_the_analyst_view_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real compose_thesis gets the stub's SectionSummaries back, not a
+    ThesisDraft, and must degrade to None instead of failing the report."""
+    _patch_tools(monkeypatch, _all_tools())
+    _patch_synth(monkeypatch, _summaries_for(*_SECTIONS))
+    report = await compose_research_report("AAPL", Focus.FULL)
+    assert report.thesis is None
+    assert {s.title for s in report.sections} >= set(_SECTIONS)
+
+
+async def test_earnings_focus_skips_the_analyst_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_tools(monkeypatch, _all_tools())
+    captured = _patch_synth(monkeypatch, _summaries_for("Earnings", "Valuation", "Risk Factors"))
+    report = await compose_research_report("AAPL", Focus.EARNINGS)
+    assert report.thesis is None
+    assert all(c["schema"] is SectionSummaries for c in captured)

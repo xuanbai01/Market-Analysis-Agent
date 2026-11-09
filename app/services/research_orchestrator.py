@@ -58,9 +58,9 @@ from app.schemas.research import (
     Section,
     SectionSummaries,
 )
-from app.services import llm
+from app.services import llm, research_thesis
 from app.services.business_info import fetch_business_info
-from app.services.claim_display import format_claim_value
+from app.services.claim_display import format_claim_line as _format_claim_line
 from app.services.earnings import fetch_earnings
 from app.services.fundamentals import fetch_fundamentals
 from app.services.macro import fetch_macro
@@ -200,36 +200,6 @@ _FALLBACK_SUMMARY_TEMPLATE = (
     "Summary unavailable: the model did not return prose for the {title} "
     "section. The section's claims are still attached to this report."
 )
-
-
-def _format_claim_line(c: Any) -> str:
-    """One line per claim for the prompt: ``- description = value (tool)``.
-
-    Unit-annotated values go in display form ("142.26%", "$4.98T"), the
-    same text the dashboard card shows, so the prose matches the cards
-    and never compares numbers stored in different forms. Unannotated
-    claims keep ``repr`` (see ``claim_display``).
-
-    ADR 0007: a claim with history adds its path — first → last, low and
-    high, in the same display units — so the model can describe a trend
-    using numbers that are history points (and pass the rubric)."""
-    unit = getattr(c, "unit", None)
-    line = f"- {c.description} = {format_claim_value(c.value, unit)} ({c.source.tool})"
-    history = list(getattr(c, "history", None) or [])
-    if len(history) < 2:
-        return line
-
-    def fmt(point: Any) -> str:
-        return format_claim_value(point.value, unit)
-
-    first, last = history[0], history[-1]
-    low = min(history, key=lambda p: p.value)
-    high = max(history, key=lambda p: p.value)
-    return (
-        f"{line} · history {len(history)} periods: {first.period} {fmt(first)} → "
-        f"{last.period} {fmt(last)}; low {fmt(low)} ({low.period}), "
-        f"high {fmt(high)} ({high.period})"
-    )
 
 
 def _format_layout_signals_block(signals: LayoutSignals) -> list[str]:
@@ -479,11 +449,27 @@ async def compose_research_report(
 
     # 3. One synth call covering every section.
     prompt = _build_user_prompt(target, focus, section_claims, derived_signals, sector_value)
-    summaries = await llm.synth_call(
+    section_call = llm.synth_call(
         prompt=prompt,
         schema=SectionSummaries,
         system=_SYSTEM_PROMPT,
     )
+    # Phase 5 — the analyst view, written in parallel from the same
+    # claims (full reports only). It never raises; None if it fails.
+    thesis = None
+    if focus is Focus.FULL:
+        summaries, thesis = await asyncio.gather(
+            section_call,
+            research_thesis.compose_thesis(
+                target,
+                section_claims,
+                sector=sector_value,
+                sector_note=_SECTOR_NOTES.get(sector_value or ""),
+                layout_signals=derived_signals,
+            ),
+        )
+    else:
+        summaries = await section_call
 
     # 4. Stitch together Sections with claims + summary +
     #    card_narrative + confidence.
@@ -518,6 +504,7 @@ async def compose_research_report(
         # framing context); reuse the same value here rather than
         # re-deriving over identical claims.
         layout_signals=derived_signals,
+        thesis=thesis,
     )
 
 

@@ -101,7 +101,7 @@ export function EarningsCard({ section, distressed }: Props) {
     // No mb-6 here — the parent grid in SymbolDetailPage owns vertical
     // spacing via gap-6 so a card-level margin would double up on the
     // last row of every grid.
-    <section className="rounded-md border border-strata-border bg-strata-surface p-5">
+    <section className="flex h-full flex-col rounded-md border border-strata-border bg-strata-surface p-5">
       <header className="mb-4 flex items-start justify-between gap-3">
         <div>
           <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-earnings">
@@ -109,7 +109,9 @@ export function EarningsCard({ section, distressed }: Props) {
           </div>
           {beatCount !== null && (
             <div className="mt-1 flex flex-wrap items-baseline gap-2 text-base font-medium text-strata-hi">
-              <span>{beatCount} of {totalQuarters} beat consensus</span>
+              <span>
+                {beatCount} of {totalQuarters} beat consensus
+              </span>
               {distressed?.beat_rate_below_30pct && (
                 <span
                   data-testid="earnings-bottom-decile"
@@ -137,59 +139,67 @@ export function EarningsCard({ section, distressed }: Props) {
         )}
       </header>
 
-      {actualHistory.length > 0 ? (
-        <EpsBars actual={actualHistory} estimate={estimateHistory} />
-      ) : (
-        <div className="flex h-[120px] items-center justify-center font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
-          No earnings history available
+      {/* 2026-11 layout pass: full-width card — bars on the left, the
+          stats and recent prints beside them at lg. */}
+      <div className="grid flex-1 grid-cols-1 gap-x-8 gap-y-4 lg:grid-cols-5">
+        <div className="lg:col-span-3">
+          {actualHistory.length > 0 ? (
+            <EpsBars actual={actualHistory} estimate={estimateHistory} />
+          ) : (
+            <div className="flex h-[120px] items-center justify-center font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
+              No earnings history available
+            </div>
+          )}
         </div>
-      )}
 
-      <div className="mt-4 grid grid-cols-3 gap-3 border-t border-strata-line pt-4">
-        <StatTile
-          label="Beat rate"
-          value={beatRate !== null ? `${Math.round(beatRate * 100)}%` : "—"}
-          accent={
-            beatRate !== null && beatRate >= 0.6
-              ? "text-strata-pos"
-              : beatRate !== null && beatRate < 0.4
-                ? "text-strata-neg"
-                : "text-strata-hi"
-          }
-        />
-        <StatTile
-          label="Surprise μ"
-          value={
-            avgSurprise !== null
-              ? `${avgSurprise >= 0 ? "+" : ""}${avgSurprise.toFixed(1)}%`
-              : "—"
-          }
-          accent={
-            avgSurprise !== null && avgSurprise > 0
-              ? "text-strata-pos"
-              : avgSurprise !== null && avgSurprise < 0
-                ? "text-strata-neg"
-                : "text-strata-hi"
-          }
-        />
-        <StatTile
-          label="EPS TTM"
-          value={ttm !== null ? formatClaimValue(ttm) : "—"}
-        />
-      </div>
+        <div className="flex flex-col lg:col-span-2">
+          <div className="grid grid-cols-3 gap-3 border-t border-strata-line pt-4 lg:border-t-0 lg:pt-0">
+            <StatTile
+              label="Beat rate"
+              value={beatRate !== null ? `${Math.round(beatRate * 100)}%` : "—"}
+              accent={
+                beatRate !== null && beatRate >= 0.6
+                  ? "text-strata-pos"
+                  : beatRate !== null && beatRate < 0.4
+                    ? "text-strata-neg"
+                    : "text-strata-hi"
+              }
+            />
+            <StatTile
+              label="Surprise μ"
+              value={
+                avgSurprise !== null
+                  ? `${avgSurprise >= 0 ? "+" : ""}${avgSurprise.toFixed(1)}%`
+                  : "—"
+              }
+              accent={
+                avgSurprise !== null && avgSurprise > 0
+                  ? "text-strata-pos"
+                  : avgSurprise !== null && avgSurprise < 0
+                    ? "text-strata-neg"
+                    : "text-strata-hi"
+              }
+            />
+            <StatTile
+              label="EPS TTM"
+              value={ttm !== null ? formatClaimValue(ttm) : "—"}
+            />
+          </div>
 
-      {/*
+          {/*
         Phase 4.3.B.1 — RecentPrints mini-table. The 3 stat tiles plus
         the chart left ~600 px of canvas below the EarningsCard before
         the row's height matched its partner (QualityCard, ~1200 px).
         Surfacing the last 4 quarters' actual / estimate / surprise
         gives substantive content + closes most of the gap.
       */}
-      {actualHistory.length >= 1 && (
-        <RecentPrints actual={actualHistory} estimate={estimateHistory} />
-      )}
+          {actualHistory.length >= 1 && (
+            <RecentPrints actual={actualHistory} estimate={estimateHistory} />
+          )}
 
-      <NarrativeStrip text={section.card_narrative} />
+          <NarrativeStrip text={section.card_narrative} />
+        </div>
+      </div>
     </section>
   );
 }

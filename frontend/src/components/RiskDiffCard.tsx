@@ -103,7 +103,7 @@ export function RiskDiffCard({ section }: Props) {
   }
 
   return (
-    <section className="rounded-md border border-strata-border bg-strata-surface p-5">
+    <section className="flex h-full flex-col rounded-md border border-strata-border bg-strata-surface p-5">
       <div className="mb-3 flex items-center justify-between">
         <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-risk">
           10-K risk diff · vs prior

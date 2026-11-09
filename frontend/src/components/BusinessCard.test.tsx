@@ -97,3 +97,23 @@ describe("BusinessCard — long summaries", () => {
     expect(screen.queryByRole("button", { name: /show more/i })).toBeNull();
   });
 });
+
+// 2026-11 layout pass — the comparison set, as links to each peer.
+describe("BusinessCard — peers", () => {
+  it("shows the sector and links each peer to its dashboard", async () => {
+    const { MemoryRouter } = await import("react-router-dom");
+    render(
+      <MemoryRouter>
+        <BusinessCard ticker="KO" section={section(FULL)} sector="consumer_staples" peers={["PEP", "PG"]} />
+      </MemoryRouter>,
+    );
+    const peers = screen.getByTestId("business-peers");
+    expect(peers).toHaveTextContent("Consumer staples");
+    expect(screen.getByRole("link", { name: "PEP" })).toHaveAttribute("href", "/symbol/PEP");
+  });
+
+  it("leaves the block out without sector or peers", () => {
+    render(<BusinessCard ticker="KO" section={section(FULL)} />);
+    expect(screen.queryByTestId("business-peers")).toBeNull();
+  });
+});

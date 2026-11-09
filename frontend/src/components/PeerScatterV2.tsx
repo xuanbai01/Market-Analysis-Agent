@@ -28,6 +28,8 @@
  */
 import { useState } from "react";
 
+import { useMeasuredWidth } from "../lib/use-measured-width";
+
 import { formatClaimValue } from "../lib/format";
 import {
   extractMedianForAxes,
@@ -102,6 +104,8 @@ interface Props {
 
 // ── Geometry ─────────────────────────────────────────────────────────
 
+// Below this the plot area collapses; the chart scrolls instead.
+const MIN_WIDTH = 320;
 const DEFAULT_WIDTH = 500;
 const DEFAULT_HEIGHT = 300;
 const PADDING_TOP = 8;
@@ -118,9 +122,13 @@ const AXIS_LABEL_COLOR = "rgb(90, 100, 115)"; // strata-muted
 export function PeerScatterV2({
   peerClaims,
   subject,
-  width = DEFAULT_WIDTH,
+  width: fallbackWidth = DEFAULT_WIDTH,
   height = DEFAULT_HEIGHT,
 }: Props) {
+  // 2026-11 layout pass: draw at the container's real width (labels stay
+  // 11 px); ``width`` is the fallback before measuring / in tests.
+  const [measureRef, measured] = useMeasuredWidth();
+  const width = Math.max(MIN_WIDTH, measured ?? fallbackWidth);
   const [presetId, setPresetId] = useState<Preset["id"]>("pe-gm");
   const preset = PRESETS.find((p) => p.id === presetId) ?? PRESETS[0];
 
@@ -183,7 +191,7 @@ export function PeerScatterV2({
   }
 
   return (
-    <div className="hidden sm:block">
+    <div ref={measureRef} className="hidden overflow-x-auto sm:block">
       {/* Preset pills. */}
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <span className="font-mono text-[10px] uppercase tracking-kicker text-strata-peers">

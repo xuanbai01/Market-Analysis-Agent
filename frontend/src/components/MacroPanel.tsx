@@ -54,7 +54,7 @@ export function MacroPanel({ section }: Props) {
   }
 
   return (
-    <section className="rounded-md border border-strata-border bg-strata-surface p-5">
+    <section className="flex h-full flex-col rounded-md border border-strata-border bg-strata-surface p-5">
       <div className="mb-3 font-mono text-[10px] uppercase tracking-kicker text-strata-macro">
         Macro · FRED
       </div>

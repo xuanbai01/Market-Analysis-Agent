@@ -23,7 +23,7 @@ import { useId, useState, type ReactNode } from "react";
 
 import { formatClaimValue } from "../lib/format";
 import type { ResearchReport, ThesisPoint } from "../lib/schemas";
-import { resolveRef, scrollToSection, type ResolvedRef } from "../lib/thesis";
+import { resolveRef, scrollToSection, shortClaimName, type ResolvedRef } from "../lib/thesis";
 
 interface Props {
   report: ResearchReport;
@@ -202,12 +202,20 @@ function PointRow({
         <Chevron open={open} />
         <span className={`min-w-0 flex-1 text-sm text-strata-fg ${point.title ? "" : "line-clamp-2"}`}>{label}</span>
         {keyFigure && key && (
-          <span
-            data-testid="key-figure"
-            title={key.claim.description}
-            className="shrink-0 font-mono text-sm text-strata-hi"
-          >
-            {keyFigure}
+          // The figure names its claim: the model doesn't always cite
+          // first the claim that matches the title ("Unbroken beat
+          // streak" beside 11.78% EPS growth), so the figure must say
+          // what it is rather than borrow the title's meaning.
+          <span className="flex shrink-0 flex-col items-end text-right" title={key.claim.description}>
+            <span data-testid="key-figure" className="font-mono text-sm text-strata-hi">
+              {keyFigure}
+            </span>
+            <span
+              data-testid="key-figure-label"
+              className="max-w-[12rem] truncate font-mono text-[10px] leading-tight text-strata-muted"
+            >
+              {shortClaimName(key.claim.description)}
+            </span>
           </span>
         )}
       </button>

@@ -52,6 +52,25 @@ async def test_ingest_writes_rows_and_returns_count(
     assert {float(r.close) for r in rows} == {100.0, 101.0, 102.0}
 
 
+async def test_ingest_skips_bars_with_non_finite_prices(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """yfinance returned the day in progress with a NaN close (NVDA,
+    2026-11-10). Stored, it broke every prices response for the symbol."""
+    await _seed_symbol(db_session, "NVDA")
+    bars = _fake_bars(count=3)
+    bars[-1] = {**bars[-1], "close": Decimal("NaN")}
+    monkeypatch.setitem(PROVIDERS, "fake", lambda _sym, _period: bars)
+
+    count = await ingest_market_data(db_session, "NVDA", "1mo", "fake")
+    assert count == 2
+
+    rows = (
+        await db_session.execute(select(Candle).where(Candle.symbol == "NVDA"))
+    ).scalars().all()
+    assert {float(r.close) for r in rows} == {100.0, 101.0}
+
+
 async def test_ingest_upserts_on_conflict(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -108,5 +127,5 @@ async def test_ingest_logs_external_call(
     r = records[0]
     assert r.service_id == "fake.history"
     assert r.input_summary == {"symbol": "NVDA", "period": "1mo", "interval": "1d"}
-    assert r.output_summary == {"bar_count": 2}
+    assert r.output_summary == {"bar_count": 2, "skipped_non_finite": 0}
     assert r.outcome == "ok"

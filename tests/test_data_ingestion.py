@@ -127,5 +127,5 @@ async def test_ingest_logs_external_call(
     r = records[0]
     assert r.service_id == "fake.history"
     assert r.input_summary == {"symbol": "NVDA", "period": "1mo", "interval": "1d"}
-    assert r.output_summary == {"bar_count": 2}
+    assert r.output_summary == {"bar_count": 2, "skipped_non_finite": 0}
     assert r.outcome == "ok"

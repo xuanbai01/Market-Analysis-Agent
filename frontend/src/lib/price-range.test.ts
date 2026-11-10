@@ -81,3 +81,94 @@ describe("sliceForRange", () => {
     }
   });
 });
+
+// ── YTD ──────────────────────────────────────────────────────────────
+//
+// Sliced from the 1Y feed. Year-to-date change is measured from the
+// previous year's last close, so the slice keeps that one bar as its
+// starting point.
+
+describe("sliceForRange YTD", () => {
+  function bar(ts: string, close: number): PricePoint {
+    return { ts, close, volume: 1_000 };
+  }
+
+  const YEAR_FEED = [
+    bar("2025-11-10T05:00:00+00:00", 80),
+    bar("2025-12-30T05:00:00+00:00", 84),
+    bar("2025-12-31T05:00:00+00:00", 85),
+    bar("2026-01-02T05:00:00+00:00", 86),
+    bar("2026-06-01T04:00:00+00:00", 90),
+    bar("2026-11-06T05:00:00+00:00", 95.67),
+  ];
+
+  it("starts at the previous year's last close and keeps the year since", () => {
+    const out = sliceForRange(YEAR_FEED, "YTD");
+    expect(out.map((p) => p.ts.slice(0, 10))).toEqual(["2025-12-31", "2026-01-02", "2026-06-01", "2026-11-06"]);
+  });
+
+  it("takes the year from the latest bar, not the clock", () => {
+    const lastYear = YEAR_FEED.slice(0, 3); // latest bar is 2025-12-31
+    expect(sliceForRange(lastYear, "YTD").map((p) => p.ts.slice(0, 10))).toEqual([
+      "2025-11-10",
+      "2025-12-30",
+      "2025-12-31",
+    ]);
+  });
+
+  it("keeps the whole year when there is no earlier bar", () => {
+    const thisYearOnly = YEAR_FEED.slice(3);
+    expect(sliceForRange(thisYearOnly, "YTD")).toEqual(thisYearOnly);
+  });
+
+  it("returns empty for empty input", () => {
+    expect(sliceForRange([], "YTD")).toEqual([]);
+  });
+});
+
+// ── Trailing 1Y / 5Y ─────────────────────────────────────────────────
+//
+// The backend pads its feeds (1Y = 400 days, 5Y = 2,000) for its cache
+// check; the pills used to draw them whole — 13 months and 5½ years.
+
+describe("sliceForRange 1Y / 5Y", () => {
+  function bar(ts: string, close: number): PricePoint {
+    return { ts, close, volume: 1_000 };
+  }
+
+  it("1Y starts at the last close on or before the date a year before the latest bar", () => {
+    const feed = [
+      bar("2025-10-06T04:00:00Z", 60),
+      bar("2025-11-05T05:00:00Z", 64),
+      bar("2025-11-06T05:00:00Z", 65), // a year before 2026-11-06: the base
+      bar("2025-11-07T05:00:00Z", 66),
+      bar("2026-11-06T05:00:00Z", 95),
+    ];
+    expect(sliceForRange(feed, "1Y").map((p) => p.ts.slice(0, 10))).toEqual([
+      "2025-11-06",
+      "2025-11-07",
+      "2026-11-06",
+    ]);
+  });
+
+  it("5Y keeps five years from the latest bar", () => {
+    const feed = [
+      bar("2021-03-01T05:00:00Z", 30),
+      bar("2021-11-05T04:00:00Z", 40),
+      bar("2021-11-08T05:00:00Z", 41),
+      bar("2026-11-06T05:00:00Z", 95),
+    ];
+    // 5 years before 2026-11-06 05:00 is 2021-11-06 05:00; the last
+    // close on or before it (Nov 5) is the base.
+    expect(sliceForRange(feed, "5Y").map((p) => p.ts.slice(0, 10))).toEqual([
+      "2021-11-05",
+      "2021-11-08",
+      "2026-11-06",
+    ]);
+  });
+
+  it("keeps the whole feed when it is shorter than the range", () => {
+    const feed = [bar("2026-06-01T04:00:00Z", 80), bar("2026-11-06T05:00:00Z", 95)];
+    expect(sliceForRange(feed, "1Y")).toEqual(feed);
+  });
+});

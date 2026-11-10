@@ -4,7 +4,7 @@
  * Three columns:
  *   left:   ticker meta (logo placeholder, ticker eyebrow, sector
  *           tag, name, big tabular price, delta, MCAP/VOL/52W meta)
- *   center: price chart with 5D/1M/3M/1Y/5Y range pills; the kicker
+ *   center: price chart with 5D/1M/3M/YTD/1Y/5Y range pills; the kicker
  *           names the range and the price change over it
  *   right:  3 featured stats (Forward P/E, ROIC TTM, FCF Margin) with
  *           peer/historical sub-context where available
@@ -32,7 +32,7 @@ interface Props {
   report: ResearchReport;
 }
 
-const RANGES = ["5D", "1M", "3M", "1Y", "5Y"] as const;
+const RANGES = ["5D", "1M", "3M", "YTD", "1Y", "5Y"] as const;
 type Range = (typeof RANGES)[number];
 
 // Backend currently accepts 60D / 1Y / 5Y; map UI ranges accordingly.
@@ -40,6 +40,8 @@ type Range = (typeof RANGES)[number];
 // design fidelity but coerce to the closest backend-supported value.
 function backendRangeFor(uiRange: Range): "60D" | "1Y" | "5Y" {
   if (uiRange === "1Y" || uiRange === "5Y") return uiRange;
+  // YTD is sliced from the 1Y feed (it always spans the year so far).
+  if (uiRange === "YTD") return "1Y";
   // 5D / 1M / 3M all coerce to 60D (daily closes; no intraday). The
   // frontend then slices the 60D dataset client-side via
   // ``sliceForRange`` so each pill produces a visibly different chart.
@@ -50,6 +52,7 @@ const RANGE_LABEL: Record<Range, string> = {
   "5D": "5 days",
   "1M": "1 month",
   "3M": "3 months",
+  YTD: "year to date",
   "1Y": "1 year",
   "5Y": "5 years",
 };
@@ -188,10 +191,10 @@ export function HeroCard({ report }: Props) {
 
         {/* ── CENTER: chart + range pills ── */}
         <div>
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
             <span
               data-testid="hero-range-label"
-              className="font-mono text-[10px] uppercase tracking-kicker text-strata-highlight"
+              className="whitespace-nowrap font-mono text-[10px] uppercase tracking-kicker text-strata-highlight"
             >
               Price · {RANGE_LABEL[range]}
               {change !== null && (

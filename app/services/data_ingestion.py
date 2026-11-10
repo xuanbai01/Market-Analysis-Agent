@@ -11,6 +11,7 @@ Alpha Vantage, etc.) drop in by registering under a new key in
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
@@ -26,6 +27,16 @@ from app.db.models.symbols import Symbol
 # the keys ``ts, open, high, low, close, volume``. Sync by design —
 # most market-data libs (yfinance, pandas_datareader) are blocking.
 Provider = Callable[[str, str], list[dict[str, Any]]]
+
+
+def _is_missing(value: Any) -> bool:
+    """True for None or a NaN / infinite number (float or Decimal)."""
+    if value is None:
+        return True
+    try:
+        return not math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return True
 
 
 def _fetch_yfinance_bars(symbol: str, period: str) -> list[dict[str, Any]]:
@@ -44,6 +55,10 @@ def _fetch_yfinance_bars(symbol: str, period: str) -> list[dict[str, Any]]:
     bars: list[dict[str, Any]] = []
     # df.index is a DatetimeIndex; iterrows gives (Timestamp, Series).
     for ts, row in df.iterrows():
+        # The day in progress can come back half-filled (NVDA's 2026-11-09
+        # row had a NaN close); int(NaN volume) would raise outright.
+        if any(_is_missing(row[col]) for col in ("Open", "High", "Low", "Close", "Volume")):
+            continue
         bars.append(
             {
                 "ts": ts.to_pydatetime(),  # tz-aware (yfinance attaches a tz)
@@ -78,9 +93,14 @@ async def ingest_market_data(
     provider restates a bar we overwrite with the latest values rather
     than failing on a duplicate key.
 
-    Returns the number of bars received from the provider (not the
-    number of brand-new rows — Postgres doesn't distinguish insert vs
-    update for ON CONFLICT DO UPDATE without extra plumbing).
+    Bars with a missing or non-finite open / high / low / close are
+    skipped: Postgres ``numeric`` accepts NaN, and one stored NaN close
+    (NVDA, 2026-11-10) made every prices response for the symbol fail
+    JSON encoding.
+
+    Returns the number of bars written (not the number of brand-new
+    rows — Postgres doesn't distinguish insert vs update for ON
+    CONFLICT DO UPDATE without extra plumbing).
     """
     if provider not in PROVIDERS:
         raise ValueError(
@@ -93,8 +113,13 @@ async def ingest_market_data(
         {"symbol": symbol, "period": period, "interval": interval},
     ) as call:
         # Block off the event loop — yfinance / requests are sync.
-        bars = await asyncio.to_thread(fetch, symbol, period)
-        call.record_output({"bar_count": len(bars)})
+        received = await asyncio.to_thread(fetch, symbol, period)
+        bars = [
+            bar
+            for bar in received
+            if not any(_is_missing(bar.get(key)) for key in ("open", "high", "low", "close"))
+        ]
+        call.record_output({"bar_count": len(received), "skipped_non_finite": len(received) - len(bars)})
 
     if not bars:
         return 0

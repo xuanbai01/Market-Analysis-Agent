@@ -215,9 +215,13 @@ async def test_prices_response_shape(
 
 
 async def test_prices_latest_delta_computed_from_last_two_closes(
-    client: AsyncClient, db_session: AsyncSession
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Spot-check the delta math: last close 161, prev close 160 → +1, +0.625%."""
+    # Two bars miss the 60D coverage check, so the route falls through to
+    # an ingest. Stub it: this test called real yfinance until 2026-11-10,
+    # when Yahoo's row for the day in progress came back with a NaN close.
+    monkeypatch.setitem(PROVIDERS, "yfinance", lambda _symbol, _period: [])
     db_session.add(Symbol(symbol="NVDA", name="NVIDIA"))
     await db_session.flush()
     now = datetime.now(UTC)
@@ -291,3 +295,37 @@ async def test_prices_accepts_supported_ranges(
     assert resp.status_code == 200
     body = resp.json()
     assert body["range"] == range_str
+
+
+# ── Non-finite bars (2026-11-10) ─────────────────────────────────────
+#
+# yfinance returned NVDA's row for the day in progress with a NaN close.
+# Ingest stored it (Postgres numeric accepts NaN), and every prices
+# request for the symbol then failed JSON encoding with a 500.
+
+
+async def test_prices_skip_bars_with_a_non_finite_close(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await _seed_candles(db_session, "NVDA", days=60)
+    db_session.add(
+        Candle(
+            symbol="NVDA",
+            ts=datetime.now(UTC),  # after the seeded bars, inside the window
+            interval="1d",
+            open=Decimal("173"),
+            high=Decimal("180"),
+            low=Decimal("170"),
+            close=Decimal("NaN"),
+            volume=456_756_830,
+        )
+    )
+    await db_session.flush()
+
+    resp = await client.get("/v1/market/NVDA/prices?range=60D")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert all(p["close"] == p["close"] for p in body["prices"])  # no NaN
+    # The latest finite bar is the headline: 100 + 59.
+    assert body["latest"]["close"] == pytest.approx(159.0)

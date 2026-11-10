@@ -196,6 +196,31 @@ describe("LineChart", () => {
       ).toBeNull();
     });
 
+    // 2026-11: hovering picked a point to the right of the cursor. The
+    // cursor was mapped onto the plot area (axis edge → right edge)
+    // instead of the whole chart, so it landed up to the axis width
+    // (52 px) too far right.
+    it("selects the point nearest the cursor, not one to its right", () => {
+      const five = [
+        { ts: "2026-04-01T00:00:00Z", close: 100 },
+        { ts: "2026-04-02T00:00:00Z", close: 102 },
+        { ts: "2026-04-03T00:00:00Z", close: 101 },
+        { ts: "2026-04-06T00:00:00Z", close: 105 },
+        { ts: "2026-04-07T00:00:00Z", close: 104 },
+      ];
+      const { container } = render(<LineChart data={five} width={560} showAxes showTooltip />);
+      const svg = container.querySelector("[data-testid='line-chart']") as SVGSVGElement;
+      // Rendered at its drawing width: 1 CSS px = 1 viewBox unit.
+      svg.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, right: 560, bottom: 140, width: 560, height: 140, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      // Points sit at x = 52, 178, 304, 430, 556. x = 230 is nearest the
+      // second point (Apr 2); the old mapping read it as x ≈ 259 → Apr 3.
+      fireEvent.mouseMove(svg, { clientX: 230, clientY: 50 });
+      const dot = container.querySelector("[data-testid='line-chart-hover-dot']");
+      expect(Number(dot?.getAttribute("cx"))).toBeCloseTo(178, 0);
+      expect(container.querySelector("[data-testid='line-chart-hover-tooltip']")?.textContent).toContain("Apr 2");
+    });
+
     it("does not respond to mousemove when showTooltip is false", () => {
       const { container } = render(<LineChart data={SAMPLE} />);
       const svg = container.querySelector("[data-testid='line-chart']");

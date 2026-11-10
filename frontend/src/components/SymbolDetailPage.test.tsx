@@ -97,7 +97,7 @@ describe("SymbolDetailPage", () => {
       ...fakeReport("AAPL"),
       thesis: {
         headline: "Priced for quality.",
-        bull: [{ text: "Margins are high.", claim_refs: [] }],
+        bull: [{ title: null, text: "Margins are high.", claim_refs: [] }],
         bear: [],
         changed: [],
         watch: [],

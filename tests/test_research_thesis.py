@@ -230,3 +230,69 @@ def test_a_middle_history_point_is_not_evidence() -> None:
     )
     assert thesis is not None
     assert thesis.bull[0].claim_refs == [ClaimRef(section="Quality", index=0)]
+
+
+# ── Point titles (2026-11 analyst-view redesign) ─────────────────────
+#
+# The card was 982 px of 40-word sentences. Each point now carries a
+# short title the dashboard lists by default (the sentence opens on
+# click). Titles carry no numbers — the figure beside each title is the
+# point's first cited claim, rendered from data — so a title can't add
+# an unchecked number.
+
+
+def titled(title: str, text: str, *ids: str) -> ThesisDraftPoint:
+    return ThesisDraftPoint(title=title, text=text, claim_ids=list(ids))
+
+
+def test_a_clean_title_is_kept() -> None:
+    thesis = rt.resolve_draft(
+        draft(bull=[titled("  Margins still expanding. ", "Margins widened 1.16 pts.", "Q2")]),
+        rt._assign_ids(SECTIONS),
+    )
+    assert thesis is not None
+    assert thesis.bull[0].title == "Margins still expanding"
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Margins up 1.16 pts",  # a number the rubric never checks
+        "Q3 margins widened",  # digits of any kind
+        "A title that runs on for far more than the eight words allowed",
+        "",
+    ],
+)
+def test_titles_with_numbers_or_too_long_are_dropped(title: str) -> None:
+    thesis = rt.resolve_draft(
+        draft(bull=[titled(title, "Margins widened 1.16 pts.", "Q2")]),
+        rt._assign_ids(SECTIONS),
+    )
+    assert thesis is not None
+    # The point stays; only its title goes (the card falls back to the text).
+    assert thesis.bull[0].title is None
+    assert thesis.bull[0].text == "Margins widened 1.16 pts."
+
+
+def test_points_without_a_title_still_resolve() -> None:
+    """Lens narratives share the draft point and never ask for titles."""
+    thesis = rt.resolve_draft(draft(bull=[p("Margins widened 1.16 pts.", "Q2")]), rt._assign_ids(SECTIONS))
+    assert thesis is not None
+    assert thesis.bull[0].title is None
+
+
+def test_prompt_asks_for_titles_and_the_key_claim_first() -> None:
+    assert "title" in rt.THESIS_SYSTEM_PROMPT
+    assert "no numbers" in rt.THESIS_SYSTEM_PROMPT.lower()
+    assert "first" in rt.THESIS_SYSTEM_PROMPT.lower()
+
+
+def test_cached_points_without_titles_still_parse() -> None:
+    from app.schemas.research import Thesis
+
+    cached = {
+        "headline": "Old report.",
+        "bull": [{"text": "Margins widened.", "claim_refs": [{"section": "Quality", "index": 0}]}],
+    }
+    thesis = Thesis.model_validate(cached)
+    assert thesis.bull[0].title is None

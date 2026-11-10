@@ -78,11 +78,21 @@ change and growth claims (they name their quarters) and history lines.
 - ``watch``: 1–2 points: the metric that would confirm or break the case, \
 and why.
 
-Each point is one or two sentences, at most 40 words, and lists in \
-``claim_ids`` the 1–3 ids of the claims it relies on — ids exactly as \
+Each point has:
+- ``title``: 2–6 plain words naming the point, in sentence case with no \
+final period ("Margins still expanding", "Rich valuation vs peers", \
+"Cash conversion slipping"). No numbers, tickers or symbols — the \
+dashboard lists the titles, so a reader should get the case from them \
+alone.
+- ``text``: one or two sentences, at most 40 words, with the evidence.
+- ``claim_ids``: the 1–3 ids of the claims it relies on — ids exactly as \
 written in the brackets, and only the claims that actually hold the \
 evidence (a point about free cash flow cites the free cash flow claims). \
-A point whose ids don't match the list is discarded, so cite carefully.
+Put the single most telling claim first: the dashboard shows its value \
+beside the title, so the two must read together ("Margins far above \
+peers" + "+11.73 pts"; "Unbroken beat streak" + the streak count, not the \
+average surprise). A point whose ids don't match the list is discarded, \
+so cite carefully.
 
 Rules (non-negotiable):
 1. Every number in your text must be a value shown in the claim lines \
@@ -192,6 +202,23 @@ def _quoted(quotes: Sequence[tuple[float, int]], claim: Claim) -> bool:
     )
 
 
+MAX_TITLE_WORDS = 8
+MAX_TITLE_CHARS = 60
+
+
+def _clean_title(raw: str) -> str | None:
+    """A point's title, or None when unusable. Titles carry no digits:
+    the rubric checks numbers in the text, and the dashboard shows the
+    point's figure from its first cited claim, so a number in the title
+    would be the only one nothing checks."""
+    title = raw.strip().rstrip(".:;,").strip()
+    if not title or any(ch.isdigit() for ch in title):
+        return None
+    if len(title) > MAX_TITLE_CHARS or len(title.split()) > MAX_TITLE_WORDS:
+        return None
+    return title
+
+
 def resolve_points(
     points: Sequence[ThesisDraftPoint],
     ids: Mapping[str, ClaimRef],
@@ -215,7 +242,9 @@ def resolve_points(
                     continue
             refs.append(ref)
         if text and refs:
-            out.append(ThesisPoint(text=text, claim_refs=refs[:MAX_REFS_PER_POINT]))
+            out.append(
+                ThesisPoint(text=text, claim_refs=refs[:MAX_REFS_PER_POINT], title=_clean_title(point.title))
+            )
         if len(out) == limit:
             break
     return out

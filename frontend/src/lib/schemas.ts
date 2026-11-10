@@ -149,6 +149,9 @@ export type ClaimRef = z.infer<typeof ClaimRefSchema>;
 export const ThesisPointSchema = z.object({
   text: z.string().min(1),
   claim_refs: z.array(ClaimRefSchema).default([]),
+  // 2026-11 redesign: a few plain words listed by default. Null on
+  // reports from before it (and on lens points).
+  title: z.string().nullable().default(null).catch(null),
 });
 export type ThesisPoint = z.infer<typeof ThesisPointSchema>;
 

@@ -16,6 +16,7 @@ cache pattern from Phase 2.
 """
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -59,7 +60,11 @@ async def _query_candles_in_window(
     start: datetime,
     end: datetime,
 ) -> list[Candle]:
-    """Pull daily candles for ``symbol`` in [start, end] ordered oldest-first."""
+    """Pull daily candles for ``symbol`` in [start, end] ordered oldest-first.
+
+    Rows with a non-finite close are left out: ingest skips them since
+    2026-11-10, but a NaN stored before that (NVDA's day in progress)
+    otherwise breaks every response for the symbol."""
     stmt = (
         select(Candle)
         .where(
@@ -70,7 +75,8 @@ async def _query_candles_in_window(
         )
         .order_by(Candle.ts.asc())
     )
-    return list((await session.execute(stmt)).scalars().all())
+    rows = (await session.execute(stmt)).scalars().all()
+    return [c for c in rows if math.isfinite(float(c.close))]
 
 
 def _candle_to_point(candle: Candle) -> PricePoint:

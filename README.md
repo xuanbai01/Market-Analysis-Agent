@@ -1,21 +1,31 @@
 # Market Analysis Agent
 
-An **AI Equity Research Assistant**. POST a ticker, get back a structured analyst-style report — valuation, quality, capital allocation, technicals, recent news, earnings analysis, peer comparison, macro context, insider activity, institutional flows, risk-factor delta — every claim cited and timestamped, built on free data and ~$5/mo of infrastructure.
+An **AI Equity Research Assistant**. Open a ticker and get a research dashboard: price, quality, earnings, valuation against peers, per-share growth, cash and capital returns, the year-over-year change in 10-K risk factors, macro context, business and news, plus an **analyst view** (headline, bull case, bear case, what changed, what to watch). Every number on the page, and every number the AI writes, cites the data it came from. Free data only, on ~$5/mo of infrastructure.
 
-Live: <https://market-analysis-agent.fly.dev/docs>
+- **Dashboard:** <https://market-analysis-agent-red.vercel.app> (sign-in with the shared secret; internal use for now)
+- **API:** <https://market-analysis-agent.fly.dev/docs>
 
-> **Status — Phases 1 → 4.7 done; Phase 4.8 (Vercel deploy + dogfood gate) is next.** The agent endpoint `POST /v1/research/{symbol}` is live with a 7-day same-day cache and per-IP rate limit; real-LLM golden eval passes at factuality ≥ 0.97. Phase 4 (the symbol-centric dashboard rebuild per [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md)) shipped 4.0 → 4.7: dashboard route at `/symbol/:ticker` (lazy-loaded), Compare page at `/compare?a=X&b=Y` (lazy-loaded), hand-rolled SVG primitives (Sparkline, LineChart, EpsBars, MetricRing, MultiLine, PeerScatterV2), nine dedicated cards, per-card LLM-written narratives, adaptive layouts for distressed names (Rivian-class), ⌘K search modal, localStorage watchlist + recent tracking with sidebar count badges. Frontend Vercel deploy held until **Phase 4.8 dogfood gate**. See [tasks/todo.md](tasks/todo.md) for the granular tracker. **607 tests passing on the backend, 447 on the frontend; main bundle 83.02 KB gzipped (16.98 KB headroom under the 100 KB budget).**
+> **Status — Phase 4 done (2026-11).** The symbol-centric dashboard ([ADR 0005](docs/adr/0005-symbol-centric-dashboard.md)) is deployed: React on Vercel, FastAPI on Fly, Postgres on Neon, DeepSeek V4.1 Flash for the prose ([ADR 0006](docs/adr/0006-pluggable-llm-provider.md)). The Phase 4.8 dogfood gate sent the project into the narrative layer: card prose that interprets instead of listing, a cited analyst view, and cross-company lenses built from SEC XBRL ([ADR 0007](docs/adr/0007-analytical-narratives.md)). Live golden eval: factuality 1.000 on all five golden tickers. **831 backend tests (+5 opt-in live-LLM cases), 587 frontend tests; main bundle 88.86 KB gzipped (11.14 KB under the 100 KB budget).** Granular tracker: [tasks/todo.md](tasks/todo.md).
 
 ## What this is (and isn't)
 
 | | |
 |---|---|
-| **Is** | A FastAPI backend exposing one primary endpoint — `POST /v1/research/{symbol}` — returning a Pydantic-typed structured research report. Single agent + well-designed tools, deterministic section composition, LLM only writes the per-section summary prose under a forced schema. React + Vite frontend renders the report as cards + (Phase 3) charts. |
-| **Is** | Built deliberately on **free data only** — yfinance, SEC EDGAR, NewsAPI free tier, FRED — and free-tier infrastructure (Neon Postgres + Fly.io). Real cost: ~$0–5/mo. |
-| **Is** | **Visual-first, delta-driven** per [ADR 0004](docs/adr/0004-visual-first-product-shape.md). Multi-year history rendered as charts; LLM commentary stays short and stays at judgment-dependent moments (e.g. 10-K risk-factor changes). |
-| **Isn't** | A real-time market platform. The original v1 vision (15-min news firehose, Discord bot, multi-agent-as-architecture) was [explicitly cut](docs/adr/0003-pivot-equity-research.md) in favour of depth-over-freshness. |
-| **Isn't** | A Morningstar-shaped analyst note. Multi-year DCF projections, fair-value estimates, capital-allocation letter grades, 5-page bull/bear essays — all explicitly out of scope (ADR 0004 §"Option 1 rejected"). The toolkit (free data + LLM) is the wrong shape for those. |
-| **Isn't** | A trading signal generator. Reports are research-style synthesis, not buy/sell recommendations. Every claim cites its source so a human can verify before acting. |
+| **Is** | A FastAPI backend whose primary endpoint, `POST /v1/research/{symbol}`, returns a Pydantic-typed research report, and a React + Vite dashboard at `/symbol/:ticker` that renders it. Single agent + well-designed tools; code picks the claims and computes every comparison, the LLM only writes prose under a forced schema. |
+| **Is** | Built on **free data only** — yfinance, SEC EDGAR (filings + XBRL), NewsAPI free tier + Yahoo RSS, FRED — and free-tier infrastructure (Fly.io, Neon, Vercel). Real cost: ~$0–5/mo; a fresh report costs about a cent of LLM on DeepSeek Flash. |
+| **Is** | **Visual-first, delta-driven** per [ADR 0004](docs/adr/0004-visual-first-product-shape.md): history drawn as charts, prose short and interpretive. Layouts adapt to distressed names (cash runway and risk lift above valuation). |
+| **Isn't** | A real-time market platform. The original v1 vision (15-min news firehose, Discord bot, multi-agent-as-architecture) was [explicitly cut](docs/adr/0003-pivot-equity-research.md) in favour of depth over freshness. |
+| **Isn't** | A Morningstar-shaped analyst note. No DCF, fair-value estimates or letter grades (ADR 0004). The analyst view argues from the report's own numbers; it never computes a number or brings in outside facts. |
+| **Isn't** | A trading signal generator. Research synthesis, not buy/sell recommendations. Every claim cites its source so a human can verify before acting. |
+
+## The dashboard
+
+| Route | What it shows |
+|---|---|
+| `/symbol/:ticker` | Sticky section nav; **Hero** (price chart with axes + hover, featured stats; distress pills and a metric swap for unprofitable names); **Analyst view** (headline, bull / bear, what changed / what to watch, each point with evidence chips that jump to the card holding the claim); full-width **Quality**, **Earnings** (20Q EPS bars, beat rate, recent prints), **Valuation** (multiples vs peer median + peer scatter), **Per-share growth**; one equal-height row of **Cash & capital**, **Capital returns**, **10-K risk diff** and **Macro** (only the cards with data); **Business** + **News**. "Generated 2 days ago · Regenerate" replaces a stale cached report. |
+| `/compare?a=X&b=Y` | Two tickers side by side: hero, valuation and quality rows, operating-margin and per-share growth overlays, risk diffs. |
+| `/lens/:id` | One metric across a group of companies over 10 years from SEC XBRL, with a cited AI read. First lens: **megacap tech capex** (AAPL, MSFT, GOOGL, AMZN, META, NVDA, TSLA) — capex intensity distribution by year, capex dollars by company, capex ÷ operating cash flow. |
+| `/` | Search + past reports. The sidebar (Search ⌘K · Home · Compare · Lenses · Watchlist · Recent) and a **market strip** (S&P 500, Nasdaq 100, Dow, VIX, our fear & greed estimate, Russell 2000, 10Y, dollar, gold, WTI, bitcoin) sit on every page. |
 
 ## Quickstart
 
@@ -28,147 +38,108 @@ cd Market-Analysis-Agent
 cp .env.example .env              # dev defaults, no real secrets required
 
 # 3. Database
-docker compose up -d db            # Postgres 15 on :5432
+docker compose up -d db            # Postgres 15 on :5432 (+ test_db)
 
-# 4. Install + migrate + run
-uv sync                            # install pinned deps (Python 3.11 via .python-version)
-uv run alembic upgrade head        # apply schema + seed NVDA/SPY
+# 4. Install + migrate + run the API
+uv sync                            # pinned deps (Python 3.11 via .python-version)
+uv run alembic upgrade head        # schema + seed rows
 uv run uvicorn app.main:app --reload
+
+# 5. Dashboard (second terminal)
+cd frontend && npm install && npm run dev   # http://localhost:5173
 ```
 
-Verify:
+Verify with `curl http://localhost:8000/v1/health` → `{"status":"ok","db":true}` and the Swagger UI at <http://localhost:8000/docs>. Reports need one LLM key in `.env`: `ANTHROPIC_API_KEY` (default `LLM_PROVIDER=anthropic`) or `LLM_PROVIDER=deepseek` + `DEEPSEEK_API_KEY`. `FRED_API_KEY` and `NEWSAPI_KEY` are optional; those sections degrade without them.
 
-- `curl http://localhost:8000/v1/health` → `{"status":"ok","db":true}`
-- `curl http://localhost:8000/v1/symbols` → seeded NVDA + SPY rows
-- Swagger UI: <http://localhost:8000/docs>
+[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) covers the frontend, both test suites and troubleshooting (Windows port clashes, stale `.env`, and the other setup problems this project has hit).
 
-See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for the frontend, the test suites, and troubleshooting (Windows port clashes, stale `.env`, and other setup problems this project has hit).
-
-## What works today
+## API
 
 | Endpoint | State |
 |---|---|
-| `GET /v1/health` | ✅ Real — pings the DB |
-| `GET /v1/symbols`, `POST /v1/symbols` | ✅ Real |
-| `GET /v1/news`, `GET /v1/news/{id}` | ✅ Real (list, detail, 404 as RFC 7807 `problem+json`) |
-| `POST /v1/news/ingest` | ✅ Real — NewsAPI dev tier + Yahoo per-ticker RSS, symbol tagging, `news_symbols` join |
-| `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ Real (yfinance ingest with upsert → `candles`; latest-bar with technicals; date-range history) |
-| `GET /v1/market/{symbol}/prices?range={60D\|1Y\|5Y}` | ✅ **Phase 4.1.** Read-through `candles` cache; falls through to yfinance ingest on miss with 80%-coverage threshold. Auth-gated. Powers the dashboard hero price chart. |
-| `POST /v1/research/{symbol}?focus={full,earnings}&refresh={false,true}` | ✅ **The v2 primary endpoint.** 9 sections in `full` mode (Business, News, Valuation, Quality, Capital Allocation, Earnings, Peers, Risk Factors, Macro) or 4 in `earnings` (News, Earnings, Valuation, Risk Factors). Same-day cache (default 7 days, configurable) + per-IP rate limit (default 3/hour, configurable). Phase 4.4.B added `Section.card_narrative` for per-card 1-2 sentence headlines; Phase 4.5.A added `ResearchReport.layout_signals` for adaptive-layout flags. |
-| `GET /v1/research?limit=20&offset=0&symbol=...` | ✅ Paginated `ResearchReportSummary[]` for the dashboard sidebar. |
+| `POST /v1/research/{symbol}?focus={full,earnings}&refresh={false,true}` | ✅ **The primary endpoint.** 9 sections in `full` (Business, News, Valuation, Quality, Capital Allocation, Earnings, Peers, Risk Factors, Macro) plus the analyst view; 4 in `earnings`. Cached up to 7 days; per-IP rate limit on fresh reports. |
+| `GET /v1/research?limit=20&offset=0&symbol=...` | ✅ Paginated report summaries for the past-reports list. |
+| `GET /v1/market/{symbol}/prices?range={60D\|1Y\|5Y}` | ✅ OHLCV from the `candles` cache, falling through to a yfinance ingest on a miss. |
+| `GET /v1/market/overview` | ✅ The market strip: headline quotes + our fear & greed estimate. In-memory cache, serves stale on provider failure. |
+| `GET /v1/lens`, `GET /v1/lens/{id}` | ✅ Cross-company lenses from SEC XBRL. |
+| `GET /v1/health` | ✅ Pings the DB. |
+| `GET/POST /v1/symbols`, `GET /v1/news`, `GET /v1/news/{id}`, `POST /v1/news/ingest`, `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ Phase 1 data routes. |
+| `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ `501` — legacy v1 stubs, to be removed. |
 
-**Frontend routes** (lazy-loaded splits keep main bundle at 83 KB gz):
-
-| Route | State |
-|---|---|
-| `/login` | ✅ Auth gate; pre-auth screen, lives in main bundle. |
-| `/` | ✅ Landing — search bar + Recent Tickers + Watchlist sections (localStorage) + Past Reports list. Stays in main. |
-| `/symbol/:ticker` | ✅ Dashboard. **Lazy chunk** (14.5 KB gz). All per-card Strata components ship here only on first visit. |
-| `/compare?a=X&b=Y` | ✅ **Phase 4.6.A.** Two-ticker side-by-side. **Lazy chunk** (6.4 KB gz). Per-side distress chrome. |
-| `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ `501 Not Implemented` (legacy v1 routes; will be removed or redirected to `/v1/research`) |
-
-All errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](app/core/errors.py).
-
-### Hitting the research endpoint
+With `BACKEND_SHARED_SECRET` set (production), research, prices, overview, lenses and every write or quota-spending route require `Authorization: Bearer <secret>`; CORS allows only `FRONTEND_ORIGIN`. Errors are [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](app/core/errors.py).
 
 ```bash
-# In .env: ANTHROPIC_API_KEY=sk-ant-... (required with the default LLM_PROVIDER=anthropic)
-#     or:  LLM_PROVIDER=deepseek + DEEPSEEK_API_KEY=sk-...  (see docs/adr/0006)
-# In .env: FRED_API_KEY=... (optional — Macro section degrades gracefully without it)
-
-uv run uvicorn app.main:app --reload
-
-# Cold call: ~30 s, full LLM round trip + tool fan-out
+# Cold call: ~20–90 s (tool fan-out + two LLM calls; uncached 10-K filings take longest)
 curl -X POST http://localhost:8000/v1/research/AAPL -o report.json
 
-# Same call within 7 days: ~10 ms, served from research_reports table
+# Same call within 7 days: served from research_reports, no LLM call
 curl -X POST http://localhost:8000/v1/research/AAPL -o report-cached.json
 
-# Force fresh synthesis (consumes 1 rate-limit token + ~$0.10 LLM cost)
+# Force a fresh report (consumes a rate-limit token)
 curl -X POST "http://localhost:8000/v1/research/AAPL?refresh=true" -o report-fresh.json
 ```
 
-Spot-check the data layer end-to-end without the LLM via [`scripts/smoke.py`](scripts/smoke.py):
+`uv run python scripts/smoke.py AAPL --skip-13f` runs each data tool against the live providers without the LLM — a fast check that nothing drifted upstream.
 
-```bash
-uv run python scripts/smoke.py AAPL --skip-13f
-```
-
-Runs each Phase 2 tool against live providers (yfinance, SEC EDGAR, FRED) and prints a one-line summary per tool — fast way to verify nothing has drifted upstream before the agent runs.
-
-## v2 architecture at a glance
+## How a report is built
 
 ```
 POST /v1/research/{symbol}?focus=full
         │
         ▼
-   Cache lookup (research_reports, configurable window, default 7d)
-        │   hit  → return (no LLM, no token consumed) ─┐
-        │ miss                                         │
-        ▼                                              │
-   Rate limit (per-IP token bucket, default 3/hour)    │
-        │   deny → 429 + Retry-After                   │
-        │ pass                                         │
-        ▼                                              │
-   Orchestrator (deterministic-everything-except-prose)│
-   ─ runs every focus-required tool in parallel        │
-   ─ static SECTION_TO_CLAIM_KEYS — code picks claims, │
-     not the LLM                                       │
-   ─ Sonnet writes only the 2-4 sentence summaries     │
-     under a forced SectionSummaries schema            │
-   ─ confidence stamped programmatically per section   │
-        │                                              │
-        ▼                                              │
-   Cache upsert  (overwrites same-day row)             │
-        │                                              │
-        ▼                                              │
-   Pydantic-typed structured report ◀──────────────────┘
-   { sections: list[Section{claims, summary, confidence}],
-     overall_confidence: "high"|"medium"|"low",
-     tool_calls_audit: ["fetch_fundamentals: ok", ...],
-     generated_at: datetime — every claim cites source + fetched_at }
+   Cache lookup (research_reports, default 7 days) ── hit ──▶ return (no LLM, no token)
+        │ miss
+        ▼
+   Rate limit (per-IP token bucket; default 3/h, 30/h in production)
+        │
+        ▼
+   Orchestrator — deterministic everything except prose
+   ─ data tools in parallel (fundamentals, earnings, peers, macro,
+     10-K business + risk diff, business info, news)
+   ─ static SECTION_TO_CLAIM_KEYS: code picks the claims, not the LLM
+   ─ derived comparison claims computed in code (YoY margins, TTM FCF
+     yield, payout + coverage, premium to peer median, beat streak …)
+   ─ two LLM calls in parallel, both under forced schemas:
+       section prose (summary + one-line card narrative per section)
+       analyst view (bull / bear / changed / watch, cites claim ids)
+   ─ citations checked in code: unknown ids and points whose quoted
+     numbers match none of their cited claims are dropped
+   ─ confidence + layout signals (unprofitable, cash runway …) computed
+        │
+        ▼
+   Cache upsert ──▶ ResearchReport { sections[claims, summary, card_narrative,
+                                    confidence], thesis, layout_signals, … }
 ```
 
-**Tool registry** (every tool is a focused async function returning `dict[str, Claim]` or a typed Pydantic record; all wrapped in `log_external_call`):
+**Data tools** — each is a focused async function, every external call logged via `log_external_call`:
 
-| Tool | Source | Status |
-|---|---|---|
-| `fetch_market`, `compute_technicals` | yfinance OHLCV + in-memory RSI/SMA | ✅ |
-| `fetch_news` | NewsAPI dev + Yahoo per-ticker RSS, symbol tagger | ✅ |
-| `fetch_fundamentals` | yfinance.info + financials/cashflow | ✅ |
-| `fetch_peers` | curated sector map + yfinance fallback | ✅ |
-| `fetch_edgar` | SEC EDGAR with disk cache + polite-crawl | ✅ |
-| `parse_filing` | Form 4 cluster, 13F holdings, 10-K Item 1, 10-K risks YoY diff | ✅ |
-| `fetch_earnings` | yfinance earnings dates + consensus | ✅ |
-| `fetch_macro` | FRED API + sector→series map | ✅ (graceful no-op without `FRED_API_KEY`) |
-| `search_history` | pgvector RAG | ⏸ deferred (ADR 0004) |
-| `compute_options` | yfinance options + daily IV snapshots | ⏸ deferred (ADR 0004) |
+| Tool | Source |
+|---|---|
+| `fetch_fundamentals` | yfinance info + quarterly statements (16 history-bearing claims) |
+| `fetch_earnings` | yfinance earnings dates: 20 quarters of EPS, consensus, beat rate |
+| `fetch_peers` | curated sector map + yfinance fallback, peer matrix + medians |
+| `fetch_macro` | FRED, sector → series map, ~36 monthly points per series |
+| `extract_10k_business`, `extract_10k_risks_diff` | SEC EDGAR 10-K (disk cache, polite crawl); risk paragraphs categorized by the triage model |
+| `fetch_business_info` | yfinance business summary, HQ, employees |
+| `fetch_news` | Yahoo per-ticker RSS (+ NewsAPI when keyed), ingested per report, categorized by the triage model |
+| `xbrl` (lenses) | SEC company-concept API, tags merged year by year, calendar frames |
+| Form 4 / 13F parsers, technicals | parsers and RSI/SMA from Phase 2, not on the dashboard today |
 
-- **Language:** Python 3.11, FastAPI 0.115, SQLAlchemy 2.0 (async + asyncpg)
-- **DB:** Postgres 15 (Docker locally; Neon free tier in prod). pgvector lands when `search_history` does.
-- **LLM:** Claude Haiku 4.5 for triage (currently unused — section composition is deterministic; the client is wired and ready), Claude Sonnet 4.6 for synthesis. System prompts are cached (`cache_control: ephemeral`) for cost savings on repeat shape.
-- **Hosting:** Fly.io (auto-stop machines, ~$0–3/mo idle)
+**LLM:** `LLM_PROVIDER` picks the backend at call time ([ADR 0006](docs/adr/0006-pluggable-llm-provider.md)): Anthropic (Haiku 4.5 triage + Sonnet 4.6 synthesis; the code default) or DeepSeek V4.1 Flash for both tiers (production). Triage runs the risk and news categorizers; synthesis writes the section prose, the analyst view and the lens read.
 
-Full detail in [docs/architecture.md](docs/architecture.md), [design_doc.md](design_doc.md), and the [ADRs](docs/adr/).
+### Anti-hallucination disciplines
 
-### Rate limit posture (current choice — easy to flip)
+A research agent that produces well-formatted hallucinations is worse than none. Every PR is held to:
 
-The rate-limit check on `/v1/research/{symbol}` runs **after** the cache lookup, not before. **Cache hits do not consume rate-limit tokens** — only cache misses and `?refresh=true` calls do. The reasoning: the rate limit exists to bound *LLM cost*, and a cache hit costs nothing.
+1. **Citation discipline** — every claim cites the tool call that produced it; the schema leaves no other path. Analyst-view and lens points cite claim ids, checked in code.
+2. **The model never computes a number** — comparisons are derived claims computed in code; the prompt forbids arithmetic and outside facts.
+3. **Per-section confidence** (`high | medium | low`) set programmatically from freshness and sparsity, never by the LLM.
+4. **Eval harness** — the factuality rubric checks every number in the summaries, card narratives and analyst view against the claims (including their history). Rubric unit tests run on every PR; the live golden eval (AAPL, NVDA, RIVN, JPM, KO) is opt-in with `uv run pytest -m live_llm tests/evals -s`.
+5. **`fetched_at` per data point** so stale data never passes as fresh.
 
-This is the right posture for a personal-scale deployment where re-reading your own already-generated reports shouldn't trigger 429s. Trade-off: a determined attacker who has burned 3 tokens can still hit the cache lookup endpoint indefinitely. For the current single-user use case that's fine — cache lookups are sub-millisecond indexed SELECTs and there's exactly one user.
+### Rate limit posture
 
-**If/when this goes public-multi-user**, flipping back to "every request consumes a token" is a one-line change: add `dependencies=[Depends(enforce_research_rate_limit)]` to the `@router.post` decorator in [`app/api/v1/routers/research.py`](app/api/v1/routers/research.py) and remove the explicit `await enforce_research_rate_limit(request)` call inside the route. Tests `test_cache_hits_do_not_consume_rate_limit_tokens` and `test_rate_limit_runs_after_cache_miss_only` would need to be deleted or inverted.
-
-History: implemented "every request" first (PR #29), flipped to "post-cache" in the follow-up PR after the live verification showed the every-request behavior was wrong for personal use. Both behaviors are tested in this commit's history if a future maintainer needs to compare.
-
-### Anti-hallucination disciplines (non-negotiable Phase 2 success criteria)
-
-A research-report agent that produces beautifully-formatted hallucinations is worse than no agent. Every Phase 2 PR is gated on:
-
-1. **Citation discipline** — every claim cites the tool call that produced it. The structured-output schema enforces it; the agent cannot synthesize free-form text.
-2. **Per-section confidence** (`high | medium | low`) set programmatically based on data freshness, sparsity, and fall-back paths.
-3. **Eval harness** — golden questions auto-graded on factuality + structure + latency. Regressions fail CI.
-4. **`last_updated` per data point** so stale data does not masquerade as fresh.
+The rate limit on `/v1/research/{symbol}` runs **after** the cache lookup: cache hits are free, only fresh reports consume tokens, because the limit exists to bound LLM cost. The code default is 3 fresh reports per IP per hour; production runs 30/h during dogfooding (`RESEARCH_RATE_LIMIT_PER_HOUR` in `fly.toml`) and should drop before the URL is shared. To make every request consume a token, move `enforce_research_rate_limit` into the route decorator's `dependencies` in [`app/api/v1/routers/research.py`](app/api/v1/routers/research.py) and invert `test_cache_hits_do_not_consume_rate_limit_tokens` / `test_rate_limit_runs_after_cache_miss_only`.
 
 ## Repository layout
 
@@ -176,103 +147,67 @@ A research-report agent that produces beautifully-formatted hallucinations is wo
 /
 ├── app/                         # FastAPI application
 │   ├── main.py                  # app factory, CORS, error handlers, router mounting
-│   ├── core/                    # settings, auth, cors, errors, observability (A09 helper)
-│   ├── api/v1/
-│   │   ├── dependencies.py      # DB session DI, rate limit
-│   │   └── routers/             # health, symbols, news, market, research
-│   ├── db/
-│   │   ├── session.py           # async engine + sessionmaker
-│   │   └── models/              # Symbol, NewsItemModel, NewsSymbol, Candle, ResearchReportRow
-│   ├── schemas/                 # Pydantic request/response (research.py is the v2 schema)
-│   └── services/                # tools (fetch_*, parse_*), orchestrator, layout signals,
-│                                # research_cache, rate_limit, llm
+│   ├── core/                    # settings, auth (shared secret), cors, errors, observability
+│   ├── api/v1/routers/          # health, symbols, news, market, research, lens (+ 501 stubs)
+│   ├── db/models/               # Symbol, NewsItemModel, NewsSymbol, Candle, ResearchReportRow
+│   ├── schemas/                 # Pydantic request/response (research.py is the report schema)
+│   └── services/                # data tools, orchestrator, derived claims, thesis, layout
+│                                # signals, cache, rate limit, LLM adapters, xbrl + lens,
+│                                # market overview + sentiment
 ├── alembic/versions/            # 0001 baseline, 0002 news_symbols, 0003 research_reports
-├── frontend/                    # Vite + React 18 + TS dashboard
-│   ├── src/
-│   │   ├── components/          # SymbolDetailPage (lazy), LandingPage, AppShell,
-│   │   │   │                    # WatchlistButton, HeroCard, QualityCard, EarningsCard,
-│   │   │   │                    # ValuationCard, PerShareGrowthCard, CashAndCapitalCard,
-│   │   │   │                    # RiskDiffCard, MacroPanel, BusinessCard, NewsList,
-│   │   │   │                    # ContextBand, HeaderPills, NarrativeStrip, primitives
-│   │   │   │                    # (LineChart, EpsBars, MetricRing, MultiLine, PeerScatterV2)
-│   │   │   ├── compare/         # ComparePage (lazy), CompareHero, CompareMetricRow,
-│   │   │   │                    #   CompareMarginOverlay, CompareGrowthOverlay,
-│   │   │   │                    #   CompareRiskDiff, CompareFooter
-│   │   │   └── search/          # SearchModal (lazy), ⌘K-triggered
-│   │   └── lib/                 # Zod schemas, API client, extractors, format helpers,
-│   │                            # watchlist + recent localStorage helpers, popular-tickers
-│   └── vercel.json              # Vercel deploy config (held until 4.8)
-├── tests/                       # pytest-asyncio; per-test SAVEPOINT rollback. Plus tests/evals/
-├── docs/                        # architecture, security, testing, commands, ADRs (0001 → 0005)
-├── tasks/                       # active sprint (todo.md), lessons learned, dogfood notes
-├── scripts/                     # smoke.py — exercises each tool against live providers
+├── frontend/                    # Vite + React 18 + TS dashboard (see frontend/README.md)
+│   └── src/
+│       ├── components/          # AppShell, SidebarShell, MarketStrip, SymbolDetailPage (lazy)
+│       │                        # and its cards; compare/, lens/, search/ (each lazy)
+│       └── lib/                 # Zod schemas, API client, per-card extractors, formatters,
+│                                # watchlist / recent storage
+├── tests/                       # pytest-asyncio, per-test SAVEPOINT rollback; tests/evals/
+├── docs/                        # architecture, deployment, security, testing, commands, ADRs 0001–0007
+├── tasks/                       # todo.md, lessons.md, dogfood logs
+├── scripts/smoke.py             # every data tool against live providers
 ├── design_doc.md                # long-form system design
-├── fly.toml                     # Fly.io app config
-├── Dockerfile
-├── docker-compose.yml
-└── pyproject.toml
+├── fly.toml · Dockerfile · docker-compose.yml · pyproject.toml
 ```
 
 ## Development
 
 | Task | Command |
 |---|---|
-| Run dev server | `uv run uvicorn app.main:app --reload` |
-| Run tests | `uv run pytest -v` (requires reachable Postgres at `DATABASE_URL`) |
-| Lint | `uv run ruff check app tests` |
-| Auto-fix lint | `uv run ruff check --fix app tests` |
-| Apply migrations | `uv run alembic upgrade head` |
+| API dev server | `uv run uvicorn app.main:app --reload` |
+| Dashboard dev server | `cd frontend && npm run dev` |
+| Backend tests | `uv run pytest -v` (needs Postgres at `DATABASE_URL`) |
+| Frontend tests | `cd frontend && npm run test` |
+| Lint | `uv run ruff check app tests` · `cd frontend && npm run lint && npm run typecheck` |
+| Migrations | `uv run alembic upgrade head` |
 
-More commands in [docs/commands.md](docs/commands.md).
+More in [docs/commands.md](docs/commands.md).
 
-## CI
+## CI and deployment
 
-Every PR runs (see [.github/workflows/ci.yml](.github/workflows/ci.yml)):
+Every PR runs ([.github/workflows/ci.yml](.github/workflows/ci.yml)): backend `ruff` + `pytest` against a Postgres service; frontend lint, typecheck, vitest and build; a production-image job that builds the Dockerfile and boots it against Postgres (`alembic upgrade` + `/v1/health`); Gitleaks; and an AI PR review.
 
-- **Backend — Unit Tests:** `ruff` + `pytest` against an ephemeral Postgres service container.
-- **Secrets Scan (Gitleaks):** blocks committed secrets.
-- **AI PR Review (Claude):** posts an inline review on the PR.
+A push to `main` deploys both halves: [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) runs `flyctl deploy` (the container applies migrations before `uvicorn` starts) and Vercel builds `frontend/`. Setup, secrets and operations are in [docs/deployment.md](docs/deployment.md); rationale in [ADR 0002](docs/adr/0002-deployment.md).
 
-Phase 2 will add an **Eval harness** job that runs the golden-question suite and fails the build on factuality regressions.
+## Roadmap
 
-## Deployment
+- **Phase 1 — Core infrastructure** ✅ FastAPI, Alembic, tests, yfinance ingest, technicals, Fly + Neon, push-to-deploy.
+- **Phase 2 — Research assistant** ✅ Citation-enforcing schema, free-data tools, deterministic orchestrator, cache, rate limit, golden eval.
+- **Phase 3 — Visual-first depth** ✅ `Claim.history` on fundamentals, earnings and macro; history-aware rubric.
+- **Phase 4 — Symbol-centric dashboard** ✅ ([ADR 0005](docs/adr/0005-symbol-centric-dashboard.md)) Strata design, dedicated cards and SVG charts, adaptive layouts for distressed names, Compare, search / watchlist / recent; 4.8 deployed it and ran the dogfood gate, which also brought readable chart axes, the sidebar rewrite, the market strip, Regenerate, error boundaries and the layout pass.
+- **Phase 5 — Narrative layer** ✅ (the 4.8 gate's outcome, [ADR 0007](docs/adr/0007-analytical-narratives.md)) Derived comparison claims and interpretive card prose, the cited analyst view, and the megacap capex lens.
+- **Phase 6 — XBRL Tier 2** ⏸ Segment and geography revenue, RPO. Dogfooding hasn't asked for it yet; the XBRL client the lenses use is the starting point.
+- **Indefinitely deferred** ⏸ `search_history` (pgvector RAG), options / IV, Reddit sentiment, real auth + per-user cost caps.
 
-Target: **Fly.io** for the API, **Neon** for Postgres. Both on free tiers until traffic warrants. Rationale in [ADR 0002](docs/adr/0002-deployment.md); first-time setup and ongoing ops in [docs/deployment.md](docs/deployment.md).
-
-Push-to-deploy via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) — `git push origin main` runs `flyctl deploy --remote-only`. The deployed container runs `alembic upgrade head` before `uvicorn`, so schema migrations apply on every rollout.
+[design_doc.md](design_doc.md) has the system design; the [ADRs](docs/adr/) have the reasoning behind each pivot.
 
 ## Contributing
 
-This is a personal learning / portfolio project, but PRs are welcome. If you're opening one:
+A personal learning / portfolio project, but PRs are welcome:
 
 1. Read [docs/workflow.md](docs/workflow.md) — TDD is non-negotiable for business logic.
 2. Read [docs/security.md](docs/security.md) — especially A09 on logging every external call.
-3. Open a PR against `main`. The C.L.E.A.R. checklist in [the PR template](.github/pull_request_template.md) is enforced by review.
+3. Open a PR against `main`; the C.L.E.A.R. checklist in [the PR template](.github/pull_request_template.md) is enforced by review.
 
 ## License
 
 No license file yet. Treat as all-rights-reserved until one lands.
-
-## Roadmap
-
-- **Phase 1 — Core Infrastructure** ✅ *(complete)*
-  FastAPI + Alembic + tests + real yfinance ingest + RSI/SMA technicals + Fly + Neon + push-to-deploy.
-- **Phase 2 — AI Equity Research Assistant** ✅ *(complete)*
-  Citation-enforcing schema, 9 free-data tools, deterministic-everything-except-prose orchestrator, same-day cache, per-IP rate limit, real-LLM golden eval at factuality 0.97.
-- **Phase 3 — Visual-first depth** ✅ *(complete; PRs #35 → #44)*
-  `Claim.history` schema extension; `fetch_fundamentals` / `fetch_earnings` / `fetch_macro` ship multi-period histories; eval rubric reads `claim.history` for trend-prose factuality. Frontend sparklines + section charts shipped via the v1 dashboard before being replaced by the Phase 4 Strata redesign.
-- **Phase 4 — Symbol-centric dashboard rebuild** 🔄 *(in flight; 4.0 → 4.7 done; 4.8 next — the dogfood gate)*
-  Per [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md). The dashboard pivoted from "click Generate → static report" to a `/symbol/:ticker` URL-routed dashboard with adaptive layouts:
-  - **4.0 → 4.4 done (PRs #46 → #56):** Strata token system, `react-router-dom@6`, `SidebarShell` + `LandingPage` + `SymbolDetailPage`. Hand-rolled SVG primitives (LineChart, EpsBars, MetricRing, MultiLine, PeerScatterV2). Nine dedicated cards: Hero (price + featured stats), Quality, Earnings (20Q EPS bars + recent prints), Valuation (4-cell + peer scatter), PerShareGrowth (5 series rebased), CashAndCapital, RiskDiff (per-category Haiku categorizer), MacroPanel, plus Business + News in a ContextBand. Per-card LLM-written `card_narrative` field with the eval rubric policing both that and the broader `summary`.
-  - **4.5 done (PRs #57 → #59):** adaptive layout. `LayoutSignals` model + pure derivation read claim values to detect distress (`is_unprofitable_ttm`, `beat_rate_below_30pct`, `cash_runway_quarters`, `gross_margin_negative`, `debt_rising_cash_falling`). HeaderPills above hero ("● UNPROFITABLE · TTM", "⚠ LIQUIDITY WATCH"); HeroCard right-column trio swap (Forward P/E → P/Sales, ROIC → Cash Runway, FCF margin red on negative); EarningsCard "bottom decile" pill; CashAndCapitalCard runway tile + "raise likely needed"; QualityCard rings flip red on negative ratios; SymbolDetailPage row 3/4 reorder so Cash + Risk + Macro lift above Valuation + Growth on distressed names; Sonnet's prompt receives signals as framing context. Layout polish (4.5.C): wider `max-w-screen-2xl` container, `items-start` honest-height alignment, ContextBand to bottom, auto-collapsing row 4.
-  - **4.6.A done (PR #61) — Compare page (`/compare?a=NVDA&b=AVGO`)**: two-ticker side-by-side dashboard, lazy-loaded. `CompareHero` (per-side mini area chart + per-side distress chrome), `CompareMetricRow` for Valuation (3 metrics, lower=cheaper) and Quality (4 metrics, higher=better), `CompareMarginOverlay` (operating margin 20Q both tickers), `CompareGrowthOverlay` (5Y per-share Rev + FCF rebased), `CompareRiskDiff` (10-K diff side-by-side), `CompareFooter` ("What survives / What's cut"). PEG metric and LLM compare narrative deferred to 4.6.B.
-  - **4.7 done (PR #62) — Search + Watchlist + Recent + bundle hygiene**: ⌘K search modal (lazy-loaded; filters over recent ∪ watchlist ∪ POPULAR_TICKERS), localStorage `lib/watchlist.ts` + `lib/recent.ts` (MRU cap-at-10), `WatchlistButton` star toggle on `/symbol/:ticker`, sidebar count badges, `LandingPage` Recent + Watchlist sections. Companion bundle hygiene: `SymbolDetailPage` lazy-loaded so all per-card Strata components move out of main into a 14.5 KB on-demand chunk — main bundle drops 98.56 → 83.02 KB gz; headroom 1.44 → **16.98 KB**.
-  - **4.8 next — Vercel deploy + dogfood gate**: ship the frontend; dogfood across 8–10 real symbols spanning the layout matrix (healthy mega-cap, growth, distressed, dividend, cyclical); the dogfood signal decides whether to escalate to Phase 5 (Narrative layer) or Phase 6 (XBRL Tier 2). Optional follow-ups: 4.6.B compare narrative if dogfood asks; per-card sparklines on landing-page ticker grids; help-overlay (`?` shortcut).
-- **Phase 5 — Narrative layer** ⏸ *(deferred; conditional on 4.8 dogfood signal)*
-  Explicit Bulls Say / Bears Say with `claim_refs` enforcement, What Changed deltas, `?focus=thesis`. Lands only if 4.8 surfaces "I want a real bull/bear case" repeatedly that the per-card narratives don't satisfy.
-- **Phase 6 — XBRL Tier 2** ⏸ *(deferred; conditional on 4.8 dogfood signal)*
-  Segment + geography revenue breakdowns, RPO via XBRL parser. Lands if 4.8 surfaces "I need segment/geography breakdowns" repeatedly (esp. for names where segment mix is the story — NVDA Data Center vs Gaming, AMZN AWS vs Retail).
-- **Indefinitely deferred** ⏸
-  `search_history` (pgvector RAG), `compute_options` (yfinance + daily IV snapshot), Reddit sentiment, real auth + per-user cost caps + Redis-backed horizontal rate limit. Revisit when there's a concrete trigger.
-
-See [tasks/todo.md](tasks/todo.md) for the granular tracker, [design_doc.md](design_doc.md) for system design, [ADR 0003](docs/adr/0003-pivot-equity-research.md) for the v1→v2 pivot, [ADR 0004](docs/adr/0004-visual-first-product-shape.md) for the visual-first commitment, and [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md) for the Phase 4 dashboard pivot.

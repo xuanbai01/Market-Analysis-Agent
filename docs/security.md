@@ -4,9 +4,9 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 
 ## A01 — Broken Access Control
 
-- There is **no auth yet**. Every public-internet deployment must sit behind an auth dependency before launch.
-- When added: every protected route uses a FastAPI dependency that validates the token and returns `current_user`.
-- Scope all user-owned DB queries to `current_user.id` unless the route is explicitly cross-user (admin, public read).
+- **Today: one shared secret.** [`app/core/auth.py::require_shared_secret`](../app/core/auth.py) checks `Authorization: Bearer <BACKEND_SHARED_SECRET>` (constant-time compare) on every route that costs money, spends a provider quota or writes: research, prices, market overview, lenses, and every `POST`. Production sets the secret; with it unset (local dev) the dependency is a pass-through. [`tests/test_route_auth.py`](../tests/test_route_auth.py) asserts the gate on each route — add new costly or writing routes there.
+- The dashboard asks for the secret at sign-in and keeps it in `localStorage`; a 401 on a report clears it and returns to sign-in.
+- **When real users arrive:** per-user auth through a dependency that returns `current_user`, and every user-owned query scoped to `current_user.id` unless the route is explicitly cross-user.
 
 ## A02 — Cryptographic Failures
 
@@ -24,13 +24,13 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 
 - Router → Service → (Agent / DB) separation. Business logic never lives in route handlers where it can be bypassed.
 - Immutable audit records: ingested market bars and news items should be append-only (use a ts-indexed table; supersede, don't update).
-- Rate-limit external-facing endpoints once exposed publicly. Especially relevant for `/v1/analysis` and `/v1/forecasts/*` (LLM-backed, expensive).
+- Rate-limit LLM-backed endpoints. `/v1/research/{symbol}` has a per-IP limit on fresh reports (default 3/h; 30/h in production while the owner is the only user — lower it before sharing the URL).
 
 ## A05 — Security Misconfiguration
 
 - All secrets loaded via `app/core/settings.py` from environment variables. The `.env` file is `.gitignored` — never commit real values.
 - `APP_ENV=prod` must disable FastAPI debug / docs routes unless deliberately public (currently `/docs` is always on — revisit before public launch).
-- CORS (not yet configured): when added, allowlist origins explicitly. Never `*` in production.
+- CORS allows exactly one origin, `FRONTEND_ORIGIN` ([`app/core/cors.py`](../app/core/cors.py)); production sets it to the Vercel dashboard in `fly.toml`. Never `*`.
 
 ## A06 — Vulnerable and Outdated Components
 
@@ -39,7 +39,8 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 
 ## A07 — Identification and Authentication Failures
 
-- Deferred — no auth yet. When added: token expiry enforced (24h default), tokens validated on every protected request, failed logins return a generic error and are logged with an anonymized identifier.
+- Shared secret only (see A01): validated on every protected request; failures return 401 with `WWW-Authenticate: Bearer` and never log the token. No expiry or rotation beyond replacing the Fly secret.
+- When per-user auth lands: token expiry enforced (24h default), failed logins return a generic error and are logged with an anonymized identifier.
 
 ## A08 — Software and Data Integrity Failures
 

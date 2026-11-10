@@ -10,27 +10,32 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Phase 4 — Symbol-centric dashboard rebuild** (Strata design from user's prototyping session). **4.0 → 4.7 done (16 PRs through #62); 4.8 (Vercel deploy + dogfood) is next; 4.6.B (compare narrative) is optional / conditional on dogfood signal.** See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md).
+- Nothing in flight. **Phase 4 is done** (4.0 → 4.8, PRs #46 → #82) and the 4.8 gate's outcome, Phase 5, shipped as ADR 0007 (#79 → #81). The next piece of work is the owner's pick from "Next candidates" below.
 
-## Handoff — pickup notes (2026-05-05)
+## Handoff — pickup notes (2026-11-09)
 
-If you're picking this up after a gap, the orientation in three lines:
+If you're picking this up after a gap:
 
-1. **Read [CLAUDE.md](../CLAUDE.md) "Current state" first** — it tracks every shipped PR through 4.7 with bundle sizes, test counts, and inline summaries.
-2. **Next concrete work is Phase 4.8 — Vercel deploy + dogfood gate.** Spec is in §4.8 below. 4.6.B (LLM compare narrative) stays optional and conditional on dogfood signal — defer unless the gate produces a "wish Compare had narrative" reaction. Bundle headroom is now **16.98 KB** (main 83.02 / 100 KB) so 4.8 + Phase 5/6 land without budget anxiety.
-3. **Test counts to expect on a clean checkout:** `uv run pytest -v` → 607/607 backend (some skipped if FRED_API_KEY unset). `cd frontend && npx vitest run` → 447/447 frontend.
+1. **Read [CLAUDE.md](../CLAUDE.md) "Current state" first** — every shipped PR with bundle sizes and test counts — then [tasks/dogfood-2026-11.md](dogfood-2026-11.md) for what the owner reacted to and why each fix exists.
+2. **Production:** dashboard <https://market-analysis-agent-red.vercel.app>, API <https://market-analysis-agent.fly.dev>, `LLM_PROVIDER=deepseek`. A push to `main` deploys both; the owner sets Fly secrets ([docs/deployment.md](../docs/deployment.md) §7). Cached reports generated before a prompt or claim change need **Regenerate** to pick it up.
+3. **Test counts on a clean checkout:** `uv run pytest -v` → 831 backend (5 live-LLM golden cases deselected unless `-m live_llm`). `cd frontend && npm run test` → 587. Main bundle 88.86 KB gz (11.14 KB under budget).
 
-**Known follow-ups not blocking 4.8:**
+**Next candidates (none committed):**
 
-- **Vite HMR cache misses file mtime in `.claude/worktrees/...`** — see [tasks/lessons.md](lessons.md). Workaround: trust unit tests + `vite build` for verification when the dev preview shows stale content. Fix candidate: add `server.watch.usePolling: true` to `vite.config.ts`. Low priority.
-- **Real-LLM dogfood for 4.5.B's prompt change** (distressed-name framing context block) — unit-tested but not verified end-to-end against a real RIVN report. Naturally lands during 4.8.
-- **Compare narrative dogfood gate** — 4.6.A Compare page ships visual-only. Whether to escalate to 4.6.B is a 4.8 decision.
-- **Per-card sparklines on LandingPage's Recent + Watchlist grids** — current cards are ticker-only (no fetch fan-out). If 4.8 dogfood wants sparklines, plumb the existing `fetchMarketPrices` query through; cache hits are likely warm if those tickers are in recent.
-- **Help overlay (`?` shortcut)** — mockup footer suggests a keyboard-help modal. Defer until ⌘K is dogfooded enough to know what other shortcuts are wanted.
+- **Lower `RESEARCH_RATE_LIMIT_PER_HOUR`** in `fly.toml` (30 → the code default 3) before the URL is shared with anyone.
+- **More lenses** — the XBRL client + `lens.py` generalize; candidates: R&D intensity, SBC ÷ revenue, buybacks vs dividends across the same megacaps, or capex for another group. A trailing-12-month point for the latest partial year is the other open lens idea.
+- **A cyclical ticker** (CAT, XOM) through the dashboard — the one layout-matrix cell the dogfood didn't cover.
+- **Phase 6 (XBRL Tier 2)** only if segment or geography mix is asked for.
+- **4.6.B compare narrative** only if Compare gets used; the dogfood never reached for it.
+- **Sonnet comparison run** of the golden eval (needs an Anthropic key), and **branch protection on `main`** (repo setting, owner's call).
 
-**`tasks/lessons.md`** captured 8 lessons through 4.6.A, plus one from the 2026-11-07 re-pickup (hardcoded dates in time-windowed tests) — read before non-trivial work to avoid retreading them.
+**Known minor issues:**
 
-**Re-pickup 2026-11-07:** three `test_research_cache.py` tests had expired (hardcoded April dates vs a 7-day lookup window) and frontend lint failed on the ValuationCard `\-` escape; both fixed on `fix/expired-cache-test-dates`. CI still runs backend only — the frontend suite + lint are not gated.
+- **Vite HMR cache misses file mtime in `.claude/worktrees/...`** — see [tasks/lessons.md](lessons.md). Workaround: trust unit tests + `vite build`; fix candidate `server.watch.usePolling: true`.
+- **Cancel-on-navigate** (old Bug 8): leaving a ticker page mid-generation doesn't abort the request. Hasn't bitten in dogfood.
+- **Help overlay (`?` shortcut)** — still deferred; ⌘K is the only shortcut.
+
+**`tasks/lessons.md`** — read before non-trivial work to avoid retreading earlier mistakes.
 
 ## Local-dev gotchas (Windows)
 
@@ -39,7 +44,7 @@ A clean checkout on Windows often hits two issues that cost dev hours if not pre
 1. **Native Postgres 18 service collides with Docker's :5432 mapping.** When the Windows `postgresql-x64-18` service is running, Docker's `5432:5432` mapping silently bumps the host port. Check with `docker ps` — if you see `0.0.0.0:5433->5432/tcp`, update `.env`'s `DATABASE_URL` to `localhost:5433`. Alternative: `Stop-Service postgresql-x64-18` to free :5432, then `docker compose down && up -d db`.
 2. **`.env`'s `DATABASE_URL` defaults to whatever the previous user set.** If the alembic / uvicorn stack hangs forever or fails with `ConnectionRefusedError`, check whether the URL points at Neon (`...neon.tech...?sslmode=require`) when you meant local. Neon connections appear in stack traces as `_create_ssl_connection`. Replace with `postgresql+asyncpg://postgres:postgres@localhost:5432/marketdb` for local.
 
-## Phase 4 — Symbol-centric dashboard (active)
+## Phase 4 — Symbol-centric dashboard ✅ done (2026-11-09)
 
 > **Why this is Phase 4:** dogfooding the Phase 3 visual depth (sparklines, section charts, peer scatter) against MSFT / NVDA / AMZN / AAPL / RIVN locally surfaced that the *data and visualization were right* but the *container was wrong*. "Click Generate → scroll a static report" feels like a generated artifact, not a tool. profitviz / stockanalysis / finchat all converge on a symbol-centric dashboard for a reason. See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md) for the full reasoning.
 >
@@ -536,13 +541,47 @@ Headroom under 100 KB main-bundle budget: **1.44 → 16.98 KB**. Phase 4.8 + Pha
   - **Backend ticker-search endpoint** — current SearchModal is frontend-only. If dogfood surfaces "I want to search for AVGO before I've ever visited it" beyond the popular-tickers list, add a yfinance-backed lookup or a seeded-symbols endpoint. 4.7.B territory.
   - **Help overlay (`?` shortcut)** — mockup footer "Press ? for shortcuts" suggests a keyboard-help modal. Defer until 4.7's ⌘K is dogfooded enough to know what other shortcuts users want.
 
-### 4.8 Vercel deploy + dogfood gate
+### 4.8 Vercel deploy + dogfood gate ✅ done (2026-11-09)
 
-- [ ] **Vercel push-to-deploy** from `frontend/`. Set `VITE_BACKEND_URL`, set backend `FRONTEND_ORIGIN`, set `BACKEND_SHARED_SECRET` on both sides.
-- [ ] **Backend env-var hardening** — confirm Fly secrets match the new dashboard's needs (`LLM_PROVIDER` + `DEEPSEEK_API_KEY` or `ANTHROPIC_API_KEY` per ADR 0006, `NEWSAPI_KEY`, `FRED_API_KEY`, `BACKEND_SHARED_SECRET`).
-- [ ] **Dogfood** the deployed stack against 8–10 real symbols spanning the layout matrix (healthy mega-cap, growth, distressed, dividend payer, cyclical). Note rough edges.
-- [ ] **Decision gate for Phase 5 vs Phase 6:** if dogfooding surfaces "I want a real bull/bear case" repeatedly, escalate to Phase 5 (narrative layer). If it surfaces "I need segment / geography breakdowns", escalate to Phase 6 (XBRL Tier 2). If neither dominates, the dashboard is the product and remaining work is polish.
-- [ ] **README + design_doc + CLAUDE.md** sweep — current state reflects Phase 4, screenshots, deploy URL. Update portfolio framing too.
+#### Execution plan (2026-11-08)
+
+Survey findings that reorder the original list below:
+
+- **Only `/v1/research/*` checks the shared secret.** `GET /v1/market/{symbol}/prices` (documented as auth-gated; it falls through to a yfinance ingest + DB write on cache miss), `POST /v1/market/ingest`, `POST /v1/news/ingest` (spends the 100/day NewsAPI quota) and `POST /v1/symbols` are open to anyone, even once `BACKEND_SHARED_SECRET` is set. The frontend already sends the bearer token on every call, so gating them breaks nothing.
+- **The News card can never fill on its own.** `fetch_news` only reads `news_items`; the only writer is a manual `POST /v1/news/ingest`, and `news_symbols` has an FK to `symbols`, so ingesting a ticker that isn't already in `symbols` would fail (same trap as the candles FK in `tasks/lessons.md`).
+- **CI never runs the frontend** (lint, typecheck, vitest, build) and never builds the production image.
+
+Order — code first (each its own PR; the account steps can run in parallel):
+
+1. [x] **Lock down the API** — `require_shared_secret` on prices + every POST that writes or spends quota; tests for 401 without / 200 with the token; fix the architecture doc's claim. → **#68**, merged 2026-11-08.
+2. [x] **Fresh news per report** — `fetch_news` ingests the symbol's latest headlines (Yahoo RSS; NewsAPI when keyed) before reading, upserting the `symbols` row first; any ingest failure degrades to the DB read. → **#69** (live: RIVN 0 → 19 headlines), merged 2026-11-08.
+3. [x] **CI coverage** — frontend job (lint, typecheck, vitest, build) + a production-image job (docker build + boot against Postgres). → **#70**, both new jobs green on their first run, merged 2026-11-08.
+4. [x] **Local-dev docs** — folded into a rewritten `docs/GETTING_STARTED.md` (troubleshooting section) rather than a new `LOCAL_DEV.md`; `FRONTEND_ORIGIN=http://localhost:5173` in `.env.example`; compose gets a named volume + auto-created `test_db`. → **#71**, merged 2026-11-08.
+5. [x] **Deploy (needs the owner's accounts)** — Fly CLI login → `BACKEND_SHARED_SECRET`, `LLM_PROVIDER=deepseek` + rotated `DEEPSEEK_API_KEY`, `FRONTEND_ORIGIN`; Vercel project import from `frontend/` with `VITE_BACKEND_URL`.
+   - 2026-11-08: Fly CLI installed + logged in; Vercel project imported and deployed; DeepSeek key rotated. **Fly had only `DATABASE_URL` set — no LLM key ever**, so production could never generate a report; the cached April/May reports in Neon came from local runs whose `.env` pointed at Neon. `market-analysis-agent.vercel.app` is someone else's project; ours is `https://market-analysis-agent-red.vercel.app`.
+   - `FRONTEND_ORIGIN` + `LLM_PROVIDER=deepseek` go in `fly.toml` `[env]` (not secrets) → **#72**. Before it, the deployed page's `fetch` to the API fails on CORS.
+   - Secrets (`BACKEND_SHARED_SECRET`, `DEEPSEEK_API_KEY`) are set by the owner with `flyctl secrets import` (stdin) — not `secrets set NAME=value`, because this machine's PSReadLine 2.0.0 writes typed commands, values included, to its history file.
+   - Verified 2026-11-08: both secrets show `Deployed`; unauthenticated `GET /v1/research` → 401 "Missing Authorization header." (was 200 with data); `/v1/health` → 200. Prices still answer without a token until #68 deploys; the Vercel login needs #72.
+   - After #68–#72 merged and deployed (`33e963d`, CI all green incl. the new frontend + image jobs): from the Vercel origin, `/v1/health` → 200 (CORS works); research, prices and `POST /v1/news/ingest` → 401 without a token, research → 401 "Invalid token." with a wrong one.
+   - First live report (owner logged in): 503 "DeepSeek API returned HTTP 401: Authentication Fails" for the key ending `d2af`. The local `.env` holds the same key and DeepSeek's free `/models` endpoint also returns 401 for it, so the key itself is revoked — not an import problem. Fix: a fresh key into `.env`, then piped to Fly from `.env` (no secret on the command line).
+   - Fresh key `…0ae2` validated (`/models` → 200) and deployed (Fly v55). **First successful live report: AAPL in ~20 s, all cards incl. 17 news headlines.** Findings in [`tasks/dogfood-2026-11.md`](dogfood-2026-11.md) — top issue: LLM prose cites raw stored values without units (misleading buyback-vs-dividend comparison).
+6. [x] **Dogfood** the deployed stack on 8–10 tickers (items below); log in `tasks/dogfood-2026-11.md`; fix the worst.
+   - Done 2026-11-09: AAPL, MSFT, NVDA, AVGO, KO, RIVN, JPM plus the seven lens companies — healthy mega-cap, growth, distressed, dividend payer and bank covered; **a cyclical was not**. 17 findings logged; every High and Medium one fixed in #73–#82 (sidebar #76, market strip #77, Regenerate + error boundaries + three small fixes #78, interpretive prose #79, analyst view #80, capex lens #81, layout pass #82). Info items #4 and #5 stay open.
+   - Earlier progress: tickers AAPL (live), NVDA (local). Fixed and merged 2026-11-08: prose units (#74), dogfood rate limit 30/h (#73), readable charts — axes, baselines, $/share panels, stat tiles, trend cells (#75). Still to cover: a distressed name (RIVN), a bank (JPM), a dividend payer (KO), a cyclical.
+   - Verified in production after #73–#75 deployed (Fly + Vercel, `2a06881`): AAPL (cached) renders the new charts — 2 per-share panels, 3 charts with value axes + baselines, 4 cash tiles, stated trend changes; a fresh MSFT report (22 s) cites display units throughout ("67.66% gross margin", "$12.39 of revenue", "dividend yield of 0.74% with a 0.57% buyback yield").
+7. [x] **Docs sweep + Phase 5/6 decision gate** (items below).
+   - Gate: the recurring signal was "the cards just display data" plus a wish for cross-company depth (dogfood #15) → Phase 5, shipped as ADR 0007 (#79–#81). No one asked for segment / geography mix → Phase 6 stays deferred.
+   - Docs (this PR, 2026-11-09): README and design_doc rewritten for the deployed product; CLAUDE.md, architecture, deployment (§7 production configuration), security (A01/A05/A07 now describe the shared secret + CORS), testing (actual suites), frontend/README rewritten. Screenshots not added — the browser pane only saves small JPEG captures; add real ones by hand if the README needs them.
+
+Not in this pass: Bug 8 (cancel-on-nav — pick up if dogfood hits it), Sonnet comparison run (needs an Anthropic key), branch protection on `main` (a repo setting — owner's call).
+
+#### Original 4.8 items
+
+- [x] **Vercel push-to-deploy** from `frontend/`. Set `VITE_BACKEND_URL`, set backend `FRONTEND_ORIGIN`, set `BACKEND_SHARED_SECRET` on both sides. *(plan item 5, #72)*
+- [x] **Backend env-var hardening** — confirm Fly secrets match the new dashboard's needs (`LLM_PROVIDER` + `DEEPSEEK_API_KEY` or `ANTHROPIC_API_KEY` per ADR 0006, `NEWSAPI_KEY`, `FRED_API_KEY`, `BACKEND_SHARED_SECRET`). *(plan items 1 + 5; FRED / NewsAPI keys stay optional)*
+- [x] **Dogfood** the deployed stack against 8–10 real symbols spanning the layout matrix (healthy mega-cap, growth, distressed, dividend payer, cyclical). Note rough edges. *(plan item 6; no cyclical yet)*
+- [x] **Decision gate for Phase 5 vs Phase 6:** if dogfooding surfaces "I want a real bull/bear case" repeatedly, escalate to Phase 5 (narrative layer). If it surfaces "I need segment / geography breakdowns", escalate to Phase 6 (XBRL Tier 2). If neither dominates, the dashboard is the product and remaining work is polish. *(→ Phase 5)*
+- [x] **README + design_doc + CLAUDE.md** sweep — current state reflects Phase 4, screenshots, deploy URL. Update portfolio framing too. *(plan item 7; no screenshots)*
 
 ### LLM provider switch — DeepSeek ✅ done *(ADR 0006, this PR)*
 
@@ -556,21 +595,23 @@ Headroom under 100 KB main-bundle budget: **1.44 → 16.98 KB**. Phase 4.8 + Pha
 - [x] **Risk categorizer output budget** now scales with paragraph count — RIVN's 248-paragraph diff overflowed the fixed 4096 ceiling on both providers.
 - [x] **10-K risk diff was 24–316 s per report** — profiled: ~99% in `_paragraph_diff`'s all-pairs `SequenceMatcher` scan (EDGAR cached, HTML parsing 1–3 s). Same output, now verbatim fast path + reusable matchers + `quick_ratio` bounds + early exit scanning outward from the paragraph's position: KO 88.5→2.2 s, AAPL 24.1→3.2 s, NVDA 99.1→5.2 s, RIVN 316.5→29.2 s, byte-identical on all four. RIVN's remaining time is ~250 genuinely changed paragraphs that must be compared against every candidate to keep the result exact.
 - [x] **Rubric fixes** — unit-suffixed numbers ("14.03x", "$888.27B") are read whole instead of truncated to their integer part (which also let a fabricated "14.9x" pass), and numbers quoted literally in the same section's claim text ("last 20 quarters", "10-K", "founded 1799") count as backed.
-- [ ] **Production switch** — `fly secrets set DEEPSEEK_API_KEY=... LLM_PROVIDER=deepseek` once the dashboard has been dogfooded on DeepSeek prose locally. Code default stays `anthropic`, so merging changes nothing in prod.
+- [x] **Production switch** — `LLM_PROVIDER=deepseek` in `fly.toml` (#72) + the `DEEPSEEK_API_KEY` Fly secret (set 2026-11-08). Code default stays `anthropic`.
 - [ ] **Sonnet comparison run** — same golden set with `LLM_PROVIDER=anthropic` (needs an Anthropic key locally) to compare factuality + prose side by side.
 
-## Phase 5 — Narrative layer (deferred; after Phase 4 dogfooding)
+## Phase 5 — Narrative layer ✅ done *(ADR 0007, #79–#81)*
 
-> **Deferred** until Phase 4 ships and is dogfooded. The dashboard's adaptive layout for distressed names (Phase 4.5) plus inline section narratives (Phase 4.4) already deliver a meaningful slice of "what would Bulls Say / Bears Say articulate?" — the killer questions ("EPS narrowing toward break-even but cash runway tightening" or "Operating margin expansion outpacing peers") get answered by the dashboard's data presentation. Phase 5 lands only if dogfooding surfaces a recurring "I want a real bull/bear case" signal that the inline narratives don't satisfy.
+> **Shipped 2026-11-09** after the 4.8 gate: derived comparison claims + interpretive card prose (#79), the analyst view — headline, bull / bear, what changed, what to watch, each point citing claims checked in code (#80), and the megacap capex lens (#81). Mapping to the original items: Bulls / Bears Say → the analyst view's bull and bear points (`claim_refs: list[ClaimRef]`, rubric-policed); What Changed → its "changed" points over derived YoY claims; catalyst awareness → "what to watch" (news deliberately excluded as an input after the NVDA run); `?focus=thesis` → not needed, the analyst view rides on full reports.
+>
+> *Original framing, kept for history:* deferred until Phase 4 ships and is dogfooded. The dashboard's adaptive layout for distressed names (Phase 4.5) plus inline section narratives (Phase 4.4) already deliver a meaningful slice of "what would Bulls Say / Bears Say articulate?" — the killer questions ("EPS narrowing toward break-even but cash runway tightening" or "Operating margin expansion outpacing peers") get answered by the dashboard's data presentation. Phase 5 lands only if dogfooding surfaces a recurring "I want a real bull/bear case" signal that the inline narratives don't satisfy.
 
-- [ ] **Bulls Say / Bears Say** sections — explicit bullet lists with `claim_refs: list[str]` per argument so the rubric can enforce "every bullet cites at least one Claim." Schema work + LLM prompt work + rubric extension all required.
-- [ ] **What Changed** section — surfaces quarter-over-quarter and year-over-year deltas mechanically (from Phase 3 history). LLM writes 1–2 sentence framing per delta. Some of this already exists implicitly in Phase 4.5 adaptive narratives.
-- [ ] **Catalyst awareness** — already partially in Phase 4.4 (next-print date + recent news with sentiment). Phase 5 expansion would tie news directly to the bull/bear thesis ("Q3 print added +7 ¶ to risk factors — feeds the bear case below").
-- [ ] **`?focus=thesis`** — new focus mode oriented around the bull/bear case for active investing decisions, complementing existing `full` (broad diligence) and `earnings` (event-driven).
+- [x] **Bulls Say / Bears Say** sections — explicit bullet lists with `claim_refs: list[str]` per argument so the rubric can enforce "every bullet cites at least one Claim." Schema work + LLM prompt work + rubric extension all required.
+- [x] **What Changed** section — surfaces quarter-over-quarter and year-over-year deltas mechanically (from Phase 3 history). LLM writes 1–2 sentence framing per delta. Some of this already exists implicitly in Phase 4.5 adaptive narratives.
+- [x] **Catalyst awareness** — already partially in Phase 4.4 (next-print date + recent news with sentiment). Phase 5 expansion would tie news directly to the bull/bear thesis ("Q3 print added +7 ¶ to risk factors — feeds the bear case below").
+- [x] **`?focus=thesis`** — new focus mode oriented around the bull/bear case for active investing decisions, complementing existing `full` (broad diligence) and `earnings` (event-driven). *(Not needed: the analyst view rides on full reports.)*
 
-## Phase 6 — XBRL Tier 2 (deferred; conditional on Phase 4.8 dogfood signal)
+## Phase 6 — XBRL Tier 2 (deferred; the 4.8 gate did not ask for it)
 
-> **Deferred** until Phase 4.8 dogfooding shows the segment / geography / RPO breakdowns are repeatedly missed. The Phase 4 dashboard has placeholder cards in the context band for "Revenue mix by segment" and "Revenue mix by geography" that render "data not available" until this lands. If users repeatedly note the gap (especially for names where segment mix is the story — NVDA Data Center vs Gaming, AMZN AWS vs Retail), escalate.
+> **Deferred** — the 4.8 dogfood never asked for segment / geography / RPO breakdowns. There are no placeholder cards for them (an earlier plan had some; they never shipped, and cards with no data render nothing). The lens work added `app/services/xbrl.py` (company-concept API, tag merging, calendar frames), which is the starting point; segment data lives in dimensional XBRL facts that API doesn't return, so this still needs a filing-level parser. If users repeatedly note the gap (especially for names where segment mix is the story — NVDA Data Center vs Gaming, AMZN AWS vs Retail), escalate.
 
 - [ ] **XBRL parser** — pick `python-xbrl` or `arelle`; reuse `fetch_edgar`'s polite-crawl + disk-cache infrastructure. One-time effort; pays for itself across all SEC filers.
 - [ ] **`fetch_segments` (new tool)** — parses `us-gaap:SegmentReportingDisclosure` from the latest 10-K + every 10-Q since. Returns revenue + operating income time series per reportable segment.
@@ -590,10 +631,10 @@ These were sketched during Phase 3 but never landed; either Phase 4 absorbs them
 ## Cross-cutting (do alongside, not blocked on Phase 4)
 
 - [ ] Turn on branch protection for `main` and add `ANTHROPIC_API_KEY` as a repo secret for the AI PR review job
-- [ ] `.python-version` already pinned; verify it's respected by CI's uv setup
-- [ ] **Set `ANTHROPIC_API_KEY` as a Fly secret** — needed before `/v1/research/*` works in prod: `fly secrets set 'ANTHROPIC_API_KEY=sk-ant-...'`
-- [ ] **Local-dev defaults sweep** — write a `LOCAL_DEV.md` in the repo root capturing the Phase 3 dogfood lessons: (1) `.env` `DATABASE_URL` should default to local Docker (`postgresql+asyncpg://postgres:postgres@localhost:5432/marketdb`) not Neon; (2) Windows users with native Postgres on :5432 need to either stop the service or remap docker to :5433; (3) `RESEARCH_CACHE_MAX_AGE_HOURS=0` disables cache for debug; (4) browser extensions can rewrite responses — test in incognito to isolate.
-- [ ] **`.env.example`** — recommend `FRONTEND_ORIGIN=http://localhost:5173` as the obvious local-dev value (currently empty trips up fresh-clone sessions).
+- [x] `.python-version` respected by CI's uv setup — the backend job's log shows "Using CPython 3.11.18" (checked 2026-11-08).
+- [x] **Set `ANTHROPIC_API_KEY` as a Fly secret** — needed before `/v1/research/*` works in prod: `fly secrets set 'ANTHROPIC_API_KEY=sk-ant-...'` *(Superseded: production runs DeepSeek — `DEEPSEEK_API_KEY` secret + `LLM_PROVIDER` in `fly.toml`, #72.)*
+- [x] **Local-dev defaults sweep** — write a `LOCAL_DEV.md` in the repo root capturing the Phase 3 dogfood lessons: (1) `.env` `DATABASE_URL` should default to local Docker (`postgresql+asyncpg://postgres:postgres@localhost:5432/marketdb`) not Neon; (2) Windows users with native Postgres on :5432 need to either stop the service or remap docker to :5433; (3) `RESEARCH_CACHE_MAX_AGE_HOURS=0` disables cache for debug; (4) browser extensions can rewrite responses — test in incognito to isolate. *(Done in #71 as the troubleshooting section of `docs/GETTING_STARTED.md`.)*
+- [x] **`.env.example`** — recommend `FRONTEND_ORIGIN=http://localhost:5173` as the obvious local-dev value (currently empty trips up fresh-clone sessions). *(Done in #71.)*
 
 ## Future scope (deliberately deferred — revisit when there's a concrete trigger)
 
@@ -688,6 +729,13 @@ These were sketched during Phase 3 but never landed; either Phase 4 absorbs them
     - [x] 6 new rubric unit tests: prose-cites-history, "rose from X to Y", percent display of historical fraction, anti-regression on fabrication, pre-3.2 backwards compat, cross-section history matching
     - [x] 25/25 rubric tests pass (was 19; +6); ruff clean
     - [x] Live-LLM golden eval auto-benefits via existing AAPL/full case
+
+- [x] Phase 4 — Symbol-centric dashboard (PRs #46 → #82; per-PR detail in CLAUDE.md "Current state")
+    - [x] **4.0 → 4.7** (#46 → #62) — Strata tokens + router, dedicated cards and SVG primitives, per-card narratives, adaptive layouts for distressed names, Compare, search / watchlist / recent, lazy route chunks
+    - [x] **LLM provider switch** (#65, ADR 0006) and the 40× faster 10-K risk diff (#66)
+    - [x] **4.8 deploy + dogfood gate** (#68 → #82) — route auth, per-report news, frontend + image CI, Fly + Vercel + DeepSeek in production; dogfood fixes: prose units, readable charts, sidebar, market strip, Regenerate, error boundaries, layout pass. Log: [dogfood-2026-11.md](dogfood-2026-11.md)
+
+- [x] Phase 5 — Narrative layer (#79 → #81, ADR 0007) — derived comparison claims, interpretive card prose, the cited analyst view, the megacap capex lens. Live golden eval 1.000 on all five tickers.
 
 ## Blocked / waiting
 

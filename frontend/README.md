@@ -1,98 +1,89 @@
 # Market Analysis Agent — Frontend
 
-React + Vite + TypeScript dashboard for the [Market Analysis Agent](../) backend.
+React 18 + Vite + TypeScript dashboard for the [Market Analysis Agent](../) backend. Live at <https://market-analysis-agent-red.vercel.app> (sign in with the backend's shared secret).
 
-Two screens:
+## Screens
 
-- **Login** — paste the shared secret, probe `GET /v1/research?limit=1`, persist the token in `localStorage` on 200, kick the user back here on any subsequent 401.
-- **Dashboard** — symbol input + focus dropdown + refresh toggle. Submit → loading state with the "first synth takes ~30s" copy → rendered report. Past-reports sidebar reads `GET /v1/research?limit=20`; clicks re-fetch the full report (cache hit, sub-second).
+| Route | What |
+|---|---|
+| `/login` | Paste the shared secret; it's probed against `GET /v1/research?limit=1` and kept in `localStorage`. |
+| `/` | Search + past reports. |
+| `/symbol/:ticker` | The dashboard: section nav, hero, analyst view, Quality / Earnings / Valuation / Per-share growth, Cash & capital · Capital returns · Risk · Macro, Business + News. Adapts to distressed names (pills, hero metric swap, survival cards first). |
+| `/compare?a=X&b=Y` | Two tickers side by side. |
+| `/lens`, `/lens/:id` | Cross-company lenses (megacap tech capex). |
+
+Every signed-in page has the sidebar (Search ⌘K, Home, Compare, Lenses, Watchlist, Recent) and the market strip.
 
 ## Local dev
 
 ```bash
 cd frontend
 npm install
-cp .env.example .env.local
-# edit .env.local: VITE_BACKEND_URL=http://localhost:8000  (or your Fly URL)
-
-npm run dev          # http://localhost:5173
+cp .env.example .env.local     # VITE_BACKEND_URL=http://localhost:8000 (or the Fly URL)
+npm run dev                    # http://localhost:5173
 ```
 
-If your backend has `BACKEND_SHARED_SECRET` set, the login screen will demand it. If unset (local dev default), paste anything — `probeAuth` will still 200 because the dep is a pass-through.
+The backend must allow the dev origin: `FRONTEND_ORIGIN=http://localhost:5173` in the root `.env`. With `BACKEND_SHARED_SECRET` unset (the local default) any value works at sign-in.
 
 ## Scripts
 
-| Command            | What                                                      |
-|--------------------|-----------------------------------------------------------|
-| `npm run dev`      | Vite dev server with HMR                                  |
-| `npm run build`    | `tsc -b && vite build` → `dist/`                          |
-| `npm run preview`  | Serve the production build locally                        |
-| `npm run test`     | Vitest one-shot                                           |
-| `npm run test:watch` | Vitest watch                                            |
-| `npm run typecheck`| `tsc -b --noEmit`                                         |
-| `npm run lint`     | ESLint                                                    |
+| Command | What |
+|---|---|
+| `npm run dev` | Vite dev server with HMR |
+| `npm run build` | `tsc -b && vite build` → `dist/` (prints each chunk's gzip size) |
+| `npm run preview` | Serve the production build locally |
+| `npm run test` / `npm run test:watch` | Vitest (587 tests, happy-dom) |
+| `npm run typecheck` | `tsc -b --noEmit` |
+| `npm run lint` | ESLint, zero warnings allowed |
 
-## Deploying to Vercel
+CI runs lint, typecheck, test and build on every PR.
 
-One-time setup:
+## Bundle budget
 
-1. Push the repo to GitHub if you haven't.
-2. Vercel → "Add New Project" → import the GitHub repo.
-3. **Root Directory:** `frontend`. (This is the key step.)
-4. **Framework Preset:** Vite (auto-detected).
-5. **Build / output / install commands:** auto-detected from `vercel.json`.
-6. **Environment variables:**
-   - `VITE_BACKEND_URL=https://market-analysis-agent.fly.dev` (or your Fly app's URL).
-   That's the only one — the shared secret is entered by the user at the login screen, not baked in.
-7. Deploy.
+The main chunk must stay under **100 KB gzipped**; it is 88.86 KB. Every route except `/` and `/login` is lazy-loaded into its own chunk: dashboard 20.3 KB, compare 6.4 KB, lens 4.4 KB, search modal 1.3 KB. Recharts survives only in the legacy `SectionChart` chunk (103 KB, loaded on demand); dashboard charts are hand-rolled SVG. Check sizes with `npm run build` before adding a dependency.
 
-After the first deploy, set the backend's CORS allowlist:
-
-```bash
-fly secrets set FRONTEND_ORIGIN=https://your-app.vercel.app
-fly secrets set BACKEND_SHARED_SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
-```
-
-Then visit your Vercel URL, paste the same `BACKEND_SHARED_SECRET` at the login screen.
-
-## Architecture
+## Layout
 
 ```
 src/
-├── App.tsx                 # 2-state machine: login | dashboard
-├── main.tsx                # entry; QueryClientProvider
-├── index.css               # tailwind directives + base body styles
+├── App.tsx                 # router + auth guard; lazy routes
 ├── components/
-│   ├── LoginScreen.tsx     # password field, probeAuth, persist token
-│   ├── Dashboard.tsx       # form + report + past-reports list, owns 401 handling
-│   ├── ReportForm.tsx      # symbol/focus/refresh form
-│   ├── ReportRenderer.tsx  # cards: section title, summary prose, claims table
-│   ├── PastReportsList.tsx # sidebar
-│   ├── ConfidenceBadge.tsx # high/medium/low pill
-│   ├── ErrorBanner.tsx     # status-code-aware messaging (401/429/503)
-│   └── LoadingState.tsx    # "~30s on first synth" copy
+│   ├── AppShell.tsx        # sidebar + market strip + outlet; global ⌘K
+│   ├── SidebarShell.tsx    # navigation + live Watchlist / Recent; collapses to a rail
+│   ├── MarketStrip.tsx     # headline quotes + fear & greed (est.) panel
+│   ├── SymbolDetailPage.tsx# the dashboard (lazy) and its cards: HeroCard,
+│   │                       #   AnalystViewCard, QualityCard, EarningsCard, ValuationCard,
+│   │                       #   PerShareGrowthCard, CashAndCapitalCard, CapitalReturnsCard,
+│   │                       #   RiskDiffCard, MacroPanel, BusinessCard, NewsList …
+│   ├── SectionNav.tsx      # sticky in-page nav built from data-section-* anchors
+│   ├── ErrorBoundary.tsx   # per card, per page, silent for the strip
+│   ├── LineChart / MultiLine / EpsBars / MetricRing / PeerScatterV2 / Sparkline
+│   │                       # hand-rolled SVG primitives
+│   ├── compare/            # ComparePage (lazy) and its rows
+│   ├── lens/               # LensPage, LensIndexPage, DistributionChart, CapexBars (lazy)
+│   └── search/             # SearchModal (lazy)
 └── lib/
-    ├── api.ts              # the only fetch caller — typed errors, Zod validation
-    ├── schemas.ts          # Zod mirrors of backend Pydantic models
-    ├── auth.ts             # localStorage helpers
-    └── format.ts           # display rules for ClaimValue (mirrors backend rubric)
+    ├── api.ts              # the only fetch caller — typed ApiError, Zod validation
+    ├── schemas.ts          # Zod mirrors of the backend Pydantic models (tolerant of new units)
+    ├── *-extract.ts        # one pure extractor per card: report → what the card draws
+    ├── format.ts           # unit-aware claim formatting (mirrors the backend's display units)
+    ├── stored-list.ts      # watchlist / recent in localStorage via useSyncExternalStore
+    └── thesis.ts, lens.ts, sidebar.ts, routes.ts …
 ```
+
+Conventions: components never call `fetch` (go through `lib/api.ts`); cards take a `Section` and run an extractor, so the parsing logic is unit-tested without rendering; a card with nothing to show returns `null` and the layout counts only cards that render.
+
+## Deploying to Vercel
+
+The project is already connected: a push to `main` builds `frontend/` (Root Directory `frontend`, Vite preset, settings from `vercel.json`, which also rewrites every path to `index.html` for client-side routes). The only environment variable is `VITE_BACKEND_URL=https://market-analysis-agent.fly.dev`; the shared secret is typed at sign-in, never baked into the build.
+
+The backend must list the Vercel origin: `FRONTEND_ORIGIN` in `fly.toml` (exact match, no trailing slash). Full runbook in [docs/deployment.md](../docs/deployment.md).
 
 ## Why these choices
 
-- **Vite over Next.js**: this is a static SPA against a separate backend; Next adds SSR/RSC complexity we don't need.
-- **TanStack Query** handles the only stateful surface (server state). No Redux / Zustand.
-- **Zod** validates every API response before it hits a component, so backend drift fails loudly here, not three layers deep.
-- **localStorage for the token**: simple, persists across tab close, no cookie+CORS gymnastics. XSS surface is small (no third-party scripts, no user-generated HTML).
-- **No router**: 2 screens, conditional render. Add `react-router` if/when deep-linkable views land (e.g. `/symbol/AAPL`).
-- **Tailwind**: 0 design system, fast iteration, easy to rip out later.
-
-## Test coverage
-
-| File                          | What                                             |
-|-------------------------------|--------------------------------------------------|
-| `src/lib/schemas.test.ts`     | Zod parses realistic backend payloads; rejects bad shapes (unknown confidence, malformed dates) |
-| `src/lib/format.test.ts`      | `formatClaimValue` matches backend rubric display rules (% for fractions, T/B/M abbreviation, etc.) |
-| `src/lib/auth.test.ts`        | Token round-trip, graceful localStorage failure |
-
-Component tests (LoginScreen / Dashboard) deferred — the schemas + format tests cover the highest-drift surface; component-render bugs surface immediately on any local refresh.
+- **Vite over Next.js:** a static SPA against a separate API; SSR adds nothing here.
+- **TanStack Query** owns server state (reports, prices, overview, lenses); local state + `useSyncExternalStore` for the small localStorage lists. No global store.
+- **Zod** validates every response before a component sees it, so backend drift fails loudly in one place — and unknown claim units degrade to a heuristic format instead of failing the report.
+- **Hand-rolled SVG charts:** each chart is small and specific (axes, baselines, hover, direct labels), and it keeps Recharts' ~100 KB out of the dashboard.
+- **Tailwind with Strata tokens** (`tailwind.config`): one dark theme, named colors per section.
+- **`localStorage` for the token:** simple and persistent; the XSS surface is small (no third-party scripts, no user HTML).

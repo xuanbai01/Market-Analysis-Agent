@@ -18,11 +18,12 @@ If you're picking this up after a gap:
 
 1. **Read [CLAUDE.md](../CLAUDE.md) "Current state" first** — every shipped PR with bundle sizes and test counts — then [tasks/dogfood-2026-11.md](dogfood-2026-11.md) for what the owner reacted to and why each fix exists.
 2. **Production:** dashboard <https://market-analysis-agent-red.vercel.app>, API <https://market-analysis-agent.fly.dev>, `LLM_PROVIDER=deepseek`. A push to `main` deploys both; the owner sets Fly secrets ([docs/deployment.md](../docs/deployment.md) §7). Cached reports generated before a prompt or claim change need **Regenerate** to pick it up.
-3. **Test counts on a clean checkout:** `uv run pytest -v` → 831 backend (5 live-LLM golden cases deselected unless `-m live_llm`). `cd frontend && npm run test` → 587. Main bundle 88.86 KB gz (11.14 KB under budget).
+3. **Test counts on a clean checkout:** `uv run pytest -v` → 849 backend (5 live-LLM golden cases deselected unless `-m live_llm`). `cd frontend && npm run test` → 591. Main bundle 88.87 KB gz (11.13 KB under budget).
 
 **Next candidates (none committed):**
 
 - **Lower `RESEARCH_RATE_LIMIT_PER_HOUR`** in `fly.toml` (30 → the code default 3) before the URL is shared with anyone.
+- **Set `FRED_API_KEY` on Fly** (free key; owner, via `fly secrets import`) — without it the Macro card never renders in production. The redrawn panels (#83) are unit-tested only.
 - **More lenses** — the XBRL client + `lens.py` generalize; candidates: R&D intensity, SBC ÷ revenue, buybacks vs dividends across the same megacaps, or capex for another group. A trailing-12-month point for the latest partial year is the other open lens idea.
 - **A cyclical ticker** (CAT, XOM) through the dashboard — the one layout-matrix cell the dogfood didn't cover.
 - **Phase 6 (XBRL Tier 2)** only if segment or geography mix is asked for.

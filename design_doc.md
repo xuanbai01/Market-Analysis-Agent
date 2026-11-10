@@ -226,5 +226,5 @@ What this project demonstrates, with backing in the codebase:
 | Anti-hallucination engineering | Code-computed comparisons, citation-enforcing schema, programmatic confidence, factuality rubric over every number, live golden eval |
 | Data visualization | Hand-rolled SVG charts with axes, baselines and hover; validated colorblind-safe palette for multi-series lenses; adaptive layouts |
 | Cost-aware engineering | Free data + free-tier infra, cache-before-rate-limit, about a cent per fresh report |
-| Test discipline | TDD on services, mocked providers, 831 backend + 587 frontend tests, separate eval harness |
+| Test discipline | TDD on services, mocked providers, 849 backend + 591 frontend tests, separate eval harness |
 | Tradeoff articulation | ADRs 0001–0007 capture the why behind each pivot; dogfood logs show what changed and why |

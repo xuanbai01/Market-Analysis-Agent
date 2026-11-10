@@ -32,7 +32,7 @@ The backend must allow the dev origin: `FRONTEND_ORIGIN=http://localhost:5173` i
 | `npm run dev` | Vite dev server with HMR |
 | `npm run build` | `tsc -b && vite build` → `dist/` (prints each chunk's gzip size) |
 | `npm run preview` | Serve the production build locally |
-| `npm run test` / `npm run test:watch` | Vitest (587 tests, happy-dom) |
+| `npm run test` / `npm run test:watch` | Vitest (591 tests, happy-dom) |
 | `npm run typecheck` | `tsc -b --noEmit` |
 | `npm run lint` | ESLint, zero warnings allowed |
 
@@ -40,7 +40,7 @@ CI runs lint, typecheck, test and build on every PR.
 
 ## Bundle budget
 
-The main chunk must stay under **100 KB gzipped**; it is 88.86 KB. Every route except `/` and `/login` is lazy-loaded into its own chunk: dashboard 20.3 KB, compare 6.4 KB, lens 4.4 KB, search modal 1.3 KB. Recharts survives only in the legacy `SectionChart` chunk (103 KB, loaded on demand); dashboard charts are hand-rolled SVG. Check sizes with `npm run build` before adding a dependency.
+The main chunk must stay under **100 KB gzipped**; it is 88.87 KB. Every route except `/` and `/login` is lazy-loaded into its own chunk: dashboard 22.3 KB, compare 6.6 KB, lens 4.4 KB, search modal 1.3 KB. Recharts survives only in the legacy `SectionChart` chunk (103 KB, loaded on demand); dashboard charts are hand-rolled SVG. Check sizes with `npm run build` before adding a dependency.
 
 ## Layout
 
@@ -57,7 +57,7 @@ src/
 │   │                       #   RiskDiffCard, MacroPanel, BusinessCard, NewsList …
 │   ├── SectionNav.tsx      # sticky in-page nav built from data-section-* anchors
 │   ├── ErrorBoundary.tsx   # per card, per page, silent for the strip
-│   ├── LineChart / MultiLine / EpsBars / MetricRing / PeerScatterV2 / Sparkline
+│   ├── LineChart / MultiLine / EpsChart / PeerScatterV2 / Sparkline
 │   │                       # hand-rolled SVG primitives
 │   ├── compare/            # ComparePage (lazy) and its rows
 │   ├── lens/               # LensPage, LensIndexPage, DistributionChart, CapexBars (lazy)

@@ -151,15 +151,44 @@ describe("HeroCard", () => {
     expect(positives.length).toBeGreaterThan(0);
   });
 
-  it("renders 5 range pills (5D / 1M / 3M / 1Y / 5Y) and no 1D", async () => {
+  it("renders 6 range pills (5D / 1M / 3M / YTD / 1Y / 5Y) and no 1D", async () => {
     vi.spyOn(api, "fetchMarketPrices").mockResolvedValue(fakePrices());
     renderHero(fakeReport());
     await waitFor(() => expect(screen.getByText("3M")).toBeInTheDocument());
-    for (const pill of ["5D", "1M", "3M", "1Y", "5Y"]) {
-      expect(screen.getByText(pill)).toBeInTheDocument();
-    }
+    const pills = screen.getAllByRole("button").map((b) => b.textContent);
+    expect(pills.filter((t) => ["5D", "1M", "3M", "YTD", "1Y", "5Y"].includes(t ?? ""))).toEqual([
+      "5D",
+      "1M",
+      "3M",
+      "YTD",
+      "1Y",
+      "5Y",
+    ]);
     // Daily closes only: a "1D" chart was a line between two of them.
     expect(screen.queryByText("1D")).toBeNull();
+  });
+
+  it("YTD reads the 1Y feed and plots from the previous year's last close", async () => {
+    const spy = vi.spyOn(api, "fetchMarketPrices").mockResolvedValue({
+      ...fakePrices(),
+      range: "1Y",
+      prices: [
+        { ts: "2025-11-10T05:00:00Z", close: 80, volume: 1 },
+        { ts: "2025-12-31T05:00:00Z", close: 85, volume: 1 },
+        { ts: "2026-01-02T05:00:00Z", close: 86, volume: 1 },
+        { ts: "2026-11-06T05:00:00Z", close: 93.5, volume: 1 },
+      ],
+    });
+    const { container } = renderHero(fakeReport());
+    await waitFor(() => expect(screen.getByText("YTD")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("YTD"));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("NVDA", "1Y"));
+    const label = await screen.findByTestId("hero-range-label");
+    await waitFor(() => expect(label.textContent).toMatch(/year to date/i));
+    // 85 → 93.5: +10.0% year to date.
+    expect(label.textContent).toContain("▲ 10.0%");
+    const d = container.querySelector("[data-testid='line-chart'] path[data-line-stroke]")?.getAttribute("d") ?? "";
+    expect((d.match(/[ML]/g) ?? []).length).toBe(3);
   });
 
   it("names the range and the price change over it", async () => {

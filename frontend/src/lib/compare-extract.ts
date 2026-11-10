@@ -90,11 +90,14 @@ function numericValue(claims: readonly Claim[] | undefined, description: string)
   return claim.value;
 }
 
+/** Index a history to its first point = 100. Only for a positive base:
+ *  a negative one flips the line's direction, and a tiny one blows it up. */
 function rebaseHistory(history: readonly ClaimHistoryPoint[]): ClaimHistoryPoint[] | null {
-  if (history.length === 0) return null;
-  const base = history[0].value;
-  if (!isFiniteNumber(base) || base === 0) return null;
-  return history.map((p) => ({ period: p.period, value: (p.value / base) * 100 }));
+  if (history.length < 2) return null;
+  const sorted = [...history].sort((x, y) => (x.period < y.period ? -1 : 1));
+  const base = sorted[0].value;
+  if (!isFiniteNumber(base) || base <= 0) return null;
+  return sorted.map((p) => ({ period: p.period, value: (p.value / base) * 100 }));
 }
 
 // ── Hero ────────────────────────────────────────────────────────────
@@ -187,41 +190,33 @@ export function extractCompareMarginOverlay(
   return out;
 }
 
-// ── Growth overlay (Rev + FCF per share, rebased, both tickers) ────
+// ── Growth (Rev + FCF per share, indexed, one panel per metric) ────
 
-interface GrowthSpec {
-  description: string;
-  metric: "Rev" | "FCF";
+export interface CompareGrowthPanels {
+  revenue: MultiLineSeries[];
+  fcf: MultiLineSeries[];
 }
 
-const GROWTH_SPECS: GrowthSpec[] = [
-  { description: DESC_REVENUE_PER_SHARE, metric: "Rev" },
-  { description: DESC_FCF_PER_SHARE, metric: "FCF" },
-];
-
-function rebasedSeriesFor(
-  report: ResearchReport,
-  spec: GrowthSpec,
-  color: string,
-): MultiLineSeries | null {
+function indexedSeriesFor(report: ResearchReport, description: string, color: string): MultiLineSeries | null {
   const quality = findSection(report, "Quality");
-  const claim = quality ? findClaim(quality.claims, spec.description) : undefined;
+  const claim = quality ? findClaim(quality.claims, description) : undefined;
   if (!claim) return null;
   const rebased = rebaseHistory(claim.history);
   if (!rebased) return null;
-  return { label: `${report.symbol} ${spec.metric}`, color, history: rebased };
+  return { label: report.symbol, shortLabel: report.symbol, color, history: rebased };
 }
 
-export function extractCompareGrowthOverlay(
-  a: ResearchReport,
-  b: ResearchReport,
-): MultiLineSeries[] {
-  const out: MultiLineSeries[] = [];
-  for (const spec of GROWTH_SPECS) {
-    const aSeries = rebasedSeriesFor(a, spec, COMPARE_COLOR_A);
-    if (aSeries) out.push(aSeries);
-    const bSeries = rebasedSeriesFor(b, spec, COMPARE_COLOR_B);
-    if (bSeries) out.push(bSeries);
-  }
-  return out;
+/**
+ * Revenue and FCF per share for both tickers, each indexed to its first
+ * quarter = 100, as two panels with one line per company (2026-11 chart
+ * audit: one chart of four lines gave KO revenue and KO FCF the same
+ * colour, so neither could be told apart). A series with a zero or
+ * negative first value is left out rather than flipped.
+ */
+export function extractCompareGrowthPanels(a: ResearchReport, b: ResearchReport): CompareGrowthPanels {
+  const pick = (description: string) =>
+    [indexedSeriesFor(a, description, COMPARE_COLOR_A), indexedSeriesFor(b, description, COMPARE_COLOR_B)].filter(
+      (x): x is MultiLineSeries => x !== null,
+    );
+  return { revenue: pick(DESC_REVENUE_PER_SHARE), fcf: pick(DESC_FCF_PER_SHARE) };
 }

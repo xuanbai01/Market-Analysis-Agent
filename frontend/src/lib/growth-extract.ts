@@ -11,12 +11,14 @@
  *                                         $/share series (the dashboard card)
  *   - extractGrowthSeries(section)      → MultiLineSeries[] (rebased; the
  *                                         two-ticker Compare overlay)
- *   - extractGrowthMultipliers(section) → { rev, gp, opi, fcf, ocf }
- *                                         where each = latest / first.
+ *   - extractGrowthChanges(section)     → { rev, gp, opi, fcf, ocf }
+ *                                         latest quarter vs the same
+ *                                         quarter a year earlier.
  *
  * Description matches mirror app/services/fundamentals.py::_DESCRIPTIONS.
  * Tests pin them so a backend rename fails the suite loudly.
  */
+import { shortPeriod } from "./chart-format";
 import type { Claim, ClaimHistoryPoint, Section } from "./schemas";
 import type { MultiLineSeries } from "../components/MultiLine";
 
@@ -41,12 +43,16 @@ const SERIES_SPEC: { description: string; label: string; color: string }[] = [
   { description: DESC_OCF, label: "OCF", color: COLOR_DIM },
 ];
 
-export interface GrowthMultipliers {
-  rev: number | null;
-  gp: number | null;
-  opi: number | null;
-  fcf: number | null;
-  ocf: number | null;
+export type GrowthKey = "rev" | "gp" | "opi" | "fcf" | "ocf";
+
+/** One series' change: a percent when the base is positive, otherwise
+ *  the dollar move (a percent of a loss misleads), with what it spans. */
+export interface GrowthChange {
+  kind: "pct" | "usd";
+  value: number;
+  /** "Q3 '26 vs Q3 '25" for a year-over-year change, else "since Q1 '26". */
+  basis: string;
+  yearOverYear: boolean;
 }
 
 function isFiniteNumber(v: unknown): v is number {
@@ -131,69 +137,53 @@ export function extractPerSharePanels(section: Section): PerSharePanels {
   return { income: pick(INCOME_ORDER), cashFlow: pick(CASH_FLOW_ORDER) };
 }
 
-/**
- * Returns latest / first ratio for each of the 5 per-share series, or
- * null when history is empty or first value is zero.
- */
-export function extractGrowthMultipliers(section: Section): GrowthMultipliers {
-  function multiplier(description: string): number | null {
-    const claim = findClaim(section.claims, description);
-    if (!claim || claim.history.length === 0) return null;
-    const first = claim.history[0].value;
-    const last = claim.history[claim.history.length - 1].value;
-    if (!isFiniteNumber(first) || first === 0 || !isFiniteNumber(last)) {
-      return null;
-    }
-    return last / first;
-  }
+/** Beyond this (as a fraction, i.e. ±300%), a change shows as dollars. */
+const MAX_PERCENT_CHANGE = 3;
 
-  return {
-    rev: multiplier(DESC_REVENUE),
-    gp: multiplier(DESC_GP),
-    opi: multiplier(DESC_OPI),
-    fcf: multiplier(DESC_FCF),
-    ocf: multiplier(DESC_OCF),
-  };
+/** "2026-Q3" → "2025-Q3"; null for other period shapes. */
+function yearEarlier(period: string): string | null {
+  const m = /^(\d{4})-Q([1-4])$/.exec(period);
+  return m ? `${Number(m[1]) - 1}-Q${m[2]}` : null;
 }
 
 /**
- * Phase 4.3.B.1 — per-period compound growth rate per series.
- * CAGR = multiplier^(1/n_periods) − 1, where n_periods is
- * ``history.length − 1`` (e.g. 5 quarterly observations = 4 periods).
- *
- * Returns null for any series whose multiplier is null OR whose history
- * has fewer than 2 points (no period span). The dashboard's
- * PerShareGrowthCard renders a CAGR sub-line under each multiplier
- * pill so the pills convey both total growth and per-period pace.
+ * Each per-share series' change from the same quarter a year earlier
+ * (2026-11 chart audit). With ~5 quarters of history the old pills —
+ * total multiplier ("1.1×") and per-quarter compound rate ("+1.8% / Q")
+ * — said little, and the multiplier hid seasonality; five quarters
+ * cover exactly one year-over-year comparison. Falls back to the change
+ * since the first point when no year-earlier quarter exists. Null for a
+ * series with fewer than 2 points.
  */
-export function extractGrowthCagr(section: Section): GrowthMultipliers {
-  function cagr(description: string): number | null {
+export function extractGrowthChanges(section: Section): Record<GrowthKey, GrowthChange | null> {
+  function change(description: string): GrowthChange | null {
     const claim = findClaim(section.claims, description);
-    if (!claim || claim.history.length < 2) return null;
-    const first = claim.history[0].value;
-    const last = claim.history[claim.history.length - 1].value;
-    if (
-      !isFiniteNumber(first) ||
-      first === 0 ||
-      !isFiniteNumber(last) ||
-      // A negative-to-positive sign change would produce a negative
-      // base for the fractional exponent — undefined in real numbers.
-      // Skip rather than emit NaN.
-      Math.sign(first) !== Math.sign(last)
-    ) {
-      return null;
+    if (!claim) return null;
+    const h = [...claim.history]
+      .filter((p) => isFiniteNumber(p.value))
+      .sort((a, b) => (a.period < b.period ? -1 : 1));
+    if (h.length < 2) return null;
+    const last = h[h.length - 1];
+    const target = yearEarlier(last.period);
+    const yearAgo = target ? h.find((p) => p.period === target) : undefined;
+    const base = yearAgo ?? h[0];
+    const basis = yearAgo
+      ? `${shortPeriod(last.period)} vs ${shortPeriod(base.period)}`
+      : `since ${shortPeriod(base.period)}`;
+    // A percent of a near-zero base reads as noise (RIVN's operating cash
+    // flow per share: "-2560%"), so past ±300% the dollar move is shown.
+    const pct = base.value > 0 ? last.value / base.value - 1 : null;
+    if (pct !== null && Math.abs(pct) <= MAX_PERCENT_CHANGE) {
+      return { kind: "pct", value: pct, basis, yearOverYear: !!yearAgo };
     }
-    const periods = claim.history.length - 1;
-    const ratio = last / first;
-    if (ratio <= 0) return null;
-    return Math.pow(ratio, 1 / periods) - 1;
+    return { kind: "usd", value: last.value - base.value, basis, yearOverYear: !!yearAgo };
   }
 
   return {
-    rev: cagr(DESC_REVENUE),
-    gp: cagr(DESC_GP),
-    opi: cagr(DESC_OPI),
-    fcf: cagr(DESC_FCF),
-    ocf: cagr(DESC_OCF),
+    rev: change(DESC_REVENUE),
+    gp: change(DESC_GP),
+    opi: change(DESC_OPI),
+    fcf: change(DESC_FCF),
+    ocf: change(DESC_OCF),
   };
 }

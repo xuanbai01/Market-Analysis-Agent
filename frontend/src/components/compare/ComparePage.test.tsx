@@ -221,14 +221,17 @@ describe("ComparePage", () => {
     expect(bCol?.querySelector("[data-pill='header-pill']")).toBeNull();
   });
 
-  it("renders the 'What survives / What's cut' footer strip", async () => {
+  // 2026-11 chart audit: the footer was a development note, and the two
+  // per-card price charts sat on separate unlabelled scales.
+  it("shows one shared price chart and no development footer", async () => {
     vi.spyOn(api, "fetchResearchReport").mockImplementation((symbol) =>
       Promise.resolve(fakeReport(symbol, symbol === "NVDA" ? "NVIDIA" : "Broadcom")),
     );
     renderAt("/compare?a=NVDA&b=AVGO");
     await waitFor(() => expect(screen.getByText("NVIDIA")).toBeInTheDocument());
 
-    expect(screen.getByText(/what survives/i)).toBeInTheDocument();
-    expect(screen.getByText(/what'?s cut/i)).toBeInTheDocument();
+    expect(screen.getByTestId("compare-price-chart")).toBeInTheDocument();
+    expect(screen.queryByText(/what survives/i)).toBeNull();
+    expect(document.querySelectorAll("[data-card='compare-hero'] [data-testid='line-chart']")).toHaveLength(0);
   });
 });

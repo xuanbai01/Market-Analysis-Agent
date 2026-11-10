@@ -31,7 +31,10 @@ export interface CapitalStat {
 
 export interface CapitalReturns {
   shareholderYield: string | null;
+  /** Null when there is no dividend (a zero yield) or no claim. */
   dividendYield: string | null;
+  /** False when the company reports a zero dividend yield; null when unknown. */
+  paysDividend: boolean | null;
   buybackYield: string | null;
   stats: CapitalStat[];
   marketCap: string | null;
@@ -65,9 +68,13 @@ export function extractCapitalReturns(section: Section): CapitalReturns {
     return [{ label: spec.label, value, description: spec.description }];
   });
   const shortDays = claimFor(section, DESC.shortDays);
+  const dividend = claimFor(section, DESC.dividendYield);
+  const paysDividend = dividend ? dividend.value !== 0 : null;
   return {
     shareholderYield: display(section, DESC.shareholderYield),
-    dividendYield: display(section, DESC.dividendYield),
+    // RIVN's card read "0.00% dividend"; a zero yield means no dividend.
+    dividendYield: paysDividend ? display(section, DESC.dividendYield) : null,
+    paysDividend,
     buybackYield: display(section, DESC.buybackYield),
     stats,
     marketCap: display(section, DESC.marketCap),

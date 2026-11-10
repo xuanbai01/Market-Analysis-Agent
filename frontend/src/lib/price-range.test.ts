@@ -58,30 +58,22 @@ describe("sliceForRange", () => {
     expect(out[0].close).toBe(56);
   });
 
-  it("returns the last 2 points for 1D so there's a line to draw", () => {
-    const data = fakePoints(60);
-    const out = sliceForRange(data, "1D");
-    expect(out.length).toBe(2);
-    expect(out[out.length - 1].close).toBe(60);
-    expect(out[0].close).toBe(59);
-  });
-
   it("returns whatever exists when input is shorter than the requested slice", () => {
     const tiny = fakePoints(3);
     expect(sliceForRange(tiny, "1M")).toEqual(tiny);
     expect(sliceForRange(tiny, "5D")).toEqual(tiny);
-    expect(sliceForRange(tiny, "1D").length).toBe(2);
+    expect(sliceForRange(tiny, "5D").length).toBe(3);
   });
 
   it("returns empty array when given empty input", () => {
-    for (const range of ["1D", "5D", "1M", "3M", "1Y", "5Y"] as UiRange[]) {
+    for (const range of ["5D", "1M", "3M", "1Y", "5Y"] as UiRange[]) {
       expect(sliceForRange([], range)).toEqual([]);
     }
   });
 
   it("never invents points (output is always a slice of input)", () => {
     const data = fakePoints(60);
-    for (const range of ["1D", "5D", "1M"] as UiRange[]) {
+    for (const range of ["5D", "1M"] as UiRange[]) {
       const out = sliceForRange(data, range);
       for (const p of out) {
         expect(data).toContain(p);

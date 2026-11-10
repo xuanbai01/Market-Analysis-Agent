@@ -51,7 +51,6 @@ from typing import Any
 
 from app.core.observability import log_external_call
 from app.schemas.research import Claim, ClaimHistoryPoint, ClaimUnit, ClaimValue, Source
-from app.services.fundamentals_history import format_period
 
 # How far back to keep in ``Claim.history``. yfinance can return more
 # than this; we cap so the chart stays readable and JSONB cache rows
@@ -115,9 +114,15 @@ _DETAILS: dict[str, str] = {
     "eps_actual": "earnings_dates[Reported EPS]",
     "eps_estimate": "earnings_dates[EPS Estimate]",
     "eps_surprise_pct": "earnings_dates[Surprise(%)] (or computed)",
-    "next.report_date": "calendar[Earnings Date]",
-    "next.eps_estimate": "earnings_estimate[+1q].avg",
-    "next.revenue_estimate": "earnings_estimate[+1q].revenueAvg",
+    "next.report_date": (
+        "calendar[Earnings Date] when after the latest report,"
+        " else the next scheduled row in earnings_dates"
+    ),
+    "next.eps_estimate": (
+        "earnings_estimate[0q].avg (the quarter the next report covers),"
+        " else the scheduled row's EPS Estimate"
+    ),
+    "next.revenue_estimate": "earnings_estimate[0q].revenueAvg",
     "last_20q.beat_count": (
         "computed: count of past quarters with surprise > 0,"
         " capped at last 20"
@@ -202,6 +207,24 @@ def _get_earnings_dates(ticker: Any) -> Any:
     return _safe_attr(ticker, "earnings_dates")
 
 
+def report_period(report_date: Any) -> str:
+    """Label an earnings report with the quarter it covers: the last
+    calendar quarter completed before the report date (``YYYY-QN``).
+
+    yfinance indexes ``earnings_dates`` by report date, and labelling
+    by the report's own quarter put every print one quarter late (KO's
+    September quarter, reported in October, showed as Q4 while the
+    Quality card called it Q3). Exact for calendar-year companies at any
+    reporting lag; for off-cycle fiscal years it names the calendar
+    quarter the fiscal quarter mostly overlaps (NVDA's May–Jul quarter,
+    reported in August → Q2).
+    """
+    quarter = (report_date.month - 1) // 3 + 1
+    if quarter == 1:
+        return f"{report_date.year - 1}-Q4"
+    return f"{report_date.year}-Q{quarter - 1}"
+
+
 def _extract_eps_history(earnings_dates: Any) -> tuple[
     dict[str, ClaimValue | None], dict[str, list[ClaimHistoryPoint]]
 ]:
@@ -263,7 +286,7 @@ def _extract_eps_history(earnings_dates: Any) -> tuple[
 
     # History: iterate over capped past rows oldest → newest.
     for idx, row in past_capped.sort_index(ascending=True).iterrows():
-        period = format_period(idx)
+        period = report_period(idx)
         actual = _safe_float(row.get("Reported EPS"))
         estimate = _safe_float(row.get("EPS Estimate"))
         surprise = _surprise_for_row(row, has_surprise_col)
@@ -298,15 +321,68 @@ def _surprise_for_row(row: Any, has_surprise_col: bool) -> float | None:
     return None
 
 
-def _extract_forward(
-    earnings_estimate: Any, calendar: Any
-) -> dict[str, ClaimValue | None]:
-    """Forward EPS + revenue + report date.
+def _calendar_date(calendar: Any) -> str | None:
+    """``calendar["Earnings Date"]`` as an ISO date. yfinance returns a
+    list or a single date."""
+    if not isinstance(calendar, dict):
+        return None
+    raw_date = calendar.get("Earnings Date")
+    if isinstance(raw_date, list):
+        raw_date = raw_date[0] if raw_date else None
+    if raw_date is None:
+        return None
+    try:
+        return raw_date.isoformat()
+    except AttributeError:
+        return str(raw_date)
 
-    Same logic as before 3.2.E — yfinance's earnings_estimate is
-    indexed by period label ('0q', '+1q', '0y', '+1y'); '+1q' is the
-    next reporting quarter. Calendar is sometimes a list and sometimes
-    a single date; both are handled.
+
+def _next_scheduled_row(
+    earnings_dates: Any, after: str | None
+) -> tuple[str | None, float | None]:
+    """The earliest scheduled row (no Reported EPS yet) dated after the
+    latest report: ``(iso_date, eps_estimate)``. yfinance mixes these
+    future rows into ``earnings_dates``."""
+    if earnings_dates is None or getattr(earnings_dates, "empty", True):
+        return None, None
+    if "Reported EPS" not in earnings_dates.columns:
+        return None, None
+
+    import pandas as pd  # noqa: PLC0415
+
+    best: tuple[str, float | None] | None = None
+    for idx, row in earnings_dates.iterrows():
+        if not pd.isna(row.get("Reported EPS")):
+            continue
+        try:
+            day = idx.date().isoformat()
+        except AttributeError:
+            continue
+        if after is not None and day <= after:
+            continue
+        if best is None or day < best[0]:
+            best = (day, _safe_float(row.get("EPS Estimate")))
+    return best if best is not None else (None, None)
+
+
+def _extract_forward(
+    earnings_estimate: Any,
+    calendar: Any,
+    earnings_dates: Any = None,
+    latest_report_date: str | None = None,
+) -> dict[str, ClaimValue | None]:
+    """The next report: its date and its consensus EPS / revenue.
+
+    - **Estimate.** yfinance's earnings_estimate is indexed '0q', '+1q',
+      '0y', '+1y'. '0q' is the current, not-yet-reported quarter — the
+      one the next report covers; '+1q' is the quarter after it (until
+      2026-11 we read '+1q', so KO showed a $0.89 "next quarter
+      consensus" against a $0.60 consensus for the actual next print).
+    - **Date.** ``calendar`` can keep the date just reported (KO's said
+      2026-10-27 after reporting that day). A calendar date on or before
+      the latest report is stale; the next scheduled row in
+      earnings_dates is used instead, and supplies the estimate when
+      earnings_estimate has none.
     """
     out: dict[str, ClaimValue | None] = {
         "next.report_date": None,
@@ -317,22 +393,20 @@ def _extract_forward(
     if (
         earnings_estimate is not None
         and not getattr(earnings_estimate, "empty", True)
-        and "+1q" in getattr(earnings_estimate, "index", [])
+        and "0q" in getattr(earnings_estimate, "index", [])
     ):
-        row = earnings_estimate.loc["+1q"]
+        row = earnings_estimate.loc["0q"]
         out["next.eps_estimate"] = _safe_float(row.get("avg"))
         out["next.revenue_estimate"] = _safe_float(row.get("revenueAvg"))
 
-    if isinstance(calendar, dict):
-        raw_date = calendar.get("Earnings Date")
-        if isinstance(raw_date, list) and raw_date:
-            raw_date = raw_date[0]
-        if raw_date is not None:
-            try:
-                out["next.report_date"] = raw_date.isoformat()
-            except AttributeError:
-                out["next.report_date"] = str(raw_date)
+    cal_date = _calendar_date(calendar)
+    if cal_date is not None and latest_report_date is not None and cal_date <= latest_report_date:
+        cal_date = None
+    scheduled_date, scheduled_estimate = _next_scheduled_row(earnings_dates, latest_report_date)
 
+    out["next.report_date"] = cal_date or scheduled_date
+    if out["next.eps_estimate"] is None:
+        out["next.eps_estimate"] = scheduled_estimate
     return out
 
 
@@ -352,7 +426,13 @@ def _fetch_yfinance_earnings(
     calendar = _safe_attr(ticker, "calendar")
 
     snapshot, history = _extract_eps_history(earnings_dates)
-    forward = _extract_forward(earnings_estimate, calendar)
+    latest = snapshot.get("latest_report_date")
+    forward = _extract_forward(
+        earnings_estimate,
+        calendar,
+        earnings_dates,
+        latest if isinstance(latest, str) else None,
+    )
 
     values: dict[str, ClaimValue | None] = {**snapshot, **forward}
     return values, history

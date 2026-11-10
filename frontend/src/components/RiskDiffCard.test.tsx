@@ -52,30 +52,21 @@ const FULL: Claim[] = [
 ];
 
 describe("RiskDiffCard", () => {
-  it("renders an SVG with data-testid='risk-diff-bars' when bars are available", () => {
+  it("renders the aggregate bars when bars are available", () => {
     const { container } = render(<RiskDiffCard section={section(FULL)} />);
     expect(
       container.querySelector("[data-testid='risk-diff-bars']"),
     ).not.toBeNull();
   });
 
-  // Phase 4.3.B.1 — risk-diff bar SVG was hardcoded to 360 px width
-  // and overflowed the narrow row-4 column (1/3 of viewport ~360 px
-  // before padding), pushing the value labels outside the card. The
-  // SVG width is now "100%" with viewBox preserving the internal coords.
-  it("renders the risk-diff bars SVG at responsive width", () => {
+  // 2026-11 chart audit: added / dropped / kept share one scale; the
+  // character change (a different unit) moved from a fourth bar on its
+  // own scale into the summary line.
+  it("renders added, dropped and kept on one scale, with the character change in text", () => {
     const { container } = render(<RiskDiffCard section={section(FULL)} />);
-    const svg = container.querySelector("[data-testid='risk-diff-bars']");
-    expect(svg?.getAttribute("width")).toBe("100%");
-    // viewBox preserves the internal layout dims so labels stay
-    // anchored at the right edge of the chart's coordinate system.
-    expect(svg?.getAttribute("viewBox")).toMatch(/^0 0 \d+ \d+$/);
-  });
-
-  it("renders one bar row per metric (4 rows)", () => {
-    const { container } = render(<RiskDiffCard section={section(FULL)} />);
-    const rows = container.querySelectorAll("[data-row='risk-diff-bar']");
-    expect(rows.length).toBe(4);
+    const rows = Array.from(container.querySelectorAll("[data-row='risk-diff-bar']"));
+    expect(rows.map((r) => r.textContent)).toEqual(["Added12", "Dropped3", "Kept47"]);
+    expect(container.textContent).toContain("+8,421 characters");
   });
 
   it("renders the prose summary with 'expanded' framing for net delta > 0", () => {
@@ -95,10 +86,10 @@ describe("RiskDiffCard", () => {
     expect(getByText(/shrank/i)).not.toBeNull();
   });
 
-  it("uses 'stable' framing for net delta = 0", () => {
+  it("uses 'stable' framing when little changed", () => {
     const stable = section([
-      claim("Newly added risk paragraphs vs prior 10-K", 3),
-      claim("Risk paragraphs dropped vs prior 10-K", 3),
+      claim("Newly added risk paragraphs vs prior 10-K", 1),
+      claim("Risk paragraphs dropped vs prior 10-K", 1),
       claim("Risk paragraphs kept (carryover)", 50),
       claim("Item 1A char delta vs prior 10-K", 100),
     ]);
@@ -145,6 +136,34 @@ describe("RiskDiffCard", () => {
     expect(
       container.querySelector("[data-testid='risk-diff-bars']"),
     ).not.toBeNull();
+  });
+
+  it("draws a ±1 topic change as a short bar, on the side of its sign", () => {
+    const withCats = section([
+      ...FULL,
+      claim("IP risk paragraph delta vs prior 10-K", 1),
+      claim("Cybersecurity risk paragraph delta vs prior 10-K", -1),
+    ]);
+    const { container } = render(<RiskDiffCard section={withCats} />);
+    const rows = container.querySelectorAll("[data-row='risk-category-bar']");
+    const ipAdded = rows[0].querySelector(".bg-strata-neg") as HTMLElement;
+    const cyberDropped = rows[1].querySelector(".bg-strata-pos") as HTMLElement;
+    // Scale floor of 5: one paragraph is a fifth of the track, not all of it.
+    expect(ipAdded.style.width).toBe("20%");
+    expect(cyberDropped.style.width).toBe("20%");
+    expect(rows[0].querySelector(".bg-strata-pos")).toBeNull();
+  });
+
+  it("calls a same-length disclosure with heavy churn 'reworked'", () => {
+    const reworked = section([
+      claim("Newly added risk paragraphs vs prior 10-K", 18),
+      claim("Risk paragraphs dropped vs prior 10-K", 15),
+      claim("Risk paragraphs kept (carryover)", 244),
+      claim("Item 1A char delta vs prior 10-K", 1993),
+    ]);
+    const { container } = render(<RiskDiffCard section={reworked} />);
+    expect(container.textContent).toMatch(/about the same length, reworked/i);
+    expect(container.textContent).not.toMatch(/expanded/i);
   });
 
   it("labels each per-category bar with the human-readable category name", () => {

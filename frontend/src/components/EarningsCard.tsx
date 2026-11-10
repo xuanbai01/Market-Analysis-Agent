@@ -4,25 +4,27 @@
  *
  * Header row:
  *   left:  eyebrow "EARNINGS · 20 QUARTERS" + bold "X of N beat consensus"
- *   right: "Next print" eyebrow + accent date + "AFTER MARKET" tag
+ *   right: the next print's date and its consensus EPS (hidden once the
+ *          date has passed — a cached report keeps its old date)
  *
  * Middle:
- *   EpsBars chart (20 bars, beat/miss color-coded, estimate ticks)
+ *   EpsChart (actual vs consensus dots on a dollar axis; 2026-11 chart
+ *   audit replaced the unlabelled bars + grey estimate ticks)
  *
- * Bottom row:
- *   3 stat tiles: Beat rate / Surprise μ / EPS TTM
+ * Side: 3 stat tiles (Beat rate / Avg surprise / EPS TTM) and the last
+ * four prints as a table.
  *
  * Reads claim values via description matching (same philosophy as
  * featured-claim.ts / hero-extract.ts). Falls back gracefully when
  * any individual claim is missing.
  */
-import { formatClaimValue } from "../lib/format";
+import { shortPeriod, usdPerShare } from "../lib/chart-format";
 import type { Claim, ClaimHistoryPoint, Section } from "../lib/schemas";
-import { EpsBars } from "./EpsBars";
+import { EpsChart } from "./EpsChart";
 import { NarrativeStrip } from "./NarrativeStrip";
 
 interface DistressedFlags {
-  /** Phase 4.5.B — when true, surface the "● BOTTOM DECILE" annotation
+  /** Phase 4.5.B — when true, surface the "● BEATS UNDER 30%" annotation
    *  beside the X-of-N beat-consensus headline. Driven by the
    *  research report's ``layout_signals.beat_rate_below_30pct``. */
   beat_rate_below_30pct?: boolean;
@@ -38,6 +40,7 @@ interface Props {
 const DESC_EPS_ACTUAL = "Reported EPS (latest quarter)";
 const DESC_EPS_ESTIMATE = "Consensus EPS estimate (latest quarter, going in)";
 const DESC_NEXT_REPORT = "Next earnings report date (expected)";
+const DESC_NEXT_EPS = "Next quarter consensus EPS estimate";
 const DESC_BEAT_COUNT_PREFIX = "Number of EPS beats over the last 20 quarters";
 const DESC_AVG_SURPRISE_PREFIX = "Average EPS surprise (%)";
 
@@ -66,6 +69,17 @@ function isFiniteNumber(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
 
+/** "2027-02-09" → "Feb 9, 2027" (UTC, so the day never shifts). */
+function formatReportDate(iso: string): string {
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function epsTTM(history: ClaimHistoryPoint[]): number | null {
   // Sum of last 4 quarters' actual EPS.
   if (history.length < 4) return null;
@@ -78,6 +92,7 @@ export function EarningsCard({ section, distressed }: Props) {
   const epsActualClaim = findExact(claims, DESC_EPS_ACTUAL);
   const epsEstimateClaim = findExact(claims, DESC_EPS_ESTIMATE);
   const nextReportClaim = findExact(claims, DESC_NEXT_REPORT);
+  const nextEpsClaim = findExact(claims, DESC_NEXT_EPS);
   const beatCountClaim = findStartsWith(claims, DESC_BEAT_COUNT_PREFIX);
   const avgSurpriseClaim = findStartsWith(claims, DESC_AVG_SURPRISE_PREFIX);
 
@@ -94,8 +109,12 @@ export function EarningsCard({ section, distressed }: Props) {
 
   const beatRate = beatCount !== null ? beatCount / totalQuarters : null;
 
+  // A date already past is a cached report's stale "next" — hide it.
   const nextReportValue =
-    typeof nextReportClaim?.value === "string" ? nextReportClaim.value : null;
+    typeof nextReportClaim?.value === "string" && nextReportClaim.value.slice(0, 10) >= todayIso()
+      ? nextReportClaim.value
+      : null;
+  const nextEps = nextReportValue && isFiniteNumber(nextEpsClaim?.value) ? (nextEpsClaim?.value as number) : null;
 
   return (
     // No mb-6 here — the parent grid in SymbolDetailPage owns vertical
@@ -114,37 +133,39 @@ export function EarningsCard({ section, distressed }: Props) {
               </span>
               {distressed?.beat_rate_below_30pct && (
                 <span
-                  data-testid="earnings-bottom-decile"
+                  data-testid="earnings-low-beat-rate"
                   className="inline-flex items-center gap-1 rounded-md bg-strata-raise px-2 py-0.5 font-mono text-[10px] uppercase tracking-kicker"
                 >
                   <span className="text-strata-neg">●</span>
-                  <span className="text-strata-fg">Bottom decile</span>
+                  <span className="text-strata-fg">Beats under 30%</span>
                 </span>
               )}
             </div>
           )}
         </div>
         {nextReportValue && (
-          <div className="text-right">
+          <div data-testid="next-print" className="text-right">
             <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
               Next print
             </div>
             <div className="mt-1 font-mono text-base font-medium text-strata-highlight">
-              {nextReportValue}
+              {formatReportDate(nextReportValue)}
             </div>
-            <div className="font-mono text-[9px] uppercase tracking-kicker text-strata-dim">
-              after market
-            </div>
+            {nextEps !== null && (
+              <div className="font-mono text-[11px] text-strata-dim">
+                consensus {usdPerShare(nextEps)}
+              </div>
+            )}
           </div>
         )}
       </header>
 
-      {/* 2026-11 layout pass: full-width card — bars on the left, the
-          stats and recent prints beside them at lg. */}
+      {/* 2026-11 layout pass: full-width card — the chart on the left,
+          the stats and recent prints beside them at lg. */}
       <div className="grid flex-1 grid-cols-1 gap-x-8 gap-y-4 lg:grid-cols-5">
         <div className="lg:col-span-3">
           {actualHistory.length > 0 ? (
-            <EpsBars actual={actualHistory} estimate={estimateHistory} />
+            <EpsChart actual={actualHistory} estimate={estimateHistory} height={240} />
           ) : (
             <div className="flex h-[120px] items-center justify-center font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
               No earnings history available
@@ -166,7 +187,7 @@ export function EarningsCard({ section, distressed }: Props) {
               }
             />
             <StatTile
-              label="Surprise μ"
+              label="Avg surprise"
               value={
                 avgSurprise !== null
                   ? `${avgSurprise >= 0 ? "+" : ""}${avgSurprise.toFixed(1)}%`
@@ -182,7 +203,7 @@ export function EarningsCard({ section, distressed }: Props) {
             />
             <StatTile
               label="EPS TTM"
-              value={ttm !== null ? formatClaimValue(ttm) : "—"}
+              value={ttm !== null ? usdPerShare(ttm) : "—"}
             />
           </div>
 
@@ -220,15 +241,18 @@ function RecentPrints({
       data-testid="recent-prints"
       className="mt-4 overflow-hidden rounded-md border border-strata-line"
     >
-      <div className="flex items-center justify-between bg-strata-raise px-3 py-2">
-        <span className="font-mono text-[10px] uppercase tracking-kicker text-strata-earnings">
-          Recent prints · last {last4.length}Q
-        </span>
-        <span className="font-mono text-[9px] uppercase tracking-kicker text-strata-dim">
-          actual · estimate · surprise
-        </span>
-      </div>
       <table className="w-full text-sm">
+        <caption className="bg-strata-raise px-3 py-2 text-left font-mono text-[10px] uppercase tracking-kicker text-strata-earnings">
+          Recent prints
+        </caption>
+        <thead>
+          <tr className="border-b border-strata-line font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
+            <th scope="col" className="px-3 py-1.5 text-left font-normal">Quarter</th>
+            <th scope="col" className="px-3 py-1.5 text-right font-normal">Actual</th>
+            <th scope="col" className="px-3 py-1.5 text-right font-normal">Consensus</th>
+            <th scope="col" className="px-3 py-1.5 text-right font-normal">Surprise</th>
+          </tr>
+        </thead>
         <tbody className="divide-y divide-strata-line">
           {last4.map((row) => {
             const est = estByPeriod.get(row.period);
@@ -251,7 +275,7 @@ function RecentPrints({
                 className="hover:bg-strata-raise"
               >
                 <td className="px-3 py-2 font-mono text-xs text-strata-dim">
-                  {row.period}
+                  {shortPeriod(row.period)}
                 </td>
                 <td className="px-3 py-2 text-right font-mono tabular text-strata-hi">
                   {row.value.toFixed(2)}

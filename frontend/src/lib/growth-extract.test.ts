@@ -10,14 +10,14 @@
  * Two pure helpers:
  *
  *   - extractGrowthSeries(section)      → MultiLineSeries[]
- *   - extractGrowthMultipliers(section) → { rev, gp, opi, fcf, ocf }
+ *   - extractGrowthChanges(section)     → { rev, gp, opi, fcf, ocf }
  *                                         where each is `latest / first`
  *                                         (e.g. 6.2 means 6.2× growth).
  */
 import { describe, expect, it } from "vitest";
 
 import {
-  extractGrowthMultipliers,
+  extractGrowthChanges,
   extractGrowthSeries,
   extractPerSharePanels,
 } from "./growth-extract";
@@ -121,36 +121,64 @@ describe("extractGrowthSeries", () => {
   });
 });
 
-// ── extractGrowthMultipliers ────────────────────────────────────────
+// ── extractGrowthChanges (2026-11 chart audit) ──────────────────────
 
-describe("extractGrowthMultipliers", () => {
-  it("returns latest / first for each series", () => {
-    const s = section([
-      claim("Revenue per share", 62, REV_HIST),
-      claim("Gross profit per share", 43.4, GP_HIST),
-    ]);
-    const mults = extractGrowthMultipliers(s);
-    // 62 / 10 = 6.2
-    expect(mults.rev).toBeCloseTo(6.2, 3);
-    // 43.4 / 7 = 6.2
-    expect(mults.gp).toBeCloseTo(6.2, 3);
+describe("extractGrowthChanges", () => {
+  const YEAR: ClaimHistoryPoint[] = [
+    { period: "2025-Q3", value: 2.8 },
+    { period: "2025-Q4", value: 2.7 },
+    { period: "2026-Q1", value: 2.85 },
+    { period: "2026-Q2", value: 3.05 },
+    { period: "2026-Q3", value: 3.1 },
+  ];
+
+  it("compares the latest quarter with the same quarter a year earlier", () => {
+    const out = extractGrowthChanges(section([claim("Revenue per share", 3.1, YEAR)]));
+    expect(out.rev?.kind).toBe("pct");
+    expect(out.rev?.value).toBeCloseTo(3.1 / 2.8 - 1, 6);
+    expect(out.rev?.basis).toBe("Q3 '26 vs Q3 '25");
+    expect(out.rev?.yearOverYear).toBe(true);
   });
 
-  it("returns null fields when history is missing or first value is zero", () => {
-    const s = section([
-      claim("Revenue per share", null, []),
-      claim(
-        "Gross profit per share",
-        0,
-        [
-          { period: "2021-Q1", value: 0 },
-          { period: "2021-Q2", value: 5 },
-        ],
-      ),
-    ]);
-    const mults = extractGrowthMultipliers(s);
-    expect(mults.rev).toBeNull();
-    expect(mults.gp).toBeNull();
+  it("falls back to the change since the first point without a year-earlier quarter", () => {
+    const noYearAgo: ClaimHistoryPoint[] = [
+      { period: "2021-Q1", value: 10 },
+      { period: "2021-Q3", value: 15 },
+      { period: "2022-Q2", value: 25 },
+    ];
+    const out = extractGrowthChanges(section([claim("Revenue per share", 25, noYearAgo)]));
+    expect(out.rev?.kind).toBe("pct");
+    expect(out.rev?.value).toBeCloseTo(1.5, 6);
+    expect(out.rev?.basis).toBe("since Q1 '21");
+    expect(out.rev?.yearOverYear).toBe(false);
+  });
+
+  it("states a dollar move when the base is zero or negative", () => {
+    const losses: ClaimHistoryPoint[] = [
+      { period: "2025-Q3", value: -0.35 },
+      { period: "2026-Q3", value: -0.78 },
+    ];
+    const out = extractGrowthChanges(section([claim("Free cash flow per share", -0.78, losses)]));
+    expect(out.fcf?.kind).toBe("usd");
+    expect(out.fcf?.value).toBeCloseTo(-0.43, 6);
+  });
+
+  it("states a dollar move when a tiny base would give a percent beyond ±300%", () => {
+    const tinyBase: ClaimHistoryPoint[] = [
+      { period: "2025-Q3", value: 0.01 },
+      { period: "2026-Q3", value: -0.25 },
+    ];
+    const out = extractGrowthChanges(section([claim("Operating cash flow per share", -0.25, tinyBase)]));
+    expect(out.ocf?.kind).toBe("usd");
+    expect(out.ocf?.value).toBeCloseTo(-0.26, 6);
+  });
+
+  it("returns null for a series with fewer than 2 points", () => {
+    const out = extractGrowthChanges(
+      section([claim("Revenue per share", null, []), claim("Gross profit per share", 1, [{ period: "2026-Q3", value: 1 }])]),
+    );
+    expect(out.rev).toBeNull();
+    expect(out.gp).toBeNull();
   });
 });
 

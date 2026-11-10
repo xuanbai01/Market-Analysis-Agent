@@ -43,6 +43,13 @@ describe("extractCapitalReturns", () => {
     expect(r.shareholderYield).toBeNull();
   });
 
+  it("treats a zero dividend yield as no dividend, not '0.00% dividend'", () => {
+    const r = extractCapitalReturns(section([claim(DESC.dividendYield, 0, "percent")]));
+    expect(r.dividendYield).toBeNull();
+    expect(r.paysDividend).toBe(false);
+    expect(extractCapitalReturns(section([])).paysDividend).toBeNull();
+  });
+
   it("says whether there is anything to show", () => {
     expect(hasCapitalReturns(undefined)).toBe(false);
     expect(hasCapitalReturns(section([claim(DESC.marketCap, 1e9, "usd")]))).toBe(false);

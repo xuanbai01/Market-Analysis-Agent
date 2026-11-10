@@ -4,8 +4,12 @@
  * Layout:
  *
  *   header (kicker "QUALITY · <ticker>" + per-section confidence)
- *   3 MetricRings (ROE / ROIC / FCF margin)
- *   MultiLine chart (gross / operating / FCF margin trio)
+ *   3 headline stat tiles (ROE / ROIC / FCF margin), each naming its
+ *   basis. They were rings until the 2026-11 chart audit: a ring reads
+ *   as "out of 100%", but these have no ceiling — AAPL's 141% ROE drew
+ *   a full ring, RIVN's negatives drew empty ones — and "top decile"
+ *   under ROIC had no data behind it.
+ *   MultiLine chart (gross / operating / FCF margin, by quarter)
  *   summary prose (when present)
  *   claims table — 6 default + "Show all 16" disclosure
  *
@@ -31,7 +35,6 @@ import {
 } from "../lib/quality-extract";
 import type { Claim, Section } from "../lib/schemas";
 import { ConfidenceBadge } from "./ConfidenceBadge";
-import { MetricRing } from "./MetricRing";
 import { MultiLine } from "./MultiLine";
 import { NarrativeStrip } from "./NarrativeStrip";
 import { TrendCell } from "./TrendCell";
@@ -79,62 +82,13 @@ export function QualityCard({ ticker, section }: Props) {
             </p>
           )}
 
-          {/* 3 MetricRings — bail to em-dash when value missing. ROE / ROIC
-          / FCF margin are all fraction-form values; pass the unit hint
-          explicitly so high-ROE companies (e.g. AAPL ROE = 1.41) render
-          as "141.00%" instead of dropping the % suffix.
-
-          Phase 4.5.B — when a value is negative, flip the ring's accent
-          to ``text-strata-neg`` so the eyebrow + arc both render in the
-          loss color. Distressed names (RIVN ROE = -62%, ROIC = -41%,
-          FCF margin = -52%) get a visually consistent loss treatment
-          across the trio. */}
-          <div className="grid grid-cols-3 gap-3 border-y border-strata-line py-5">
-            <MetricRing
-              label="ROE"
-              value={
-                rings.roe !== null
-                  ? formatClaimValue(rings.roe, "fraction")
-                  : "—"
-              }
-              ratio={rings.roe}
-              accentClass={
-                rings.roe !== null && rings.roe < 0
-                  ? "text-strata-neg"
-                  : "text-strata-quality"
-              }
-            />
-            <MetricRing
-              label="ROIC TTM"
-              value={
-                rings.roic !== null
-                  ? formatClaimValue(rings.roic, "fraction")
-                  : "—"
-              }
-              ratio={rings.roic}
-              sub={
-                rings.roic !== null && rings.roic > 0.4 ? "top decile" : null
-              }
-              accentClass={
-                rings.roic !== null && rings.roic < 0
-                  ? "text-strata-neg"
-                  : "text-strata-quality"
-              }
-            />
-            <MetricRing
-              label="FCF margin"
-              value={
-                rings.fcfMargin !== null
-                  ? formatClaimValue(rings.fcfMargin, "fraction")
-                  : "—"
-              }
-              ratio={rings.fcfMargin}
-              accentClass={
-                rings.fcfMargin !== null && rings.fcfMargin < 0
-                  ? "text-strata-neg"
-                  : "text-strata-cashflow"
-              }
-            />
+          <div
+            data-testid="quality-headline-stats"
+            className="grid grid-cols-3 gap-3 border-y border-strata-line py-5"
+          >
+            <HeadlineStat label="ROE" value={rings.roe} basis="trailing 12 months" />
+            <HeadlineStat label="ROIC" value={rings.roic} basis="trailing 12 months" />
+            <HeadlineStat label="FCF margin" value={rings.fcfMargin} basis="latest quarter" />
           </div>
 
           <NarrativeStrip text={section.card_narrative} />
@@ -144,22 +98,16 @@ export function QualityCard({ ticker, section }: Props) {
           {/* Multi-line margin chart. */}
           {series.length >= 2 && (
             <div className="mb-5">
-              {/*
-            Phase 4.3.X — MARGINS sub-kicker (cosmetic backlog from PR
-            #50). Inline current GM / OM / FCF values matching the
-            legend chips below. Shows snapshot point values (not
-            history-last) since that's what the rings + claim table
-            also display, so the user reads one consistent number per
-            metric across the whole card.
-          */}
+              {/* Quarterly points: the line's end labels carry the latest
+                  quarter. The header used to repeat the snapshot values,
+                  but gross margin's snapshot is trailing-12-month (62.32%
+                  for KO) while its line ends at the latest quarter
+                  (63.2%) — two "GM" numbers on one card. */}
               <div
                 data-testid="quality-margins-subkicker"
-                className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-kicker"
+                className="mb-2 font-mono text-[10px] uppercase tracking-kicker text-strata-quality"
               >
-                <span className="text-strata-quality">
-                  Margins · {marginPeriods}Q
-                </span>
-                <MarginsInline section={section} />
+                Margins by quarter · {marginPeriods}Q
               </div>
               <MultiLine
                 series={series}
@@ -235,36 +183,25 @@ function ClaimRow({ claim }: { claim: Claim }) {
   );
 }
 
-/** Inline GM / OM / FCF values for the MARGINS sub-kicker.
- *  Reads the section's snapshot claim values (claim.value), formats
- *  via the unit-aware formatter, and renders three colored chips that
- *  echo the MultiLine legend below. */
-function MarginsInline({ section }: { section: Section }) {
-  const find = (desc: string) =>
-    section.claims.find((c) => c.description === desc);
-  const gm = find("Gross margin");
-  const om = find("Operating margin");
-  const fcf = find("Free cash flow margin");
+/** One headline figure: label, value (red when negative) and what it
+ *  covers. Proportional digits — a stat value stands alone. */
+function HeadlineStat({
+  label,
+  value,
+  basis,
+}: {
+  label: string;
+  value: number | null;
+  basis: string;
+}) {
+  const negative = value !== null && value < 0;
   return (
-    <span className="flex flex-wrap items-baseline gap-x-2.5 text-strata-dim">
-      {gm && (
-        <span>
-          <span className="mr-1 text-strata-quality">●</span>
-          GM {formatClaimValue(gm.value, gm.unit ?? "fraction")}
-        </span>
-      )}
-      {om && (
-        <span>
-          <span className="mr-1 text-strata-quality opacity-80">●</span>
-          OM {formatClaimValue(om.value, om.unit ?? "fraction")}
-        </span>
-      )}
-      {fcf && (
-        <span>
-          <span className="mr-1 text-strata-cashflow">●</span>
-          FCF {formatClaimValue(fcf.value, fcf.unit ?? "fraction")}
-        </span>
-      )}
-    </span>
+    <div data-testid="quality-stat" data-negative={negative ? "true" : "false"}>
+      <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-muted">{label}</div>
+      <div className={`mt-1 font-mono text-2xl font-medium ${negative ? "text-strata-neg" : "text-strata-hi"}`}>
+        {value !== null ? formatClaimValue(value, "fraction") : "—"}
+      </div>
+      <div className="mt-0.5 text-[11px] text-strata-dim">{basis}</div>
+    </div>
   );
 }

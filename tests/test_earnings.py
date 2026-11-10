@@ -41,6 +41,7 @@ from app.services.earnings import (
     PROVIDERS,
     _fetch_yfinance_earnings,
     fetch_earnings,
+    report_period,
 )
 
 # ── Fixtures ─────────────────────────────────────────────────────────
@@ -428,9 +429,11 @@ def test_yfinance_extracts_eps_history_from_earnings_dates(
 
     assert "eps_actual" in history
     assert len(history["eps_actual"]) == 5
-    # Oldest is 2023-Q4 (Nov 2023 report); newest is 2024-Q4 (Oct 2024).
-    assert history["eps_actual"][0].period == "2023-Q4"
-    assert history["eps_actual"][-1].period == "2024-Q4"
+    # Each report is labelled with the quarter it covers — the last
+    # calendar quarter completed before the report date: the Nov 2023
+    # report is 2023-Q3, the Oct 2024 report 2024-Q3.
+    assert history["eps_actual"][0].period == "2023-Q3"
+    assert history["eps_actual"][-1].period == "2024-Q3"
     # Snapshot = newest.
     assert raw["eps_actual"] == 1.64
     assert raw["latest_report_date"] == "2024-10-31"
@@ -472,8 +475,9 @@ def test_yfinance_handles_no_earnings_dates(
 def test_yfinance_extracts_forward_estimates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """earnings_estimate['+1q'] supplies next.eps_estimate +
-    next.revenue_estimate; calendar supplies next.report_date."""
+    """The next report covers the current (unreported) quarter, so
+    earnings_estimate['0q'] supplies its consensus — '+1q' is the
+    quarter after it. calendar supplies next.report_date."""
     estimate = pd.DataFrame(
         {"avg": [1.5, 2.35, 7.8, 9.5], "revenueAvg": [1e10, 1.24e11, 1e11, 1.5e11]},
         index=["0q", "+1q", "0y", "+1y"],
@@ -483,9 +487,81 @@ def test_yfinance_extracts_forward_estimates(
 
     raw, _ = _fetch_yfinance_earnings("AAPL")
 
-    assert raw["next.eps_estimate"] == 2.35
-    assert raw["next.revenue_estimate"] == 1.24e11
+    assert raw["next.eps_estimate"] == 1.5
+    assert raw["next.revenue_estimate"] == 1e10
     assert raw["next.report_date"] == "2025-02-01"
+
+
+def _earnings_dates_with_next(next_date: str, next_estimate: float) -> pd.DataFrame:
+    """The 5 past quarters plus one scheduled row (NaN Reported EPS),
+    newest-first like yfinance."""
+    future = pd.DataFrame(
+        {
+            "EPS Estimate": [next_estimate],
+            "Reported EPS": [float("nan")],
+            "Surprise(%)": [float("nan")],
+        },
+        index=pd.DatetimeIndex([next_date], tz="America/New_York"),
+    )
+    return pd.concat([future, _earnings_dates_5q()])
+
+
+def test_stale_calendar_date_falls_back_to_the_scheduled_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """yfinance's calendar can keep the date just reported (KO showed
+    "next print 2026-10-27" after reporting on 2026-10-27). A calendar
+    date on or before the latest report is stale; the scheduled row in
+    earnings_dates holds the real next date and its consensus."""
+    dates = _earnings_dates_with_next("2025-02-06", 1.71)
+    cal = {"Earnings Date": [pd.Timestamp("2024-10-31").date()]}
+    _patch_yfinance(monkeypatch, earnings_dates=dates, calendar=cal)
+
+    raw, history = _fetch_yfinance_earnings("AAPL")
+
+    assert raw["latest_report_date"] == "2024-10-31"
+    assert raw["next.report_date"] == "2025-02-06"
+    # No earnings_estimate frame → the scheduled row's estimate.
+    assert raw["next.eps_estimate"] == 1.71
+    # The scheduled row is not history.
+    assert len(history["eps_actual"]) == 5
+
+
+def test_calendar_date_after_the_latest_report_is_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dates = _earnings_dates_with_next("2025-02-06", 1.71)
+    cal = {"Earnings Date": [pd.Timestamp("2025-01-30").date()]}
+    _patch_yfinance(monkeypatch, earnings_dates=dates, calendar=cal)
+
+    raw, _ = _fetch_yfinance_earnings("AAPL")
+
+    assert raw["next.report_date"] == "2025-01-30"
+
+
+def test_no_next_date_when_only_a_stale_calendar_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cal = {"Earnings Date": [pd.Timestamp("2024-10-31").date()]}
+    _patch_yfinance(monkeypatch, earnings_dates=_earnings_dates_5q(), calendar=cal)
+
+    raw, _ = _fetch_yfinance_earnings("AAPL")
+
+    assert raw["next.report_date"] is None
+
+
+@pytest.mark.parametrize(
+    ("report_date", "label"),
+    [
+        ("2026-10-27", "2026-Q3"),  # KO: Sep quarter reported in October
+        ("2027-02-09", "2026-Q4"),  # Dec quarter reported in February
+        ("2026-08-26", "2026-Q2"),  # NVDA: May-Jul quarter, mostly Q2
+        ("2026-01-14", "2025-Q4"),  # early reporter (banks)
+        ("2026-04-01", "2026-Q1"),  # first day of a quarter
+    ],
+)
+def test_report_period_is_the_last_completed_quarter(report_date: str, label: str) -> None:
+    assert report_period(pd.Timestamp(report_date)) == label
 
 
 def test_yfinance_calendar_handles_single_date(

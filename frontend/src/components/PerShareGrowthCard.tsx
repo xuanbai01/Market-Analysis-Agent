@@ -3,8 +3,11 @@
  *
  * Five per-share series (Revenue, Gross profit, Op income, OCF, FCF) as
  * actual dollars per share in two panels — income lines and cash-flow
- * lines — on one shared, labelled scale, with 5 multiplier + CAGR pills
- * below summarizing total growth.
+ * lines — on one shared, labelled scale, with 5 pills below giving each
+ * series' year-over-year change (same quarter, a year apart). The pills
+ * were a total multiplier plus a per-quarter compound rate until the
+ * 2026-11 chart audit: over ~5 quarters "1.1×" and "+1.8% / Q" said
+ * little.
  *
  * Until 2026-11 this was one chart of all five lines rebased to the
  * first quarter = 100, with no axis or baseline and smoothed curves
@@ -17,10 +20,10 @@
  */
 import { relativeChange, usdPerShare, usdTick } from "../lib/chart-format";
 import {
-  extractGrowthCagr,
-  extractGrowthMultipliers,
+  extractGrowthChanges,
   extractPerSharePanels,
-  type GrowthMultipliers,
+  type GrowthChange,
+  type GrowthKey,
 } from "../lib/growth-extract";
 import type { Section } from "../lib/schemas";
 import { ConfidenceBadge } from "./ConfidenceBadge";
@@ -38,7 +41,7 @@ const COLOR_CASH = "#e8c277";
 const COLOR_EARN = "#d68dc6";
 const COLOR_DIM = "#8892a0";
 
-const PILL_SPEC: { key: keyof GrowthMultipliers; label: string; color: string }[] = [
+const PILL_SPEC: { key: GrowthKey; label: string; color: string }[] = [
   { key: "rev", label: "Rev", color: COLOR_VAL },
   { key: "gp", label: "GP", color: COLOR_QUAL },
   { key: "opi", label: "OpI", color: COLOR_CASH },
@@ -46,18 +49,12 @@ const PILL_SPEC: { key: keyof GrowthMultipliers; label: string; color: string }[
   { key: "ocf", label: "OCF", color: COLOR_DIM },
 ];
 
-function formatMultiplier(n: number | null): string {
-  if (n === null || !Number.isFinite(n)) return "—";
-  return `${n.toFixed(1)}×`;
-}
-
-function formatCagr(n: number | null): string {
-  // Phase 4.3.B.1 — per-period CAGR rendered as a signed percent.
-  // The sub-line beneath each multiplier pill conveys per-quarter
-  // growth pace alongside the total-period multiplier.
-  if (n === null || !Number.isFinite(n)) return "—";
-  const sign = n > 0 ? "+" : "";
-  return `${sign}${(n * 100).toFixed(1)}%`;
+function formatChange(c: GrowthChange | null): string {
+  if (c === null || !Number.isFinite(c.value)) return "—";
+  if (c.kind === "usd") return `${c.value >= 0 ? "+" : "-"}${usdPerShare(Math.abs(c.value))}`;
+  const pct = c.value * 100;
+  const digits = Math.abs(pct) >= 100 ? 0 : 1;
+  return `${pct >= 0 ? "+" : ""}${pct.toFixed(digits)}%`;
 }
 
 const PANEL_HEIGHT = 190;
@@ -96,8 +93,7 @@ function Panel({
 
 export function PerShareGrowthCard({ ticker, section }: Props) {
   const panels = extractPerSharePanels(section);
-  const mults = extractGrowthMultipliers(section);
-  const cagrs = extractGrowthCagr(section);
+  const changes = extractGrowthChanges(section);
   const all = [...panels.income, ...panels.cashFlow];
   const periodLength = Math.max(0, ...all.map((s) => s.history.length));
   const values = all.flatMap((s) => s.history.map((p) => p.value));
@@ -147,30 +143,33 @@ export function PerShareGrowthCard({ ticker, section }: Props) {
       )}
 
       <div className="mt-4 grid grid-cols-5 gap-2">
-        {PILL_SPEC.map((spec) => (
-          <div
-            key={spec.key}
-            data-pill="growth-multiplier"
-            className="rounded-md bg-strata-raise px-3 py-2"
-          >
-            <div
-              className="font-mono text-[9px] uppercase tracking-kicker"
-              style={{ color: spec.color }}
-            >
-              {spec.label}
+        {PILL_SPEC.map((spec) => {
+          const c = changes[spec.key];
+          return (
+            <div key={spec.key} data-pill="growth-change" className="rounded-md bg-strata-raise px-3 py-2">
+              <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-kicker text-strata-dim">
+                <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-sm" style={{ backgroundColor: spec.color }} />
+                {spec.label}
+              </div>
+              <div
+                className={`mt-1 font-mono text-base font-medium ${
+                  c && c.value < 0 ? "text-strata-neg" : "text-strata-hi"
+                }`}
+              >
+                {formatChange(c)}
+              </div>
+              <div data-testid="growth-basis" className="mt-0.5 font-mono text-[10px] text-strata-dim">
+                {c ? (c.yearOverYear ? "YoY" : c.basis) : "—"}
+              </div>
             </div>
-            <div className="mt-1 font-mono tabular text-base font-medium text-strata-hi">
-              {formatMultiplier(mults[spec.key])}
-            </div>
-            <div
-              data-testid="growth-cagr"
-              className="mt-0.5 font-mono text-[10px] tabular text-strata-dim"
-            >
-              {formatCagr(cagrs[spec.key])} / Q
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
+      {Object.values(changes).some((c) => c?.yearOverYear) && (
+        <p className="mt-2 font-mono text-[10px] text-strata-muted">
+          YoY: {Object.values(changes).find((c) => c?.yearOverYear)?.basis}
+        </p>
+      )}
 
       <NarrativeStrip text={section.card_narrative} />
     </section>

@@ -17,10 +17,18 @@
  *   line at that point, and render a small floating tooltip with the
  *   exact date + price. Clears on ``mouseleave``.
  *
+ * 2026-11 chart audit: drawn at the container's measured width so axis
+ * text is a true 11 px (the hero's chart was drawn at 560 and shrunk to
+ * ~400, rendering its labels at 8 px), and dates carry the year once
+ * the span passes six months ("Nov 7 → Nov 6" on the 1Y range said
+ * nothing about which November).
+ *
  * Returns null on empty data so callers can branch via `points.length`
  * if they want a custom skeleton.
  */
 import { useState } from "react";
+
+import { useMeasuredWidth } from "../lib/use-measured-width";
 
 interface DataPoint {
   ts: string;
@@ -42,6 +50,8 @@ interface Props {
   showAxes?: boolean;
   /** Enable mousemove → guide line + nearest-point dot + tooltip. */
   showTooltip?: boolean;
+  /** Formats axis values and the tooltip value; defaults to "$12.34". */
+  formatValue?: (n: number) => string;
 }
 
 const DEFAULT_WIDTH = 560;
@@ -49,8 +59,13 @@ const DEFAULT_HEIGHT = 140;
 const PADDING = 4;
 // Reserve a column on the left for "$X.XX" labels and a row on the
 // bottom for date text when ``showAxes`` is true.
-const AXIS_LEFT_W = 44;
-const AXIS_BOTTOM_H = 16;
+const AXIS_LEFT_W = 52;
+const AXIS_BOTTOM_H = 18;
+const LONG_SPAN_DAYS = 183;
+/** "2024-04": a monthly observation, so the tooltip names no day. */
+const MONTHLY_PERIOD = /^\d{4}-\d{2}$/;
+const DAY_MS = 86_400_000;
+const LABEL_STYLE = { fontSize: 11, fontFamily: "var(--font-mono, monospace)" };
 
 const AXIS_LABEL_COLOR = "rgb(90, 100, 115)"; // strata-muted
 const HOVER_GUIDE_COLOR = "rgb(122, 132, 148)"; // strata-dim
@@ -59,18 +74,28 @@ function formatPrice(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-function formatDate(iso: string): string {
+type DateStyle = "day" | "month" | "full";
+
+function formatDate(iso: string, style: DateStyle = "day"): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   // Format in UTC so the displayed date matches the underlying
   // timestamp regardless of the user's local timezone. yfinance bars
   // are timestamped at UTC midnight; rendering them in local time
   // would shift "2026-04-04T00:00:00Z" to "Apr 3" on UTC-4 etc.
-  return d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
+  const opts: Intl.DateTimeFormatOptions =
+    style === "month"
+      ? { month: "short", year: "numeric" }
+      : style === "full"
+        ? { month: "short", day: "numeric", year: "numeric" }
+        : { month: "short", day: "numeric" };
+  return d.toLocaleDateString("en-US", { ...opts, timeZone: "UTC" });
+}
+
+/** Axis dates name the month and year once the span passes six months. */
+function axisDateStyle(firstIso: string, lastIso: string): DateStyle {
+  const span = new Date(lastIso).getTime() - new Date(firstIso).getTime();
+  return Number.isFinite(span) && span > LONG_SPAN_DAYS * DAY_MS ? "month" : "day";
 }
 
 function nearestIndex(
@@ -100,10 +125,16 @@ export function LineChart({
   ariaLabel,
   showAxes = false,
   showTooltip = false,
+  formatValue = formatPrice,
 }: Props) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [measureRef, measured] = useMeasuredWidth();
 
   if (data.length < 1) return null;
+
+  // Draw in real pixels once measured; ``width`` is the fallback.
+  width = measured ?? width;
+  const dateStyle = axisDateStyle(data[0].ts, data[data.length - 1].ts);
 
   const closes = data.map((d) => d.close);
   const min = Math.min(...closes);
@@ -172,8 +203,8 @@ export function LineChart({
   // ── Tooltip placement ───────────────────────────────────────────────
   // Position the tooltip to the right of the cursor by default; if too
   // close to the right edge, flip it to the left so it stays in-frame.
-  const TOOLTIP_W = 96;
-  const TOOLTIP_H = 32;
+  const TOOLTIP_W = 112;
+  const TOOLTIP_H = 36;
   const TOOLTIP_GAP = 8;
   const hoverPoint = hoverIdx !== null ? points[hoverIdx] : null;
   const hoverData = hoverIdx !== null ? data[hoverIdx] : null;
@@ -192,6 +223,7 @@ export function LineChart({
       : Math.max(PADDING, Math.min(height - bottomP - TOOLTIP_H, hoverPoint.y - TOOLTIP_H / 2));
 
   return (
+    <div ref={measureRef}>
     <svg
       data-testid="line-chart"
       // Phase 4.3.B.1 — responsive width so the hero price chart
@@ -231,12 +263,12 @@ export function LineChart({
           <text
             data-testid="line-chart-y-axis-max"
             x={leftP - 6}
-            y={PADDING + 9}
+            y={PADDING + 10}
             fill={AXIS_LABEL_COLOR}
             textAnchor="end"
-            style={{ fontSize: 10, fontFamily: "var(--font-mono, monospace)" }}
+            style={LABEL_STYLE}
           >
-            {formatPrice(max)}
+            {formatValue(max)}
           </text>
           <text
             data-testid="line-chart-y-axis-min"
@@ -244,18 +276,18 @@ export function LineChart({
             y={height - bottomP - 2}
             fill={AXIS_LABEL_COLOR}
             textAnchor="end"
-            style={{ fontSize: 10, fontFamily: "var(--font-mono, monospace)" }}
+            style={LABEL_STYLE}
           >
-            {formatPrice(min)}
+            {formatValue(min)}
           </text>
           <text
             data-testid="line-chart-x-axis-start"
             x={leftP}
             y={height - 4}
             fill={AXIS_LABEL_COLOR}
-            style={{ fontSize: 10, fontFamily: "var(--font-mono, monospace)" }}
+            style={LABEL_STYLE}
           >
-            {formatDate(data[0].ts)}
+            {formatDate(data[0].ts, dateStyle)}
           </text>
           <text
             data-testid="line-chart-x-axis-end"
@@ -263,9 +295,9 @@ export function LineChart({
             y={height - 4}
             fill={AXIS_LABEL_COLOR}
             textAnchor="end"
-            style={{ fontSize: 10, fontFamily: "var(--font-mono, monospace)" }}
+            style={LABEL_STYLE}
           >
-            {formatDate(data[data.length - 1].ts)}
+            {formatDate(data[data.length - 1].ts, dateStyle)}
           </text>
         </>
       )}
@@ -307,20 +339,20 @@ export function LineChart({
             />
             <text
               x={8}
-              y={13}
+              y={14}
               fill="rgb(170, 180, 196)"
               style={{
-                fontSize: 9,
+                fontSize: 10,
                 fontFamily: "var(--font-mono, monospace)",
                 textTransform: "uppercase",
                 letterSpacing: "0.04em",
               }}
             >
-              {formatDate(hoverData.ts)}
+              {formatDate(hoverData.ts, MONTHLY_PERIOD.test(hoverData.ts) ? "month" : "full")}
             </text>
             <text
               x={8}
-              y={26}
+              y={29}
               fill="rgb(245, 247, 251)"
               style={{
                 fontSize: 12,
@@ -328,11 +360,12 @@ export function LineChart({
                 fontWeight: 500,
               }}
             >
-              {formatPrice(hoverData.close)}
+              {formatValue(hoverData.close)}
             </text>
           </g>
         </g>
       )}
     </svg>
+    </div>
   );
 }

@@ -87,6 +87,26 @@ describe("MacroPanel", () => {
     expect(text).toMatch(/2\.8/);
   });
 
+  // 2026-11 chart audit: values carry their unit, each panel states its
+  // change over the window, and the chart is a line on labelled axes
+  // (not an area filled down to the series minimum).
+  it("shows each value in its unit with the change over the window", () => {
+    const { container } = render(<MacroPanel section={section(FULL)} />);
+    const panels = Array.from(container.querySelectorAll("[data-testid='macro-panel']"));
+    expect(panels[0].textContent).toContain("4.10%");
+    expect(panels[0].textContent).toContain("−0.40 pts since Jan '24");
+    // CPI is an index: a percent change, not points.
+    expect(panels[1].textContent).toContain("−17.6% since Jan '24");
+  });
+
+  it("draws lines with axes in the series' unit, no area fill", () => {
+    const { container } = render(<MacroPanel section={section(FULL)} />);
+    expect(container.querySelector("[data-line-area]")).toBeNull();
+    const yMax = container.querySelector("[data-testid='line-chart-y-axis-max']");
+    expect(yMax?.textContent).toBe("4.50%");
+    expect(container.textContent).not.toMatch(/\$4\.50/);
+  });
+
   it("renders the section summary prose when present", () => {
     const { getByText } = render(
       <MacroPanel

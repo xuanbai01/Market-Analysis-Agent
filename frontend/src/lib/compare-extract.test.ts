@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 import {
   COMPARE_COLOR_A,
   COMPARE_COLOR_B,
-  extractCompareGrowthOverlay,
+  extractCompareGrowthPanels,
   extractCompareHeroData,
   extractCompareMarginOverlay,
   extractCompareQualityMetrics,
@@ -179,7 +179,7 @@ describe("extractCompareMarginOverlay", () => {
   });
 });
 
-describe("extractCompareGrowthOverlay", () => {
+describe("extractCompareGrowthPanels", () => {
   function withGrowthHistory(symbol: string, name: string, opts: { rev?: { period: string; value: number }[]; fcf?: { period: string; value: number }[] }): ResearchReport {
     const claims: Claim[] = [];
     if (opts.rev) claims.push(claim("Revenue per share", opts.rev.at(-1)?.value ?? 0, opts.rev));
@@ -187,40 +187,35 @@ describe("extractCompareGrowthOverlay", () => {
     return fakeReport(symbol, name, { sections: [section("Quality", claims)] });
   }
 
-  it("returns up to 4 rebased series (Rev × 2 + FCF × 2) — first point each = 100", () => {
+  it("splits revenue and FCF into panels with one indexed line per company", () => {
     const a = withGrowthHistory("NVDA", "NVIDIA", {
-      rev: [{ period: "2021", value: 5 }, { period: "2025", value: 31 }],
-      fcf: [{ period: "2021", value: 2 }, { period: "2025", value: 24.4 }],
+      rev: [{ period: "2025-Q3", value: 1.9 }, { period: "2026-Q3", value: 2.9 }],
+      fcf: [{ period: "2025-Q3", value: 0.55 }, { period: "2026-Q3", value: 1.1 }],
     });
-    const b = withGrowthHistory("AVGO", "Broadcom", {
-      rev: [{ period: "2021", value: 50 }, { period: "2025", value: 195 }],
-      fcf: [{ period: "2021", value: 12 }, { period: "2025", value: 52.8 }],
+    const b = withGrowthHistory("KO", "Coca-Cola", {
+      rev: [{ period: "2025-Q3", value: 2.8 }, { period: "2026-Q3", value: 3.1 }],
+      fcf: [{ period: "2025-Q3", value: 1.06 }, { period: "2026-Q3", value: 1.05 }],
     });
-    const series = extractCompareGrowthOverlay(a, b);
-    expect(series).toHaveLength(4);
-    // Each series rebased so the first point is exactly 100.
-    for (const s of series) {
-      expect(s.history[0].value).toBeCloseTo(100, 5);
-    }
-    // Naming carries both ticker and metric (NVDA Rev, NVDA FCF, AVGO Rev, AVGO FCF).
-    const labels = series.map((s) => s.label);
-    expect(labels).toContain("NVDA Rev");
-    expect(labels).toContain("NVDA FCF");
-    expect(labels).toContain("AVGO Rev");
-    expect(labels).toContain("AVGO FCF");
+    const panels = extractCompareGrowthPanels(a, b);
+    expect(panels.revenue.map((s) => s.label)).toEqual(["NVDA", "KO"]);
+    expect(panels.fcf.map((s) => s.label)).toEqual(["NVDA", "KO"]);
+    // Colour follows the company, never the metric.
+    expect(panels.revenue[0].color).toBe(panels.fcf[0].color);
+    expect(panels.revenue[0].color).not.toBe(panels.revenue[1].color);
+    for (const s of [...panels.revenue, ...panels.fcf]) expect(s.history[0].value).toBeCloseTo(100, 5);
   });
 
-  it("drops a series with empty history or zero-base first value", () => {
-    const a = withGrowthHistory("NVDA", "NVIDIA", {
-      rev: [{ period: "2021", value: 5 }, { period: "2025", value: 31 }],
-      // No FCF history.
+  it("leaves out a series whose first value is zero or negative", () => {
+    const a = withGrowthHistory("RIVN", "Rivian", {
+      rev: [{ period: "2025-Q3", value: 1.5 }, { period: "2026-Q3", value: 1.6 }],
+      fcf: [{ period: "2025-Q3", value: -0.35 }, { period: "2026-Q3", value: -0.78 }],
     });
-    const b = withGrowthHistory("AVGO", "Broadcom", {
-      // First point zero — can't rebase.
-      rev: [{ period: "2021", value: 0 }, { period: "2025", value: 100 }],
-      fcf: [{ period: "2021", value: 12 }, { period: "2025", value: 52.8 }],
+    const b = withGrowthHistory("KO", "Coca-Cola", {
+      rev: [{ period: "2025-Q3", value: 2.8 }, { period: "2026-Q3", value: 3.1 }],
+      fcf: [{ period: "2025-Q3", value: 1.06 }, { period: "2026-Q3", value: 1.05 }],
     });
-    const series = extractCompareGrowthOverlay(a, b);
-    expect(series.map((s) => s.label).sort()).toEqual(["AVGO FCF", "NVDA Rev"]);
+    const panels = extractCompareGrowthPanels(a, b);
+    expect(panels.revenue).toHaveLength(2);
+    expect(panels.fcf.map((s) => s.label)).toEqual(["KO"]);
   });
 });

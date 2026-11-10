@@ -14,13 +14,13 @@
  */
 import type { PricePoint } from "./schemas";
 
-export type UiRange = "1D" | "5D" | "1M" | "3M" | "1Y" | "5Y";
+export type UiRange = "5D" | "1M" | "3M" | "1Y" | "5Y";
 
 /** Approximate trading-day count per pill. 1M ≈ 22 trading days, 5D
- *  ≈ 5, 1D shows the most-recent two points (a single point isn't a
- *  chartable line). 3M maps to the full 60D fetch. */
+ *  ≈ 5. 3M maps to the full 60D fetch. There is no 1D: the feed is
+ *  daily closes, so "1D" drew a straight line between two of them
+ *  (2026-11 chart audit). */
 const TRADING_DAYS: Record<UiRange, number | null> = {
-  "1D": 2,
   "5D": 5,
   "1M": 22,
   "3M": null, // pass through — backend already constrained to 60D

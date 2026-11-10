@@ -188,11 +188,12 @@ export function LineChart({
       setHoverIdx(0);
       return;
     }
-    const cursorClientX = e.clientX - rect.left;
-    // Map browser cursor x (0..rect.width) to viewBox coordinate space.
-    const fraction = Math.max(0, Math.min(1, cursorClientX / rect.width));
-    const targetX = leftP + fraction * innerW;
-    setHoverIdx(nearestIndex(points, targetX));
+    // Map the cursor (0..rect.width) onto the whole viewBox (0..width),
+    // where the points live. It used to be mapped onto the plot area
+    // (leftP..leftP + innerW), which put the target up to the axis width
+    // to the right of the cursor.
+    const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setHoverIdx(nearestIndex(points, fraction * width));
   }
 
   function onMouseLeave() {

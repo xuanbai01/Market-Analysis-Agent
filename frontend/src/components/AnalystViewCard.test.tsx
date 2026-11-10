@@ -98,6 +98,17 @@ describe("AnalystViewCard", () => {
     expect(screen.queryAllByTestId("evidence-row")).toHaveLength(0);
   });
 
+  // Live KO showed "Unbroken beat streak 11.78%" — the model cited EPS
+  // growth first — so each figure now names the claim it comes from.
+  it("names the claim each key figure comes from", () => {
+    render(<AnalystViewCard report={report(THESIS)} />);
+    const row = pointRow("Margins still expanding");
+    expect(within(row).getByTestId("key-figure-label")).toHaveTextContent("Operating margin change");
+    expect(within(pointRow("Rich valuation vs peers")).getByTestId("key-figure-label")).toHaveTextContent(
+      "Median trailing P/E",
+    );
+  });
+
   it("opens a point to its full text and evidence, skipping refs that don't resolve", () => {
     render(<AnalystViewCard report={report(THESIS)} />);
     const row = pointRow("Margins still expanding");

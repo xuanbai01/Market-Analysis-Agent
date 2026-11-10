@@ -26,6 +26,20 @@ export function resolveRef(report: ResearchReport, ref: ClaimRef): ResolvedRef |
   return section && claim ? { section: section.title, claim } : null;
 }
 
+/**
+ * A claim's name, short enough to sit under a figure: the description up
+ * to its first comma, bracket or colon, without a trailing "of <number>"
+ * ("Gross margin vs peer median of 50.59%" → "Gross margin vs peer
+ * median"). The full description stays in the tooltip.
+ */
+export function shortClaimName(description: string): string {
+  const head = description
+    .split(/,|\s\(|:/)[0]
+    .replace(/\s+of\s+[-−+$\d].*$/, "")
+    .trim();
+  return head || description;
+}
+
 /** Scroll the card carrying ``data-section-anchor`` for this section into view. */
 export function scrollToSection(section: string): boolean {
   const target = document.querySelector<HTMLElement>(

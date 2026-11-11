@@ -35,6 +35,7 @@ from app.schemas.research import (
 )
 from app.services import research_cache as cache_module
 from app.services import research_orchestrator as orch_module
+from app.services.report_version import REPORT_VERSION
 
 
 @pytest_asyncio.fixture
@@ -101,10 +102,15 @@ def _enable_rate_limit(monkeypatch: pytest.MonkeyPatch, capacity: int) -> None:
     deps_module.reset_research_rate_limit_for_tests()
 
 
-def _stub_report(symbol: str = "AAPL") -> ResearchReport:
-    """A minimal but valid ResearchReport the orchestrator stub returns."""
+def _stub_report(symbol: str = "AAPL", *, report_version: int = REPORT_VERSION) -> ResearchReport:
+    """A minimal but valid ResearchReport the orchestrator stub returns.
+
+    Stamped with the current report version by default, so a cache hit
+    built from it is served as-is; pass ``report_version=0`` for a row
+    cached before versioning."""
     src = Source(tool="test.tool", fetched_at=datetime.now(UTC))
     return ResearchReport(
+        report_version=report_version,
         symbol=symbol,
         generated_at=datetime.now(UTC),
         sections=[
@@ -632,3 +638,96 @@ async def test_refresh_true_consumes_rate_limit_token(
         "/v1/research/AAPL?refresh=true", headers=headers
     )
     assert resp.status_code == 429
+
+
+# ── Report versions (2026-11-10) ─────────────────────────────────────
+#
+# A fix that changes what reports contain (corrected earnings dates,
+# analyst-view titles) used to reach a ticker only when someone pressed
+# Regenerate: cached rows were served for up to 7 days. Reports now carry
+# ``report_version``; a cached report older than ``REPORT_VERSION`` is
+# rebuilt on its next visit, and served as-is only when a rebuild can't
+# run.
+
+
+async def test_outdated_cached_report_is_rebuilt(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old = _stub_report(report_version=0)
+    old.sections[0].summary = "Written before the fix."
+    _patch_cache_lookup(monkeypatch, returns=old)
+    fresh = _stub_report()
+    fresh.sections[0].summary = "Rebuilt with the fix."
+    orch_calls = _patch_orchestrator(monkeypatch, fresh)
+    upserts = _patch_cache_upsert(monkeypatch)
+
+    resp = await research_client.post("/v1/research/AAPL")
+
+    assert resp.status_code == 200
+    assert resp.json()["sections"][0]["summary"] == "Rebuilt with the fix."
+    assert resp.json()["report_version"] == REPORT_VERSION
+    assert len(orch_calls) == 1
+    assert len(upserts) == 1
+
+
+async def test_current_cached_report_is_not_rebuilt(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_cache_lookup(monkeypatch, returns=_stub_report())
+    orch_calls = _patch_orchestrator(monkeypatch, _stub_report())
+
+    resp = await research_client.post("/v1/research/AAPL")
+
+    assert resp.status_code == 200
+    assert orch_calls == []
+
+
+async def test_outdated_report_is_served_when_the_rate_limit_is_spent(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rebuild is a fresh report and takes a token; out of tokens, the
+    reader still gets the old report instead of a 429."""
+    _enable_rate_limit(monkeypatch, capacity=1)
+    old = _stub_report(report_version=0)
+    old.sections[0].summary = "Written before the fix."
+    _patch_cache_lookup(monkeypatch, returns=old)
+    orch_calls = _patch_orchestrator(monkeypatch, _stub_report())
+    _patch_cache_upsert(monkeypatch)
+    headers = {"x-forwarded-for": "10.0.0.90"}
+
+    first = await research_client.post("/v1/research/AAPL", headers=headers)
+    second = await research_client.post("/v1/research/MSFT", headers=headers)
+
+    assert first.status_code == 200
+    assert len(orch_calls) == 1  # the first rebuild took the only token
+    assert second.status_code == 200
+    assert second.json()["sections"][0]["summary"] == "Written before the fix."
+
+
+async def test_outdated_report_is_served_when_synthesis_fails(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old = _stub_report(report_version=0)
+    old.sections[0].summary = "Written before the fix."
+    _patch_cache_lookup(monkeypatch, returns=old)
+    _patch_orchestrator(monkeypatch, RuntimeError("DeepSeek API returned HTTP 402"))
+    upserts = _patch_cache_upsert(monkeypatch)
+
+    resp = await research_client.post("/v1/research/AAPL")
+
+    assert resp.status_code == 200
+    assert resp.json()["sections"][0]["summary"] == "Written before the fix."
+    assert upserts == []
+
+
+async def test_refresh_still_reports_a_failed_synthesis(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fallback is for automatic rebuilds only: an explicit refresh
+    that fails says so."""
+    _patch_cache_lookup(monkeypatch, returns=_stub_report(report_version=0))
+    _patch_orchestrator(monkeypatch, RuntimeError("DeepSeek API returned HTTP 402"))
+
+    resp = await research_client.post("/v1/research/AAPL?refresh=true")
+
+    assert resp.status_code == 503

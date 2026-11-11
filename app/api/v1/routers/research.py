@@ -21,6 +21,13 @@ overwrites the existing row rather than duplicating.
 "same trading day" means same date in ET, not UTC. A request at 11pm
 ET reads the same row a request at 9am ET the next morning UTC writes.
 
+A cached report older than ``REPORT_VERSION`` (see
+``app.services.report_version``) is treated as a miss and rebuilt, so a
+fix to report content reaches every ticker on its next visit. If the
+rebuild can't run — rate limit spent, synthesis unavailable — the old
+report is served rather than an error. ``?refresh=true`` keeps reporting
+failures: the reader asked for a fresh report.
+
 ## Error mapping
 
 - ``RuntimeError`` from the orchestrator → 503. The most common cause
@@ -53,6 +60,7 @@ entirely.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -63,8 +71,10 @@ from app.api.v1.dependencies import enforce_research_rate_limit, get_session
 from app.core.auth import require_shared_secret
 from app.core.settings import settings
 from app.schemas.research import ResearchReport, ResearchReportSummary
-from app.services import research_cache, research_orchestrator
+from app.services import report_version, research_cache, research_orchestrator
 from app.services.research_tool_registry import Focus
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -158,8 +168,10 @@ async def research(
     report_date = datetime.now(tz).date()
 
     # Cache lookup runs first, unconditionally (cache hits are free —
-    # no LLM cost, no token consumed). Only cache misses or explicit
-    # ?refresh=true requests reach the rate limiter and the orchestrator.
+    # no LLM cost, no token consumed). Only cache misses, outdated
+    # reports or explicit ?refresh=true requests reach the rate limiter
+    # and the orchestrator.
+    outdated: ResearchReport | None = None
     if not refresh:
         cached = await research_cache.lookup_recent(
             session,
@@ -178,18 +190,31 @@ async def research(
             # adaptive UI works on cache hits without a fresh-gen
             # round-trip.
             cached = research_orchestrator.backfill_layout_signals(cached)
-            return cached
+            if not report_version.is_outdated(cached):
+                return cached
+            # Built before the current report version: rebuild below,
+            # keeping this one to serve if the rebuild can't run.
+            outdated = cached
 
-    # Cache miss (or refresh forced) → about to spend an LLM call.
-    # Rate-limit gate goes here, after we've confirmed we'd actually
-    # be paying for the synthesis.
-    await enforce_research_rate_limit(request)
+    # Cache miss, outdated report or refresh forced → about to spend an
+    # LLM call. Rate-limit gate goes here, after we've confirmed we'd
+    # actually be paying for the synthesis.
+    try:
+        await enforce_research_rate_limit(request)
+    except HTTPException as exc:
+        if outdated is not None and exc.status_code == 429:
+            logger.info("serving outdated %s report: rate limit spent", target)
+            return outdated
+        raise
 
     try:
         report = await research_orchestrator.compose_research_report(
             target, focus
         )
     except RuntimeError as exc:
+        if outdated is not None:
+            logger.warning("serving outdated %s report: synthesis unavailable: %s", target, exc)
+            return outdated
         # Orchestration's upstream dependency (LLM provider, missing API
         # key) is unusable. Don't cache this — next request retries.
         raise HTTPException(

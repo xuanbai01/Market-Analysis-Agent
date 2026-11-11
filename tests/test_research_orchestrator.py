@@ -1420,3 +1420,36 @@ async def test_earnings_focus_skips_the_analyst_view(monkeypatch: pytest.MonkeyP
     report = await compose_research_report("AAPL", Focus.EARNINGS)
     assert report.thesis is None
     assert all(c["schema"] is SectionSummaries for c in captured)
+
+
+# ── Report version (2026-11-10) ──────────────────────────────────────
+
+
+async def test_fresh_reports_carry_the_current_report_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.report_version import REPORT_VERSION
+
+    _patch_tools(
+        monkeypatch,
+        {
+            "fetch_fundamentals": _fundamentals_output(),
+            "fetch_earnings": _earnings_output(),
+            "extract_10k_risks_diff": _risks_diff_output(),
+            "extract_10k_business": _business_output(),
+        },
+    )
+    _patch_synth(monkeypatch, _summaries_for("News", "Earnings", "Valuation", "Risk Factors"))
+
+    report = await compose_research_report("AAPL", Focus.EARNINGS)
+
+    assert report.report_version == REPORT_VERSION
+
+
+def test_reports_cached_before_versioning_read_as_version_zero() -> None:
+    from app.services.report_version import is_outdated
+
+    cached = {"symbol": "KO", "generated_at": "2026-11-08T14:00:00+00:00", "sections": []}
+    report = ResearchReport.model_validate(cached)
+    assert report.report_version == 0
+    assert is_outdated(report)

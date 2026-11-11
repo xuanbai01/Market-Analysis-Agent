@@ -49,11 +49,11 @@ CACHE_TTL_SECONDS = 24 * 3600
 MAX_NARRATIVE_POINTS = 5
 LENS_SECTION = "Lens"
 
-# Ordered tag preferences per metric; ``xbrl.annual_series`` merges them
-# year by year (companies switch tags over time).
-CAPEX_TAGS = ("PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets")
-REVENUE_TAGS = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet")
-OCF_TAGS = ("NetCashProvidedByUsedInOperatingActivities",)
+# Ordered tag preferences per metric (shared with the per-share history
+# tool); ``xbrl.annual_series`` merges them year by year.
+CAPEX_TAGS = xbrl.CAPEX_TAGS
+REVENUE_TAGS = xbrl.REVENUE_TAGS
+OCF_TAGS = xbrl.OCF_TAGS
 
 METHOD = (
     "SEC XBRL annual filings. Capex is purchases of property and equipment; "

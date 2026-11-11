@@ -40,7 +40,7 @@ from typing import Any
 
 from app.schemas.research import Claim, Source
 from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
-from app.services import research_derived
+from app.services import annual_history, research_derived
 
 
 class Focus(str, Enum):
@@ -148,7 +148,25 @@ def _build_valuation(outputs: dict[str, Any]) -> list[Claim]:
 
 def _build_quality(outputs: dict[str, Any]) -> list[Claim]:
     fundamentals = outputs.get("fetch_fundamentals")
-    return _filter_keys(fundamentals, _QUALITY_KEYS) + research_derived.quality_claims(fundamentals)
+    annual = outputs.get("fetch_annual_history")
+    return (
+        _filter_keys(fundamentals, _QUALITY_KEYS)
+        + _annual_claims(annual, fundamentals)
+        + research_derived.quality_claims(fundamentals)
+        + research_derived.long_term_growth_claims(annual, fundamentals)
+    )
+
+
+def _annual_claims(annual: Any, fundamentals: Any) -> list[Claim]:
+    """2026-11 — the SEC annual per-share series that have a history.
+    Banks drop free cash flow per share (ADR 0007: it describes the loan
+    book, not the business)."""
+    keys = tuple(
+        key
+        for key in annual_history.CLAIM_KEYS
+        if not (key == "fcf_per_share_annual" and research_derived.is_balance_sheet_business(fundamentals))
+    )
+    return [claim for claim in _filter_keys(annual, keys) if claim.history]
 
 
 def _build_capital_allocation(outputs: dict[str, Any]) -> list[Claim]:
@@ -318,7 +336,8 @@ SECTIONS_BY_FOCUS: dict[Focus, list[SectionSpec]] = {
         SectionSpec("News", ("fetch_news",), _build_news),
         # Peers feed Valuation's premium/discount claims (ADR 0007).
         SectionSpec("Valuation", ("fetch_fundamentals", "fetch_peers"), _build_valuation),
-        SectionSpec("Quality", ("fetch_fundamentals",), _build_quality),
+        # 2026-11 — SEC annual history feeds the 10-year per-share view.
+        SectionSpec("Quality", ("fetch_fundamentals", "fetch_annual_history"), _build_quality),
         SectionSpec(
             "Capital Allocation",
             ("fetch_fundamentals",),

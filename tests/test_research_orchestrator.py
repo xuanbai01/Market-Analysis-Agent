@@ -161,6 +161,7 @@ def _patch_tools(
     new_dispatch: dict[str, Any] = {
         "fetch_business_info": _wrap_const({}),
         "fetch_news": _wrap_const({}),
+        "fetch_annual_history": _wrap_const({}),
     }
     for name, override in overrides.items():
         if callable(override) and hasattr(override, "__await__"):
@@ -526,7 +527,7 @@ async def test_tool_calls_audit_records_every_invoked_tool(
     assert audit_names == {
         "fetch_fundamentals", "fetch_earnings", "fetch_peers",
         "fetch_macro", "extract_10k_risks_diff", "extract_10k_business",
-        "fetch_business_info", "fetch_news",
+        "fetch_business_info", "fetch_news", "fetch_annual_history",
     }
 
 

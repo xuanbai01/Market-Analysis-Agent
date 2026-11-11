@@ -36,6 +36,15 @@ from app.core.settings import settings
 from app.services import edgar
 
 CACHE_TTL_SECONDS = 24 * 3600
+
+# Ordered us-gaap tag preferences per metric; ``annual_series`` merges
+# them year by year (companies switch tags over time).
+REVENUE_TAGS = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet")
+OPERATING_INCOME_TAGS = ("OperatingIncomeLoss",)
+OCF_TAGS = ("NetCashProvidedByUsedInOperatingActivities",)
+CAPEX_TAGS = ("PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets")
+DILUTED_SHARES_TAGS = ("WeightedAverageNumberOfDilutedSharesOutstanding",)
+DILUTED_EPS_TAGS = ("EarningsPerShareDiluted",)
 _CONCEPT_URL = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{tag}.json"
 
 
@@ -65,14 +74,26 @@ def fetch_concept(cik: str, tag: str) -> dict:
     return payload
 
 
-def annual_values(payload: dict) -> dict[int, float]:
-    """Calendar year → USD value, from the facts' annual ``CY####`` frames."""
-    out: dict[int, float] = {}
-    for fact in payload.get("units", {}).get("USD", []):
+def annual_facts(payload: dict, unit: str = "USD") -> dict[int, tuple[float, str]]:
+    """Calendar year → (value, filing date), from the facts' annual
+    ``CY####`` frames in ``unit`` ("USD", "shares", "USD/shares").
+
+    The filing date matters for share counts and per-share values: a
+    framed fact is the latest one filed for that period, so it reflects
+    the stock splits before that date and none after (NVDA's CY2018
+    diluted shares, filed in Feb 2021, predate its 4:1 and 10:1 splits).
+    """
+    out: dict[int, tuple[float, str]] = {}
+    for fact in payload.get("units", {}).get(unit, []):
         frame = fact.get("frame", "")
         if len(frame) == 6 and frame.startswith("CY") and frame[2:].isdigit():
-            out[int(frame[2:])] = float(fact["val"])
+            out[int(frame[2:])] = (float(fact["val"]), str(fact.get("filed", "")))
     return out
+
+
+def annual_values(payload: dict) -> dict[int, float]:
+    """Calendar year → USD value, from the facts' annual ``CY####`` frames."""
+    return {year: value for year, (value, _filed) in annual_facts(payload, "USD").items()}
 
 
 def annual_series(cik: str, tags: Sequence[str]) -> dict[int, float]:
@@ -81,4 +102,15 @@ def annual_series(cik: str, tags: Sequence[str]) -> dict[int, float]:
     for tag in tags:
         for year, value in annual_values(fetch_concept(cik, tag)).items():
             merged.setdefault(year, value)
+    return dict(sorted(merged.items()))
+
+
+def annual_series_with_filed(
+    cik: str, tags: Sequence[str], unit: str = "USD"
+) -> dict[int, tuple[float, str]]:
+    """``annual_series`` in any unit, keeping each value's filing date."""
+    merged: dict[int, tuple[float, str]] = {}
+    for tag in tags:
+        for year, fact in annual_facts(fetch_concept(cik, tag), unit).items():
+            merged.setdefault(year, fact)
     return dict(sorted(merged.items()))

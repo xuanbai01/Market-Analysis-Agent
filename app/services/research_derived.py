@@ -60,6 +60,11 @@ def _is_balance_sheet_business(claims: Claims) -> bool:
     return sector is not None and sector.value in BALANCE_SHEET_SECTORS
 
 
+def is_balance_sheet_business(fundamentals: Any) -> bool:
+    """Whether ``fetch_fundamentals``' output tags a bank (see module docstring)."""
+    return _is_balance_sheet_business(_claims(fundamentals))
+
+
 def _history(claims: Claims, key: str) -> list[ClaimHistoryPoint]:
     claim = claims.get(key)
     return list(claim.history) if claim is not None else []
@@ -392,5 +397,45 @@ def earnings_claims(earnings: Any) -> list[Claim]:
             "percentage_points",
             "eps_surprise_pct − last_20q.avg_surprise_pct",
             e,
+        ))
+    return out
+
+
+# ── Long-term growth (SEC annual history, 2026-11) ───────────────────
+
+_ANNUAL_LABELS = {
+    "revenue_per_share_annual": "Revenue per share",
+    "operating_income_per_share_annual": "Operating income per share",
+    "fcf_per_share_annual": "Free cash flow per share",
+    "eps_diluted_annual": "Diluted EPS",
+}
+# Fewer annual points than this is too short a span to call a trend.
+MIN_ANNUAL_POINTS = 5
+
+
+def long_term_growth_claims(annual: Any, fundamentals: Any) -> list[Claim]:
+    """Compound annual growth of each annual per-share series between its
+    first and last named years ("Revenue per share, compound annual
+    growth, 2015 → 2025"). Only over positive endpoints and at least
+    ``MIN_ANNUAL_POINTS`` years; banks skip free cash flow."""
+    a = _claims(annual)
+    bank = _is_balance_sheet_business(_claims(fundamentals))
+    out: list[Claim] = []
+    for key, label in _ANNUAL_LABELS.items():
+        if bank and key == "fcf_per_share_annual":
+            continue
+        points = _history(a, key)
+        if len(points) < MIN_ANNUAL_POINTS:
+            continue
+        first, last = points[0], points[-1]
+        years = int(last.period) - int(first.period)
+        if years <= 0 or first.value <= 0 or last.value <= 0:
+            continue
+        out.append(_claim(
+            f"{label}, compound annual growth, {first.period} → {last.period}",
+            (last.value / first.value) ** (1 / years) - 1,
+            "fraction",
+            f"({key}[{last.period}] ÷ {key}[{first.period}])^(1/{years}) − 1",
+            a,
         ))
     return out

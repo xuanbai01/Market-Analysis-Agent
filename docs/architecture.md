@@ -97,7 +97,8 @@ For the v2 research endpoint specifically:
 
 ```
 POST /v1/research/{symbol}
-  └▶ research_cache.lookup_recent       (free; pre-rate-limit)
+  └▶ research_cache.lookup_recent       (free; pre-rate-limit; a report older than
+                                          REPORT_VERSION is rebuilt, or served if the rebuild can't run)
   └▶ enforce_research_rate_limit         (only on cache miss)
   └▶ research_orchestrator.compose_research_report
        ├▶ tool fan-out (asyncio.gather, return_exceptions=True)

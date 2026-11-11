@@ -17,7 +17,7 @@
  * user opens a ticker. Moving it out of main makes the entry feel
  * snappier and gives Phase 4.8 / future phases plenty of headroom.
  */
-import { lazy, Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { AppShell } from "./components/AppShell";
@@ -26,13 +26,14 @@ import { LoadingState } from "./components/LoadingState";
 import { LoginScreen } from "./components/LoginScreen";
 import { RequireAuth } from "./components/RequireAuth";
 import { getStoredToken } from "./lib/auth";
+import { lazyWithReload } from "./lib/lazy-with-reload";
 import { ROUTE_PATHS, ROUTES } from "./lib/routes";
 
-const ComparePage = lazy(() => import("./components/compare/ComparePage"));
+const ComparePage = lazyWithReload(() => import("./components/compare/ComparePage"));
 // Cross-company lenses (ADR 0007 layer 3) — their own chunks.
-const LensIndexPage = lazy(() => import("./components/lens/LensIndexPage"));
-const LensPage = lazy(() => import("./components/lens/LensPage"));
-const SymbolDetailPage = lazy(() => import("./components/SymbolDetailPage"));
+const LensIndexPage = lazyWithReload(() => import("./components/lens/LensIndexPage"));
+const LensPage = lazyWithReload(() => import("./components/lens/LensPage"));
+const SymbolDetailPage = lazyWithReload(() => import("./components/SymbolDetailPage"));
 
 /**
  * LoginRoute — wraps LoginScreen with post-auth redirect logic.

@@ -24,6 +24,11 @@
 - **LLM agents (when added):** one async function per agent, typed inputs and outputs. No DB writes inside agent functions — the calling service handles persistence.
 - **Time:** store as `timestamptz` in DB; use `datetime.now(timezone.utc)` (never naive `datetime.utcnow()` when writing new code) — see [news_repository.py](../app/services/news_repository.py) for the pattern.
 
+## Research reports
+
+- **Bump `REPORT_VERSION`** ([app/services/report_version.py](../app/services/report_version.py)) in the same PR as any change that alters what a fresh report would contain: tool output, claims, units, derived claims, prompts, the thesis, layout signals. Add a line to its history. Cached reports older than the current version are rebuilt on their next visit (served as-is only when the rebuild can't run), so the fix reaches every ticker without anyone pressing Regenerate. Frontend-only changes and refactors that leave reports identical don't bump it.
+- New `ResearchReport` / `Section` / `Claim` fields get a default, so reports cached before them still parse.
+
 ## Schemas and validation
 
 - Validate every external input at the boundary (router, queue consumer). Never trust upstream data.

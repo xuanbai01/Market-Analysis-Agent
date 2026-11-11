@@ -279,6 +279,10 @@ class ResearchReport(BaseModel):
     sections: list[Section] = Field(default_factory=list)
     overall_confidence: Confidence = Confidence.LOW
     tool_calls_audit: list[str] = Field(default_factory=list)
+    # 2026-11-10 — what this report's content corresponds to; see
+    # app/services/report_version.py. 0 for rows cached before
+    # versioning, which the research route rebuilds on their next visit.
+    report_version: int = Field(default=0, ge=0)
     # Phase 4.1 — top-level metadata for the dashboard hero card.
     # Both default to None so pre-4.1 cached JSONB rows round-trip
     # unchanged. Values are lifted from fetch_fundamentals' name +

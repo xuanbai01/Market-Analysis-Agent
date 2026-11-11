@@ -66,6 +66,7 @@ from app.services.fundamentals import fetch_fundamentals
 from app.services.macro import fetch_macro
 from app.services.news import fetch_news
 from app.services.peers import fetch_peers
+from app.services.report_version import REPORT_VERSION
 from app.services.research_confidence import score_section
 from app.services.research_layout_signals import derive_layout_signals
 from app.services.research_tool_registry import (
@@ -494,6 +495,7 @@ async def compose_research_report(
     return ResearchReport(
         symbol=target,
         generated_at=datetime.now(UTC),
+        report_version=REPORT_VERSION,
         sections=sections,
         overall_confidence=_overall_confidence(sections),
         tool_calls_audit=audit,

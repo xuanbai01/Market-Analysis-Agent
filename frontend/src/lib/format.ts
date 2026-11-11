@@ -5,6 +5,16 @@
  */
 import type { ClaimUnit, ClaimValue } from "./schemas";
 
+/** Plain USD: abbreviate large magnitudes, $ prefix always. */
+function usd(n: number): string {
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  if (abs >= 1e12) return `${sign}$${(abs / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(2)}M`;
+  return `${sign}$${abs.toFixed(2)}`;
+}
+
 /**
  * Render a claim value for display.
  *
@@ -75,14 +85,14 @@ export function formatClaimValue(
           const sign = n < 0 ? "-" : "";
           return `${sign}$${abs.toFixed(2)}`;
         }
-        case "usd": {
-          // Plain USD: abbreviate large magnitudes, $ prefix always.
-          const sign = n < 0 ? "-" : "";
-          if (abs >= 1e12) return `${sign}$${(abs / 1e12).toFixed(2)}T`;
-          if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(2)}B`;
-          if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(2)}M`;
-          return `${sign}$${abs.toFixed(2)}`;
-        }
+        case "usd":
+          return usd(n);
+        case "usd_millions":
+          // FRED retail sales 745021 ($ millions) → "$745.02B".
+          return usd(n * 1e6);
+        case "thousands":
+          // FRED payrolls 12700 (thousands) → "12.70M".
+          return formatClaimValue(n * 1e3, "shares");
         case "ratio":
           // P/E etc. — plain decimal, 2 places, no suffix.
           return n.toFixed(2);

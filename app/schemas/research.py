@@ -39,6 +39,8 @@ ClaimUnit = Literal[
     "shares",          # 134.42M → "134.42M" abbreviated, no $
     "basis_points",    # rare, reserved for explicit bp-shaped deltas
     "percentage_points",  # 0.0188 → "+1.88 pts" — change between two fractions (margin YoY)
+    "usd_millions",    # 745021.0 → "$745.02B" — FRED series reported in $ millions (retail sales)
+    "thousands",       # 12700.0 → "12.70M"  — FRED counts reported in thousands (payrolls)
     "date",            # ISO string passthrough
     "string",          # name, sector tag
 ]

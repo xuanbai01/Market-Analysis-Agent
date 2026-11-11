@@ -144,15 +144,25 @@ def _claim_numeric_values(report: ResearchReport) -> list[float]:
     out: list[float] = []
     for section in report.sections:
         for claim in section.claims:
+            scale = _BASE_UNIT_SCALE.get(claim.unit or "")
+            values: list[float] = []
             v = claim.value
             if isinstance(v, int | float) and not isinstance(v, bool):
-                out.append(float(v))
+                values.append(float(v))
             # History points are validated as floats by
             # ClaimHistoryPoint's field_validator, so no isinstance
             # guard is needed — the schema already rejects str/bool.
-            for point in claim.history:
-                out.append(float(point.value))
+            values.extend(float(point.value) for point in claim.history)
+            out.extend(values)
+            if scale is not None:
+                out.extend(value * scale for value in values)
     return out
+
+
+# 2026-11 — units stored in FRED's scale. The prompt shows them in base
+# units ("$745.02B" for retail sales stored as 745021.0 $ millions), so
+# the scaled-units rule needs the base value too.
+_BASE_UNIT_SCALE: dict[str, float] = {"usd_millions": 1e6, "thousands": 1e3}
 
 
 def _claim_text_numbers(section: Section) -> list[float]:

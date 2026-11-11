@@ -87,7 +87,7 @@ import httpx
 
 from app.core.observability import log_external_call
 from app.core.settings import settings
-from app.schemas.research import Claim, ClaimHistoryPoint, ClaimValue, Source
+from app.schemas.research import Claim, ClaimHistoryPoint, ClaimUnit, ClaimValue, Source
 from app.services.sectors import resolve_sector
 
 # How many monthly observations to ask FRED for per series. ~3 years
@@ -103,6 +103,18 @@ class FredSeries:
     id: str
     label: str
     units: str = ""
+
+
+# 2026-11 — each series' unit as a ``Claim.unit``, so the prompt shows
+# "Retail sales = $745.02B" (what the Macro card shows) instead of FRED's
+# raw "745021.0" ($ millions), which the model copied into prose.
+CLAIM_UNITS: dict[str, ClaimUnit] = {
+    "%": "percent",
+    "index": "ratio",
+    "thousands": "thousands",
+    "$M": "usd_millions",
+    "$/bbl": "usd",
+}
 
 
 # Sector → curated FRED series. Keys must match ``sectors.SECTOR_PEERS``.
@@ -388,6 +400,7 @@ def _build_claims(
         out[f"{s.id}.value"] = Claim(
             description=f"{s.label} (latest observation)",
             value=value,
+            unit=CLAIM_UNITS.get(s.units),
             source=Source(
                 tool=service_id,
                 fetched_at=fetched_at,

@@ -27,11 +27,12 @@
  * a 60 px sparkline next to a number on a phone is more noise than
  * signal. Hidden via Tailwind's ``hidden sm:table-cell``.
  */
-import { Suspense, lazy } from "react";
+import { Suspense } from "react";
 
 import type { Claim, ResearchReport, Section } from "../lib/schemas";
 import { featuredClaim } from "../lib/featured-claim";
 import { formatClaimValue, formatTimestamp } from "../lib/format";
+import { lazyWithReload } from "../lib/lazy-with-reload";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { TrendCell } from "./TrendCell";
 
@@ -41,7 +42,7 @@ import { TrendCell } from "./TrendCell";
 // Macro until 4.3 replaces those cards. Lazy-loaded so recharts
 // (~100 KB gz) stays out of the main bundle; the chunk loads on demand
 // when a section needing a chart appears.
-const SectionChart = lazy(() => import("./SectionChart"));
+const SectionChart = lazyWithReload(() => import("./SectionChart"));
 
 interface Props {
   report: ResearchReport;

@@ -12,7 +12,7 @@
  * The search modal is lazy-loaded so the main bundle pays only the
  * dynamic-import shim.
  */
-import { lazy, Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
 
@@ -28,12 +28,13 @@ import {
   sidebarRecent,
   writeSidebarCollapsed,
 } from "../lib/sidebar";
+import { lazyWithReload } from "../lib/lazy-with-reload";
 import { removeFromWatchlist, useWatchlist } from "../lib/watchlist";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { MarketStrip } from "./MarketStrip";
 import { SidebarShell } from "./SidebarShell";
 
-const SearchModal = lazy(() => import("./search/SearchModal"));
+const SearchModal = lazyWithReload(() => import("./search/SearchModal"));
 
 /** Match Cmd+K on Mac, Ctrl+K elsewhere. */
 function isOpenSearchShortcut(e: KeyboardEvent): boolean {

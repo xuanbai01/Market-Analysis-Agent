@@ -41,15 +41,16 @@ export function indexValue(v: number): string {
 }
 
 /** Period-over-period change of a level: "+18% QoQ", or the absolute
- *  move when the prior value is zero/negative (a % of a loss misleads). */
-export function relativeChange(format: (v: number) => string) {
+ *  move when the prior value is zero/negative (a % of a loss misleads).
+ *  ``period`` names the step: "QoQ" for quarters, "YoY" for years. */
+export function relativeChange(format: (v: number) => string, period = "QoQ") {
   return (now: number, prev: number): string => {
     if (prev > 0) {
       const pct = (now / prev - 1) * 100;
-      return `${pct >= 0 ? "+" : ""}${pct.toFixed(0)}% QoQ`;
+      return `${pct >= 0 ? "+" : ""}${pct.toFixed(0)}% ${period}`;
     }
     const diff = now - prev;
-    return `${diff >= 0 ? "+" : "-"}${format(Math.abs(diff))} QoQ`;
+    return `${diff >= 0 ? "+" : "-"}${format(Math.abs(diff))} ${period}`;
   };
 }
 

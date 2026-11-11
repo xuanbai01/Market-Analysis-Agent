@@ -14,6 +14,10 @@
  *   - extractGrowthChanges(section)     → { rev, gp, opi, fcf, ocf }
  *                                         latest quarter vs the same
  *                                         quarter a year earlier.
+ *   - extractAnnualPanels(section)      → { topLine, earnings } — up to
+ *                                         eleven years from SEC filings
+ *   - extractLongTermGrowth(section)    → { rev, opi, eps, fcf } multiple
+ *                                         + compound annual rate over the span
  *
  * Description matches mirror app/services/fundamentals.py::_DESCRIPTIONS.
  * Tests pin them so a backend rename fails the suite loudly.
@@ -185,5 +189,113 @@ export function extractGrowthChanges(section: Section): Record<GrowthKey, Growth
     opi: change(DESC_OPI),
     fcf: change(DESC_FCF),
     ocf: change(DESC_OCF),
+  };
+}
+
+// ── 2026-11 — ten years of annual per-share history (SEC filings) ──────
+// Mirrors app/services/annual_history.py::DESCRIPTIONS.
+
+export const DESC_REVENUE_ANNUAL = "Revenue per share, annual (SEC filings)";
+export const DESC_OPI_ANNUAL = "Operating income per share, annual (SEC filings)";
+export const DESC_FCF_ANNUAL = "Free cash flow per share, annual (SEC filings)";
+export const DESC_EPS_ANNUAL = "Diluted EPS, annual (SEC filings)";
+
+export type AnnualKey = "rev" | "opi" | "eps" | "fcf";
+
+interface AnnualSpec {
+  key: AnnualKey;
+  description: string;
+  label: string;
+  shortLabel: string;
+  color: string;
+}
+
+// Revenue, operating income and FCF keep their quarterly-view colours;
+// EPS (annual only) takes the slot gross profit has in the quarterly view.
+export const ANNUAL_SPEC: AnnualSpec[] = [
+  { key: "rev", description: DESC_REVENUE_ANNUAL, label: "Revenue", shortLabel: "Rev", color: COLOR_VAL },
+  { key: "opi", description: DESC_OPI_ANNUAL, label: "Op income", shortLabel: "OpI", color: COLOR_CASH },
+  { key: "eps", description: DESC_EPS_ANNUAL, label: "Diluted EPS", shortLabel: "EPS", color: COLOR_QUAL },
+  { key: "fcf", description: DESC_FCF_ANNUAL, label: "FCF", shortLabel: "FCF", color: COLOR_EARN },
+];
+
+export interface AnnualPanels {
+  /** Revenue and operating income per share. */
+  topLine: MultiLineSeries[];
+  /** Diluted EPS and free cash flow per share. */
+  earnings: MultiLineSeries[];
+}
+
+function annualHistory(section: Section, description: string): ClaimHistoryPoint[] {
+  const claim = findClaim(section.claims, description);
+  if (!claim) return [];
+  return claim.history
+    .filter((p) => isFiniteNumber(p.value) && /^\d{4}$/.test(p.period))
+    .sort((a, b) => (a.period < b.period ? -1 : 1));
+}
+
+/**
+ * The annual series as two panels. Each panel gets its own scale: EPS
+ * and FCF per share sit at a fraction of revenue per share and would
+ * flatten on a shared one; every panel labels its axis. Series with
+ * fewer than 2 years are dropped (banks have no FCF, many companies no
+ * operating income line).
+ */
+export function extractAnnualPanels(section: Section): AnnualPanels {
+  const pick = (keys: AnnualKey[]): MultiLineSeries[] =>
+    keys.flatMap((key) => {
+      const spec = ANNUAL_SPEC.find((s) => s.key === key)!;
+      const history = annualHistory(section, spec.description);
+      if (history.length < 2) return [];
+      return [{ label: spec.label, shortLabel: spec.shortLabel, color: spec.color, history }];
+    });
+  return { topLine: pick(["rev", "opi"]), earnings: pick(["eps", "fcf"]) };
+}
+
+/** One annual series from its first year to its latest. */
+export interface LongTermGrowth {
+  firstPeriod: string;
+  lastPeriod: string;
+  firstValue: number;
+  lastValue: number;
+  years: number;
+  /** last ÷ first — null unless both ends are positive. */
+  multiple: number | null;
+  /** Compound annual growth rate as a fraction — null unless both ends are positive. */
+  cagr: number | null;
+  /** last − first, in $/share (shown when a ratio would mislead). */
+  change: number;
+}
+
+/**
+ * Each annual series' growth over its whole span. A ratio of a loss (or
+ * of a zero) misleads, so with a non-positive end only the dollar move
+ * is given. Null for a series with fewer than 2 years.
+ */
+export function extractLongTermGrowth(section: Section): Record<AnnualKey, LongTermGrowth | null> {
+  const growth = (description: string): LongTermGrowth | null => {
+    const h = annualHistory(section, description);
+    if (h.length < 2) return null;
+    const first = h[0];
+    const last = h[h.length - 1];
+    const years = Number(last.period) - Number(first.period);
+    const positive = first.value > 0 && last.value > 0 && years > 0;
+    const multiple = positive ? last.value / first.value : null;
+    return {
+      firstPeriod: first.period,
+      lastPeriod: last.period,
+      firstValue: first.value,
+      lastValue: last.value,
+      years,
+      multiple,
+      cagr: multiple !== null ? multiple ** (1 / years) - 1 : null,
+      change: last.value - first.value,
+    };
+  };
+  return {
+    rev: growth(DESC_REVENUE_ANNUAL),
+    opi: growth(DESC_OPI_ANNUAL),
+    eps: growth(DESC_EPS_ANNUAL),
+    fcf: growth(DESC_FCF_ANNUAL),
   };
 }

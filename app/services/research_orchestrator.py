@@ -59,6 +59,7 @@ from app.schemas.research import (
     SectionSummaries,
 )
 from app.services import llm, research_thesis
+from app.services.annual_history import fetch_annual_history
 from app.services.business_info import fetch_business_info
 from app.services.claim_display import format_claim_line as _format_claim_line
 from app.services.earnings import fetch_earnings
@@ -91,6 +92,8 @@ TOOL_DISPATCH: dict[str, Callable[[str], Awaitable[Any]]] = {
     # ContextBand has data to render.
     "fetch_business_info": fetch_business_info,
     "fetch_news": fetch_news,
+    # 2026-11 — ten years of per-share history from SEC filings.
+    "fetch_annual_history": fetch_annual_history,
 }
 
 

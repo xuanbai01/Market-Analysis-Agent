@@ -45,6 +45,7 @@ import pytest
 from app.schemas.research import Claim, ClaimHistoryPoint
 from app.services import macro as macro_module
 from app.services.macro import (
+    CLAIM_UNITS,
     DEFAULT_SERIES,
     MACRO_HISTORY_LIMIT_MONTHS,
     PROVIDERS,
@@ -193,6 +194,26 @@ async def test_per_series_value_and_date_pass_through(
     # Label comes from the static SECTOR_SERIES map, not the provider.
     series = next(s for s in SECTOR_SERIES["semiconductors"] if s.id == "DGS10")
     assert result["DGS10.label"].value == series.label
+
+
+async def test_value_claims_carry_their_series_unit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2026-11 — without a unit the prompt showed retail sales as FRED's
+    raw "745021.0" ($ millions) and the model copied it into prose."""
+    snapshot = {
+        "UMCSENT": {"value": 48.1, "date": "2026-09-01"},
+        "RSAFS": {"value": 745_021.0, "date": "2026-09-01"},
+    }
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider((snapshot, {})))
+
+    result = await fetch_macro("KO", provider="fake")
+
+    assert result["RSAFS.value"].unit == "usd_millions"
+    assert result["UMCSENT.value"].unit == "ratio"
+    # Every curated unit maps to a claim unit.
+    units = {s.units for series in SECTOR_SERIES.values() for s in series} | {s.units for s in DEFAULT_SERIES}
+    assert units <= set(CLAIM_UNITS)
 
 
 async def test_per_series_missing_observation_yields_none_value(

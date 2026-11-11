@@ -266,3 +266,51 @@ def test_latest_surprise_against_the_long_run_average() -> None:
     gap = d["Latest EPS surprise minus the 20-quarter average surprise"]
     assert gap.value == pytest.approx(0.0137)
     assert gap.unit == "percentage_points"  # prints "+1.37 pts": above, not below
+
+
+# ── Long-term growth from SEC annual history (2026-11) ───────────────
+
+
+def _annual(key: str, points: list[tuple[str, float]]) -> Claim:
+    from app.services.annual_history import DESCRIPTIONS
+
+    return Claim(
+        description=DESCRIPTIONS[key],
+        value=points[-1][1] if points else None,
+        unit="usd_per_share",
+        source=Source(tool="sec.xbrl", fetched_at=datetime(2026, 11, 10, tzinfo=UTC)),
+        history=[ClaimHistoryPoint(period=p, value=v) for p, v in points],
+    )
+
+
+def test_long_term_growth_is_the_compound_annual_rate_between_named_years() -> None:
+    annual = {
+        "revenue_per_share_annual": _annual(
+            "revenue_per_share_annual", [(str(y), v) for y, v in zip(range(2015, 2026), [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 25.937], strict=True)]
+        ),
+    }
+    [claim] = rd.long_term_growth_claims(annual, {})
+    assert claim.description == "Revenue per share, compound annual growth, 2015 → 2025"
+    assert claim.unit == "fraction"
+    # 10 → 25.937 over 10 years ≈ 10% a year.
+    assert claim.value == pytest.approx(0.10, abs=1e-4)
+    assert claim.source.tool == "computed.analytics"
+
+
+def test_long_term_growth_needs_five_points_and_positive_endpoints() -> None:
+    annual = {
+        "revenue_per_share_annual": _annual("revenue_per_share_annual", [("2022", 1.0), ("2023", 2.0), ("2024", 3.0)]),
+        "fcf_per_share_annual": _annual("fcf_per_share_annual", [(str(y), v) for y, v in zip(range(2019, 2026), [-1, 1, 2, 3, 4, 5, 6], strict=True)]),
+    }
+    assert rd.long_term_growth_claims(annual, {}) == []
+
+
+def test_banks_get_no_free_cash_flow_growth() -> None:
+    fundamentals = {"sector_tag": c("banks")}
+    pts = [(str(y), float(y - 2010)) for y in range(2015, 2026)]
+    annual = {
+        "revenue_per_share_annual": _annual("revenue_per_share_annual", pts),
+        "fcf_per_share_annual": _annual("fcf_per_share_annual", pts),
+    }
+    descriptions = [c.description for c in rd.long_term_growth_claims(annual, fundamentals)]
+    assert descriptions == ["Revenue per share, compound annual growth, 2015 → 2025"]

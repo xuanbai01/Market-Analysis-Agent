@@ -52,6 +52,10 @@ export const ClaimUnitSchema = z.enum([
   "shares",
   "basis_points",
   "percentage_points",
+  // 2026-11 — FRED series stored in their own scale (retail sales in
+  // $ millions, payrolls in thousands).
+  "usd_millions",
+  "thousands",
   "date",
   "string",
 ]);

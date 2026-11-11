@@ -11,7 +11,7 @@
  * 5. Returns a fallback message when no series can be rebased.
  */
 import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 
 import { PerShareGrowthCard } from "./PerShareGrowthCard";
 import type { Claim, ClaimHistoryPoint, ClaimValue, Section } from "../lib/schemas";
@@ -223,5 +223,68 @@ describe("PerShareGrowthCard", () => {
       <PerShareGrowthCard ticker="NVDA" section={section(FULL)} />,
     );
     expect(queryByTestId("card-narrative")).toBeNull();
+  });
+
+  // 2026-11 — ten years of annual per-share history from SEC filings.
+  describe("annual view", () => {
+    const years = (values: number[], start = 2015): ClaimHistoryPoint[] =>
+      values.map((value, i) => ({ period: String(start + i), value }));
+    const ANNUAL: Claim[] = [
+      claim("Revenue per share, annual (SEC filings)", 40, years([10, 12, 14, 16, 18, 20, 23, 26, 30, 35, 40])),
+      claim("Operating income per share, annual (SEC filings)", 12, years([3, 3, 4, 4, 5, 6, 7, 8, 9, 10, 12])),
+      claim("Diluted EPS, annual (SEC filings)", 8, years([2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8])),
+      claim("Free cash flow per share, annual (SEC filings)", -1, years([-2, -1.5, -1], 2023)),
+    ];
+
+    it("opens on ten years when SEC history exists", () => {
+      const { getByTestId, container } = render(
+        <PerShareGrowthCard ticker="KO" section={section([...FULL, ...ANNUAL])} />,
+      );
+      expect(getByTestId("per-share-panel-topline").querySelectorAll("path[data-series-line]")).toHaveLength(2);
+      expect(getByTestId("per-share-panel-earnings").querySelectorAll("path[data-series-line]")).toHaveLength(2);
+      expect(container.querySelector("[data-view=annual]")?.getAttribute("aria-pressed")).toBe("true");
+      expect(container.querySelector("[data-view=annual]")?.textContent).toBe("10Y");
+      expect(container.querySelector("[data-view=quarterly]")?.textContent).toBe("5Q");
+      expect(container.textContent).toContain("SEC filings");
+    });
+
+    it("gives each series its multiple, compound rate and span", () => {
+      const { container } = render(
+        <PerShareGrowthCard ticker="KO" section={section([...FULL, ...ANNUAL])} />,
+      );
+      const pills = Array.from(container.querySelectorAll("[data-pill=growth-annual]"));
+      expect(pills).toHaveLength(4);
+      const rev = pills[0].textContent ?? "";
+      expect(rev).toContain("4.0×");
+      expect(rev).toContain("+14.9% / yr");
+      expect(rev).toContain("2015 → 2025");
+    });
+
+    it("shows a loss-making series as its two ends, not a rate", () => {
+      const { container } = render(
+        <PerShareGrowthCard ticker="KO" section={section([...FULL, ...ANNUAL])} />,
+      );
+      const fcf = Array.from(container.querySelectorAll("[data-pill=growth-annual]"))[3].textContent ?? "";
+      expect(fcf).toContain("+$1.00");
+      expect(fcf).toContain("-$2.00 → -$1.00");
+      expect(fcf).toContain("2023 → 2025");
+      expect(fcf).not.toContain("/ yr");
+    });
+
+    it("switches to the quarterly view", () => {
+      const { container, queryByTestId } = render(
+        <PerShareGrowthCard ticker="KO" section={section([...FULL, ...ANNUAL])} />,
+      );
+      fireEvent.click(container.querySelector("[data-view=quarterly]")!);
+      expect(queryByTestId("per-share-panel-topline")).toBeNull();
+      expect(queryByTestId("per-share-panel-income")).not.toBeNull();
+      expect(container.querySelectorAll("[data-pill=growth-change]")).toHaveLength(5);
+    });
+
+    it("has no toggle without SEC history", () => {
+      const { container } = render(<PerShareGrowthCard ticker="KO" section={section(FULL)} />);
+      expect(container.querySelector("[data-view]")).toBeNull();
+      expect(container.textContent).toContain("5Q");
+    });
   });
 });

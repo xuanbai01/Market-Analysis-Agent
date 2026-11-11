@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.schemas.research import Claim, Source
+from app.schemas.research import Claim, ClaimHistoryPoint, Source
 from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
 from app.services.research_derived import DERIVED_TOOL
 from app.services.research_tool_registry import (
@@ -129,6 +129,7 @@ def test_tools_for_full_lists_every_required_tool() -> None:
         "extract_10k_business",
         "fetch_business_info",
         "fetch_news",
+        "fetch_annual_history",
     }
 
 
@@ -255,6 +256,48 @@ def test_capital_allocation_builder_takes_only_cap_alloc_keys() -> None:
     assert "Revenue per share" not in descriptions
     assert "Total debt per share" not in descriptions
     assert "Trailing P/E" not in descriptions
+
+
+def _annual_output() -> dict[str, Claim]:
+    """fetch_annual_history: six years of revenue / EPS / FCF per share,
+    operating income empty (fewer than two points upstream)."""
+    from app.services import annual_history
+
+    years = range(2020, 2026)
+    series = {
+        "revenue_per_share_annual": [ClaimHistoryPoint(period=str(y), value=10.0 + y - 2020) for y in years],
+        "eps_diluted_annual": [ClaimHistoryPoint(period=str(y), value=1.0 + (y - 2020) / 10) for y in years],
+        "fcf_per_share_annual": [ClaimHistoryPoint(period=str(y), value=2.0) for y in years],
+    }
+    return annual_history.build_claims(series)
+
+
+def test_quality_carries_the_annual_sec_series_that_have_history() -> None:
+    """2026-11 — the 10-year per-share view reads these from Quality."""
+    spec = _spec(Focus.FULL, "Quality")
+    assert "fetch_annual_history" in spec.tools_required
+    outputs = {"fetch_fundamentals": _make_fundamentals_output(), "fetch_annual_history": _annual_output()}
+    claims = spec.builder(outputs)
+    descriptions = [c.description for c in claims]
+    assert "Revenue per share, annual (SEC filings)" in descriptions
+    assert "Diluted EPS, annual (SEC filings)" in descriptions
+    assert "Free cash flow per share, annual (SEC filings)" in descriptions
+    # No history upstream → no claim (it would be an empty row).
+    assert "Operating income per share, annual (SEC filings)" not in descriptions
+    assert "Revenue per share, compound annual growth, 2020 → 2025" in descriptions
+    # Derived claims still come last.
+    tool = _tool_claims(claims)
+    assert all(c.source.tool == DERIVED_TOOL for c in claims[len(tool):])
+
+
+def test_quality_drops_annual_free_cash_flow_for_banks() -> None:
+    fundamentals = _make_fundamentals_output()
+    fundamentals["sector_tag"] = _claim("Sector tag", "banks")
+    outputs = {"fetch_fundamentals": fundamentals, "fetch_annual_history": _annual_output()}
+    descriptions = [c.description for c in _spec(Focus.FULL, "Quality").builder(outputs)]
+    assert "Revenue per share, annual (SEC filings)" in descriptions
+    assert not any(d.startswith("Free cash flow per share, annual") for d in descriptions)
+    assert not any(d.startswith("Free cash flow per share, compound") for d in descriptions)
 
 
 # ── ADR 0007 — derived comparison claims ─────────────────────────────

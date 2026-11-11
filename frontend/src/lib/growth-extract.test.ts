@@ -17,8 +17,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DESC_EPS_ANNUAL,
+  DESC_FCF_ANNUAL,
+  DESC_OPI_ANNUAL,
+  DESC_REVENUE_ANNUAL,
+  extractAnnualPanels,
   extractGrowthChanges,
   extractGrowthSeries,
+  extractLongTermGrowth,
   extractPerSharePanels,
 } from "./growth-extract";
 import type { Claim, ClaimHistoryPoint, ClaimValue, Section } from "./schemas";
@@ -248,5 +254,63 @@ describe("extractPerSharePanels", () => {
       ]),
     );
     expect(panels.income.map((s) => s.label)).toEqual(["Gross profit"]);
+  });
+});
+
+// 2026-11 — ten years of annual per-share history from SEC filings.
+describe("annual per-share history", () => {
+  const years = (values: number[], start = 2015): ClaimHistoryPoint[] =>
+    values.map((value, i) => ({ period: String(start + i), value }));
+
+  it("mirrors the backend descriptions", () => {
+    // app/services/annual_history.py::DESCRIPTIONS — a rename must fail here.
+    expect(DESC_REVENUE_ANNUAL).toBe("Revenue per share, annual (SEC filings)");
+    expect(DESC_OPI_ANNUAL).toBe("Operating income per share, annual (SEC filings)");
+    expect(DESC_FCF_ANNUAL).toBe("Free cash flow per share, annual (SEC filings)");
+    expect(DESC_EPS_ANNUAL).toBe("Diluted EPS, annual (SEC filings)");
+  });
+
+  it("splits the series into a top-line panel and an earnings panel", () => {
+    const panels = extractAnnualPanels(
+      section([
+        claim(DESC_REVENUE_ANNUAL, 30, years([10, 12, 15, 20, 30])),
+        claim(DESC_OPI_ANNUAL, 9, years([3, 4, 5, 6, 9])),
+        claim(DESC_EPS_ANNUAL, 6, years([2, 3, 4, 5, 6])),
+        claim(DESC_FCF_ANNUAL, null, []),
+      ]),
+    );
+    expect(panels.topLine.map((s) => s.label)).toEqual(["Revenue", "Op income"]);
+    // No FCF history (a bank) → no FCF line.
+    expect(panels.earnings.map((s) => s.label)).toEqual(["Diluted EPS"]);
+  });
+
+  it("ignores the quarterly claims", () => {
+    const panels = extractAnnualPanels(section([claim("Revenue per share", 3, years([1, 2, 3]))]));
+    expect(panels.topLine).toEqual([]);
+    expect(panels.earnings).toEqual([]);
+  });
+
+  it("gives the multiple and compound annual rate over the span", () => {
+    const g = extractLongTermGrowth(
+      section([claim(DESC_REVENUE_ANNUAL, 40, years([10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40]))]),
+    ).rev!;
+    expect(g.firstPeriod).toBe("2015");
+    expect(g.lastPeriod).toBe("2025");
+    expect(g.years).toBe(10);
+    expect(g.multiple).toBeCloseTo(4);
+    expect(g.cagr).toBeCloseTo(4 ** (1 / 10) - 1);
+  });
+
+  it("gives only the dollar move when an end is a loss", () => {
+    const g = extractLongTermGrowth(section([claim(DESC_EPS_ANNUAL, -0.78, years([-3.82, -2, -0.78], 2023))])).eps!;
+    expect(g.multiple).toBeNull();
+    expect(g.cagr).toBeNull();
+    expect(g.change).toBeCloseTo(3.04);
+  });
+
+  it("is null for a series with fewer than two years", () => {
+    const growth = extractLongTermGrowth(section([claim(DESC_FCF_ANNUAL, 2, years([2]))]));
+    expect(growth.fcf).toBeNull();
+    expect(growth.rev).toBeNull();
   });
 });

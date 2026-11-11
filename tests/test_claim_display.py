@@ -44,6 +44,9 @@ from tests.evals.rubric import score_factuality
         (0.0188, "percentage_points", "+1.88 pts"),
         (-0.005, "percentage_points", "-0.50 pts"),
         (0.0, "percentage_points", "0.00 pts"),
+        (745_021.0, "usd_millions", "$745.02B"),
+        (12_700.0, "thousands", "12.70M"),
+        (850.0, "thousands", "850,000"),
         ("2027-01-28", "date", "2027-01-28"),
         ("Apple Inc.", "string", "Apple Inc."),
         (True, "count", "yes"),
@@ -59,7 +62,7 @@ def test_none_value() -> None:
 
 @pytest.mark.parametrize("value", [0.4879, 7.7375, "megacap_tech", 15])
 def test_unannotated_values_keep_their_raw_form(value: object) -> None:
-    """Claims from tools without unit annotations (peers, earnings, macro)
+    """Claims from tools without unit annotations (peers, some earnings claims)
     keep today's ``repr`` so their prompt lines don't change."""
     assert format_claim_value(value, None) == repr(value)
 
@@ -78,6 +81,8 @@ def test_display_values_still_pass_the_factuality_rubric() -> None:
         (38.1306, "ratio"),
         (131_590_000, "shares"),
         (0.0188, "percentage_points"),
+        (745_021.0, "usd_millions"),
+        (12_700.0, "thousands"),
     ]
     claims = [
         Claim(description=f"metric {i}", value=v, unit=u, source=src)

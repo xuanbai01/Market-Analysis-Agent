@@ -161,3 +161,13 @@ describe("formatAge", () => {
     expect(formatAge("2026-11-08T18:00:30Z", now)).toBe("just now");
   });
 });
+
+// 2026-11 — FRED series stored in their own scale.
+describe("formatClaimValue with FRED-scale units", () => {
+  it("shows $ millions in dollars", () => {
+    expect(formatClaimValue(745021, "usd_millions")).toBe("$745.02B");
+  });
+  it("shows thousands as a count", () => {
+    expect(formatClaimValue(12700, "thousands")).toBe("12.70M");
+  });
+});

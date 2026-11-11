@@ -91,3 +91,40 @@ def test_server_errors_raise_instead_of_caching_an_empty_series(cache_dir: Path,
     with pytest.raises(httpx.HTTPStatusError):
         xbrl.fetch_concept("0000320193", "Capex")
     assert not (cache_dir / "xbrl" / "0000320193" / "Capex.json").exists()
+
+
+# ── Facts with their filing date (2026-11, per-share history) ────────
+
+
+def test_annual_facts_read_any_unit_and_keep_the_filing_date() -> None:
+    """Share counts come in "shares" and EPS in "USD/shares"; the filing
+    date says which stock splits a number already reflects."""
+    body = {
+        "units": {
+            "shares": [
+                {"val": 625_000_000, "frame": "CY2018", "filed": "2021-02-26"},
+                {"val": 24_514_000_000, "frame": "CY2025", "filed": "2026-02-25"},
+                {"val": 6_000_000_000, "frame": "CY2025Q3", "filed": "2025-11-19"},
+            ]
+        }
+    }
+    assert xbrl.annual_facts(body, "shares") == {
+        2018: (625_000_000.0, "2021-02-26"),
+        2025: (24_514_000_000.0, "2026-02-25"),
+    }
+    assert xbrl.annual_facts(body, "USD") == {}
+
+
+def test_annual_series_with_filed_merges_tags_like_annual_series(cache_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeSec({
+        "OldTag": (200, {"units": {"USD": [{"val": 1.0, "frame": "CY2015", "filed": "2016-02-01"}]}}),
+        "NewTag": (200, {"units": {"USD": [
+            {"val": 9.0, "frame": "CY2015", "filed": "2017-02-01"},
+            {"val": 2.0, "frame": "CY2016", "filed": "2017-02-01"},
+        ]}}),
+    })
+    monkeypatch.setattr(xbrl.edgar, "_sec_get", fake)
+    assert xbrl.annual_series_with_filed("0000000001", ["OldTag", "NewTag"]) == {
+        2015: (1.0, "2016-02-01"),
+        2016: (2.0, "2017-02-01"),
+    }

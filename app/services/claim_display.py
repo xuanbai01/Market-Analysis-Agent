@@ -56,6 +56,12 @@ def format_claim_value(value: object, unit: ClaimUnit | None) -> str:
         return f"{sign}${abs_n:.2f}"
     if unit == "usd":
         return f"{sign}${_scaled(abs_n) or f'{abs_n:.2f}'}"
+    if unit == "usd_millions":
+        dollars = abs_n * 1e6
+        return f"{sign}${_scaled(dollars) or f'{dollars:.2f}'}"
+    if unit == "thousands":
+        scaled = _scaled(abs_n * 1e3)
+        return f"{sign}{scaled}" if scaled else _grouped(n * 1e3)
     if unit == "ratio":
         return f"{n:.2f}"
     if unit == "shares":

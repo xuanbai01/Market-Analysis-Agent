@@ -19,12 +19,16 @@ History:
     0  Reports cached before versioning (the field's default).
     1  2026-11-10 — corrected earnings next date, next-quarter consensus
        and quarter labels (#83); titled analyst-view points (#84).
+    2  2026-11-10 — ten years of annual per-share history from SEC filings
+       (revenue, operating income, FCF, diluted EPS) and their compound
+       annual growth, in the Quality section; FRED values carry units, so
+       Macro prose reads "$745.02B" rather than "745021.0".
 """
 from __future__ import annotations
 
 from app.schemas.research import ResearchReport
 
-REPORT_VERSION = 1
+REPORT_VERSION = 2
 
 
 def is_outdated(report: ResearchReport) -> bool:

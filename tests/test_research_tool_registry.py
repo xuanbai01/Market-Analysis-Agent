@@ -603,3 +603,56 @@ def test_a_banks_valuation_leaves_gross_margin_out() -> None:
     claims = _spec(Focus.FULL, "Valuation").builder({"fetch_fundamentals": fundamentals})
 
     assert not any("gross margin" in c.description.lower() for c in claims)
+
+
+# ── Valuation against the company's own history (2026-11) ────────────
+
+
+def _annual_with_multiples() -> dict[str, Claim]:
+    from app.schemas.research import ClaimHistoryPoint
+
+    def series(description: str, values: list[float]) -> Claim:
+        claim = _claim(description, values[-1])
+        return claim.model_copy(
+            update={"history": [ClaimHistoryPoint(period=str(2021 + i), value=v) for i, v in enumerate(values)]}
+        )
+
+    return {
+        "revenue_per_share_annual": series("Revenue per share, annual (SEC filings)", [1.0, 2.0, 3.0, 4.0, 5.0]),
+        "eps_diluted_annual": series("Diluted EPS, annual (SEC filings)", [0.1, 0.2, 0.3, 0.4, 0.5]),
+        "fcf_per_share_annual": series("Free cash flow per share, annual (SEC filings)", [0.1, 0.2, 0.2, 0.3, 0.4]),
+        "pe_annual": series("P/E at fiscal year-end (SEC filings)", [10.0, 12.0, 14.0, 16.0, 18.0]),
+        "ps_annual": series("Price-to-sales at fiscal year-end (SEC filings)", [4.0, 5.0, 6.0, 7.0, 8.0]),
+        "pfcf_annual": series("Price-to-free-cash-flow at fiscal year-end (SEC filings)", [20.0, 22.0, 25.0, 30.0, 26.0]),
+    }
+
+
+def test_valuation_carries_the_year_end_multiples_and_their_comparisons() -> None:
+    outputs = {"fetch_fundamentals": _make_fundamentals_output(), "fetch_annual_history": _annual_with_multiples()}
+
+    descriptions = [c.description for c in _spec(Focus.FULL, "Valuation").builder(outputs)]
+
+    assert "P/E at fiscal year-end (SEC filings)" in descriptions
+    assert "Price-to-sales at fiscal year-end (SEC filings)" in descriptions
+    assert "Median P/E across 5 fiscal year-ends (2021–2025)" in descriptions
+    assert any(d.startswith("Trailing P/E vs its own median of 14.00") for d in descriptions)
+    assert "fetch_annual_history" in _spec(Focus.FULL, "Valuation").tools_required
+
+
+def test_quality_keeps_the_per_share_series_and_not_the_multiples() -> None:
+    outputs = {"fetch_fundamentals": _make_fundamentals_output(), "fetch_annual_history": _annual_with_multiples()}
+
+    descriptions = {c.description for c in _spec(Focus.FULL, "Quality").builder(outputs)}
+
+    assert "Revenue per share, annual (SEC filings)" in descriptions
+    assert not any("fiscal year-end" in d for d in descriptions)
+
+
+def test_a_multiple_with_no_history_stays_out_of_valuation() -> None:
+    annual = _annual_with_multiples()
+    annual["pfcf_annual"] = _claim("Price-to-free-cash-flow at fiscal year-end (SEC filings)", None)
+    outputs = {"fetch_fundamentals": _make_fundamentals_output(), "fetch_annual_history": annual}
+
+    descriptions = {c.description for c in _spec(Focus.FULL, "Valuation").builder(outputs)}
+
+    assert "Price-to-free-cash-flow at fiscal year-end (SEC filings)" not in descriptions

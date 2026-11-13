@@ -204,3 +204,30 @@ def test_share_counts_fall_back_to_basic_in_years_with_no_diluted_count(
         2024: 4_298.0,
         2025: 4_305.0,
     }
+
+
+# ── Period ends (2026-11, valuation history) ─────────────────────────
+
+
+def test_period_ends_come_from_the_annual_frames(cache_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fiscal year is priced on its own last day: Apple's ends in late
+    September, so the calendar frame alone does not say when."""
+    body = {"units": {"USD": [
+        {"val": 1.0, "frame": "CY2024", "end": "2024-09-28", "filed": "2024-11-01"},
+        {"val": 2.0, "frame": "CY2025", "end": "2025-09-27", "filed": "2025-10-31"},
+        {"val": 0.5, "frame": "CY2025Q3", "end": "2025-06-28", "filed": "2025-08-01"},
+        {"val": 3.0, "end": "2023-09-30", "filed": "2023-11-03"},  # no frame: superseded
+    ]}}
+    monkeypatch.setattr(xbrl.edgar, "_sec_get", FakeSecByCik({("0000320193", "Revenues"): body}))
+
+    assert xbrl.annual_period_ends("0000320193", ["Revenues"]) == {2024: "2024-09-28", 2025: "2025-09-27"}
+
+
+def test_period_ends_follow_a_successor_registrant_too(cache_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    new, old = "0000000002", "0000000001"
+    monkeypatch.setattr(sec_registrants, "PREDECESSOR_CIKS", {new: (old,)})
+    monkeypatch.setattr(xbrl.edgar, "_sec_get", FakeSecByCik({
+        (old, "Revenues"): {"units": {"USD": [{"val": 1.0, "frame": "CY2025", "end": "2025-12-31", "filed": "2026-02-18"}]}},
+    }))
+
+    assert xbrl.annual_period_ends(new, ["Revenues"]) == {2025: "2025-12-31"}

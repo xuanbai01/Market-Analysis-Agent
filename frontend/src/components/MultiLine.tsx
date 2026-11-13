@@ -18,7 +18,9 @@
  *     so lines that finish together stay legible.
  *   - Hover: a guide at the nearest period and a readout listing every
  *     series at that period (plus ``formatChange`` vs the prior period).
- *   - ``yDomain`` lets sibling charts share one scale.
+ *   - ``yDomain`` lets sibling charts share one scale. A point outside
+ *     it breaks the line and is marked by a triangle at the plot edge
+ *     (2026-11: a line to an off-scale point ran out of the chart).
  *   - Drawn at the container's measured pixel width, so labels stay a
  *     true 11 px in any card instead of shrinking with a fixed viewBox
  *     (``width`` is the fallback before measurement and in tests).
@@ -57,12 +59,19 @@ interface Props {
   formatChange?: (now: number, prev: number) => string;
   /** Extend the scale to include zero (and draw the zero baseline). */
   includeZero?: boolean;
-  /** Fixed raw [min, max] so sibling charts share one scale. */
+  /** Fixed raw [min, max] so sibling charts share one scale. A point
+   *  outside the resulting scale is not drawn to: the line breaks there
+   *  and a small triangle at the plot's edge marks the period. */
   yDomain?: [number, number];
   /** Emphasized reference line, e.g. 100 for an indexed chart. */
   baseline?: number;
   /** Formats period labels and the hover header; defaults to "Q3 '25". */
   formatPeriod?: (period: string) => string;
+  /** Every slot on the period axis, in order. Without it the axis is
+   *  the periods that have a point, so a skipped year closes up and the
+   *  line joins its neighbours; with it, a slot with no point stays on
+   *  the axis and the line breaks across it. */
+  periodAxis?: string[];
   ariaLabel?: string;
 }
 
@@ -161,6 +170,7 @@ export function MultiLine({
   yDomain,
   baseline,
   formatPeriod = shortPeriod,
+  periodAxis,
   ariaLabel,
 }: Props) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -183,9 +193,9 @@ export function MultiLine({
     .map((s) => ({ ...s, history: sortedHistory(s.history) }));
   if (drawable.length === 0) return null;
 
-  const periods = Array.from(
-    new Set(drawable.flatMap((s) => s.history.map((p) => p.period))),
-  ).sort();
+  const periods =
+    periodAxis ??
+    Array.from(new Set(drawable.flatMap((s) => s.history.map((p) => p.period)))).sort();
   const periodIndex = new Map(periods.map((p, i) => [p, i]));
 
   // ── Scale ──────────────────────────────────────────────────────────
@@ -231,7 +241,7 @@ export function MultiLine({
     .map((s, i) => ({
       key: s.label,
       text: endTexts[i],
-      y: yOf(s.history[s.history.length - 1].value),
+      y: Math.max(PAD_TOP, Math.min(plotBottom, yOf(s.history[s.history.length - 1].value))),
     }))
     .sort((a, b) => a.y - b.y);
   for (let i = 1; i < endLabels.length; i++) {
@@ -347,9 +357,28 @@ export function MultiLine({
 
           {/* Lines + markers. */}
           {drawable.map((s) => {
-            const pts = s.history.map((p) => ({ x: xOf(p.period), y: yOf(p.value) }));
-            const d = pts
-              .map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
+            const all = s.history
+              .filter((p) => periodIndex.has(p.period))
+              .map((p) => ({
+              slot: periodIndex.get(p.period) ?? 0,
+              x: xOf(p.period),
+              y: yOf(p.value),
+              // Only a fixed yDomain can leave a point outside the ticks.
+              off: p.value > yHi ? ("above" as const) : p.value < yLo ? ("below" as const) : null,
+            }));
+            // With an explicit axis, a skipped slot is missing data.
+            const starts = (i: number) =>
+              i === 0 ||
+              all[i - 1].off !== null ||
+              (periodAxis !== undefined && all[i].slot !== all[i - 1].slot + 1);
+            const pts = all.filter((p) => p.off === null);
+            // The line restarts after a point it can't reach, so it never
+            // leaves the plot or implies a slope to an undrawn value.
+            const d = all
+              .map((p, i) =>
+                p.off !== null ? "" : `${starts(i) ? "M" : "L"}${p.x.toFixed(2)},${p.y.toFixed(2)}`,
+              )
+              .filter(Boolean)
               .join(" ");
             const marked = markAll ? pts : pts.slice(-1);
             return (
@@ -363,6 +392,24 @@ export function MultiLine({
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
+                {all
+                  .filter((p) => p.off !== null)
+                  .map((p, i) => {
+                    const up = p.off === "above";
+                    const tip = up ? PAD_TOP - 2 : plotBottom + 2;
+                    const base = up ? PAD_TOP + 6 : plotBottom - 6;
+                    return (
+                      <path
+                        key={`off-${i}`}
+                        data-testid="multi-line-off-scale"
+                        data-direction={p.off ?? undefined}
+                        d={`M${p.x.toFixed(2)},${tip} L${(p.x + 5).toFixed(2)},${base} L${(p.x - 5).toFixed(2)},${base} Z`}
+                        fill={s.color}
+                        stroke={MARKER_RING}
+                        strokeWidth={1}
+                      />
+                    );
+                  })}
                 {marked.map((p, i) => (
                   <circle
                     key={i}

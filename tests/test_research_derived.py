@@ -322,3 +322,83 @@ def test_banks_get_no_free_cash_flow_growth() -> None:
     }
     descriptions = [c.description for c in rd.long_term_growth_claims(annual, fundamentals)]
     assert descriptions == ["Revenue per share, compound annual growth, 2015 → 2025"]
+
+
+def annual(values: list[float], first_year: int = 2021) -> Claim:
+    """A year-end multiple series, one point per fiscal year."""
+    return Claim(
+        description="x",
+        value=values[-1],
+        unit="ratio",
+        source=Source(tool="sec.xbrl", fetched_at=FETCHED),
+        history=[ClaimHistoryPoint(period=str(first_year + i), value=v) for i, v in enumerate(values)],
+    )
+
+
+ANNUAL = {
+    "pe_annual": annual([10.0, 12.0, 14.0, 16.0, 18.0]),
+    "ps_annual": annual([4.0, 5.0, 6.0, 7.0, 8.0]),
+    "pfcf_annual": annual([20.0, 22.0, 25.0, 30.0, 26.0]),
+}
+
+
+class TestOwnHistory:
+    """ADR 0004 named this gap first: is it expensive against its own
+    history? Today's multiple against the median of its fiscal year-ends."""
+
+    def test_the_median_of_the_year_end_readings(self) -> None:
+        d = by_description(rd.valuation_history_claims(FUND, ANNUAL))
+        median = d["Median P/E across 5 fiscal year-ends (2021–2025)"]
+        assert median.value == pytest.approx(14.0)
+        assert median.unit == "ratio"
+        assert d["Median price-to-sales across 5 fiscal year-ends (2021–2025)"].value == pytest.approx(6.0)
+        assert d["Median price-to-free-cash-flow across 5 fiscal year-ends (2021–2025)"].value == pytest.approx(25.0)
+
+    def test_todays_multiple_against_that_median(self) -> None:
+        d = by_description(rd.valuation_history_claims(FUND, ANNUAL))
+        # FUND: trailing P/E 28, P/S 8.
+        pe = d["Trailing P/E vs its own median of 14.00 across 5 fiscal year-ends: premium (+) or discount (−)"]
+        assert pe.value == pytest.approx(1.0)
+        assert pe.unit == "fraction"
+        ps = d["Price-to-sales vs its own median of 6.00 across 5 fiscal year-ends: premium (+) or discount (−)"]
+        assert ps.value == pytest.approx(8 / 6 - 1)
+
+    def test_todays_price_to_free_cash_flow_is_price_to_sales_over_the_trailing_fcf_margin(self) -> None:
+        d = by_description(rd.valuation_history_claims(FUND, ANNUAL))
+        today = d["Price-to-free-cash-flow (trailing 12 months)"]
+        assert today.value == pytest.approx(8.0 / (FCF_TTM / REV_TTM))
+        assert today.unit == "ratio"
+        gap = d[
+            "Price-to-free-cash-flow vs its own median of 25.00 across 5 fiscal year-ends: "
+            "premium (+) or discount (−)"
+        ]
+        assert gap.value == pytest.approx(today.value / 25 - 1)
+
+    def test_a_history_too_short_to_have_a_median_says_nothing(self) -> None:
+        short = {**ANNUAL, "pe_annual": annual([10.0, 12.0, 14.0, 16.0])}
+        d = by_description(rd.valuation_history_claims(FUND, short))
+        assert not any("P/E" in k for k in d)
+        assert any(k.startswith("Median price-to-sales") for k in d)
+
+    def test_a_loss_today_keeps_the_median_and_drops_the_comparison(self) -> None:
+        losing = {**FUND, "trailing_pe": c(None)}
+        d = by_description(rd.valuation_history_claims(losing, ANNUAL))
+        assert "Median P/E across 5 fiscal year-ends (2021–2025)" in d
+        assert not any(k.startswith("Trailing P/E vs its own median") for k in d)
+
+    def test_a_bank_has_no_free_cash_flow_multiple(self) -> None:
+        bank = {**FUND, "sector_tag": c("banks")}
+        text = " ".join(cl.description for cl in rd.valuation_history_claims(bank, ANNUAL)).lower()
+        assert "free-cash-flow" not in text
+        assert "median p/e" in text
+
+    def test_without_annual_history_only_todays_price_to_fcf_remains(self) -> None:
+        d = by_description(rd.valuation_history_claims(FUND, None))
+        assert set(d) == {"Price-to-free-cash-flow (trailing 12 months)"}
+        assert rd.valuation_history_claims(None, None) == []
+
+    def test_every_claim_is_sourced_as_computed_with_its_formula(self) -> None:
+        for claim in rd.valuation_history_claims(FUND, ANNUAL):
+            assert claim.source.tool == rd.DERIVED_TOOL
+            assert claim.source.detail
+            assert claim.unit is not None

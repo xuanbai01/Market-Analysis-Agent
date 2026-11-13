@@ -81,6 +81,10 @@ def test_an_unadjusted_split_cuts_the_history_at_the_jump() -> None:
 def test_claims_keep_a_stable_shape() -> None:
     claims = ah.build_claims(ah.per_share_series(raw()))
     assert set(claims) == set(ah.CLAIM_KEYS)
+    # The year-end multiples are part of the shape even with no prices.
+    assert set(ah.CLAIM_KEYS) == set(ah.PER_SHARE_KEYS) | {"pe_annual", "ps_annual", "pfcf_annual"}
+    assert claims["pe_annual"].value is None
+    assert claims["pe_annual"].unit == "ratio"
     rev = claims["revenue_per_share_annual"]
     assert rev.description == "Revenue per share, annual (SEC filings)"
     assert rev.unit == "usd_per_share"
@@ -119,3 +123,53 @@ async def test_fetch_uses_the_provider_and_uppercases_the_symbol(monkeypatch: py
 async def test_unknown_provider_raises() -> None:
     with pytest.raises(ValueError):
         await ah.fetch_annual_history("NVDA", provider="nope")
+
+
+# ── Year-end multiples (2026-11, valuation history) ──────────────────
+
+PRICED = {
+    # NVDA's fiscal years end in late January of the next calendar year.
+    "period_ends": {2018: "2019-01-27", 2019: "2020-01-26", 2025: "2026-01-25"},
+    "closes": [("2019-01-25", 4.0), ("2020-01-24", 6.25), ("2026-01-23", 176.2)],
+}
+
+
+def test_year_end_multiples_divide_the_close_by_the_split_adjusted_figures() -> None:
+    series = ah.all_series(raw(**PRICED))
+
+    # 2018: revenue 11.7e9 over 625M x 40 shares = $0.468; close $4.00.
+    assert by_year(series["ps_annual"]) == {
+        "2018": round(4.0 / (11.7e9 / 25e9), 4),
+        "2019": round(6.25 / (10.9e9 / 24.72e9), 4),
+        "2025": round(176.2 / (216e9 / 24.514e9), 4),
+    }
+    # EPS filed before both splits: 6.63 / 40.
+    assert by_year(series["pe_annual"]) == {
+        "2018": round(4.0 / (6.63 / 40), 4),
+        "2025": round(176.2 / 4.90, 4),
+    }
+    assert by_year(series["pfcf_annual"]) == {
+        "2019": round(6.25 / ((4.8e9 - 0.5e9) / 24.72e9), 4),
+        "2025": round(176.2 / ((100e9 - 3.4e9) / 24.514e9), 4),
+    }
+    # The per-share series are untouched.
+    assert by_year(series["revenue_per_share_annual"])["2025"] == round(216e9 / 24.514e9, 4)
+
+
+def test_without_prices_the_multiples_are_empty_and_the_rest_stands() -> None:
+    series = ah.all_series(raw())
+    assert series["pe_annual"] == [] and series["ps_annual"] == [] and series["pfcf_annual"] == []
+    assert series["revenue_per_share_annual"]
+
+
+async def test_fetch_returns_the_multiples_as_ratio_claims(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(ah.PROVIDERS, "fake", lambda _symbol: raw(**PRICED))
+
+    claims = await ah.fetch_annual_history("NVDA", provider="fake")
+
+    ps = claims["ps_annual"]
+    assert ps.description == "Price-to-sales at fiscal year-end (SEC filings)"
+    assert ps.unit == "ratio"
+    assert ps.source.tool == "sec.xbrl"
+    assert [p.period for p in ps.history] == ["2018", "2019", "2025"]
+    assert ps.value == ps.history[-1].value

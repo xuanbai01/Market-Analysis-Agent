@@ -322,3 +322,72 @@ describe("MultiLine — axes, baseline, markers, labels, hover", () => {
     expect(getByTestId("multi-line-tooltip").textContent).toMatch(/QoQ/);
   });
 });
+
+describe("MultiLine — a point outside a fixed scale (2026-11)", () => {
+  const history = [25, 28, 158, 30, 27].map((value, i) => ({ period: String(2021 + i), value }));
+  const series = [{ label: "P/E", color: "#6cb6ff", history }];
+
+  it("breaks the line at the point instead of drawing out of the plot", () => {
+    const { container } = render(<MultiLine series={series} yDomain={[25, 30]} formatPeriod={(p) => p} />);
+    const d = container.querySelector("[data-series-line='P/E']")?.getAttribute("d") ?? "";
+    // Two strokes: 2021-2022, then 2024-2025.
+    expect(d.match(/M/g)).toHaveLength(2);
+    expect(d.match(/L/g)).toHaveLength(2);
+    // Nothing is drawn above the plot's top padding.
+    const ys = [...d.matchAll(/,(-?[\d.]+)/g)].map((m) => Number(m[1]));
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("marks the off-scale period with a triangle at the top edge and no dot", () => {
+    const { container } = render(<MultiLine series={series} yDomain={[25, 30]} formatPeriod={(p) => p} />);
+    const marks = container.querySelectorAll("[data-testid='multi-line-off-scale']");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].getAttribute("data-direction")).toBe("above");
+    expect(container.querySelectorAll("[data-testid='multi-line-marker']")).toHaveLength(4);
+  });
+
+  it("draws every point when the scale is automatic", () => {
+    const { container } = render(<MultiLine series={series} formatPeriod={(p) => p} />);
+    expect(container.querySelectorAll("[data-testid='multi-line-off-scale']")).toHaveLength(0);
+    expect(container.querySelectorAll("[data-testid='multi-line-marker']")).toHaveLength(5);
+  });
+
+  it("keeps the end label inside the plot when the last point is off the scale", () => {
+    const tail = [25, 28, 30, 27, 158].map((value, i) => ({ period: String(2021 + i), value }));
+    const { container } = render(
+      <MultiLine series={[{ label: "P/E", color: "#6cb6ff", history: tail }]} yDomain={[25, 30]} height={150} />,
+    );
+    const y = Number(container.querySelector("[data-testid='multi-line-end-label']")?.getAttribute("y"));
+    expect(y).toBeGreaterThan(0);
+    expect(y).toBeLessThan(150);
+  });
+});
+
+describe("MultiLine — an explicit period axis (2026-11)", () => {
+  // A loss year has no P/E: 2023 is missing.
+  const history = [
+    { period: "2021", value: 20 },
+    { period: "2022", value: 22 },
+    { period: "2024", value: 14 },
+    { period: "2025", value: 18 },
+  ];
+  const series = [{ label: "P/E", color: "#6cb6ff", history }];
+  const axis = ["2021", "2022", "2023", "2024", "2025"];
+
+  it("keeps the empty year's slot and breaks the line across it", () => {
+    const { container } = render(<MultiLine series={series} periodAxis={axis} formatPeriod={(p) => p} />);
+    const d = container.querySelector("[data-series-line='P/E']")?.getAttribute("d") ?? "";
+    expect(d.match(/M/g)).toHaveLength(2);
+    const xs = [...container.querySelectorAll("[data-testid='multi-line-marker']")].map((m) =>
+      Number(m.getAttribute("cx")),
+    );
+    // 2022 → 2024 spans two slots; 2021 → 2022 spans one.
+    expect(xs[2] - xs[1]).toBeCloseTo(2 * (xs[1] - xs[0]), 1);
+  });
+
+  it("without an axis the years close up, as before", () => {
+    const { container } = render(<MultiLine series={series} formatPeriod={(p) => p} />);
+    const d = container.querySelector("[data-series-line='P/E']")?.getAttribute("d") ?? "";
+    expect(d.match(/M/g)).toHaveLength(1);
+  });
+});

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from statistics import median
 from typing import Any
 
 from app.schemas.research import Claim, ClaimHistoryPoint, ClaimUnit, Source
@@ -447,4 +448,78 @@ def long_term_growth_claims(annual: Any, fundamentals: Any) -> list[Claim]:
             f"({key}[{last.period}] ÷ {key}[{first.period}])^(1/{years}) − 1",
             a,
         ))
+    return out
+
+
+# ── Valuation against the company's own history ──────────────────────
+
+# (year-end series, today's multiple as the prose names it, name in "median …")
+_OWN_HISTORY: tuple[tuple[str, str, str], ...] = (
+    ("pe_annual", "Trailing P/E", "P/E"),
+    ("ps_annual", "Price-to-sales", "price-to-sales"),
+    ("pfcf_annual", "Price-to-free-cash-flow", "price-to-free-cash-flow"),
+)
+
+
+def _trailing_price_to_fcf(f: Claims) -> float | None:
+    """Today's price over trailing free cash flow per share, as
+    price-to-sales ÷ the trailing FCF margin. None for a bank or when
+    trailing free cash flow isn't positive."""
+    if _is_balance_sheet_business(f):
+        return None
+    margin = _ratio(_ttm(f, "fcf_per_share"), _ttm(f, "revenue_per_share"))
+    price_to_sales = _num(f, "p_s")
+    if margin is None or margin <= 0 or price_to_sales is None or price_to_sales <= 0:
+        return None
+    return price_to_sales / margin
+
+
+def valuation_history_claims(fundamentals: Any, annual: Any) -> list[Claim]:
+    """Today's multiples against the company's own fiscal year-ends
+    (``valuation_history.py``): the median of each year-end series, and
+    today's trailing multiple as a premium or discount to it. A median
+    needs ``MIN_ANNUAL_POINTS`` year-ends; a loss today drops the
+    comparison and keeps the median.
+
+    The year-end points are fiscal-year figures and today's are trailing
+    twelve months, which the descriptions say.
+    """
+    f, a = _claims(fundamentals), _claims(annual)
+    out: list[Claim] = []
+
+    price_to_fcf = _trailing_price_to_fcf(f)
+    if price_to_fcf is not None:
+        out.append(_claim(
+            "Price-to-free-cash-flow (trailing 12 months)",
+            price_to_fcf,
+            "ratio",
+            "p_s ÷ (Σ4Q fcf_per_share / Σ4Q revenue_per_share)",
+            f,
+        ))
+
+    today = {"pe_annual": _num(f, "trailing_pe"), "ps_annual": _num(f, "p_s"), "pfcf_annual": price_to_fcf}
+    bank = _is_balance_sheet_business(f)
+    for key, today_label, median_label in _OWN_HISTORY:
+        points = _history(a, key)
+        if len(points) < MIN_ANNUAL_POINTS or (bank and key == "pfcf_annual"):
+            continue
+        mid = median(p.value for p in points)
+        span = f"{len(points)} fiscal year-ends"
+        out.append(_claim(
+            f"Median {median_label} across {span} ({points[0].period}–{points[-1].period})",
+            mid,
+            "ratio",
+            f"median({key})",
+            a,
+        ))
+        now = today[key]
+        if now is not None and now > 0 and mid > 0:
+            out.append(_claim(
+                f"{today_label} vs its own median of {mid:.2f} across {span}: premium (+) or discount (−)",
+                now / mid - 1,
+                "fraction",
+                f"today's trailing multiple ÷ median({key}) − 1",
+                f,
+                a,
+            ))
     return out

@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Workstream A2 (fixes from the XOM check)** is in review on `fix/sec-successor-and-oil-peers`. **B is next** — see the plan below. A (cleanup) merged as #92.
+- **Workstream B (valuation against own history)** is in review on `feature/valuation-history`. **C is next** and starts with a design to confirm. A merged as #92, A2 as #93.
 
 ## Plan — after Phase 5 (2026-11-13)
 
@@ -31,7 +31,7 @@ Owner actions (they need an account or a decision):
 - [ ] **`docs/screenshots/`** (the Strata mockups the archive links to) is untracked: commit it or delete it.
 - [ ] **Branch protection on `main`**, and `ANTHROPIC_API_KEY` as a repo secret for the AI PR review job.
 
-### A2. Fixes from the XOM check *(branch `fix/sec-successor-and-oil-peers`)*
+### A2. Fixes from the XOM check ✅ *(#93, merged 2026-11-13)*
 
 These change report content, so they come before B, which builds on the same SEC history.
 
@@ -42,15 +42,15 @@ These change report content, so they come before B, which builds on the same SEC
 - [x] **One basis for gross margin** (#20) — the Quality claim is the latest quarter of its own history; Yahoo's trailing figure is a separate Valuation claim that the peer comparison and the scatter use.
 - [x] **`REPORT_VERSION` 3**; XOM added to the golden set (six cases).
 
-### B. Valuation against the company's own history *(branch `feature/valuation-history`)*
+### B. Valuation against the company's own history *(branch `feature/valuation-history`, in review)*
 
-ADR 0004 called "is this expensive versus its own history" the most-cited gap; the Valuation card still compares only against peers. The ten-year per-share history (#90) supplies the denominators.
+ADR 0004 called "is this expensive versus its own history" the most-cited gap; the Valuation card compared only against peers.
 
-- [ ] **`fetch_valuation_history` tool** (`app/services/valuation_history.py`) — fiscal-year-end price ÷ that year's diluted EPS, revenue per share and FCF per share gives P/E, P/S and P/FCF for up to ten years. Needs ten years of closes (the price route stops at 5Y): split-adjusted but not dividend-adjusted, to match the split-adjusted per-share figures. A loss year has no P/E (P/S still draws). Banks: P/E and P/S only.
-- [ ] **Claims** in the Valuation section, with history, plus **derived claims** in `research_derived.py`: the ten-year median of each multiple, today's multiple against that median (premium or discount), and where today sits in the ten-year range. Each description names its basis (fiscal-year multiple vs today's trailing multiple).
-- [ ] **Prose and thesis** pick the claims up through the existing claim lines; **bump `REPORT_VERSION`**; live golden eval ≥ 0.97 on every golden ticker.
-- [ ] **ValuationCard** — an own-history panel: one multiple at a time (P/E · P/S · P/FCF), a yearly line, the median, today marked. Read the dataviz rules before drawing.
-- [ ] **Data checks** on KO, NVDA (splits), AAPL (September year end), JPM (bank), RIVN (losses).
+- [x] **Year-end multiples** — `fetch_annual_history` also prices each fiscal year (`app/services/valuation_history.py`): the close on the year's last trading day over that year's diluted EPS, revenue per share and FCF per share. Built into the existing tool, not a new one, so one SEC read serves both. Loss years have no earnings multiple; a multiple above 200 is left out; banks get no cash-flow multiple.
+- [x] **Claims** — the three series in the Valuation section, plus derived claims: the median of each, today's trailing multiple as a premium or discount to it, and today's price-to-free-cash-flow.
+- [x] **Prose and thesis** read them through the existing claim lines. Both prompts gained a rule that a fiscal-year figure is named by its year, after the first report called one "today". `REPORT_VERSION` 4.
+- [x] **ValuationCard** — "Against its own history": one small chart per multiple, each on its own scale, the median as a reference line, today at the end of the line. A year more than four times the median is named instead of drawn.
+- [x] **Data checks** on KO, NVDA (splits), AAPL (September year end), JPM (bank), RIVN (losses) and XOM (predecessor registrant).
 
 ### C. Make it showable *(C2 needs the owner's go-ahead on the design before any code)*
 
@@ -63,7 +63,7 @@ ADR 0004 called "is this expensive versus its own history" the most-cited gap; t
 - [ ] **More lenses** — R&D intensity, SBC ÷ revenue, buybacks vs dividends for the megacap group; `lens.py` and `xbrl.py` generalize. A trailing-12-month point for the partial year is the other open idea.
 - [ ] **Insider activity** — `form_4.py` (tested since Phase 2) has never reached the dashboard; a section and a card would serve the catalyst workflow. Decide `holdings_13f.py` at the same time: surface it or delete it.
 - [ ] **Predecessor registrants for older reorganizations** — a company that moved to a new registrant years ago still has its 10-Ks, but its ten-year history stops at the move (candidates to check against SEC: DIS 2019, CI 2018, AVGO 2018, CHTR 2016, LIN 2018). Each is one verified line in `sec_registrants.py`; a merger shows up as a share-count jump, which the existing guard cuts at.
-- [ ] **Split modules past the 400-line convention when next touched** — `research_orchestrator.py` (619), `ten_k.py` (614), `earnings.py` (532), `fundamentals.py` (520).
+- [ ] **Split modules past the 400-line convention when next touched** — `research_orchestrator.py`, `ten_k.py`, `earnings.py`, `fundamentals.py` and `research_derived.py` (the last grew past 500 lines with the own-history claims).
 
 Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a filing-level XBRL parser), the 4.6.B compare narrative, the Sonnet comparison run of the golden eval.
 
@@ -81,6 +81,8 @@ If you're picking this up after a gap:
 - **Cancel-on-navigate** (old Bug 8): leaving a ticker page mid-generation doesn't abort the request. Hasn't bitten in dogfood.
 - **Help overlay (`?` shortcut)** — still deferred; ⌘K is the only shortcut.
 - **The EDGAR disk cache never looks for a newer filing** once it holds as many as a call asks for (`edgar._try_cache`): a machine that cached two 10-Ks keeps serving them after a third is filed. Fly's disk is wiped on every stop, so production recovers by itself; a long-lived local `.edgar_cache` does not. Found 2026-11-13, not fixed.
+- **Yahoo's `info` can come back partial.** One KO fetch on 2026-11-13 had no price-to-sales, EV/EBITDA or gross margin; the report then shows "—" in those cells and "no trailing figure today" on two own-history panels until it is regenerated. A retry, or a fallback from the latest close and trailing per-share figures, would fix it. Not fixed.
+- **Alphabet's annual history starts in 2022.** Before then it tagged share counts per share class, which the SEC company-concept API doesn't return, so GOOGL has four years of per-share figures and multiples. The same limit applies to any company that reports shares only by class.
 - **XBRL revenue tags can mix definitions across years.** `xbrl.annual_series` takes the first tag that has a year, and XOM's 2017–2021 revenue comes from a narrower tag than the years around it (about 3% lower). The ends of its ten-year series are on one tag, so the growth rate is unaffected. Found 2026-11-13, not fixed.
 
 **[lessons.md](lessons.md)** — read before non-trivial work to avoid retreading earlier mistakes.

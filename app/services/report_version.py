@@ -29,12 +29,16 @@ History:
        into integrated majors and producers; gross margin's snapshot
        is the latest quarter of its history, with Yahoo's trailing
        figure as a separate Valuation claim for the peer comparison.
+    4  2026-11-13 — valuation against the company's own history: P/E,
+       price-to-sales and price-to-free-cash-flow at each fiscal
+       year-end, their medians, and today's trailing multiples as a
+       premium or discount to them, in the Valuation section.
 """
 from __future__ import annotations
 
 from app.schemas.research import ResearchReport
 
-REPORT_VERSION = 3
+REPORT_VERSION = 4
 
 
 def is_outdated(report: ResearchReport) -> bool:

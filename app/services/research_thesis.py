@@ -108,6 +108,10 @@ claims. If a sector note is given, follow it.
 4. No forecasts, price targets or advice. Hedged interpretation \
 ("suggests", "leaves less room for") is fine.
 5. Plain prose, no markdown.
+6. A value is as of when its description says: a claim described as \
+"at fiscal year-end" or "annual" belongs to the fiscal year its history \
+ends on, not to today. Say "today" or "currently" only for trailing \
+figures and for the claims that compare today with a median.
 """
 
 

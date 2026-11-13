@@ -5,7 +5,7 @@ An **AI Equity Research Assistant**. Open a ticker and get a research dashboard:
 - **Dashboard:** <https://market-analysis-agent-red.vercel.app> (sign-in with the shared secret; internal use for now)
 - **API:** <https://market-analysis-agent.fly.dev/docs>
 
-> **Status — Phase 4 done (2026-11).** The symbol-centric dashboard ([ADR 0005](docs/adr/0005-symbol-centric-dashboard.md)) is deployed: React on Vercel, FastAPI on Fly, Postgres on Neon, DeepSeek V4.1 Flash for the prose ([ADR 0006](docs/adr/0006-pluggable-llm-provider.md)). The Phase 4.8 dogfood gate sent the project into the narrative layer: card prose that interprets instead of listing, a cited analyst view, and cross-company lenses built from SEC XBRL ([ADR 0007](docs/adr/0007-analytical-narratives.md)). Live golden eval: factuality 1.000 on all five golden tickers. **849 backend tests (+5 opt-in live-LLM cases), 591 frontend tests; main bundle 88.87 KB gzipped (11.13 KB under the 100 KB budget).** Granular tracker: [tasks/todo.md](tasks/todo.md).
+> **Status — Phases 1–5 done (2026-11).** The symbol-centric dashboard ([ADR 0005](docs/adr/0005-symbol-centric-dashboard.md)) is deployed: React on Vercel, FastAPI on Fly, Postgres on Neon, DeepSeek V4.1 Flash for the prose ([ADR 0006](docs/adr/0006-pluggable-llm-provider.md)). The Phase 4.8 dogfood gate sent the project into the narrative layer: card prose that interprets instead of listing, a cited analyst view, and cross-company lenses built from SEC XBRL ([ADR 0007](docs/adr/0007-analytical-narratives.md)). Live golden eval: factuality 1.000 on all five golden tickers. Test counts are in [docs/testing.md](docs/testing.md), bundle sizes in [frontend/README.md](frontend/README.md), the open plan in [tasks/todo.md](tasks/todo.md) and the history in [docs/changelog.md](docs/changelog.md).
 
 ## What this is (and isn't)
 
@@ -64,7 +64,6 @@ Verify with `curl http://localhost:8000/v1/health` → `{"status":"ok","db":true
 | `GET /v1/lens`, `GET /v1/lens/{id}` | ✅ Cross-company lenses from SEC XBRL. |
 | `GET /v1/health` | ✅ Pings the DB. |
 | `GET/POST /v1/symbols`, `GET /v1/news`, `GET /v1/news/{id}`, `POST /v1/news/ingest`, `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ Phase 1 data routes. |
-| `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ `501` — legacy v1 stubs, to be removed. |
 
 With `BACKEND_SHARED_SECRET` set (production), research, prices, overview, lenses and every write or quota-spending route require `Authorization: Bearer <secret>`; CORS allows only `FRONTEND_ORIGIN`. Errors are [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](app/core/errors.py).
 
@@ -148,7 +147,7 @@ The rate limit on `/v1/research/{symbol}` runs **after** the cache lookup: cache
 ├── app/                         # FastAPI application
 │   ├── main.py                  # app factory, CORS, error handlers, router mounting
 │   ├── core/                    # settings, auth (shared secret), cors, errors, observability
-│   ├── api/v1/routers/          # health, symbols, news, market, research, lens (+ 501 stubs)
+│   ├── api/v1/routers/          # health, symbols, news, market, research, lens
 │   ├── db/models/               # Symbol, NewsItemModel, NewsSymbol, Candle, ResearchReportRow
 │   ├── schemas/                 # Pydantic request/response (research.py is the report schema)
 │   └── services/                # data tools, orchestrator, derived claims, thesis, layout
@@ -196,6 +195,7 @@ A push to `main` deploys both halves: [`.github/workflows/deploy.yml`](.github/w
 - **Phase 4 — Symbol-centric dashboard** ✅ ([ADR 0005](docs/adr/0005-symbol-centric-dashboard.md)) Strata design, dedicated cards and SVG charts, adaptive layouts for distressed names, Compare, search / watchlist / recent; 4.8 deployed it and ran the dogfood gate, which also brought readable chart axes, the sidebar rewrite, the market strip, Regenerate, error boundaries and the layout pass.
 - **Phase 5 — Narrative layer** ✅ (the 4.8 gate's outcome, [ADR 0007](docs/adr/0007-analytical-narratives.md)) Derived comparison claims and interpretive card prose, the cited analyst view, and the megacap capex lens.
 - **Phase 6 — XBRL Tier 2** ⏸ Segment and geography revenue, RPO. Dogfooding hasn't asked for it yet; the XBRL client the lenses use is the starting point.
+- **Next** ([tasks/todo.md](tasks/todo.md)) Valuation against the company's own ten-year history, a public read-only demo, more lenses, insider activity.
 - **Indefinitely deferred** ⏸ `search_history` (pgvector RAG), options / IV, Reddit sentiment, real auth + per-user cost caps.
 
 [design_doc.md](design_doc.md) has the system design; the [ADRs](docs/adr/) have the reasoning behind each pivot.

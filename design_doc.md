@@ -1,6 +1,6 @@
 # Financial Market Analysis Agent — Design
 
-> **Status:** v2 — **AI Equity Research Assistant**, Phase 4 done (2026-11). Dashboard live at <https://market-analysis-agent-red.vercel.app> (shared-secret sign-in, internal use), API at <https://market-analysis-agent.fly.dev>. Pivoted from the v1 "real-time multi-agent platform" in [ADR 0003](docs/adr/0003-pivot-equity-research.md); **visual-first, delta-driven** per [ADR 0004](docs/adr/0004-visual-first-product-shape.md); a **symbol-centric dashboard** per [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md); prose that **interprets** per [ADR 0007](docs/adr/0007-analytical-narratives.md). This doc is the single source of truth for scope, architecture and roadmap; the v1 design lives in git history.
+> **Status:** v2 — **AI Equity Research Assistant**, Phases 1–5 done (2026-11). Dashboard live at <https://market-analysis-agent-red.vercel.app> (shared-secret sign-in, internal use), API at <https://market-analysis-agent.fly.dev>. Pivoted from the v1 "real-time multi-agent platform" in [ADR 0003](docs/adr/0003-pivot-equity-research.md); **visual-first, delta-driven** per [ADR 0004](docs/adr/0004-visual-first-product-shape.md); a **symbol-centric dashboard** per [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md); prose that **interprets** per [ADR 0007](docs/adr/0007-analytical-narratives.md). This doc is the single source of truth for scope, architecture and roadmap; the v1 design lives in git history.
 
 ## Goal
 
@@ -82,7 +82,7 @@ Layering: `router → service → repository / external`. Business logic never l
 | Lint | ruff · ESLint + `tsc` |
 | CI | GitHub Actions: backend, frontend, production-image boot, Gitleaks, AI PR review |
 
-**Deliberately not used:** LangChain, Celery, Redis, Pinecone, a charting library on the dashboard (Recharts survives only in the legacy `SectionChart` fallback chunk). The single-agent-with-tools pattern doesn't need them.
+**Deliberately not used:** LangChain, Celery, Redis, Pinecone, a charting library (the charts are hand-rolled SVG; Recharts was removed in 2026-11). The single-agent-with-tools pattern doesn't need them.
 
 ## Data model
 
@@ -110,6 +110,7 @@ Tools live in `app/services/`. Each is a focused async function; sync providers 
 | `fetch_business_info` | yfinance summary, HQ, employees | Business |
 | `fetch_news` | Yahoo RSS + NewsAPI, ingested per report, categorized by triage LLM | News |
 | `xbrl.annual_series` | SEC company-concept API (tags merged per year, CY frames) | Lenses |
+| `fetch_annual_history` | SEC XBRL annual facts, split-adjusted with yfinance splits | Quality (ten-year per-share growth) |
 | `parse_filing` (Form 4, 13F), `compute_technicals` | Phase 2 parsers, RSI/SMA | not on the dashboard today |
 
 **Derived claims** (`app/services/research_derived.py`, ADR 0007) are computed in code and added to sections with source `computed.analytics`: year-over-year margin and per-share changes between named quarters, TTM FCF margin and yield, FCF ÷ net income, payout, shareholder yield, dividend coverage, capex intensity, SBC ÷ FCF, net debt ÷ operating cash flow, premium or discount to the peer median, implied EPS growth, beat streak, latest surprise vs average. Banks skip FCF, capex, gross margin and net debt. These give the model comparisons to argue from without ever computing a number itself.
@@ -145,7 +146,6 @@ Non-negotiable; every PR is held to them.
 | Market (Phase 1 reads) | `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | open |
 | Lenses | `GET /v1/lens`, `GET /v1/lens/{id}` | bearer |
 | Symbols / News | `GET /v1/symbols`, `GET /v1/news`, `GET /v1/news/{id}` open; `POST /v1/symbols`, `POST /v1/news/ingest` bearer | |
-| Legacy | `/v1/analysis`, `/v1/reports/daily/latest`, `/v1/forecasts/{symbol}` | 501, to be removed |
 
 Errors are RFC 7807 problem+json via [`app/core/errors.py`](app/core/errors.py); `Retry-After` (429) and `WWW-Authenticate` (401) survive the wrap.
 
@@ -190,7 +190,7 @@ Real auth and per-user cost caps land only when there are real users.
 
 **Phase 6 — XBRL Tier 2 (deferred).** Segment and geography revenue, RPO. The lens XBRL client is the starting point. Escalate if dogfooding asks for segment mix (NVDA Data Center vs Gaming, AMZN AWS vs Retail).
 
-**Next candidates (no commitment):** more lenses; a trailing-12-month lens point; lowering the production rate limit before sharing; a compare narrative (4.6.B) if Compare gets used.
+**Next (plan in [tasks/todo.md](tasks/todo.md), 2026-11-13):** valuation against the company's own ten-year history; a public read-only demo and README screenshots, with the production rate limit lowered alongside; then more lenses and insider activity from the Form 4 parser. A compare narrative (4.6.B) waits until Compare gets used.
 
 **Indefinitely deferred.** `search_history` (pgvector RAG), `compute_options`, Reddit sentiment, real auth + per-user cost caps + Redis-backed rate limiting.
 
@@ -201,7 +201,7 @@ Real auth and per-user cost caps land only when there are real users.
 | Upstream scrapers / schemas drift (yfinance, EDGAR) | Defensive lookups; missing fields become `None` claims with a stable shape; tools fail independently (`return_exceptions=True`); `scripts/smoke.py` checks drift. |
 | LLM writes a wrong number or a wrong citation | Code computes comparisons; citations resolved and checked in code; rubric on every number; golden eval before prompt changes. |
 | LLM cost overruns | Cache before rate limit, per-IP limit, a cheap production model, shared-secret gate. |
-| Stale cached reports after a fix | Report age shown with Regenerate. |
+| Stale cached reports after a fix | `REPORT_VERSION`: a report cached before the current version rebuilds on its next visit. Report age and Regenerate cover the rest. |
 | A card meets data it can't draw | Error boundary per card; unknown claim units parse as null. |
 | Free-data sparsity | Per-section confidence, `fetched_at`, cards that hide when empty. |
 
@@ -226,5 +226,5 @@ What this project demonstrates, with backing in the codebase:
 | Anti-hallucination engineering | Code-computed comparisons, citation-enforcing schema, programmatic confidence, factuality rubric over every number, live golden eval |
 | Data visualization | Hand-rolled SVG charts with axes, baselines and hover; validated colorblind-safe palette for multi-series lenses; adaptive layouts |
 | Cost-aware engineering | Free data + free-tier infra, cache-before-rate-limit, about a cent per fresh report |
-| Test discipline | TDD on services, mocked providers, 849 backend + 591 frontend tests, separate eval harness |
+| Test discipline | TDD on services, mocked providers, about 1,500 tests across backend and frontend, separate eval harness |
 | Tradeoff articulation | ADRs 0001–0007 capture the why behind each pivot; dogfood logs show what changed and why |

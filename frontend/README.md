@@ -32,7 +32,7 @@ The backend must allow the dev origin: `FRONTEND_ORIGIN=http://localhost:5173` i
 | `npm run dev` | Vite dev server with HMR |
 | `npm run build` | `tsc -b && vite build` → `dist/` (prints each chunk's gzip size) |
 | `npm run preview` | Serve the production build locally |
-| `npm run test` / `npm run test:watch` | Vitest (591 tests, happy-dom) |
+| `npm run test` / `npm run test:watch` | Vitest (happy-dom; count in [docs/testing.md](../docs/testing.md)) |
 | `npm run typecheck` | `tsc -b --noEmit` |
 | `npm run lint` | ESLint, zero warnings allowed |
 
@@ -40,7 +40,7 @@ CI runs lint, typecheck, test and build on every PR.
 
 ## Bundle budget
 
-The main chunk must stay under **100 KB gzipped**; it is 88.87 KB. Every route except `/` and `/login` is lazy-loaded into its own chunk: dashboard 22.3 KB, compare 6.6 KB, lens 4.4 KB, search modal 1.3 KB. Recharts survives only in the legacy `SectionChart` chunk (103 KB, loaded on demand); dashboard charts are hand-rolled SVG. Check sizes with `npm run build` before adding a dependency.
+The main chunk must stay under **100 KB gzipped**; it is 88.95 KB (2026-11-13). Every route except `/` and `/login` is lazy-loaded into its own chunk: dashboard 22.9 KB, compare 6.6 KB, lens 4.4 KB (+ 0.7 KB index), search modal 1.3 KB. There is no charting library; charts are hand-rolled SVG. These sizes are kept only here. Check them with `npm run build` before adding a dependency.
 
 ## Layout
 
@@ -84,6 +84,6 @@ The backend must list the Vercel origin: `FRONTEND_ORIGIN` in `fly.toml` (exact 
 - **Vite over Next.js:** a static SPA against a separate API; SSR adds nothing here.
 - **TanStack Query** owns server state (reports, prices, overview, lenses); local state + `useSyncExternalStore` for the small localStorage lists. No global store.
 - **Zod** validates every response before a component sees it, so backend drift fails loudly in one place — and unknown claim units degrade to a heuristic format instead of failing the report.
-- **Hand-rolled SVG charts:** each chart is small and specific (axes, baselines, hover, direct labels), and it keeps Recharts' ~100 KB out of the dashboard.
+- **Hand-rolled SVG charts:** each chart is small and specific (axes, baselines, hover, direct labels), and it keeps a ~100 KB charting library out of the bundle (Recharts was removed in 2026-11).
 - **Tailwind with Strata tokens** (`tailwind.config`): one dark theme, named colors per section.
 - **`localStorage` for the token:** simple and persistent; the XSS surface is small (no third-party scripts, no user HTML).

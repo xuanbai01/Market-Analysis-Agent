@@ -39,6 +39,7 @@ uv run pytest -v                       # full suite
 uv run pytest tests/test_symbols.py    # one file
 uv run pytest -k news -v               # filter by name
 uv run pytest -m live_llm tests/evals -v -s   # live golden eval on LLM_PROVIDER (costs money; needs its key)
+gh workflow run live-eval.yml -f provider=deepseek   # the same eval on GitHub (needs the DEEPSEEK_API_KEY repo secret)
 uv run pytest --cov=app --cov-report=term-missing
 ```
 

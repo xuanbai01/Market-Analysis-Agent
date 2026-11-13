@@ -27,7 +27,7 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + per-call LLM b
 | Macro | FRED API | ✅ |
 | Hosting | Fly.io (auto-stop machines) + Neon (Postgres) + Vercel (frontend) | ✅ API https://market-analysis-agent.fly.dev, dashboard https://market-analysis-agent-red.vercel.app |
 | Frontend stack | Vite + React 18 + Tailwind + TanStack Query + Zod | ✅ |
-| Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ 875 backend (+5 opt-in live-LLM golden cases) / 628 frontend |
+| Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ counts in [testing.md](testing.md) |
 | Lint | ruff (backend), ESLint (frontend) | ✅ |
 | CI | GitHub Actions (tests + Gitleaks + Claude PR review) + push-to-deploy | ✅ |
 
@@ -57,10 +57,10 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + per-call LLM b
 │   │   │   ├── SidebarShell.tsx # Search/Home/Compare + live Watchlist & Recent; collapses to a 64px rail
 │   │   │   ├── MarketStrip.tsx  # markets row above every page + fear & greed (est.) breakdown
 │   │   │   ├── LandingPage.tsx  # / route — search + past reports
-│   │   │   ├── SymbolDetailPage.tsx  # /symbol/:ticker (LAZY chunk, 23.4 KB gz)
-│   │   │   ├── compare/         # /compare/?a&b sub-tree (LAZY chunk, 6.6 KB gz)
-│   │   │   ├── lens/            # /lens, /lens/:id (LAZY chunks, 0.7 + 4.4 KB gz)
-│   │   │   ├── search/          # SearchModal (LAZY chunk, 1.3 KB gz)
+│   │   │   ├── SymbolDetailPage.tsx  # /symbol/:ticker (LAZY chunk)
+│   │   │   ├── compare/         # /compare/?a&b sub-tree (LAZY chunk)
+│   │   │   ├── lens/            # /lens, /lens/:id (LAZY chunks)
+│   │   │   ├── search/          # SearchModal (LAZY chunk)
 │   │   │   └── ...              # Strata cards: HeroCard, AnalystViewCard, QualityCard,
 │   │   │                        #   EarningsCard, ValuationCard, PerShareGrowthCard,
 │   │   │                        #   CashAndCapitalCard, CapitalReturnsCard, RiskDiffCard,
@@ -135,20 +135,19 @@ POST /v1/research/{symbol}
 | Phase 4 — prices | `GET /v1/market/:ticker/prices?range={60D\|1Y\|5Y}` | ✅ Phase 4.1 — read-through `candles` cache, falls through to yfinance ingest on miss. Auth-gated. |
 | Market strip | `GET /v1/market/overview` | ✅ 2026-11 — headline quotes (S&P 500, Nasdaq 100, Dow, VIX, Russell 2000, US 10Y, dollar, gold, WTI, bitcoin) + our fear & greed estimate (`market_sentiment.py`: momentum, VIX, safe-haven and junk-bond demand, each ranked against its past year). yfinance, in-memory cache (5 min quotes / 1 h sentiment), serves stale on provider failure. Auth-gated. |
 | Lenses | `GET /v1/lens`, `GET /v1/lens/{id}` | ✅ 2026-11 (ADR 0007 layer 3) — cross-company lens built from SEC XBRL annual filings (`xbrl.py`: tag merging per year, SEC calendar frames, 24 h disk cache) and `lens.py` (10-year window ending at the latest year every company filed; per-year distribution stats; computed facts; cited AI narrative). First lens: megacap tech capex. In-memory cache 24 h, stale on failure, 503 when nothing cached. Auth-gated. |
-| Legacy | `POST /v1/analysis`, `GET /v1/reports/daily/latest`, `GET /v1/forecasts/{symbol}` | ❌ 501 (legacy v1 stubs; will be removed or redirected to `/v1/research`) |
 
 ## Frontend routes (current)
 
-Lazy-loading is the binding bundle constraint — main is at 89.01 KB gz (10.99 KB headroom under the 100 KB budget). Every authenticated route except `/` is split into its own chunk so the entry stays lean.
+Lazy-loading is the binding bundle constraint — the main chunk must stay under 100 KB gzipped (current sizes: [frontend/README.md](../frontend/README.md)). Every authenticated route except `/` is split into its own chunk so the entry stays lean.
 
 | Route | State | Chunk |
 |---|---|---|
 | `/login` | ✅ Pre-auth screen. | main |
 | `/` | ✅ LandingPage — search bar + Past Reports (Watchlist and Recent live in the sidebar on every page). | main |
-| `/symbol/:ticker` | ✅ The dashboard: sticky section nav, HeroCard, AnalystViewCard, full-width Quality / Earnings / Valuation / Per-share growth, an equal-height row of Cash & capital · Capital returns · Risk · Macro (only the cards with data), Business + News. | **lazy** (23.4 KB gz) |
-| `/compare?a=X&b=Y` | ✅ Phase 4.6.A — two-ticker side-by-side. One % change price chart, growth by metric, risk on one scale. | **lazy** (6.6 KB gz) |
-| `/lens`, `/lens/:id` | ✅ ADR 0007 layer 3 — cross-company lenses: the yearly distribution of a metric across a group (DistributionChart), dollars by company (CapexBars), a latest-year table and a cited AI read. | **lazy** (4.6 KB gz) |
-| (overlay) `SearchModal` | ✅ Phase 4.7 — ⌘K-triggered. | **lazy** (1.3 KB gz) |
+| `/symbol/:ticker` | ✅ The dashboard: sticky section nav, HeroCard, AnalystViewCard, full-width Quality / Earnings / Valuation / Per-share growth, an equal-height row of Cash & capital · Capital returns · Risk · Macro (only the cards with data), Business + News. | **lazy** |
+| `/compare?a=X&b=Y` | ✅ Phase 4.6.A — two-ticker side-by-side. One % change price chart, growth by metric, risk on one scale. | **lazy** |
+| `/lens`, `/lens/:id` | ✅ ADR 0007 layer 3 — cross-company lenses: the yearly distribution of a metric across a group (DistributionChart), dollars by company (CapexBars), a latest-year table and a cited AI read. | **lazy** |
+| (overlay) `SearchModal` | ✅ Phase 4.7 — ⌘K-triggered. | **lazy** |
 
 Errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/rfc7807) via [app/core/errors.py](../app/core/errors.py). The handler propagates `HTTPException.headers` so `Retry-After` (429) and `WWW-Authenticate` (401) survive the wrap.
 

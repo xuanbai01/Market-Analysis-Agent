@@ -127,14 +127,14 @@ POST /v1/research/{symbol}
 | Group | Routes | Status |
 |---|---|---|
 | Health | `GET /v1/health` | ✅ real (pings DB) |
-| Symbols | `GET /v1/symbols`, `POST /v1/symbols` | ✅ real. `POST` auth-gated. |
-| News | `POST /v1/news/ingest`, `GET /v1/news`, `GET /v1/news/{id}` | ✅ real (NewsAPI + Yahoo RSS, symbol-tagged). `POST` auth-gated (spends NewsAPI quota). |
-| Market | `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ real (yfinance ingest + upsert + technicals). `POST` auth-gated. |
+| Symbols | `GET /v1/symbols`, `POST /v1/symbols` | ✅ real. Auth-gated. |
+| News | `POST /v1/news/ingest`, `GET /v1/news`, `GET /v1/news/{id}` | ✅ real (NewsAPI + Yahoo RSS, symbol-tagged). Auth-gated (`POST` spends NewsAPI quota; the reads show which tickers are tracked). |
+| Market | `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ real (yfinance ingest + upsert + technicals). Auth-gated. |
 | **Research** | **`POST /v1/research/{symbol}?focus={full,earnings}&refresh={false,true}`** | ✅ **the v2 primary endpoint.** Auth-gated when `BACKEND_SHARED_SECRET` is set. Per-IP rate limit. |
 | Research list | `GET /v1/research?limit=20&offset=0&symbol=...` | ✅ paginated `ResearchReportSummary[]` for the dashboard sidebar |
 | Phase 4 — prices | `GET /v1/market/:ticker/prices?range={60D\|1Y\|5Y}` | ✅ Phase 4.1 — read-through `candles` cache, falls through to yfinance ingest on miss. Auth-gated. |
 | Market strip | `GET /v1/market/overview` | ✅ 2026-11 — headline quotes (S&P 500, Nasdaq 100, Dow, VIX, Russell 2000, US 10Y, dollar, gold, WTI, bitcoin) + our fear & greed estimate (`market_sentiment.py`: momentum, VIX, safe-haven and junk-bond demand, each ranked against its past year). yfinance, in-memory cache (5 min quotes / 1 h sentiment), serves stale on provider failure. Auth-gated. |
-| Demo | `GET /v1/demo`, `GET /v1/demo/research/{symbol}`, `GET /v1/demo/market/{symbol}/prices` | ✅ 2026-11 — public and read-only: the latest stored report and stored prices for the tickers in `DEMO_SYMBOLS`. Never generates or fetches; 5 min in-memory cache. **Not auth-gated, by design** (security.md A01). |
+| Demo | `GET /v1/demo`, `GET /v1/demo/research/{symbol}`, `GET /v1/demo/market/{symbol}/prices` | ✅ 2026-11 — public and read-only: the latest stored report and stored prices for the tickers in `DEMO_SYMBOLS`. Never generates or fetches; responses cached 5 min as bytes; per-IP limit. **Not auth-gated, by design** (security.md A01). |
 | Lenses | `GET /v1/lens`, `GET /v1/lens/{id}` | ✅ 2026-11 (ADR 0007 layer 3) — cross-company lens built from SEC XBRL annual filings (`xbrl.py`: tag merging per year, SEC calendar frames, 24 h disk cache) and `lens.py` (10-year window ending at the latest year every company filed; per-year distribution stats; computed facts; cited AI narrative). First lens: megacap tech capex. In-memory cache 24 h, stale on failure, 503 when nothing cached. Auth-gated. |
 
 ## Frontend routes (current)

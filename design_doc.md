@@ -143,10 +143,10 @@ Non-negotiable; every PR is held to them.
 | Health | `GET /v1/health` | open |
 | Research | `POST /v1/research/{symbol}?focus={full,earnings}&refresh=`, `GET /v1/research` | bearer |
 | Market | `GET /v1/market/{symbol}/prices?range=`, `GET /v1/market/overview`, `POST /v1/market/ingest` | bearer |
-| Market (Phase 1 reads) | `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | open |
+| Market (Phase 1 reads) | `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | bearer |
 | Lenses | `GET /v1/lens`, `GET /v1/lens/{id}` | bearer |
 | Demo | `GET /v1/demo`, `/v1/demo/research/{symbol}`, `/v1/demo/market/{symbol}/prices` | **open by design**: stored data for `DEMO_SYMBOLS` only, never generates |
-| Symbols / News | `GET /v1/symbols`, `GET /v1/news`, `GET /v1/news/{id}` open; `POST /v1/symbols`, `POST /v1/news/ingest` bearer | |
+| Symbols / News | `GET /v1/symbols`, `GET /v1/news`, `GET /v1/news/{id}`, `POST /v1/symbols`, `POST /v1/news/ingest` | bearer |
 
 Errors are RFC 7807 problem+json via [`app/core/errors.py`](app/core/errors.py); `Retry-After` (429) and `WWW-Authenticate` (401) survive the wrap.
 
@@ -167,7 +167,7 @@ The per-IP rate limit on fresh reports (default 3/h; 30/h in production during d
 
 Active OWASP mitigations in [docs/security.md](docs/security.md). The non-negotiables:
 
-- **A01 access.** Shared-secret bearer auth on every route that costs money, spends quota or writes; single-origin CORS. The one open exception is the read-only demo, which serves stored reports for a configured list of tickers and can't spend anything.
+- **A01 access.** Shared-secret bearer auth on every route but the health check and the demo; single-origin CORS. The one open exception is the read-only demo, which serves stored reports for a configured list of tickers and can't spend anything.
 - **A09 observability.** Every external call (LLM, yfinance, SEC, FRED, news) logged with service id, input/output shape, latency, timestamp and outcome via `log_external_call`.
 - **A03 injection.** No user input in SQL strings (typed `select()`) or LLM prompts (structured slots only).
 - **Honest clients.** No bot-check circumvention: CNN's fear & greed endpoint refuses automated clients, so the strip shows our own labelled estimate instead.

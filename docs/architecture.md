@@ -29,7 +29,7 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + per-call LLM b
 | Frontend stack | Vite + React 18 + Tailwind + TanStack Query + Zod | ✅ |
 | Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ counts in [testing.md](testing.md) |
 | Lint | ruff (backend), ESLint (frontend) | ✅ |
-| CI | GitHub Actions (tests + Gitleaks + Claude PR review) + push-to-deploy | ✅ |
+| CI | GitHub Actions (tests + Gitleaks + DeepSeek PR review) + push-to-deploy | ✅ |
 
 **Indefinitely deferred per [ADR 0004](adr/0004-visual-first-product-shape.md):** pgvector (`search_history`), yfinance options chain (`compute_options`), Redis (no horizontal-scale rate limit need yet), Celery (no scheduled work).
 

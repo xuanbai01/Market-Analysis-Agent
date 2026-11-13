@@ -124,21 +124,44 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── AI PR Review ───────────────────────────────────────────────────────────
-  # Note: this job will fail on PRs that modify ci.yml itself. That is by
-  # design — the Claude Code Action refuses to run if the workflow file on
-  # the PR differs from the version on main, to prevent a malicious PR from
-  # modifying the workflow to exfiltrate secrets. Merge the change and the
-  # check passes on the next PR.
+  # DeepSeek reads the diff and posts one comment on the PR, rewritten on
+  # each push (scripts/ai_review.py). Claude writes most of this code, so
+  # the second read comes from a different model. Needs the
+  # DEEPSEEK_API_KEY repo secret (the one the Live Eval uses) and fails
+  # without it rather than passing having reviewed nothing. Advisory: it
+  # comments, it never blocks a merge on its findings.
+  #
+  # Only PRs from branches of this repo: GitHub withholds secrets from
+  # fork PRs anyway. The script that runs is the PR's own copy, so anyone
+  # who can push a branch here can run code with DEEPSEEK_API_KEY. That
+  # is deliberate, not an oversight: the same person can already edit
+  # this file in their PR and print any repo secret, so running the base
+  # copy of the script would protect nothing. Today only the owner can
+  # push. Revisit (pull_request_target + base checkout, or an environment
+  # with required reviewers) if collaborators are added.
   ai-review:
-    name: AI — PR Review (Claude)
+    name: AI — PR Review (DeepSeek)
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
-      id-token: write
+    # A new push replaces the review still running for the last one.
+    concurrency:
+      group: ai-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
-      - uses: anthropics/claude-code-action@beta
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Review the diff
+        run: python scripts/ai_review.py
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

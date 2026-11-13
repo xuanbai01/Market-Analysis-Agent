@@ -23,12 +23,18 @@ History:
        (revenue, operating income, FCF, diluted EPS) and their compound
        annual growth, in the Quality section; FRED values carry units, so
        Macro prose reads "$745.02B" rather than "745021.0".
+    3  2026-11-13 — fixes from the XOM check: filings and annual facts
+       follow a successor registrant back to its predecessor; a tool
+       that found nothing is audited "empty"; oil and gas peers split
+       into integrated majors and producers; gross margin's snapshot
+       is the latest quarter of its history, with Yahoo's trailing
+       figure as a separate Valuation claim for the peer comparison.
 """
 from __future__ import annotations
 
 from app.schemas.research import ResearchReport
 
-REPORT_VERSION = 2
+REPORT_VERSION = 3
 
 
 def is_outdated(report: ResearchReport) -> bool:

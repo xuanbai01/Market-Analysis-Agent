@@ -16,9 +16,11 @@ import { formatAge, formatTimestamp } from "../lib/format";
 interface Props {
   ticker: string;
   generatedAt: string;
+  /** Show the report's age only: the public demo can't rebuild one. */
+  readOnly?: boolean;
 }
 
-export function ReportFreshness({ ticker, generatedAt }: Props) {
+export function ReportFreshness({ ticker, generatedAt, readOnly = false }: Props) {
   const queryClient = useQueryClient();
   const regenerate = useMutation({
     mutationFn: () => fetchResearchReport(ticker, { focus: "full", refresh: true }),
@@ -31,6 +33,8 @@ export function ReportFreshness({ ticker, generatedAt }: Props) {
   return (
     <div data-testid="report-freshness" className="mr-auto flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-strata-muted">
       <span title={formatTimestamp(generatedAt)}>Generated {formatAge(generatedAt)}</span>
+      {!readOnly && (
+        <>
       <span aria-hidden="true">·</span>
       <button
         type="button"
@@ -40,6 +44,8 @@ export function ReportFreshness({ ticker, generatedAt }: Props) {
       >
         {regenerate.isPending ? "Regenerating… (30–90 s)" : "Regenerate"}
       </button>
+        </>
+      )}
       {regenerate.isError && (
         <span role="alert" className="text-strata-neg">
           Couldn&apos;t regenerate: {errorText(regenerate.error)}

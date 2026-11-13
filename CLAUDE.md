@@ -35,7 +35,7 @@ Phases 1–5 are shipped and deployed. The open plan is in [`tasks/todo.md`](tas
 **What exists**
 
 - **Backend:** `POST /v1/research/{symbol}` builds a report. Tools fan out in parallel (`fetch_fundamentals`, `fetch_earnings`, `fetch_peers`, `fetch_macro`, `fetch_news`, `fetch_business_info`, the 10-K extractors, `fetch_annual_history`); code builds the claims and the derived comparisons (`research_derived.py`); two LLM calls in parallel write the section prose and the analyst view (`research_thesis.py`); code checks citations and sets confidence and layout signals. Also `GET /v1/market/{symbol}/prices`, `GET /v1/market/overview` and `GET /v1/lens/{id}`.
-- **Frontend:** the `/symbol/:ticker` dashboard (one card per section, reordered for distressed names), `/compare`, `/lens/:id`, search / watchlist / recent, and the market strip. Charts are hand-rolled SVG; there is no charting library.
+- **Frontend:** the `/symbol/:ticker` dashboard (one card per section, reordered for distressed names), `/compare`, `/lens/:id`, search / watchlist / recent, the market strip, and a public read-only demo at `/demo` (`useDemo()` switches the fetchers and hides what a visitor can't do). Charts are hand-rolled SVG; there is no charting library.
 - **Production:** Vercel + Fly + Neon behind the shared secret, `LLM_PROVIDER=deepseek` ([ADR 0006](docs/adr/0006-pluggable-llm-provider.md); the code default is `anthropic`). `FRED_API_KEY` is not set there, so the Macro card does not render in production.
 
 **Tables today:** `symbols`, `news_items`, `news_symbols`, `candles`, `research_reports`. pgvector + `embeddings` columns are not added until/unless `search_history` un-defers.
@@ -54,7 +54,7 @@ Phases 1–5 are shipped and deployed. The open plan is in [`tasks/todo.md`](tas
 - **A section needs a card.** `CARD_SECTIONS` in `SymbolDetailPage.tsx` lists the sections with one; any other section falls to the plain `ReportRenderer` table until its card exists.
 - **A card with nothing to draw returns null**, and a row counts only the cards that will render (each card's own empty check), so no row reserves an empty column.
 - **Every `lazy()` goes through `lib/lazy-with-reload.ts`**, and every authenticated route except `/` is its own chunk. The main chunk must stay under 100 KB gzipped (current sizes: `frontend/README.md`).
-- **A costly or writing route takes `require_shared_secret`** and is listed in `tests/test_route_auth.py`.
+- **Every route takes `require_shared_secret`** except `/`, `/v1/health` and the demo; `tests/test_route_auth.py` fails on any other ungated route. The only open data routes are the three under `/v1/demo`: stored data for `DEMO_SYMBOLS`, never a generated report or a provider call (`app/services/demo.py`). Don't add a fourth, or anything that can spend, without a decision.
 - **A new runtime dependency goes in the Dockerfile too** — it has its own pin list; `tests/test_dockerfile_deps.py` fails on drift.
 - **Never fetch CNN's fear & greed endpoint by disguising the client.** The strip shows our own estimate, labelled "est." (`app/services/market_sentiment.py`).
 

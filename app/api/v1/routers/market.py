@@ -36,7 +36,9 @@ async def market_overview() -> MarketOverview:
     return await get_market_overview()
 
 
-@router.get("/market/{symbol}", response_model=MarketSnapshotOut)
+# Gated since 2026-11: an open read of stored candles tells anyone
+# which tickers have been researched.
+@router.get("/market/{symbol}", response_model=MarketSnapshotOut, dependencies=[Depends(require_shared_secret)])
 async def market_latest(symbol: str, tz: str = Query("America/New_York"), session: AsyncSession = Depends(get_session)):
     snap = await get_latest_snapshot(session, symbol.upper(), tz)
     if not snap:
@@ -44,7 +46,7 @@ async def market_latest(symbol: str, tz: str = Query("America/New_York"), sessio
     return snap
 
 
-@router.get("/market/{symbol}/history", response_model=MarketHistoryOut)
+@router.get("/market/{symbol}/history", response_model=MarketHistoryOut, dependencies=[Depends(require_shared_secret)])
 async def market_history(
     symbol: str,
     start_date: str | None = Query(None),

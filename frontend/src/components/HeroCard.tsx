@@ -21,7 +21,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchMarketPrices } from "../lib/api";
+import { fetchDemoPrices, fetchMarketPrices } from "../lib/api";
+import { useDemo } from "../lib/demo";
 import { formatClaimValue } from "../lib/format";
 import { extractHeroData } from "../lib/hero-extract";
 import { sliceForRange } from "../lib/price-range";
@@ -99,9 +100,10 @@ export function HeroCard({ report }: Props) {
   const symbol = report.symbol;
   const [range, setRange] = useState<Range>("3M");
 
+  const demo = useDemo();
   const pricesQuery = useQuery({
-    queryKey: ["prices", symbol, backendRangeFor(range)],
-    queryFn: () => fetchMarketPrices(symbol, backendRangeFor(range)),
+    queryKey: [demo ? "demo-prices" : "prices", symbol, backendRangeFor(range)],
+    queryFn: () => (demo ? fetchDemoPrices : fetchMarketPrices)(symbol, backendRangeFor(range)),
     staleTime: 60_000,
   });
 

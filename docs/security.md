@@ -4,8 +4,9 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 
 ## A01 — Broken Access Control
 
-- **Today: one shared secret.** [`app/core/auth.py::require_shared_secret`](../app/core/auth.py) checks `Authorization: Bearer <BACKEND_SHARED_SECRET>` (constant-time compare) on every route that costs money, spends a provider quota or writes: research, prices, market overview, lenses, and every `POST`. Production sets the secret; with it unset (local dev) the dependency is a pass-through. [`tests/test_route_auth.py`](../tests/test_route_auth.py) asserts the gate on each route — add new costly or writing routes there.
+- **Today: one shared secret.** [`app/core/auth.py::require_shared_secret`](../app/core/auth.py) checks `Authorization: Bearer <BACKEND_SHARED_SECRET>` (constant-time compare) on **every route except `/`, `/v1/health` and the three demo routes below**. That includes plain reads of stored data (market snapshot and history, news, symbols): until 2026-11 those were open, and each told an anonymous caller which tickers had been researched. Production sets the secret; with it unset (local dev) the dependency is a pass-through. [`tests/test_route_auth.py`](../tests/test_route_auth.py) asserts that the set of ungated routes is exactly that short list, so a new route is gated or the test fails.
 - The dashboard asks for the secret at sign-in and keeps it in `localStorage`; a 401 on a report clears it and returns to sign-in.
+- **One deliberate exception: the read-only demo.** `GET /v1/demo`, `/v1/demo/research/{symbol}` and `/v1/demo/market/{symbol}/prices` answer without the secret ([`app/services/demo.py`](../app/services/demo.py)). They return only what is already stored (the latest report and the stored prices) for the tickers in `DEMO_SYMBOLS`; they never generate a report, call the LLM or reach a data provider, so a visitor cannot spend money or quota. A ticker off the list is a 404 whether or not anything is stored for it. They are built to be hammered: responses are cached for five minutes as serialized bytes (no per-request validation or serialization of a large report), the cache can only hold keys for listed tickers and the three allowed ranges, responses carry `Cache-Control: public, max-age=300`, and one IP is limited to `DEMO_RATE_LIMIT_PER_MINUTE` requests (120 by default). `DEMO_SYMBOLS` empty turns all three off. `tests/test_route_auth.py` pins the set to exactly these three GET routes; `tests/test_demo.py` fails if any path from them reaches the orchestrator or the price ingest. The reports hold public market data and AI prose about it, nothing about the owner.
 - **When real users arrive:** per-user auth through a dependency that returns `current_user`, and every user-owned query scoped to `current_user.id` unless the route is explicitly cross-user.
 
 ## A02 — Cryptographic Failures
@@ -19,6 +20,7 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 - **No raw SQL strings constructed from user input.** Use SQLAlchemy 2.0 `select()` with bound params.
 - **No user input passed directly into LLM prompts.** Once agents land: structure and sanitize input into a template with typed slots, never f-string interpolation of raw user strings.
 - No shell commands built from user input. If ingestion calls a subprocess, use an allowlist.
+- **A source link is a web address or nothing.** `Source.url` is rendered as `<a href>`; both the Pydantic model and the Zod schema keep only `http(s)` and drop anything else (a `javascript:` address would run in the page that holds the owner's token).
 
 ## A04 — Insecure Design
 
@@ -53,6 +55,7 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 - **Every external service invocation is logged:** service id (`polygon.aggregates`, `openai.chat`, `newsapi.everything`), input payload shape, output payload shape (not full body unless needed), latency ms, timestamp. This is what keeps LLM and ingestion systems debuggable.
 - Auth failures (when auth lands) logged with timestamp and anonymized identifier.
 - **Never log** raw passwords, tokens, API keys, or full PII. Redact headers when logging HTTP requests.
+- **An unhandled error tells the caller nothing about the server.** The 500 body carries a reference id; the exception goes to the log under that id (`app/core/errors.py`). It used to carry `str(exc)`, which on an open route can hand a stranger a SQL fragment or a hostname.
 
 ## A10 — Server-Side Request Forgery (SSRF)
 

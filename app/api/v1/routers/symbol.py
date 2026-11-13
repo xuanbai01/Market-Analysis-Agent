@@ -10,7 +10,7 @@ from app.schemas.symbol import SymbolCreate, SymbolOut
 router = APIRouter()
 
 
-@router.get("/symbols", response_model=list[SymbolOut])
+@router.get("/symbols", response_model=list[SymbolOut], dependencies=[Depends(require_shared_secret)])
 async def list_symbols(
     query: str | None = Query(None, description="Filter by symbol or name"),
     limit: int = Query(20, ge=1, le=100),

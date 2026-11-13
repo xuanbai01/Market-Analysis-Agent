@@ -16,9 +16,11 @@
  * No "remember me" toggle: a public URL with an unauthenticated user
  * is the design. If you don't want to be remembered, close the tab.
  */
-import { useState, type FormEvent } from "react";
-import { ApiError, probeAuth } from "../lib/api";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
+import { ApiError, fetchDemoIndex, probeAuth } from "../lib/api";
 import { setStoredToken } from "../lib/auth";
+import { ROUTES } from "../lib/routes";
 
 interface Props {
   onAuthenticated: () => void;
@@ -28,6 +30,19 @@ export function LoginScreen({ onAuthenticated }: Props) {
   const [secret, setSecret] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setSubmitting] = useState(false);
+  // Offer the public demo only when it has something to show.
+  const [hasDemo, setHasDemo] = useState(false);
+  useEffect(() => {
+    let live = true;
+    fetchDemoIndex()
+      .then((index) => {
+        if (live) setHasDemo(index.symbols.length > 0);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -102,6 +117,18 @@ export function LoginScreen({ onAuthenticated }: Props) {
         >
           {isSubmitting ? "Checking…" : "Unlock"}
         </button>
+
+        {hasDemo && (
+          <p className="text-center text-xs text-strata-dim">
+            No password?{" "}
+            <Link
+              to={ROUTES.demo}
+              className="text-strata-highlight hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-strata-highlight"
+            >
+              See the read-only demo
+            </Link>
+          </p>
+        )}
       </form>
     </div>
   );

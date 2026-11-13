@@ -100,6 +100,17 @@ class Settings(BaseSettings):
     # allow-headers is Authorization/Content-Type, allow-credentials
     # is False (we use bearer tokens, not cookies).
     FRONTEND_ORIGIN: str = ""
+    # Public read-only demo (app/services/demo.py). A comma-separated
+    # list of tickers whose latest stored report and stored prices
+    # anyone may read at /v1/demo/* without the shared secret. Those
+    # routes never generate a report or call a provider. Empty (the
+    # default) turns the demo off.
+    DEMO_SYMBOLS: str = ""
+    # Requests per minute one IP may make to the demo routes. They are
+    # open and cheap (cached bytes), so this is about one caller
+    # crowding out the rest, not about money. A dashboard page makes
+    # three. 0 disables the limit.
+    DEMO_RATE_LIMIT_PER_MINUTE: int = 120
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

@@ -19,10 +19,24 @@ import { z } from "zod";
 export const ConfidenceSchema = z.enum(["high", "medium", "low"]);
 export type Confidence = z.infer<typeof ConfidenceSchema>;
 
+/**
+ * A source link, kept only when it is a web address. The dashboard
+ * renders it as ``<a href>``, and Zod's ``.url()`` accepts
+ * ``javascript:``; on a page that holds the owner's token (the demo
+ * shares its origin) that would be token theft on click. Anything else
+ * becomes null, so the claim shows without a link and the report still
+ * parses. The backend drops the same values (``Source.url``).
+ */
+const WebUrlSchema = z.preprocess(
+  (value) =>
+    value === undefined ? undefined : typeof value === "string" && /^https?:\/\//i.test(value) ? value : null,
+  z.string().nullable().optional(),
+);
+
 export const SourceSchema = z.object({
   tool: z.string().min(1),
   fetched_at: z.string().datetime({ offset: true }),
-  url: z.string().url().nullable().optional(),
+  url: WebUrlSchema,
   detail: z.string().nullable().optional(),
 });
 export type Source = z.infer<typeof SourceSchema>;
@@ -359,3 +373,17 @@ export const LensReportSchema = LensSummarySchema.extend({
   generated_at: z.string(),
 });
 export type LensReport = z.infer<typeof LensReportSchema>;
+
+// ── Public read-only demo (app/schemas/demo.py) ──────────────────────
+
+export const DemoSymbolSchema = z.object({
+  symbol: z.string(),
+  name: z.string().nullable().default(null),
+  generated_at: z.string(),
+});
+export type DemoSymbol = z.infer<typeof DemoSymbolSchema>;
+
+export const DemoIndexSchema = z.object({
+  symbols: z.array(DemoSymbolSchema).default([]),
+});
+export type DemoIndex = z.infer<typeof DemoIndexSchema>;

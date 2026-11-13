@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Workstream B (valuation against own history)** is in review on `feature/valuation-history`. **C is next** and starts with a design to confirm. A merged as #92, A2 as #93.
+- **Workstream C (public demo)** is in review on `feature/public-demo`. **D is next** (unordered; pick one). A merged as #92, A2 as #93, B as #94.
 
 ## Plan — after Phase 5 (2026-11-13)
 
@@ -42,7 +42,7 @@ These change report content, so they come before B, which builds on the same SEC
 - [x] **One basis for gross margin** (#20) — the Quality claim is the latest quarter of its own history; Yahoo's trailing figure is a separate Valuation claim that the peer comparison and the scatter use.
 - [x] **`REPORT_VERSION` 3**; XOM added to the golden set (six cases).
 
-### B. Valuation against the company's own history *(branch `feature/valuation-history`, in review)*
+### B. Valuation against the company's own history ✅ *(#94, merged 2026-11-13)*
 
 ADR 0004 called "is this expensive versus its own history" the most-cited gap; the Valuation card compared only against peers.
 
@@ -52,11 +52,12 @@ ADR 0004 called "is this expensive versus its own history" the most-cited gap; t
 - [x] **ValuationCard** — "Against its own history": one small chart per multiple, each on its own scale, the median as a reference line, today at the end of the line. A year more than four times the median is named instead of drawn.
 - [x] **Data checks** on KO, NVDA (splits), AAPL (September year end), JPM (bank), RIVN (losses) and XOM (predecessor registrant).
 
-### C. Make it showable *(C2 needs the owner's go-ahead on the design before any code)*
+### C. Make it showable *(C2 and C3 on branch `feature/public-demo`, in review)*
 
-- [ ] **C1 README screenshots** — hero + analyst view, one full dashboard, the capex lens. The last attempt found the browser pane only saves small JPEGs; these may need capturing by hand.
-- [ ] **C2 Public read-only demo** — design to confirm first: an unauthenticated route that serves the latest cached report for a fixed list of tickers (`DEMO_SYMBOLS`, empty = off), never generates a report and never calls a provider; cached prices for the same tickers; a "View demo" entry on the sign-in page; Regenerate and search hidden in demo mode. `tests/test_route_auth.py` lists the route as deliberately open and `docs/security.md` A01 records it.
-- [ ] **C3 Lower `RESEARCH_RATE_LIMIT_PER_HOUR`** from 30 to 3 in `fly.toml`, in the same PR as C2.
+- [ ] **C1 README screenshots** — hero + analyst view, one full dashboard, the capex lens. The browser pane only saves small images, so these need capturing by hand (owner).
+- [x] **C2 Public read-only demo** — `/demo` and `/v1/demo/*`: the latest stored report and stored prices for the tickers in `DEMO_SYMBOLS`, never a generated report or a provider call. Off unless the setting is non-empty; production lists AAPL, NVDA, KO, JPM, RIVN and XOM.
+- [x] **C3 Rate limit** — production `RESEARCH_RATE_LIMIT_PER_HOUR` 30 → 10, not the 3 first planned: generation still needs the secret, and 3 would stop the owner rebuilding more than three tickers an hour after a report-version bump.
+- [ ] **After the merge (owner):** open each demo ticker once while signed in, so its report is built at the current version. The demo shows whatever is stored, and a ticker with nothing stored doesn't appear.
 
 ### D. After those (unordered)
 
@@ -83,6 +84,7 @@ If you're picking this up after a gap:
 - **The EDGAR disk cache never looks for a newer filing** once it holds as many as a call asks for (`edgar._try_cache`): a machine that cached two 10-Ks keeps serving them after a third is filed. Fly's disk is wiped on every stop, so production recovers by itself; a long-lived local `.edgar_cache` does not. Found 2026-11-13, not fixed.
 - **Yahoo's `info` can come back partial.** One KO fetch on 2026-11-13 had no price-to-sales, EV/EBITDA or gross margin; the report then shows "—" in those cells and "no trailing figure today" on two own-history panels until it is regenerated. A retry, or a fallback from the latest close and trailing per-share figures, would fix it. Not fixed.
 - **Alphabet's annual history starts in 2022.** Before then it tagged share counts per share class, which the SEC company-concept API doesn't return, so GOOGL has four years of per-share figures and multiples. The same limit applies to any company that reports shares only by class.
+- **Left from the 2026-11-13 security review of the demo** (low severity, not fixed): `app/core/logging.py` is never imported, so the `app.external` call log may not be written in production (unverified); two requests arriving as a demo cache entry expires each query the database once; `tool_calls_audit` (tool names and exception class names) is public on demo reports, which was accepted.
 - **XBRL revenue tags can mix definitions across years.** `xbrl.annual_series` takes the first tag that has a year, and XOM's 2017–2021 revenue comes from a narrower tag than the years around it (about 3% lower). The ends of its ten-year series are on one tag, so the growth rate is unaffected. Found 2026-11-13, not fixed.
 
 **[lessons.md](lessons.md)** — read before non-trivial work to avoid retreading earlier mistakes.

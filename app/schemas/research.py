@@ -72,6 +72,18 @@ class Source(BaseModel):
     url: str | None = None
     detail: str | None = Field(default=None, max_length=256)
 
+    @field_validator("url", mode="before")
+    @classmethod
+    def _only_web_addresses(cls, value: object) -> object:
+        """Keep http(s) addresses and drop anything else. The dashboard
+        renders ``url`` as a link, and report pages can be public (the
+        demo): a ``javascript:`` address would run in the page that
+        holds the owner's token. Dropped rather than rejected, so an
+        odd stored value can never make a whole report unreadable."""
+        if isinstance(value, str) and value[:8].lower().startswith(("http://", "https://")):
+            return value
+        return None
+
 
 # A claim's value can be a number, a string, or null (e.g. "data unavailable
 # from source"). Booleans are intentionally allowed — beat/miss flags, etc.

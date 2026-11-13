@@ -111,7 +111,7 @@ Now `git push origin main` runs [`.github/workflows/deploy.yml`](../.github/work
 
 ### 7. Production configuration: the dashboard, LLM and access (10 min)
 
-Plain settings live in `fly.toml` `[env]` (public, reviewed in PRs): `FRONTEND_ORIGIN` (the Vercel origin, exact match, no trailing slash — CORS allows only it), `LLM_PROVIDER`, `RESEARCH_RATE_LIMIT_PER_HOUR`.
+Plain settings live in `fly.toml` `[env]` (public, reviewed in PRs): `FRONTEND_ORIGIN` (the Vercel origin, exact match, no trailing slash — CORS allows only it), `LLM_PROVIDER`, `RESEARCH_RATE_LIMIT_PER_HOUR`, and `DEMO_SYMBOLS` (the tickers the public demo at `/demo` may show; empty turns it off). A demo ticker appears once a signed-in visit has built its report, and the demo keeps showing that report until a signed-in visit rebuilds it.
 
 Secrets, besides `DATABASE_URL`:
 

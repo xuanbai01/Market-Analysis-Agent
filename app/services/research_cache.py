@@ -100,6 +100,30 @@ async def lookup_recent(
         return ResearchReport.model_validate(row.report_json)
 
 
+async def lookup_latest(
+    session: AsyncSession,
+    *,
+    symbol: str,
+    focus: str,
+) -> ResearchReport | None:
+    """Return the newest stored report for ``(symbol, focus)`` whatever
+    its age, or None. The read-only demo uses this: it cannot rebuild a
+    report, so an old one with its date beats none.
+    """
+    with log_external_call(
+        "db.research_cache.lookup_latest", {"symbol": symbol, "focus": focus}
+    ) as call:
+        stmt = (
+            select(ResearchReportRow)
+            .where(ResearchReportRow.symbol == symbol, ResearchReportRow.focus == focus)
+            .order_by(ResearchReportRow.generated_at.desc())
+            .limit(1)
+        )
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        call.record_output({"hit": row is not None})
+        return ResearchReport.model_validate(row.report_json) if row is not None else None
+
+
 async def list_recent(
     session: AsyncSession,
     *,

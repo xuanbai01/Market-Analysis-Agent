@@ -7,6 +7,7 @@
  *   /symbol/:ticker  → SymbolDetailPage (lazy chunk; Phase 4.7)
  *   /compare         → ComparePage (lazy chunk; Phase 4.6.A)
  *   /lens, /lens/:id → lens index + LensPage (lazy chunks; ADR 0007 layer 3)
+ *   /demo, /demo/:ticker → public read-only demo (lazy chunks; no sign-in)
  *
  * Authenticated routes wrap in RequireAuth (redirects to /login when
  * no token is in localStorage) and AppShell (sidebar + main outlet).
@@ -34,6 +35,9 @@ const ComparePage = lazyWithReload(() => import("./components/compare/ComparePag
 const LensIndexPage = lazyWithReload(() => import("./components/lens/LensIndexPage"));
 const LensPage = lazyWithReload(() => import("./components/lens/LensPage"));
 const SymbolDetailPage = lazyWithReload(() => import("./components/SymbolDetailPage"));
+// Public read-only demo: its own chunks, outside the auth guard.
+const DemoShell = lazyWithReload(() => import("./components/demo/DemoShell"));
+const DemoIndexPage = lazyWithReload(() => import("./components/demo/DemoIndexPage"));
 
 /**
  * LoginRoute — wraps LoginScreen with post-auth redirect logic.
@@ -65,6 +69,32 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route path={ROUTES.login} element={<LoginRoute />} />
+        {/* Public read-only demo: no token needed. The pages read the
+            backend's open /v1/demo routes (stored reports only). */}
+        <Route
+          element={
+            <Suspense fallback={null}>
+              <DemoShell />
+            </Suspense>
+          }
+        >
+          <Route
+            path={ROUTE_PATHS.demo}
+            element={
+              <Suspense fallback={null}>
+                <DemoIndexPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path={ROUTE_PATHS.demoSymbol}
+            element={
+              <Suspense fallback={<LoadingState />}>
+                <SymbolDetailPage />
+              </Suspense>
+            }
+          />
+        </Route>
         <Route
           element={
             <RequireAuth>

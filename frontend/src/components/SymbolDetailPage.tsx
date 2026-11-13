@@ -29,9 +29,10 @@ import { useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { ApiError, fetchResearchReport } from "../lib/api";
+import { ApiError, fetchDemoReport, fetchResearchReport } from "../lib/api";
 import { clearStoredToken } from "../lib/auth";
 import { hasCapitalReturns } from "../lib/capital-returns-extract";
+import { useDemo } from "../lib/demo";
 import { extractMacroPanels } from "../lib/macro-extract";
 import { pushRecent } from "../lib/recent";
 import { extractRiskDiffBars, extractRiskDiffSummary } from "../lib/risk-extract";
@@ -101,9 +102,13 @@ export function SymbolDetailPage() {
   const navigate = useNavigate();
   const upperTicker = (ticker ?? "").toUpperCase();
 
+  // In the public demo the report comes from the open, stored-only
+  // route; its own cache key keeps it apart from a signed-in visit.
+  const demo = useDemo();
   const reportQuery = useQuery({
-    queryKey: ["report", upperTicker, "full"],
-    queryFn: () => fetchResearchReport(upperTicker, { focus: "full" }),
+    queryKey: ["report", upperTicker, demo ? "demo" : "full"],
+    queryFn: () =>
+      demo ? fetchDemoReport(upperTicker) : fetchResearchReport(upperTicker, { focus: "full" }),
     enabled: upperTicker.length > 0,
     staleTime: 60_000,
   });
@@ -111,21 +116,22 @@ export function SymbolDetailPage() {
   // Centralized 401 handling — clear token + bounce to login.
   useEffect(() => {
     if (
+      !demo &&
       reportQuery.error instanceof ApiError &&
       reportQuery.error.status === 401
     ) {
       clearStoredToken();
       navigate(ROUTES.login, { replace: true });
     }
-  }, [reportQuery.error, navigate]);
+  }, [demo, reportQuery.error, navigate]);
 
   // Phase 4.7 — push the ticker onto the MRU recent list once the
   // report has actually loaded (typos / 404 tickers stay out).
   useEffect(() => {
-    if (reportQuery.data && upperTicker) {
+    if (!demo && reportQuery.data && upperTicker) {
       pushRecent(upperTicker);
     }
-  }, [reportQuery.data, upperTicker]);
+  }, [demo, reportQuery.data, upperTicker]);
 
   const report = reportQuery.data;
   const sections = report?.sections ?? [];
@@ -151,13 +157,13 @@ export function SymbolDetailPage() {
           {/* Report age + Regenerate, overall confidence, diagnostic
               pills, watchlist star. */}
           <div className="mb-3 flex items-center justify-end gap-2">
-            <ReportFreshness ticker={upperTicker} generatedAt={report.generated_at} />
+            <ReportFreshness ticker={upperTicker} generatedAt={report.generated_at} readOnly={demo} />
             <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
               Confidence
               <ConfidenceBadge confidence={report.overall_confidence} size="sm" />
             </span>
             <HeaderPills signals={report.layout_signals} />
-            <WatchlistButton ticker={upperTicker} />
+            {!demo && <WatchlistButton ticker={upperTicker} />}
           </div>
 
           {/* A card with no data draws nothing; this names what's absent. */}

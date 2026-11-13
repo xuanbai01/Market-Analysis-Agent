@@ -5,8 +5,9 @@ Runs in CI (the "AI — PR Review" job in .github/workflows/ci.yml) on
 the standard library only, so the job needs no install step. Claude
 writes most of this repo's code; a model from another family reads the
 diff for what it missed. It sees only the diff, the PR's title and
-description, and the project rules from CLAUDE.md, not the rest of the
-repo, so it can miss a break in a file the PR didn't touch.
+description, and the project rules from the base commit's CLAUDE.md,
+not the rest of the repo, so it can miss a break in a file the PR
+didn't touch.
 
 One comment per PR, found again by MARKER and rewritten on each push,
 so a long PR doesn't collect a stack of reviews.
@@ -274,6 +275,14 @@ def _git_diff(base_sha: str, head_sha: str) -> str:
     ).stdout
 
 
+def _file_at(sha: str, path: str) -> str:
+    """``path`` as of commit ``sha``; empty when it doesn't exist there."""
+    result = subprocess.run(
+        ["git", "show", f"{sha}:{path}"], capture_output=True, text=True, encoding="utf-8",
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
 def _ask_deepseek(messages: list[dict[str, str]], options: dict, *, key: str, model: str,
                   base_url: str) -> dict:
     try:
@@ -336,8 +345,8 @@ def main() -> int:
               f"Comment {action}.")
         return 0
 
-    claude_md = Path("CLAUDE.md")
-    rules = project_rules(claude_md.read_text(encoding="utf-8")) if claude_md.exists() else ""
+    # The base commit's rules: a PR doesn't get to weaken what it is judged by.
+    rules = project_rules(_file_at(pr["base"]["sha"], "CLAUDE.md"))
     diff = "".join(f.text for f in kept)
     messages = build_messages(pr["title"], pr.get("body"), diff, rules)
     print(f"Reviewing {len(kept)} files ({len(diff)} chars) with {model}; "

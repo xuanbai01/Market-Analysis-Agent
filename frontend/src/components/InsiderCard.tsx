@@ -137,10 +137,13 @@ export function InsiderCard({ ticker, insiders: x }: Props) {
               {x.people.map((p) => (
                 <li key={`${p.name}-${p.role}`} data-testid="insider-person">
                   <div className="flex items-baseline justify-between gap-3 text-sm">
-                    <span className="min-w-0 truncate">
-                      <span className="text-strata-hi">{p.name}</span>
-                      <span className="ml-1.5 text-xs text-strata-dim">{p.role}</span>
-                    </span>
+                    {/* Role on its own line, and both wrap rather than
+                        truncate: titles run long ("President, Latin
+                        America OU") and a cut-off name says nothing. */}
+                    <div className="min-w-0 break-words">
+                      <div className="text-strata-hi">{p.name}</div>
+                      <div data-testid="insider-role" className="text-xs text-strata-dim">{p.role}</div>
+                    </div>
                     <span className="shrink-0 font-mono text-xs text-strata-fg tabular">
                       {p.net < 0 ? "sold" : "bought"} {usd(Math.abs(p.net))}
                     </span>

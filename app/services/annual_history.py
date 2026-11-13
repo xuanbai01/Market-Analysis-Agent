@@ -52,7 +52,10 @@ DESCRIPTIONS: dict[str, str] = {
 }
 
 _DETAILS: dict[str, str] = {
-    "revenue_per_share_annual": "us-gaap revenue ÷ diluted weighted shares, split-adjusted, calendar-year frames",
+    "revenue_per_share_annual": (
+        "us-gaap revenue ÷ diluted weighted shares (basic where no diluted count is filed), "
+        "split-adjusted, calendar-year frames"
+    ),
     "operating_income_per_share_annual": "us-gaap OperatingIncomeLoss ÷ diluted weighted shares, split-adjusted",
     "fcf_per_share_annual": "(operating cash flow − capex) ÷ diluted weighted shares, split-adjusted",
     "eps_diluted_annual": "us-gaap EarningsPerShareDiluted, split-adjusted",

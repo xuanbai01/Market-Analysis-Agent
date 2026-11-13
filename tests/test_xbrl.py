@@ -180,3 +180,27 @@ def test_a_successor_with_no_annual_facts_yet_reads_entirely_from_its_predecesso
         2024: (4_000.0, "2025-02-19"),
         2025: (3_900.0, "2026-02-18"),
     }
+
+
+def test_share_counts_fall_back_to_basic_in_years_with_no_diluted_count(
+    cache_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exxon has no dilutive securities and stopped tagging a diluted
+    count after 2013; every later year carries only the basic one. A
+    year that has a diluted count keeps it."""
+
+    def shares(*points: tuple[str, float]) -> dict[str, Any]:
+        return {"units": {"shares": [{"val": v, "frame": f, "filed": "2026-02-18"} for f, v in points]}}
+
+    monkeypatch.setattr(xbrl.edgar, "_sec_get", FakeSecByCik({
+        ("0000034088", "WeightedAverageNumberOfDilutedSharesOutstanding"): shares(("CY2013", 4_419.0)),
+        ("0000034088", "WeightedAverageNumberOfSharesOutstandingBasic"): shares(
+            ("CY2013", 4_400.0), ("CY2024", 4_298.0), ("CY2025", 4_305.0)
+        ),
+    }))
+    series = xbrl.annual_series_with_filed("0000034088", xbrl.DILUTED_SHARES_TAGS, "shares")
+    assert {year: value for year, (value, _filed) in series.items()} == {
+        2013: 4_419.0,
+        2024: 4_298.0,
+        2025: 4_305.0,
+    }

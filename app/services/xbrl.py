@@ -43,8 +43,15 @@ REVENUE_TAGS = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues
 OPERATING_INCOME_TAGS = ("OperatingIncomeLoss",)
 OCF_TAGS = ("NetCashProvidedByUsedInOperatingActivities",)
 CAPEX_TAGS = ("PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets")
-DILUTED_SHARES_TAGS = ("WeightedAverageNumberOfDilutedSharesOutstanding",)
-DILUTED_EPS_TAGS = ("EarningsPerShareDiluted",)
+# A company with nothing dilutive may tag one combined count, or only the
+# basic one: Exxon stopped tagging a diluted count after 2013. Those fill
+# the years that have no diluted count.
+DILUTED_SHARES_TAGS = (
+    "WeightedAverageNumberOfDilutedSharesOutstanding",
+    "WeightedAverageNumberOfSharesOutstandingBasicAndDiluted",
+    "WeightedAverageNumberOfSharesOutstandingBasic",
+)
+DILUTED_EPS_TAGS = ("EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted")
 _CONCEPT_URL = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{tag}.json"
 
 

@@ -402,3 +402,21 @@ class TestOwnHistory:
             assert claim.source.tool == rd.DERIVED_TOOL
             assert claim.source.detail
             assert claim.unit is not None
+
+
+class TestInsiders:
+    """Dollars sold read differently at a $4T company and a $4B one."""
+
+    FUND = {"market_cap": c(4_000_000_000_000.0)}
+
+    def test_sales_and_purchases_as_a_share_of_market_cap(self) -> None:
+        insider = {"sell_dollars": c(1_000_000_000.0), "buy_dollars": c(400_000_000.0)}
+        d = by_description(rd.insider_claims(insider, self.FUND))
+        assert d["Officer and director sales as a share of market cap, last 6 months"].value == pytest.approx(0.00025)
+        assert d["Officer and director purchases as a share of market cap, last 6 months"].value == pytest.approx(0.0001)
+        assert all(cl.unit == "fraction" for cl in d.values())
+
+    def test_nothing_when_there_were_no_trades_or_no_market_cap(self) -> None:
+        assert rd.insider_claims({"sell_dollars": c(0.0), "buy_dollars": c(0.0)}, self.FUND) == []
+        assert rd.insider_claims({"sell_dollars": c(1e9)}, {}) == []
+        assert rd.insider_claims(None, self.FUND) == []

@@ -162,6 +162,7 @@ def _patch_tools(
         "fetch_business_info": _wrap_const({}),
         "fetch_news": _wrap_const({}),
         "fetch_annual_history": _wrap_const({}),
+        "fetch_insider_activity": _wrap_const({}),
     }
     for name, override in overrides.items():
         if callable(override) and hasattr(override, "__await__"):
@@ -243,7 +244,7 @@ async def test_full_focus_assembles_seven_sections(
     assert titles[:2] == ["Business", "News"]
     assert titles[2:] == [
         "Valuation", "Quality", "Capital Allocation",
-        "Earnings", "Peers", "Risk Factors", "Macro",
+        "Earnings", "Peers", "Risk Factors", "Insider Activity", "Macro",
     ]
     # All numeric sections populated → HIGH per section. Business +
     # News default-stubbed to empty in this test, so they land LOW;
@@ -490,8 +491,8 @@ async def test_synth_unknown_title_silently_dropped(
 
     titles = [s.title for s in report.sections]
     assert "ESG Analysis" not in titles
-    # Phase 4.4.A — Business + News added to FULL catalog → 9 sections.
-    assert len(report.sections) == 9
+    # Phase 4.4.A — Business + News; 2026-11 — Insider Activity → 10 sections.
+    assert len(report.sections) == 10
 
 
 # ── Audit trail + observability ──────────────────────────────────────
@@ -528,6 +529,7 @@ async def test_tool_calls_audit_records_every_invoked_tool(
         "fetch_fundamentals", "fetch_earnings", "fetch_peers",
         "fetch_macro", "extract_10k_risks_diff", "extract_10k_business",
         "fetch_business_info", "fetch_news", "fetch_annual_history",
+        "fetch_insider_activity",
     }
 
 

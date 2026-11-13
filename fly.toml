@@ -22,11 +22,17 @@ kill_timeout = '10s'            # give in-flight requests time to drain
   # with 'anthropic' + the ANTHROPIC_API_KEY secret.
   LLM_PROVIDER = 'deepseek'
   # Fresh reports per IP per hour (cache hits are free). The code default
-  # is 3; raised for the Phase 4.8 dogfood phase, when the owner is the
-  # only user and needs many fresh reports. The shared secret gates the
-  # endpoint and a DeepSeek report costs under a cent, so 30/h caps the
-  # worst case near $0.30/h. Lower it before sharing the URL publicly.
-  RESEARCH_RATE_LIMIT_PER_HOUR = '30'
+  # is 3. It was 30 while the owner dogfooded alone; lowered when the
+  # public demo opened (2026-11). Generating a report still needs the
+  # shared secret, so this only matters if the secret leaks: 10/h caps
+  # that near $0.10/h on DeepSeek, and still lets the owner rebuild a
+  # handful of tickers after a report-version bump.
+  RESEARCH_RATE_LIMIT_PER_HOUR = '10'
+  # Public read-only demo (app/services/demo.py): these tickers' latest
+  # stored reports and prices are readable at /v1/demo/* and /demo
+  # without the secret. Nothing is generated for a visitor. A ticker
+  # appears once a signed-in visit has built its report. Empty = off.
+  DEMO_SYMBOLS = 'AAPL,NVDA,KO,JPM,RIVN,XOM'
   # Secrets — set via `flyctl secrets set ...`, never hardcoded here:
   #   DATABASE_URL, BACKEND_SHARED_SECRET, DEEPSEEK_API_KEY
   #   (optional: ANTHROPIC_API_KEY, FRED_API_KEY, NEWSAPI_KEY).

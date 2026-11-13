@@ -9,6 +9,8 @@
  *   4-cell matrix: trailing P/E, forward P/E, P/S, EV/EBITDA — each
  *     cell shows subject value, peer median, percentile bar.
  *   PeerScatterV2 below the matrix.
+ *   ValuationHistory: the company's own multiples at each fiscal
+ *     year-end, with today at the end of each line (2026-11).
  *
  * The percentile bar is a simple horizontal track with peer min on
  * the left, peer max on the right, a faint tick at the median, and
@@ -18,6 +20,7 @@
  */
 import { formatClaimValue } from "../lib/format";
 import { subjectGrossMargin } from "../lib/peer-grouping";
+import { extractOwnHistory } from "../lib/valuation-history-extract";
 import {
   extractValuationCells,
   type ValuationCell,
@@ -25,6 +28,7 @@ import {
 import type { Claim, ResearchReport } from "../lib/schemas";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { PeerScatterV2 } from "./PeerScatterV2";
+import { ValuationHistory } from "./ValuationHistory";
 
 // Phase 4.3.X — count distinct peer tickers in a Peers section's
 // claims. Backend ``fetch_peers`` emits each claim as
@@ -115,6 +119,9 @@ export function ValuationCard({ report }: Props) {
           )}
         </div>
       </div>
+
+      {/* 2026-11 — against peers above, against its own past below. */}
+      <ValuationHistory panels={extractOwnHistory(report)} />
     </section>
   );
 }

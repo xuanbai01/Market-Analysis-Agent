@@ -112,6 +112,16 @@ def test_project_rules_come_from_claude_md():
     assert "Phase 6" not in rules
 
 
+def test_project_rules_found_in_the_real_claude_md():
+    # A renamed heading would drop the rules from every review while the
+    # job stays green, so read the file the job reads.
+    claude_md = (Path(__file__).resolve().parents[1] / "CLAUDE.md").read_text(encoding="utf-8")
+    rules = ai_review.project_rules(claude_md)
+    assert "REPORT_VERSION" in rules
+    assert "require_shared_secret" in rules
+    assert sum(1 for line in rules.splitlines() if line.startswith("- **")) >= 10
+
+
 def test_project_rules_empty_when_the_section_is_missing():
     assert ai_review.project_rules("# CLAUDE.md\nnothing here\n") == ""
 
@@ -297,6 +307,37 @@ def test_main_says_so_on_the_pr_when_nothing_is_reviewable(pr_env, monkeypatch):
     assert pr_env[0].startswith(ai_review.MARKER)
     assert "Nothing to review" in pr_env[0]
     assert "uv.lock" in pr_env[0]
+
+
+def test_main_names_source_files_left_out_for_size(pr_env, monkeypatch):
+    # From the review: one source file over the budget was announced as
+    # "every changed file is generated" and never named.
+    huge = "+" + "x" * (ai_review.MAX_DIFF_CHARS + 10) + "\n"
+    monkeypatch.setattr(ai_review, "_git_diff", lambda base, head: _file("app/big.py", huge))
+    monkeypatch.setattr(ai_review, "_ask_deepseek", lambda *a, **k: pytest.fail("nothing fits"))
+
+    assert ai_review.main() == 0
+    assert "app/big.py" in pr_env[0]
+    assert "generated" not in pr_env[0]
+
+
+def test_comments_are_read_past_the_first_page(monkeypatch):
+    # From the review: a PR with 100+ comments would get a second review.
+    pages = {
+        1: [{"id": i, "body": "chat"} for i in range(100)],
+        2: [{"id": 500, "body": f"{ai_review.MARKER}\nold review"}],
+    }
+    calls = []
+
+    def fake_request(url, **kwargs):
+        calls.append((url, kwargs.get("method", "GET")))
+        if "page=" in url:
+            return pages.get(int(url.rsplit("page=", 1)[1]), [])
+        return {}
+
+    monkeypatch.setattr(ai_review, "_request", fake_request)
+    assert ai_review._post_or_update("new", repo="o/r", number=97, token="t") == "updated"
+    assert calls[-1] == ("https://api.github.com/repos/o/r/issues/comments/500", "PATCH")
 
 
 def test_main_fails_without_the_key(pr_env, monkeypatch):

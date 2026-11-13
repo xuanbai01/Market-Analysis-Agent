@@ -52,9 +52,9 @@ _GATED_CALLS: list[tuple[str, str, dict[str, Any] | None]] = [
     ("POST", "/v1/symbols", {"symbol": "AAPL", "name": "Apple Inc."}),
 ]
 
-# Write-method routes deliberately left ungated: legacy stubs that only
-# ever answer 501 (see CLAUDE.md "Stubs / 501s").
-_UNGATED_WRITE_PATHS = {"/v1/analysis"}
+# Write-method routes deliberately left ungated, each with its reason.
+# None today: the last entry was a 501 stub, removed 2026-11.
+_UNGATED_WRITE_PATHS: set[str] = set()
 
 
 class _FakeSession:

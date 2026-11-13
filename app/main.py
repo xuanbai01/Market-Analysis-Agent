@@ -1,15 +1,6 @@
 from fastapi import FastAPI
 
-from app.api.v1.routers import (
-    analysis,
-    forecasts,
-    lens,
-    market,
-    news,
-    reports,
-    research,
-    symbol,
-)
+from app.api.v1.routers import lens, market, news, research, symbol
 from app.api.v1.routers.health import router as health_router
 from app.core.cors import configure_cors
 from app.core.errors import add_problem_handlers
@@ -34,9 +25,6 @@ add_problem_handlers(app)
 app.include_router(health_router, prefix="/v1")
 app.include_router(market.router, prefix="/v1")
 app.include_router(news.router, prefix="/v1")
-app.include_router(analysis.router, prefix="/v1")
-app.include_router(reports.router, prefix="/v1")
-app.include_router(forecasts.router, prefix="/v1")
 app.include_router(research.router, prefix="/v1")
 app.include_router(symbol.router, prefix="/v1")
 app.include_router(lens.router, prefix="/v1")

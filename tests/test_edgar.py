@@ -23,6 +23,8 @@ from typing import Any
 import pytest
 
 from app.schemas.edgar import EdgarFiling
+from app.services import edgar as edgar_module
+from app.services import sec_registrants
 from app.services.edgar import (
     PROVIDERS,
     SUPPORTED_FORM_TYPES,
@@ -635,3 +637,134 @@ def test_strip_xsl_prefix_only_strips_leading_xsl_segment() -> None:
         _strip_xsl_prefix("Financial_Report.xlsx")
         == "Financial_Report.xlsx"
     )
+
+
+# ── SEC provider: successor registrants (2026-11, dogfood #18) ────────
+# The HTTP layer is faked at ``_sec_get``; what is under test is which
+# registrants the provider reads and how it merges their filings.
+
+
+class _FakeResponse:
+    def __init__(self, body: Any) -> None:
+        self._body = body
+
+    def json(self) -> Any:
+        return self._body
+
+    @property
+    def text(self) -> str:
+        return self._body if isinstance(self._body, str) else json.dumps(self._body)
+
+
+def _submissions(*rows: tuple[str, str, str]) -> dict[str, Any]:
+    """rows: (form, accession, filing date)."""
+    return {
+        "filings": {
+            "recent": {
+                "form": [r[0] for r in rows],
+                "accessionNumber": [r[1] for r in rows],
+                "filingDate": [r[2] for r in rows],
+                "reportDate": ["" for _ in rows],
+                "primaryDocument": ["doc.htm" for _ in rows],
+                "size": [100 for _ in rows],
+            }
+        }
+    }
+
+
+_NEW_CIK, _OLD_CIK = "0002115436", "0000034088"
+
+
+def _fake_sec(monkeypatch: pytest.MonkeyPatch, submissions: dict[str, dict[str, Any]]) -> list[str]:
+    """Serve the ticker map, each registrant's submissions and any document."""
+    monkeypatch.setattr(sec_registrants, "PREDECESSOR_CIKS", {_NEW_CIK: (_OLD_CIK,)})
+    calls: list[str] = []
+
+    def _get(url: str) -> _FakeResponse:
+        calls.append(url)
+        if url.endswith("company_tickers.json"):
+            return _FakeResponse(
+                {"0": {"cik_str": int(_NEW_CIK), "ticker": "XOM", "title": "ExxonMobil Holdings Corp"}}
+            )
+        for cik, body in submissions.items():
+            if url.endswith(f"CIK{cik}.json"):
+                return _FakeResponse(body)
+        return _FakeResponse("<html>filing text</html>")
+
+    monkeypatch.setattr(edgar_module, "_sec_get", _get)
+    return calls
+
+
+def test_sec_provider_reads_a_successors_10ks_from_its_predecessor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exxon, 2026: the ticker's new registrant has filed no 10-K; the
+    two most recent ones are under the registrant before it."""
+    _fake_sec(monkeypatch, {
+        _NEW_CIK: _submissions(
+            ("10-Q", "0002115436-26-000007", "2026-11-03"),
+            ("8-K12B", "0001193125-26-291990", "2026-07-01"),
+        ),
+        _OLD_CIK: _submissions(
+            ("10-K", "0000034088-26-000045", "2026-02-18"),
+            ("10-K", "0000034088-25-000010", "2025-02-19"),
+            ("10-K", "0000034088-24-000018", "2024-02-28"),
+        ),
+    })
+    filings = edgar_module._fetch_edgar_sec("XOM", "10-K", 2, False)
+
+    assert [f.accession for f in filings] == ["0000034088-26-000045", "0000034088-25-000010"]
+    assert {f.cik for f in filings} == {_OLD_CIK}
+    assert {f.symbol for f in filings} == {"XOM"}
+    # Each document lives under the registrant that filed it.
+    assert filings[0].primary_doc_url == (
+        "https://www.sec.gov/Archives/edgar/data/34088/000003408826000045/doc.htm"
+    )
+
+
+def test_sec_provider_merges_registrants_newest_first_without_repeating_a_joint_filing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Once the successor files its own 10-K, that one leads; a filing
+    listed under both registrants counts once, under the current one."""
+    _fake_sec(monkeypatch, {
+        _NEW_CIK: _submissions(("10-K", "0002115436-27-000003", "2027-02-17")),
+        _OLD_CIK: _submissions(
+            ("10-K", "0002115436-27-000003", "2027-02-17"),
+            ("10-K", "0000034088-26-000045", "2026-02-18"),
+            ("10-K", "0000034088-25-000010", "2025-02-19"),
+        ),
+    })
+    filings = edgar_module._fetch_edgar_sec("XOM", "10-K", 2, False)
+
+    assert [(f.accession, f.cik) for f in filings] == [
+        ("0002115436-27-000003", _NEW_CIK),
+        ("0000034088-26-000045", _OLD_CIK),
+    ]
+
+
+def test_sec_provider_fetches_text_only_for_the_filings_it_returns(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _fake_sec(monkeypatch, {
+        _NEW_CIK: _submissions(("10-Q", "0002115436-26-000007", "2026-11-03")),
+        _OLD_CIK: _submissions(
+            ("10-K", "0000034088-26-000045", "2026-02-18"),
+            ("10-K", "0000034088-25-000010", "2025-02-19"),
+        ),
+    })
+    filings = edgar_module._fetch_edgar_sec("XOM", "10-K", 1, True)
+
+    assert [f.primary_doc_text for f in filings] == ["<html>filing text</html>"]
+    assert [u for u in calls if u.endswith("doc.htm")] == [
+        "https://www.sec.gov/Archives/edgar/data/34088/000003408826000045/doc.htm"
+    ]
+
+
+def test_sec_provider_is_unchanged_for_a_registrant_with_no_predecessor(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _fake_sec(monkeypatch, {
+        "0000320193": _submissions(
+            ("10-K", "0000320193-25-000079", "2025-10-31"),
+            ("10-K", "0000320193-24-000123", "2024-11-01"),
+        ),
+    })
+    filings = edgar_module._fetch_edgar_sec("AAPL", "10-K", 1, False, "0000320193")
+
+    assert [f.accession for f in filings] == ["0000320193-25-000079"]
+    assert len(calls) == 1  # one submissions request, nothing else

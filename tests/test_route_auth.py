@@ -189,3 +189,28 @@ def test_prices_route_requires_the_shared_secret() -> None:
         if isinstance(r, APIRoute) and r.path == "/v1/market/{symbol}/prices"
     )
     assert _requires_secret(route)
+
+
+# The public read-only demo (app/services/demo.py): the only routes that
+# return report data without the secret. Adding a fourth, or a write
+# method, must be a decision, so the set is pinned here.
+_OPEN_DEMO_PATHS = {
+    "/v1/demo",
+    "/v1/demo/research/{symbol}",
+    "/v1/demo/market/{symbol}/prices",
+}
+
+
+def test_the_demo_routes_are_open_read_only_and_exactly_these() -> None:
+    demo_routes = [r for r in app.routes if isinstance(r, APIRoute) and r.path.startswith("/v1/demo")]
+    assert {r.path for r in demo_routes} == _OPEN_DEMO_PATHS
+    for route in demo_routes:
+        assert route.methods == {"GET"}, route.path
+        assert not _requires_secret(route), route.path
+
+
+def test_every_other_report_and_price_route_still_requires_the_secret() -> None:
+    gated_prefixes = ("/v1/research", "/v1/lens", "/v1/market/overview", "/v1/market/{symbol}/prices")
+    for route in app.routes:
+        if isinstance(route, APIRoute) and route.path.startswith(gated_prefixes):
+            assert _requires_secret(route), route.path

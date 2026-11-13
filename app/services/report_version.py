@@ -33,12 +33,16 @@ History:
        price-to-sales and price-to-free-cash-flow at each fiscal
        year-end, their medians, and today's trailing multiples as a
        premium or discount to them, in the Valuation section.
+    5  2026-11-13 — an Insider Activity section from Form 4 filings:
+       officer and director purchases and sales over six months, apart
+       from 10% holders, the share sold under 10b5-1 plans, the top
+       traders, and insider dollars as a share of market cap.
 """
 from __future__ import annotations
 
 from app.schemas.research import ResearchReport
 
-REPORT_VERSION = 4
+REPORT_VERSION = 5
 
 
 def is_outdated(report: ResearchReport) -> bool:

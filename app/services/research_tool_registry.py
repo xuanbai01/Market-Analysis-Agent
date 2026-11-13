@@ -40,7 +40,7 @@ from typing import Any
 
 from app.schemas.research import Claim, Source
 from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
-from app.services import annual_history, research_derived, valuation_history
+from app.services import annual_history, form_4, research_derived, valuation_history
 
 
 class Focus(str, Enum):
@@ -208,6 +208,17 @@ def _build_peers(outputs: dict[str, Any]) -> list[Claim]:
     return _all_claims(outputs.get("fetch_peers"))
 
 
+def _build_insider_activity(outputs: dict[str, Any]) -> list[Claim]:
+    """Form 4 trades over six months (``form_4.py``): the fixed claims, one
+    per top trader, then insider dollars as a share of market cap."""
+    insider = outputs.get("fetch_insider_activity")
+    if not isinstance(insider, dict) or not insider:
+        return []
+    fixed = _filter_keys(insider, form_4.CLAIM_KEYS)
+    people = [claim for key, claim in insider.items() if key.startswith("person.")]
+    return fixed + people + research_derived.insider_claims(insider, outputs.get("fetch_fundamentals"))
+
+
 def _build_macro(outputs: dict[str, Any]) -> list[Claim]:
     return _all_claims(outputs.get("fetch_macro"))
 
@@ -370,6 +381,12 @@ SECTIONS_BY_FOCUS: dict[Focus, list[SectionSpec]] = {
             "Risk Factors",
             ("extract_10k_risks_diff", "extract_10k_business"),
             _build_risk_factors,
+        ),
+        # 2026-11 — who among officers and directors bought or sold.
+        SectionSpec(
+            "Insider Activity",
+            ("fetch_insider_activity", "fetch_fundamentals"),
+            _build_insider_activity,
         ),
         SectionSpec("Macro", ("fetch_macro",), _build_macro),
     ],

@@ -67,6 +67,7 @@ from app.services.annual_history import fetch_annual_history
 from app.services.business_info import fetch_business_info
 from app.services.claim_display import format_claim_line as _format_claim_line
 from app.services.earnings import fetch_earnings
+from app.services.form_4 import fetch_insider_activity
 from app.services.fundamentals import fetch_fundamentals
 from app.services.macro import fetch_macro
 from app.services.news import fetch_news
@@ -98,6 +99,8 @@ TOOL_DISPATCH: dict[str, Callable[[str], Awaitable[Any]]] = {
     "fetch_news": fetch_news,
     # 2026-11 — ten years of per-share history from SEC filings.
     "fetch_annual_history": fetch_annual_history,
+    # 2026-11 — officer and director trades from Form 4 filings.
+    "fetch_insider_activity": fetch_insider_activity,
 }
 
 

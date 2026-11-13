@@ -15,6 +15,7 @@
  *   └ Growth    PerShareGrowthCard          ┘ below for distressed names
  *   small row   Cash & capital · Capital returns · Risk · Macro —
  *               only the cards with data, one column each, equal height
+ *   Insiders    InsiderCard, full width (2026-11; absent when no Form 4s)
  *   context     Business · News — equal height
  *
  * Cards are flex columns filling their grid cell (``h-full``) and rows
@@ -32,6 +33,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ApiError, fetchDemoReport, fetchResearchReport } from "../lib/api";
 import { clearStoredToken } from "../lib/auth";
 import { hasCapitalReturns } from "../lib/capital-returns-extract";
+import { extractInsiders } from "../lib/insider-extract";
 import { useDemo } from "../lib/demo";
 import { extractMacroPanels } from "../lib/macro-extract";
 import { pushRecent } from "../lib/recent";
@@ -48,6 +50,7 @@ import { ErrorBanner } from "./ErrorBanner";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { HeaderPills } from "./HeaderPills";
 import { HeroCard } from "./HeroCard";
+import { InsiderCard } from "./InsiderCard";
 import { LoadingState } from "./LoadingState";
 import { MacroPanel } from "./MacroPanel";
 import { MissingDataNote } from "./MissingDataNote";
@@ -71,6 +74,7 @@ const CARD_SECTIONS = [
   "Risk Factors",
   "Macro",
   "Capital Allocation",
+  "Insider Activity",
 ];
 
 /** Peers listed in the Peers section ("PG, PEP, CL"). */
@@ -140,6 +144,7 @@ export function SymbolDetailPage() {
   const qualitySection = find("Quality");
   const businessSection = find("Business");
   const newsSection = find("News");
+  const insiders = extractInsiders(find("Insider Activity"));
   const otherSections = sections.filter((s) => !CARD_SECTIONS.includes(s.title));
   const reportKey = `${upperTicker}:${report?.generated_at ?? ""}`;
 
@@ -206,6 +211,14 @@ export function SymbolDetailPage() {
           )}
 
           <DashboardRows reportKey={reportKey} ticker={upperTicker} report={report} />
+
+          {insiders && (
+            <Anchor anchor="Insider Activity" label="Insiders" className="mb-6">
+              <ErrorBoundary label="Insider activity" resetKey={reportKey}>
+                <InsiderCard ticker={upperTicker} insiders={insiders} />
+              </ErrorBoundary>
+            </Anchor>
+          )}
 
           {(businessSection || newsSection) && (
             <Anchor anchor="News" label="Business & news">

@@ -16,6 +16,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1 import dependencies as deps
 from app.core import settings as settings_module
 from app.db.models.candles import Candle
 from app.db.models.research_reports import ResearchReportRow
@@ -83,6 +84,7 @@ def _demo_on(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings_module.settings, "DEMO_SYMBOLS", "ko, NVDA")
     monkeypatch.setattr(settings_module.settings, "BACKEND_SHARED_SECRET", _SECRET)
     demo.clear_cache()
+    deps.reset_demo_rate_limit_for_tests()
 
 
 @pytest.fixture(autouse=True)
@@ -93,8 +95,12 @@ def _no_spending(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _boom(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("the demo must never generate a report or call a provider")
 
+    from app.services import llm
+
     monkeypatch.setattr(research_orchestrator, "compose_research_report", _boom)
     monkeypatch.setattr(market_prices, "ingest_market_data", _boom)
+    monkeypatch.setattr(llm, "synth_call", _boom)
+    monkeypatch.setattr(llm, "triage_call", _boom)
 
 
 # ── Which tickers ────────────────────────────────────────────────────
@@ -257,3 +263,110 @@ async def test_a_repeated_request_is_answered_from_memory(
     for _ in range(5):
         assert (await client.get("/v1/demo/research/KO")).status_code == 200
     assert calls == 1
+
+
+# ── Under a flood (security review, 2026-11-13) ──────────────────────
+
+
+async def test_a_repeated_request_does_not_rebuild_the_response(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A report is a large document. Validating and serializing it again
+    for every anonymous request would let a loop pin the one shared CPU,
+    so the stored bytes are what gets sent."""
+    await _store(db_session, _report("KO", datetime.now(UTC)))
+    first = await client.get("/v1/demo/research/KO")
+
+    def _boom(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("a cached demo response was serialized again")
+
+    monkeypatch.setattr(ResearchReport, "model_dump_json", _boom)
+    monkeypatch.setattr(ResearchReport, "model_dump", _boom)
+
+    again = await client.get("/v1/demo/research/KO")
+    assert again.status_code == 200
+    assert again.content == first.content
+
+
+async def test_responses_tell_browsers_and_proxies_to_cache_them(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await _store(db_session, _report("KO", datetime.now(UTC)))
+    for path in ("/v1/demo", "/v1/demo/research/KO", "/v1/demo/market/KO/prices"):
+        resp = await client.get(path)
+        assert resp.headers["cache-control"] == "public, max-age=300", path
+        assert resp.headers["content-type"].startswith("application/json"), path
+
+
+async def test_one_caller_is_slowed_past_the_per_minute_limit(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings_module.settings, "DEMO_RATE_LIMIT_PER_MINUTE", 3)
+    deps.reset_demo_rate_limit_for_tests()
+    await _store(db_session, _report("KO", datetime.now(UTC)))
+
+    statuses = [(await client.get("/v1/demo/research/KO")).status_code for _ in range(4)]
+
+    assert statuses == [200, 200, 200, 429]
+    limited = await client.get("/v1/demo")
+    assert limited.status_code == 429
+    assert int(limited.headers["retry-after"]) >= 1
+
+
+async def test_the_limit_can_be_turned_off(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings_module.settings, "DEMO_RATE_LIMIT_PER_MINUTE", 0)
+    deps.reset_demo_rate_limit_for_tests()
+    await _store(db_session, _report("KO", datetime.now(UTC)))
+    assert {(await client.get("/v1/demo/research/KO")).status_code for _ in range(10)} == {200}
+
+
+def test_a_source_url_that_is_not_a_web_address_is_dropped() -> None:
+    """The dashboard renders ``Source.url`` as a link, and the demo makes
+    report pages public. A ``javascript:`` address would run in the page
+    that holds the owner's token; only http(s) survives."""
+    from datetime import UTC as _UTC
+    from datetime import datetime as _datetime
+
+    from app.schemas.research import Source as _Source
+
+    at = _datetime.now(_UTC)
+    assert _Source(tool="t", fetched_at=at, url="https://www.sec.gov/x").url == "https://www.sec.gov/x"
+    assert _Source(tool="t", fetched_at=at, url="HTTP://example.com/a").url == "HTTP://example.com/a"
+    for bad in ("javascript:alert(1)", "data:text/html,x", " https://x.test", "ftp://x.test", ""):
+        assert _Source(tool="t", fetched_at=at, url=bad).url is None, bad
+    assert _Source(tool="t", fetched_at=at).url is None
+
+
+async def test_an_unexpected_failure_does_not_describe_itself_to_the_caller(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 500 body used to carry ``str(exc)``: on an open route that can
+    hand a stranger a SQL fragment or a hostname."""
+    from httpx import ASGITransport
+    from httpx import AsyncClient as _Client
+
+    from app.api.v1.dependencies import get_session
+    from app.main import app
+    from app.services import research_cache
+
+    async def _explode(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("connection to db.internal:5432 refused (password=hunter2)")
+
+    monkeypatch.setattr(research_cache, "lookup_latest", _explode)
+
+    async def _session() -> Any:
+        yield db_session
+
+    app.dependency_overrides[get_session] = _session
+    try:
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with _Client(transport=transport, base_url="http://test") as raw:
+            resp = await raw.get("/v1/demo/research/KO")
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+
+    assert resp.status_code == 500
+    assert "hunter2" not in resp.text and "db.internal" not in resp.text
+    assert resp.json()["title"] == "Internal Server Error"

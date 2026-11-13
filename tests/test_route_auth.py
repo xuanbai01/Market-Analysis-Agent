@@ -214,3 +214,17 @@ def test_every_other_report_and_price_route_still_requires_the_secret() -> None:
     for route in app.routes:
         if isinstance(route, APIRoute) and route.path.startswith(gated_prefixes):
             assert _requires_secret(route), route.path
+
+
+# Security review, 2026-11-13: the Phase 1 read routes (market snapshot
+# and history, news, symbols) were open, and each one tells an anonymous
+# caller which tickers the owner has researched. With a public demo URL
+# that matters. Everything is now gated unless it is named here.
+_OPEN_BY_DESIGN = {"/", "/v1/health", *_OPEN_DEMO_PATHS}
+
+
+def test_every_route_requires_the_secret_unless_named_open() -> None:
+    ungated = {
+        r.path for r in app.routes if isinstance(r, APIRoute) and not _requires_secret(r)
+    }
+    assert ungated == _OPEN_BY_DESIGN

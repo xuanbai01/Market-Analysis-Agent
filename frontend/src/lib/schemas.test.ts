@@ -17,6 +17,7 @@ import {
   ResearchReportSummariesSchema,
   ResearchReportSummarySchema,
   SectionSchema,
+  SourceSchema,
 } from "./schemas";
 
 describe("ResearchReportSchema", () => {
@@ -406,5 +407,26 @@ describe("ResearchReportSchema thesis", () => {
     const report = ResearchReportSchema.parse({ ...base, thesis: { bull: "nope" } });
     expect(report.thesis).toBeNull();
     expect(report.symbol).toBe("KO");
+  });
+});
+
+describe("SourceSchema — links are web addresses or nothing (2026-11)", () => {
+  const base = { tool: "yfinance.news", fetched_at: "2026-11-13T17:00:00+00:00" };
+
+  it("keeps an http(s) address", () => {
+    expect(SourceSchema.parse({ ...base, url: "https://www.sec.gov/Archives/x.htm" }).url).toBe(
+      "https://www.sec.gov/Archives/x.htm",
+    );
+  });
+
+  it("drops anything a browser would run or that isn't a web address", () => {
+    for (const url of ["javascript:alert(1)", "data:text/html,x", "ftp://x.test/a", "not a url", ""]) {
+      expect(SourceSchema.parse({ ...base, url }).url).toBeNull();
+    }
+  });
+
+  it("leaves a missing or null link as it is", () => {
+    expect(SourceSchema.parse(base).url).toBeUndefined();
+    expect(SourceSchema.parse({ ...base, url: null }).url).toBeNull();
   });
 });

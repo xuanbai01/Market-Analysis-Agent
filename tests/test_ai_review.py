@@ -152,6 +152,63 @@ def test_review_text_fails_loudly_on_an_empty_answer():
         ai_review.review_text(response)
 
 
+def _answer(text: str, finish: str = "stop") -> dict:
+    return {"choices": [{"message": {"content": text}, "finish_reason": finish}], "usage": {}}
+
+
+def test_request_review_thinks_first():
+    calls = []
+
+    def ask(options):
+        calls.append(options)
+        return _answer("No problems found.")
+
+    review, _, thinking = ai_review.request_review(ask)
+    assert review == "No problems found."
+    assert thinking is True
+    assert len(calls) == 1
+    assert "thinking" not in calls[0]
+    assert calls[0]["max_tokens"] == ai_review.THINKING_MAX_TOKENS
+
+
+def test_request_review_asks_again_without_thinking_when_reasoning_uses_the_budget():
+    # The first live run: reasoning took all 16K tokens and left no review.
+    calls = []
+    answers = iter([_answer("", "length"), _answer("1. **high** · `app/a.py:3` — bug.")])
+
+    def ask(options):
+        calls.append(options)
+        return next(answers)
+
+    review, _, thinking = ai_review.request_review(ask)
+    assert review.startswith("1. **high**")
+    assert thinking is False
+    assert calls[1]["thinking"] == {"type": "disabled"}
+    assert calls[1]["max_tokens"] == ai_review.PLAIN_MAX_TOKENS
+
+
+def test_request_review_asks_again_when_the_thinking_request_is_refused():
+    answers = iter([RuntimeError("HTTP 400: max_tokens too large"), _answer("Nothing worth raising.")])
+
+    def ask(options):
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    review, _, thinking = ai_review.request_review(ask)
+    assert review == "Nothing worth raising."
+    assert thinking is False
+
+
+def test_request_review_fails_when_both_attempts_fail():
+    def ask(options):
+        return _answer("", "length")
+
+    with pytest.raises(RuntimeError, match="no review text"):
+        ai_review.request_review(ask)
+
+
 # ── what lands on the PR ─────────────────────────────────────────────
 
 

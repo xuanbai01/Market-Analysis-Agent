@@ -82,6 +82,7 @@ If you're picking this up after a gap:
 - **Help overlay (`?` shortcut)** — still deferred; ⌘K is the only shortcut.
 - **The EDGAR disk cache never looks for a newer filing** once it holds as many as a call asks for (`edgar._try_cache`): a machine that cached two 10-Ks keeps serving them after a third is filed. Fly's disk is wiped on every stop, so production recovers by itself; a long-lived local `.edgar_cache` does not. Found 2026-11-13, not fixed.
 - **Yahoo's `info` can come back partial.** One KO fetch on 2026-11-13 had no price-to-sales, EV/EBITDA or gross margin; the report then shows "—" in those cells and "no trailing figure today" on two own-history panels until it is regenerated. A retry, or a fallback from the latest close and trailing per-share figures, would fix it. Not fixed.
+- **Alphabet's annual history starts in 2022.** Before then it tagged share counts per share class, which the SEC company-concept API doesn't return, so GOOGL has four years of per-share figures and multiples. The same limit applies to any company that reports shares only by class.
 - **XBRL revenue tags can mix definitions across years.** `xbrl.annual_series` takes the first tag that has a year, and XOM's 2017–2021 revenue comes from a narrower tag than the years around it (about 3% lower). The ends of its ten-year series are on one tag, so the growth rate is unaffected. Found 2026-11-13, not fixed.
 
 **[lessons.md](lessons.md)** — read before non-trivial work to avoid retreading earlier mistakes.

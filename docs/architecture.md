@@ -104,7 +104,7 @@ POST /v1/research/{symbol}
        ├▶ tool fan-out (asyncio.gather, return_exceptions=True)
        │    fetch_fundamentals / fetch_earnings / fetch_peers /
        │    fetch_macro / extract_10k_business / extract_10k_risks_diff /
-       │    fetch_annual_history (SEC XBRL, ten years per share)
+       │    fetch_annual_history (SEC XBRL, ten years per share + year-end multiples)
        ├▶ deterministic claim builders   (per-section, code picks claims, not LLM)
        ├▶ llm.synth_call                 (Sonnet writes summary prose under forced schema)
        ├▶ research_thesis.compose_thesis (in parallel: the analyst view, claim-id citations)
@@ -155,7 +155,7 @@ Errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/
 
 | Service | Purpose | Failure mode |
 |---|---|---|
-| yfinance | OHLCV, fundamentals, peers, earnings | Defensive `_safe_loc` lookups; missing fields become `None`-valued claims with stable shape |
+| yfinance | OHLCV, fundamentals, peers, earnings, ten years of closes for the year-end multiples | Defensive `_safe_loc` lookups; missing fields become `None`-valued claims with stable shape |
 | SEC EDGAR | Filings (10-K, Form 4, 13F-HR); XBRL company concepts for lenses and the ten-year per-share history | Disk-cached (XBRL 24 h); SEC `User-Agent` mandatory; 0.15s sleep between requests for polite-crawl. A company that moved to a new registrant is read across both (`sec_registrants.py`). A ticker SEC doesn't know fails `fetch_annual_history` only — the card falls back to the quarterly view |
 | NewsAPI | News articles | Optional — skipped silently when `NEWSAPI_KEY` empty |
 | FRED | Macro series | Optional — `fetch_macro` emits metadata claims with None values when `FRED_API_KEY` empty |

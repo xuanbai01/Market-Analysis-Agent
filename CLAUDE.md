@@ -42,7 +42,7 @@ Phases 1–5 are shipped and deployed. The open plan is in [`tasks/todo.md`](tas
 
 **Rules that came out of shipped work** (the changelog or `tasks/lessons.md` has the story behind each):
 
-- **Bump `REPORT_VERSION`** (`app/services/report_version.py`, now 3) in the same PR as any change to what a fresh report contains; cached reports then rebuild on their next visit (docs/conventions.md).
+- **Bump `REPORT_VERSION`** (`app/services/report_version.py`, now 4) in the same PR as any change to what a fresh report contains; cached reports then rebuild on their next visit (docs/conventions.md).
 - **Code computes, the model writes** ([ADR 0007](docs/adr/0007-analytical-narratives.md)). A comparison the prose should make is a derived claim in `research_derived.py`; the prompt forbids arithmetic and the factuality rubric fails any number no claim holds.
 - **Run the live golden eval before merging a change to report content** (prompts, claims, tools, the thesis): `uv run pytest -m live_llm tests/evals -s`, or the Live Eval workflow on GitHub.
 - **A claim that renders carries a `unit`.** The frontend formats from the unit, never from the size of the number.
@@ -50,6 +50,7 @@ Phases 1–5 are shipped and deployed. The open plan is in [`tasks/todo.md`](tas
 - **A tool that found nothing is `empty`, not `ok`** in `tool_calls_audit`, and the dashboard names it ("Not in this report"). A tool with always-present metadata needs its own check in `research_orchestrator._found_nothing` (see `fetch_macro`).
 - **A company that moved to a new SEC registrant gets a line in `app/services/sec_registrants.py`**, checked against SEC. SEC publishes no link between the two, and the 10-Ks and XBRL history stay under the old one.
 - **Peers carry only Yahoo's figures, so a peer comparison uses the subject's Yahoo figure too** (`gross_margin_ttm`), not one computed from statements.
+- **A fiscal-year figure is not today's.** The year-end multiples (`valuation_history.py`) are as of each fiscal year's last trading day; today's are the trailing claims. Descriptions say which, and both prompts tell the model to name the year.
 - **A section needs a card.** `CARD_SECTIONS` in `SymbolDetailPage.tsx` lists the sections with one; any other section falls to the plain `ReportRenderer` table until its card exists.
 - **A card with nothing to draw returns null**, and a row counts only the cards that will render (each card's own empty check), so no row reserves an empty column.
 - **Every `lazy()` goes through `lib/lazy-with-reload.ts`**, and every authenticated route except `/` is its own chunk. The main chunk must stay under 100 KB gzipped (current sizes: `frontend/README.md`).

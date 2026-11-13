@@ -110,10 +110,10 @@ Tools live in `app/services/`. Each is a focused async function; sync providers 
 | `fetch_business_info` | yfinance summary, HQ, employees | Business |
 | `fetch_news` | Yahoo RSS + NewsAPI, ingested per report, categorized by triage LLM | News |
 | `xbrl.annual_series` | SEC company-concept API (tags merged per year, CY frames) | Lenses |
-| `fetch_annual_history` | SEC XBRL annual facts, split-adjusted with yfinance splits | Quality (ten-year per-share growth) |
+| `fetch_annual_history` | SEC XBRL annual facts, split-adjusted with yfinance splits; ten years of closes | Quality (ten-year per-share growth), Valuation (P/E, P/S and P/FCF at each fiscal year-end) |
 | `parse_filing` (Form 4, 13F), `compute_technicals` | Phase 2 parsers, RSI/SMA | not on the dashboard today |
 
-**Derived claims** (`app/services/research_derived.py`, ADR 0007) are computed in code and added to sections with source `computed.analytics`: year-over-year margin and per-share changes between named quarters, TTM FCF margin and yield, FCF ÷ net income, payout, shareholder yield, dividend coverage, capex intensity, SBC ÷ FCF, net debt ÷ operating cash flow, premium or discount to the peer median, implied EPS growth, beat streak, latest surprise vs average. Banks skip FCF, capex, gross margin and net debt. These give the model comparisons to argue from without ever computing a number itself.
+**Derived claims** (`app/services/research_derived.py`, ADR 0007) are computed in code and added to sections with source `computed.analytics`: year-over-year margin and per-share changes between named quarters, TTM FCF margin and yield, FCF ÷ net income, payout, shareholder yield, dividend coverage, capex intensity, SBC ÷ FCF, net debt ÷ operating cash flow, premium or discount to the peer median, the median of each year-end multiple and today's premium or discount to it, implied EPS growth, beat streak, latest surprise vs average. Banks skip FCF, capex, gross margin and net debt. These give the model comparisons to argue from without ever computing a number itself.
 
 **Layout signals** (`research_layout_signals.py`): unprofitable TTM, beat rate under 30%, cash runway in quarters, negative gross margin, debt rising while cash falls. They drive header pills, the hero metric swap and the distressed card order, and frame the prompt.
 
@@ -190,7 +190,9 @@ Real auth and per-user cost caps land only when there are real users.
 
 **Phase 6 — XBRL Tier 2 (deferred).** Segment and geography revenue, RPO. The lens XBRL client is the starting point. Escalate if dogfooding asks for segment mix (NVDA Data Center vs Gaming, AMZN AWS vs Retail).
 
-**Next (plan in [tasks/todo.md](tasks/todo.md), 2026-11-13):** valuation against the company's own ten-year history; a public read-only demo and README screenshots, with the production rate limit lowered alongside; then more lenses and insider activity from the Form 4 parser. A compare narrative (4.6.B) waits until Compare gets used.
+**Valuation against own history (done, 2026-11-13).** Each fiscal year-end's multiples, their medians and today's premium or discount to them, drawn on the Valuation card.
+
+**Next (plan in [tasks/todo.md](tasks/todo.md)):** a public read-only demo and README screenshots, with the production rate limit lowered alongside; then more lenses and insider activity from the Form 4 parser. A compare narrative (4.6.B) waits until Compare gets used.
 
 **Indefinitely deferred.** `search_history` (pgvector RAG), `compute_options`, Reddit sentiment, real auth + per-user cost caps + Redis-backed rate limiting.
 

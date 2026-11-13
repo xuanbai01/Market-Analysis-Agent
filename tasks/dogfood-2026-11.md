@@ -66,6 +66,18 @@ A fresh XOM report on a local stack (`LLM_PROVIDER=anthropic`, no `FRED_API_KEY`
 
 **After the fixes** (same day, local stack and the Live Eval workflow): XOM's page shows the 10-K risk card, a ten-year growth view (2015 → 2025), four peers (CVX, SHEL, BP, TTE), gross margin as 24.21% in both the table and the chart, and overall confidence MEDIUM instead of LOW. Live golden eval on DeepSeek Flash, six cases: AAPL 1.000, NVDA 1.000, RIVN 1.000, JPM 0.990, KO 1.000, XOM 1.000. The run on `main` before the fixes was 1.000 on the original five.
 
+## Valuation against own history — first real reports (2026-11-13)
+
+Workstream B, checked on a local KO report and on real data for six tickers.
+
+| # | Severity | Finding | Root cause / fix |
+|---|---|---|---|
+| 23 | Medium | The Valuation prose said price-to-free-cash-flow was "56.93 today"; 56.93 is the fiscal-2025 year-end figure. | A year-end claim's snapshot is its latest fiscal year, and nothing told the model so. **Fixed:** both prompts say a value is as of when its description says, and that "today" is for trailing figures. The next report read "56.93 in 2025". |
+| 24 | Medium | KO's P/E chart ran from 0 to 200 and every year but one sat flat at the bottom. | KO's 2017 P/E was 158: earnings were cut by a one-off tax charge. **Fixed:** a year-end more than four times the median is left off the scale and named beside the reading ("off the scale: 2017 at 158.2×"). |
+| 25 | Low | On that first KO fetch, Yahoo's `info` had no price-to-sales, EV/EBITDA or gross margin, so two panels read "no trailing figure today". A second fetch minutes later had them. | Yahoo sometimes returns a partial `info`. The report keeps the gaps until it is regenerated. **Open**, in the plan's known issues. |
+
+Real-data checks: AAPL's year-end P/E runs 13.6 (2016) to 38.0 (2026) and NVDA's price-to-sales 3.3 to 27.1, both on split-adjusted figures; JPM has P/E and price-to-sales and no cash-flow multiple; RIVN has four year-ends of price-to-sales and nothing else, so no median; XOM skips its 2020 loss year. Live golden eval on the branch: 6 of 6 pass.
+
 ## Coverage and the gate
 
 - **Tickers exercised:** AAPL, MSFT (fresh live reports); NVDA, AVGO, KO, RIVN (dashboard, local and live); JPM (live golden eval: the bank path); plus the seven lens companies. That spans healthy mega-cap, growth, distressed, dividend payer and bank. A cyclical (XOM) was added on 2026-11-13 — see the section above.

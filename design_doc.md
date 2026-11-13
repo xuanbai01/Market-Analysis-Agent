@@ -133,7 +133,7 @@ Non-negotiable; every PR is held to them.
 1. **Citation discipline.** `Source` is frozen (`tool, fetched_at, url, detail`); `Claim` carries `value + unit + source + history`. Free text exists only in `summary`, `card_narrative`, thesis points and the lens read, and each is checked against claims.
 2. **Code computes, the model writes.** Comparisons are derived claims; the prompt forbids arithmetic.
 3. **Per-section confidence** set programmatically from freshness and sparsity, never by the LLM.
-4. **Eval harness.** [`tests/evals/`](tests/evals/): rubric unit tests on every PR (free); the live golden eval (AAPL, NVDA, RIVN, JPM, KO) is opt-in with `-m live_llm`. The factuality rubric reads unit-suffixed numbers whole, accepts history values, and covers summaries, card narratives and the analyst view. Latest live run on DeepSeek: 1.000 on all five.
+4. **Eval harness.** [`tests/evals/`](tests/evals/): rubric unit tests on every PR (free); the live golden eval (AAPL, NVDA, RIVN, JPM, KO, XOM) is opt-in with `-m live_llm` or the Live Eval workflow. The factuality rubric reads unit-suffixed numbers whole, accepts history values, and covers summaries, card narratives and the analyst view. Latest live run on DeepSeek: 1.000 on all five.
 5. **`fetched_at` per data point** — the wall time the upstream call returned.
 
 ## API surface
@@ -203,7 +203,8 @@ Real auth and per-user cost caps land only when there are real users.
 | LLM cost overruns | Cache before rate limit, per-IP limit, a cheap production model, shared-secret gate. |
 | Stale cached reports after a fix | `REPORT_VERSION`: a report cached before the current version rebuilds on its next visit. Report age and Regenerate cover the rest. |
 | A card meets data it can't draw | Error boundary per card; unknown claim units parse as null. |
-| Free-data sparsity | Per-section confidence, `fetched_at`, cards that hide when empty. |
+| Free-data sparsity | Per-section confidence, `fetched_at`, cards that hide when empty, and a line under the dashboard header naming the tools that found nothing. |
+| A company moves to a new SEC registrant | The 10-Ks and XBRL history stay under the old one, with no link published; `sec_registrants.py` keeps the links by hand, and the empty-tool line is how a missing one gets noticed. |
 
 ## ADR index
 

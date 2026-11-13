@@ -124,9 +124,15 @@ Secrets, besides `DATABASE_URL`:
 Set secrets from stdin so the value never appears on a command line or in shell history (PowerShell's PSReadLine history file records typed commands, values included):
 
 ```bash
-# one NAME=value per line; read from a file you then delete, or from .env
+# Git Bash / macOS / Linux. One NAME=value per line; read from a file you then delete, or from .env
 grep -E '^(BACKEND_SHARED_SECRET|DEEPSEEK_API_KEY)=' .env | fly secrets import
 fly secrets list        # names + digests only; each should show "Deployed"
+```
+
+In Windows PowerShell there is no `grep`, and a PowerShell pipe puts a byte-order mark in front of the text, which Fly rejects (`"\ufeffNAME" is not a valid secret name`). Run the pipe through `cmd`, one secret at a time:
+
+```powershell
+cmd /c "findstr /R /B FRED_API_KEY=. .env | fly secrets import"
 ```
 
 Vercel (once): import the repo, Root Directory `frontend`, framework Vite, environment variable `VITE_BACKEND_URL=https://<your-app>.fly.dev`. `frontend/vercel.json` rewrites every path to `index.html` so deep links like `/symbol/KO` load.

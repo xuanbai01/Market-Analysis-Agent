@@ -1,8 +1,8 @@
 name: Live Eval
 
-# The golden eval against a real LLM (tests/evals/test_golden.py): five
-# fresh reports (AAPL, NVDA, RIVN, JPM, KO), every number in the prose
-# checked against the report's claims.
+# The golden eval against a real LLM (tests/evals/test_golden.py): one
+# fresh report per golden case (tests/evals/golden.py), every number in
+# the prose checked against the report's claims.
 #
 # It costs money (about a cent per report on DeepSeek) and calls the
 # live data providers, so it never runs on a push. Start it by hand

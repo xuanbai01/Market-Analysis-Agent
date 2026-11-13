@@ -156,7 +156,7 @@ Errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/
 | Service | Purpose | Failure mode |
 |---|---|---|
 | yfinance | OHLCV, fundamentals, peers, earnings | Defensive `_safe_loc` lookups; missing fields become `None`-valued claims with stable shape |
-| SEC EDGAR | Filings (10-K, Form 4, 13F-HR); XBRL company concepts for lenses and the ten-year per-share history | Disk-cached (XBRL 24 h); SEC `User-Agent` mandatory; 0.15s sleep between requests for polite-crawl. A ticker SEC doesn't know fails `fetch_annual_history` only — the card falls back to the quarterly view |
+| SEC EDGAR | Filings (10-K, Form 4, 13F-HR); XBRL company concepts for lenses and the ten-year per-share history | Disk-cached (XBRL 24 h); SEC `User-Agent` mandatory; 0.15s sleep between requests for polite-crawl. A company that moved to a new registrant is read across both (`sec_registrants.py`). A ticker SEC doesn't know fails `fetch_annual_history` only — the card falls back to the quarterly view |
 | NewsAPI | News articles | Optional — skipped silently when `NEWSAPI_KEY` empty |
 | FRED | Macro series | Optional — `fetch_macro` emits metadata claims with None values when `FRED_API_KEY` empty |
 | Anthropic Claude | Synth (Sonnet 4.6) + triage (Haiku 4.5) when `LLM_PROVIDER=anthropic` (default) | `RuntimeError` → 503 problem+json (key not configured / provider API error) |

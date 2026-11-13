@@ -86,3 +86,10 @@ Each entry has three parts:
 **Context:** About to merge the DeepSeek provider PR (#65), which added `openai` to `pyproject.toml` / `uv.lock`. Local tests and CI were green.
 **Mistake:** the Dockerfile `pip install`s a hand-maintained pin list and never reads pyproject, so CI (which runs `uv sync`) can't see what the image lacks. Merging would have pushed an image without `openai` to Fly and crashed the app on import. The list had already drifted: `lxml` and `beautifulsoup4` were pinned in pyproject months earlier but never added — bs4 only arrived via yfinance, and without lxml yfinance's earnings scraping returns empty frames, so production earnings history was probably silently empty.
 **Rule:** when adding a runtime dependency, add it to the Dockerfile in the same commit — `tests/test_dockerfile_deps.py` now fails CI on any drift. Before merging anything that changes dependencies, build the image and boot it (`docker build` + `docker run`, hit `/v1/health`); green CI only proves the uv environment.
+
+### A command handed to the owner runs in Windows PowerShell, not Git Bash
+
+**Date:** 2026-11-13
+**Context:** Telling the owner how to send `FRED_API_KEY` from `.env` to Fly without the value appearing on a command line.
+**Mistake:** Two commands in a row failed for them. First the documented `grep ... | fly secrets import`: PowerShell has no `grep`. Then a PowerShell pipe, `(Select-String ...).Line | fly secrets import`, which I had not run: PowerShell 5.1 puts a byte-order mark in front of text it pipes to a native program, and Fly answered `"\ufeffFRED_API_KEY" is not a valid secret name`. My own shell tool is Git Bash, so neither failure could show up on my side.
+**Rule:** a command for the owner to run must be written for PowerShell 5.1 and tried there with dummy data first (`powershell -NoProfile -Command ...`). When text has to reach a native program byte for byte (a secret, anything parsed as NAME=value), run the pipeline inside `cmd /c "..."`: cmd passes bytes through untouched.

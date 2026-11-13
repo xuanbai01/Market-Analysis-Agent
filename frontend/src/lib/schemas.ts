@@ -359,3 +359,17 @@ export const LensReportSchema = LensSummarySchema.extend({
   generated_at: z.string(),
 });
 export type LensReport = z.infer<typeof LensReportSchema>;
+
+// ── Public read-only demo (app/schemas/demo.py) ──────────────────────
+
+export const DemoSymbolSchema = z.object({
+  symbol: z.string(),
+  name: z.string().nullable().default(null),
+  generated_at: z.string(),
+});
+export type DemoSymbol = z.infer<typeof DemoSymbolSchema>;
+
+export const DemoIndexSchema = z.object({
+  symbols: z.array(DemoSymbolSchema).default([]),
+});
+export type DemoIndex = z.infer<typeof DemoIndexSchema>;

@@ -15,6 +15,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { extractBusinessInfo } from "../lib/business-extract";
+import { useDemo } from "../lib/demo";
 import { ROUTES } from "../lib/routes";
 import type { Section } from "../lib/schemas";
 
@@ -36,6 +37,7 @@ function sectorLabel(sector: string): string {
 export const BUSINESS_SUMMARY_CLAMP_CHARS = 280;
 
 export function BusinessCard({ ticker, section, sector = null, peers = [] }: Props) {
+  const demo = useDemo();
   const info = extractBusinessInfo(section);
   const [expanded, setExpanded] = useState(false);
   if (!info.summary) return null;
@@ -97,7 +99,16 @@ export function BusinessCard({ ticker, section, sector = null, peers = [] }: Pro
                 Compared with
               </dt>
               <dd className="flex flex-wrap gap-1.5">
-                {peers.map((peer) => (
+                {peers.map((peer) =>
+                  demo ? (
+                    // The demo can't open an arbitrary ticker.
+                    <span
+                      key={peer}
+                      className="rounded border border-strata-border bg-strata-raise px-2 py-0.5 font-mono text-[11px] text-strata-fg"
+                    >
+                      {peer}
+                    </span>
+                  ) : (
                   <Link
                     key={peer}
                     to={ROUTES.symbol(peer)}
@@ -106,7 +117,8 @@ export function BusinessCard({ ticker, section, sector = null, peers = [] }: Pro
                   >
                     {peer}
                   </Link>
-                ))}
+                  ),
+                )}
               </dd>
             </div>
           )}

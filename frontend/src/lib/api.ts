@@ -17,6 +17,7 @@
 import { z } from "zod";
 import { getStoredToken } from "./auth";
 import {
+  type DemoIndex,
   type Focus,
   type LensReport,
   type LensSummary,
@@ -24,6 +25,7 @@ import {
   type MarketPrices,
   type ResearchReport,
   type ResearchReportSummary,
+  DemoIndexSchema,
   LensReportSchema,
   LensSummarySchema,
   MarketOverviewSchema,
@@ -262,4 +264,35 @@ export async function fetchLens(id: string): Promise<LensReport> {
     throw new ApiError({ status: resp.status, title: await extractErrorTitle(resp) });
   }
   return parseJsonAndValidate(resp, LensReportSchema);
+}
+
+// ── Public read-only demo ────────────────────────────────────────────
+// The backend's /v1/demo routes answer without the shared secret and
+// serve only stored data for a configured list of tickers, so these send
+// no Authorization header.
+
+async function demoGet<S extends z.ZodTypeAny>(path: string, schema: S): Promise<z.output<S>> {
+  const resp = await fetch(`${BACKEND_URL}/v1/demo${path}`, { method: "GET" });
+  if (!resp.ok) {
+    throw new ApiError({ status: resp.status, title: await extractErrorTitle(resp) });
+  }
+  return parseJsonAndValidate(resp, schema);
+}
+
+/** The demo tickers that have a report; empty when the demo is off. */
+export function fetchDemoIndex(): Promise<DemoIndex> {
+  return demoGet("", DemoIndexSchema);
+}
+
+/** The latest stored report for a demo ticker. Never generates one. */
+export function fetchDemoReport(symbol: string): Promise<ResearchReport> {
+  return demoGet(`/research/${encodeURIComponent(symbol.toUpperCase())}`, ResearchReportSchema);
+}
+
+/** The stored daily closes for a demo ticker. */
+export function fetchDemoPrices(ticker: string, range: string): Promise<MarketPrices> {
+  return demoGet(
+    `/market/${encodeURIComponent(ticker.toUpperCase())}/prices?range=${encodeURIComponent(range)}`,
+    MarketPricesSchema,
+  );
 }

@@ -21,6 +21,7 @@
  */
 import { useId, useState, type ReactNode } from "react";
 
+import { useDemo } from "../lib/demo";
 import { formatClaimValue } from "../lib/format";
 import type { ResearchReport, ThesisPoint } from "../lib/schemas";
 import { resolveRef, scrollToSection, shortClaimName, type ResolvedRef } from "../lib/thesis";
@@ -46,9 +47,11 @@ function resolved(point: ThesisPoint, report: ResearchReport): ResolvedRef[] {
 
 export function AnalystViewCard({ report }: Props) {
   const thesis = report.thesis;
+  const demo = useDemo();
   const [open, setOpen] = useState<Set<string>>(() => new Set());
 
   if (!thesis) {
+    if (demo) return null; // nothing a demo visitor can do about it
     return (
       <section
         data-testid="analyst-view-missing"

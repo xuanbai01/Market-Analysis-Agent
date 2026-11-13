@@ -246,13 +246,13 @@ async def test_full_focus_assembles_seven_sections(
         "Valuation", "Quality", "Capital Allocation",
         "Earnings", "Peers", "Risk Factors", "Insider Activity", "Macro",
     ]
-    # All numeric sections populated → HIGH per section. Business +
-    # News default-stubbed to empty in this test, so they land LOW;
-    # overall confidence is the min so it lands LOW too.
+    # All numeric sections populated → HIGH per section. Business, News
+    # and Insider Activity are default-stubbed to empty in this test, so
+    # they land LOW; overall confidence is the min so it lands LOW too.
     assert all(
         s.confidence == Confidence.HIGH
         for s in report.sections
-        if s.title not in {"Business", "News"}
+        if s.title not in {"Business", "News", "Insider Activity"}
     )
 
 

@@ -49,6 +49,7 @@ import { HeaderPills } from "./HeaderPills";
 import { HeroCard } from "./HeroCard";
 import { LoadingState } from "./LoadingState";
 import { MacroPanel } from "./MacroPanel";
+import { MissingDataNote } from "./MissingDataNote";
 import { PerShareGrowthCard } from "./PerShareGrowthCard";
 import { QualityCard } from "./QualityCard";
 import { ReportRenderer } from "./ReportRenderer";
@@ -158,6 +159,9 @@ export function SymbolDetailPage() {
             <HeaderPills signals={report.layout_signals} />
             <WatchlistButton ticker={upperTicker} />
           </div>
+
+          {/* A card with no data draws nothing; this names what's absent. */}
+          <MissingDataNote audit={report.tool_calls_audit} />
 
           <SectionNav refreshKey={reportKey} />
 

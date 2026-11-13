@@ -1,338 +1,444 @@
 """
-Form 4 cluster summary — first parser in the ``parse_filing`` family.
+Insider activity from Form 4 filings (2026-11).
 
-Form 4 is the SEC filing insiders (officers, directors, ≥10% owners)
-must file within two business days of buying or selling the company's
-stock. The XML schema is structured (unlike 10-K HTML), so this is the
-cleanest filing type to parse: the values we want — owner name,
-transaction code, shares, price — sit at known XPaths.
+Officers, directors and 10%+ holders must file a Form 4 within two
+business days of trading the company's stock. The filing is structured
+XML, so who traded, in which direction, how many shares and at what
+price sit at known paths.
 
-The agent doesn't need per-insider detail in a research report. It
-needs a *cluster summary*: how many distinct insiders, total shares
-bought vs sold, total dollar value bought vs sold, net of both, and
-the date range the data spans. That's what this tool returns.
+What a reader wants from it is whether the people running the company
+are buying or selling, and how much that says. A naive sum of every
+Form 4 in the company's SEC list says the wrong thing in three ways,
+all found on real filings (tasks/dogfood-2026-11.md):
 
-## Why aggregate, not per-insider
+1. **The list holds Form 4s about other companies.** A company that owns
+   10% or more of another files Form 4s as that owner, and they appear in
+   its own list: Exxon's $277M "sale" was Exxon selling Imperial Oil
+   shares. Only filings whose issuer is the company count.
+2. **10%+ holders are not insiders in the sense that matters.**
+   Volkswagen's $1B purchase of Rivian shares is a strategic investment,
+   not an executive buying with their own money. Officers and directors
+   are summed apart from other reporting owners.
+3. **Most executive selling is pre-scheduled.** Since 2023 a Form 4 says
+   whether the trade was made under a 10b5-1 trading plan, set up months
+   ahead. The share of selling made under plans is reported, so a large
+   but routine program reads as one.
 
-Per-insider rows balloon the response size and the LLM context window.
-The agent's relevant question is "is there an insider buying cluster
-right now?" — that's answered by the aggregate. If the agent later
-needs per-insider granularity, it can call a more targeted tool; for
-now, ten aggregate claims do the job.
+Only transaction codes ``P`` (purchase) and ``S`` (sale) are trades.
+Grants (``A``), option exercises (``M``), tax withholding (``F``) and
+gifts (``G``) are counted as routine. Option and other derivative rows
+are not read. A sale whose price is reported only in a footnote counts
+as $0, which understates rather than invents.
 
-## Why P and S are the only "real" codes
+**Window.** The last ``WINDOW_DAYS`` days, by filing date for which
+filings are read and by transaction date for what is summed, capped at
+the ``MAX_FILINGS`` most recent filings. The claims name the span
+actually covered.
 
-Form 4 transaction codes:
+**Cost.** One request lists the filings; each filing in the window is
+one more (about 40-70 for a large company), downloaded once and then
+reused from the disk cache (``edgar.fetch_edgar``).
 
-- ``P`` — open-market or private purchase. Real insider conviction.
-- ``S`` — open-market or private sale. Real insider exit.
-- ``A`` — grant, award. Compensation, not conviction.
-- ``M`` — option exercise. Mechanical — the insider exercises options
-  often as part of an option-exercise-and-immediate-sell pipeline,
-  triggered by vest schedules, not by valuation conviction.
-- ``F`` — tax withholding. Pure accounting — shares withheld to cover
-  the employer's tax obligation on a vesting event.
-- ``G`` — gift. Estate planning, charitable transfer.
-
-Only ``P`` and ``S`` survive into ``shares_bought`` /
-``shares_sold``; everything else lands in ``transaction_count`` so
-we can show "12 transactions, but 0 actual buys and 0 actual sales —
-just RSU mechanics" in the cluster summary.
-
-## Test seam
-
-``fetch_edgar`` is imported at module load and re-bound in tests via
-``monkeypatch.setattr(form_4_module, "fetch_edgar", ...)``. This
-isolates form_4's logic from EDGAR HTTP, the disk cache, and the SEC
-rate limit; the parsing math is what we're testing here, not those.
-
-## Excluded for v1
-
-- Derivative transactions (``<derivativeTable>``). Stock options /
-  warrants / RSUs reported here. Adds a different math layer
-  (notional vs delta-adjusted). Defer until the agent demonstrably
-  asks for it.
-- Window-based filtering by date. ``recent_n`` is the proxy; if the
-  agent wants "last 30 days" it can pass a smaller ``recent_n``. A
-  date filter would need a second query path through fetch_edgar.
-- Per-insider breakdown. See the rationale above.
+``fetch_edgar`` is imported at module load so tests replace it here.
 """
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
-from collections.abc import Iterable
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, timedelta
 
 from app.core.observability import log_external_call
 from app.schemas.edgar import EdgarFiling
-from app.schemas.research import Claim, ClaimValue, Source
+from app.schemas.research import Claim, ClaimUnit, ClaimValue, Source
 from app.services.edgar import fetch_edgar
 
-# ── Stable claim contract ─────────────────────────────────────────────
+WINDOW_DAYS = 183
+MAX_FILINGS = 100
+MAX_PEOPLE = 5
+TOOL = "sec.form_4"
+_WINDOW = "last 6 months"
+
+_BUY, _SELL = "P", "S"
+
+# Fixed claims: every key present on every result (None when unknown).
 CLAIM_KEYS: tuple[str, ...] = (
-    "cluster.transaction_count",
-    "cluster.filer_count",
-    "cluster.shares_bought",
-    "cluster.shares_sold",
-    "cluster.dollar_bought",
-    "cluster.dollar_sold",
-    "cluster.net_shares",
-    "cluster.net_dollars",
-    "cluster.first_filing_date",
-    "cluster.last_filing_date",
+    "filing_count",
+    "first_filing_date",
+    "last_filing_date",
+    "buy_dollars",
+    "buyer_count",
+    "sell_dollars",
+    "seller_count",
+    "net_dollars",
+    "plan_sale_share",
+    "routine_count",
+    "holder_buy_dollars",
+    "holder_sell_dollars",
 )
 
-_DESCRIPTIONS: dict[str, str] = {
-    "cluster.transaction_count": "Total Form 4 transactions in window",
-    "cluster.filer_count": "Distinct insiders filing in window",
-    "cluster.shares_bought": "Total shares bought (P transactions)",
-    "cluster.shares_sold": "Total shares sold (S transactions)",
-    "cluster.dollar_bought": "Total dollar value bought (P transactions)",
-    "cluster.dollar_sold": "Total dollar value sold (S transactions)",
-    "cluster.net_shares": "Net insider shares: bought minus sold",
-    "cluster.net_dollars": "Net insider dollars: bought minus sold",
-    "cluster.first_filing_date": "Earliest Form 4 filing date in window",
-    "cluster.last_filing_date": "Most recent Form 4 filing date in window",
+DESCRIPTIONS: dict[str, str] = {
+    "filing_count": f"Form 4 filings about the company, {_WINDOW}",
+    "first_filing_date": "Earliest Form 4 filing in the window",
+    "last_filing_date": "Most recent Form 4 filing",
+    "buy_dollars": f"Purchases by officers and directors, {_WINDOW}",
+    "buyer_count": f"Officers and directors who bought, {_WINDOW}",
+    "sell_dollars": f"Sales by officers and directors, {_WINDOW}",
+    "seller_count": f"Officers and directors who sold, {_WINDOW}",
+    "net_dollars": f"Net officer and director buying (+) or selling (−), {_WINDOW}",
+    "plan_sale_share": "Share of officer and director sales made under 10b5-1 trading plans",
+    "routine_count": f"Grants, option exercises, tax withholdings and gifts, {_WINDOW} (not buys or sales)",
+    "holder_buy_dollars": f"Purchases by 10% holders and other reporting owners, {_WINDOW}",
+    "holder_sell_dollars": f"Sales by 10% holders and other reporting owners, {_WINDOW}",
 }
 
-# Codes that count as real conviction signals. Everything else is
-# accounting / compensation noise.
-_BUY_CODE = "P"
-_SELL_CODE = "S"
+UNITS: dict[str, ClaimUnit] = {
+    "filing_count": "count",
+    "first_filing_date": "date",
+    "last_filing_date": "date",
+    "buy_dollars": "usd",
+    "buyer_count": "count",
+    "sell_dollars": "usd",
+    "seller_count": "count",
+    "net_dollars": "usd",
+    "plan_sale_share": "fraction",
+    "routine_count": "count",
+    "holder_buy_dollars": "usd",
+    "holder_sell_dollars": "usd",
+}
+
+assert set(DESCRIPTIONS) == set(UNITS) == set(CLAIM_KEYS)
 
 
-# ── Parsed transaction record (internal) ──────────────────────────────
+# ── Parsing ──────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
-class _Form4Transaction:
-    """One row from a Form 4 ``nonDerivativeTable``."""
-
-    owner_cik: str
-    owner_name: str
-    date: str  # ISO YYYY-MM-DD
-    code: str  # Form 4 transactionCode
+class Transaction:
+    date: str  # ISO date as filed; may be empty
+    code: str
     shares: float
     price: float
 
-
-# ── XML parser ────────────────────────────────────────────────────────
-
-
-def _text_or(elem: ET.Element | None, default: str = "") -> str:
-    """``elem.text`` if present and not None, else default."""
-    if elem is None or elem.text is None:
-        return default
-    return elem.text.strip()
+    @property
+    def dollars(self) -> float:
+        return self.shares * self.price
 
 
-def _value_under(parent: ET.Element | None, child_tag: str) -> str:
-    """Form 4 wraps most fields in ``<child><value>X</value></child>`` — unwrap."""
-    if parent is None:
-        return ""
-    child = parent.find(child_tag)
-    if child is None:
-        return ""
-    value_elem = child.find("value")
-    if value_elem is None:
-        # Some fields are bare text under the child rather than nested in <value>.
-        return _text_or(child)
-    return _text_or(value_elem)
+@dataclass(frozen=True)
+class Form4:
+    issuer_cik: str
+    owner_cik: str
+    owner_name: str
+    role: str
+    is_insider: bool
+    under_plan: bool | None
+    transactions: tuple[Transaction, ...]
 
 
-def _parse_form_4_xml(xml_text: str) -> list[_Form4Transaction]:
-    """Pure parser: Form 4 XML → list of transactions. Raises on malformed XML."""
-    root = ET.fromstring(xml_text)
-
-    # Owner identification — at most one reportingOwner block matters for
-    # the cluster summary (joint filings are rare; first owner wins).
-    owner = root.find("reportingOwner")
-    owner_id = owner.find("reportingOwnerId") if owner is not None else None
-    owner_cik = _text_or(owner_id.find("rptOwnerCik")) if owner_id is not None else ""
-    owner_name = (
-        _text_or(owner_id.find("rptOwnerName")) if owner_id is not None else ""
-    )
-
-    out: list[_Form4Transaction] = []
-    table = root.find("nonDerivativeTable")
-    if table is None:
-        return out
-
-    for txn in table.findall("nonDerivativeTransaction"):
-        date_str = _value_under(txn, "transactionDate")
-        coding = txn.find("transactionCoding")
-        code = _text_or(coding.find("transactionCode")) if coding is not None else ""
-        amounts = txn.find("transactionAmounts")
-        shares_str = _value_under(amounts, "transactionShares")
-        price_str = _value_under(amounts, "transactionPricePerShare")
-
-        try:
-            shares = float(shares_str) if shares_str else 0.0
-        except ValueError:
-            shares = 0.0
-        try:
-            price = float(price_str) if price_str else 0.0
-        except ValueError:
-            price = 0.0
-
-        out.append(
-            _Form4Transaction(
-                owner_cik=owner_cik,
-                owner_name=owner_name,
-                date=date_str,
-                code=code,
-                shares=shares,
-                price=price,
-            )
-        )
-    return out
+def _flag(text: str | None) -> bool:
+    return (text or "").strip().lower() in ("1", "true")
 
 
-# ── Aggregation ───────────────────────────────────────────────────────
+def _number(text: str | None) -> float:
+    try:
+        return float((text or "").strip() or 0)
+    except ValueError:
+        return 0.0
 
 
-def _aggregate(
-    transactions: list[_Form4Transaction],
-    filings: list[EdgarFiling],
-) -> dict[str, ClaimValue | None]:
-    """Roll a parsed-transaction list + the filings they came from into the cluster dict.
+# An owner marked "other" whose description names one of these is an
+# executive in all but the checkbox: Coca-Cola files its regional
+# presidents as "other" ("President, Latin America OU").
+_EXECUTIVE_WORDS = re.compile(
+    r"\b(president|chief|officer|vp|vice president|director|head|ceo|cfo|coo|cto|"
+    r"chair|chairman|treasurer|controller|secretary|general counsel)\b",
+    re.IGNORECASE,
+)
 
-    All keys land in the output dict — None where no data exists, so
-    the async entry point can stamp Claims uniformly without per-key
-    presence checks.
+
+def _role(rel: ET.Element | None) -> tuple[str, bool]:
+    """(role as shown, whether the owner is an officer or director)."""
+    if rel is None:
+        return "Other", False
+    officer = _flag(rel.findtext("isOfficer"))
+    director = _flag(rel.findtext("isDirector"))
+    title = (rel.findtext("officerTitle") or "").strip()
+    if officer and title:
+        return title[:60], True
+    if officer:
+        return "Officer", True
+    if director:
+        return "Director", True
+    if _flag(rel.findtext("isTenPercentOwner")):
+        return "10% owner", False
+    other = (rel.findtext("otherText") or "").strip()
+    if _flag(rel.findtext("isOther")) and other:
+        return other[:60], bool(_EXECUTIVE_WORDS.search(other)) and "10%" not in other
+    return "Other", False
+
+
+def parse_form_4(xml_text: str) -> Form4:
+    """One Form 4's issuer, owner and non-derivative transactions.
+    Raises on malformed XML.
+
+    A joint filing (a director and their family trust, a fund and its
+    general partner) reports each trade once; it is attributed to the
+    first owner who is an officer or director, else to the first owner.
     """
-    if not filings:
-        return {k: None for k in CLAIM_KEYS}
+    root = ET.fromstring(xml_text)
+    owners = []
+    for owner in root.findall("reportingOwner"):
+        role, insider = _role(owner.find("reportingOwnerRelationship"))
+        owners.append((
+            (owner.findtext("reportingOwnerId/rptOwnerCik") or "").strip(),
+            (owner.findtext("reportingOwnerId/rptOwnerName") or "").strip(),
+            role,
+            insider,
+        ))
+    chosen = next((o for o in owners if o[3]), owners[0] if owners else ("", "", "Other", False))
 
-    shares_bought = sum(t.shares for t in transactions if t.code == _BUY_CODE)
-    shares_sold = sum(t.shares for t in transactions if t.code == _SELL_CODE)
-    dollar_bought = sum(
-        t.shares * t.price for t in transactions if t.code == _BUY_CODE
+    plan_text = root.findtext("aff10b5One")
+    under_plan = None if plan_text is None or not plan_text.strip() else _flag(plan_text)
+
+    transactions = tuple(
+        Transaction(
+            date=(txn.findtext("transactionDate/value") or "").strip(),
+            code=(txn.findtext("transactionCoding/transactionCode") or "").strip(),
+            shares=_number(txn.findtext("transactionAmounts/transactionShares/value")),
+            price=_number(txn.findtext("transactionAmounts/transactionPricePerShare/value")),
+        )
+        for txn in root.findall("nonDerivativeTable/nonDerivativeTransaction")
     )
-    dollar_sold = sum(
-        t.shares * t.price for t in transactions if t.code == _SELL_CODE
+    return Form4(
+        issuer_cik=(root.findtext("issuer/issuerCik") or "").strip(),
+        owner_cik=chosen[0],
+        owner_name=chosen[1],
+        role=chosen[2],
+        is_insider=chosen[3],
+        under_plan=under_plan,
+        transactions=transactions,
     )
 
-    # Distinct filers — match on CIK first (stable id), fall back to name.
-    filers: set[str] = set()
-    for t in transactions:
-        key = t.owner_cik or t.owner_name
-        if key:
-            filers.add(key)
 
-    filed_dates = sorted(f.filed_at.date() for f in filings)
-    first = filed_dates[0].isoformat() if filed_dates else None
-    last = filed_dates[-1].isoformat() if filed_dates else None
+# ── Summary ──────────────────────────────────────────────────────────
 
+
+@dataclass
+class Person:
+    name: str
+    role: str
+    is_insider: bool
+    bought: float = 0.0
+    sold: float = 0.0
+    trades: int = 0
+
+    @property
+    def net(self) -> float:
+        return self.bought - self.sold
+
+
+@dataclass
+class Summary:
+    filing_count: int = 0
+    skipped_count: int = 0
+    other_issuer_count: int = 0
+    first_filing_date: str | None = None
+    last_filing_date: str | None = None
+    buy_dollars: float = 0.0
+    sell_dollars: float = 0.0
+    holder_buy_dollars: float = 0.0
+    holder_sell_dollars: float = 0.0
+    routine_count: int = 0
+    plan_sale_share: float | None = None
+    buyers: set[str] = field(default_factory=set)
+    sellers: set[str] = field(default_factory=set)
+    people: list[Person] = field(default_factory=list)
+
+    @property
+    def buyer_count(self) -> int:
+        return len(self.buyers)
+
+    @property
+    def seller_count(self) -> int:
+        return len(self.sellers)
+
+    @property
+    def net_dollars(self) -> float:
+        return self.buy_dollars - self.sell_dollars
+
+
+def _same_cik(a: str, b: str) -> bool:
+    try:
+        return int(a) == int(b)
+    except ValueError:
+        return False
+
+
+def summarize(filings: list[EdgarFiling], *, today: date) -> Summary:
+    """Sum the trades in ``filings`` (with text) dated within the window.
+
+    A filing is skipped when it has no text or doesn't parse, and left out
+    when its issuer isn't the registrant whose list it came from.
+    """
+    cutoff = (today - timedelta(days=WINDOW_DAYS)).isoformat()
+    s = Summary()
+    people: dict[str, Person] = {}
+    plan_sold = known_plan_sold = 0.0
+    dates: list[str] = []
+
+    for filing in filings:
+        if filing.filed_at.date().isoformat() < cutoff:
+            continue  # filed before the window
+        if not filing.primary_doc_text:
+            s.skipped_count += 1
+            continue
+        try:
+            doc = parse_form_4(filing.primary_doc_text)
+        except ET.ParseError:
+            s.skipped_count += 1
+            continue
+        if not _same_cik(doc.issuer_cik, filing.cik):
+            s.other_issuer_count += 1
+            continue
+        s.filing_count += 1
+        dates.append(filing.filed_at.date().isoformat())
+        key = doc.owner_cik or doc.owner_name
+        for txn in doc.transactions:
+            when = txn.date or filing.filed_at.date().isoformat()
+            if when < cutoff:
+                continue
+            if txn.code not in (_BUY, _SELL):
+                s.routine_count += 1
+                continue
+            person = people.setdefault(key, Person(name=doc.owner_name, role=doc.role, is_insider=doc.is_insider))
+            person.trades += 1
+            if txn.code == _BUY:
+                person.bought += txn.dollars
+                if doc.is_insider:
+                    s.buy_dollars += txn.dollars
+                    s.buyers.add(key)
+                else:
+                    s.holder_buy_dollars += txn.dollars
+            else:
+                person.sold += txn.dollars
+                if doc.is_insider:
+                    s.sell_dollars += txn.dollars
+                    s.sellers.add(key)
+                    if doc.under_plan is not None:
+                        known_plan_sold += txn.dollars
+                        if doc.under_plan:
+                            plan_sold += txn.dollars
+                else:
+                    s.holder_sell_dollars += txn.dollars
+
+    if dates:
+        s.first_filing_date, s.last_filing_date = min(dates), max(dates)
+    if known_plan_sold > 0:
+        s.plan_sale_share = plan_sold / known_plan_sold
+    s.people = sorted(people.values(), key=lambda p: p.bought + p.sold, reverse=True)[:MAX_PEOPLE]
+    return s
+
+
+# ── Claims ───────────────────────────────────────────────────────────
+
+
+def _usd(v: float) -> str:
+    return f"${v:,.0f}"
+
+
+def _values(s: Summary | None, latest_listed: str | None) -> dict[str, ClaimValue]:
+    if s is None:
+        # Filings exist but none in the window: say so, and when the last was.
+        return {"filing_count": 0, "last_filing_date": latest_listed}
     return {
-        "cluster.transaction_count": len(transactions),
-        "cluster.filer_count": len(filers) if filers else None,
-        "cluster.shares_bought": shares_bought,
-        "cluster.shares_sold": shares_sold,
-        "cluster.dollar_bought": dollar_bought,
-        "cluster.dollar_sold": dollar_sold,
-        "cluster.net_shares": shares_bought - shares_sold,
-        "cluster.net_dollars": dollar_bought - dollar_sold,
-        "cluster.first_filing_date": first,
-        "cluster.last_filing_date": last,
+        "filing_count": s.filing_count,
+        "first_filing_date": s.first_filing_date,
+        "last_filing_date": s.last_filing_date or latest_listed,
+        "buy_dollars": s.buy_dollars,
+        "buyer_count": s.buyer_count,
+        "sell_dollars": s.sell_dollars,
+        "seller_count": s.seller_count,
+        "net_dollars": s.net_dollars,
+        "plan_sale_share": s.plan_sale_share,
+        "routine_count": s.routine_count,
+        "holder_buy_dollars": s.holder_buy_dollars,
+        "holder_sell_dollars": s.holder_sell_dollars,
     }
 
 
-def _parse_filings(
-    filings: Iterable[EdgarFiling],
-) -> tuple[list[_Form4Transaction], int]:
-    """Parse every filing's text; return (all_transactions, skipped_count).
+def build_claims(
+    s: Summary | None,
+    *,
+    latest_listed: str | None,
+    fetched_at: datetime | None = None,
+) -> dict[str, Claim]:
+    """The fixed claims (all None when the company files no Form 4s), then
+    one ``person.N`` claim per top trader."""
+    at = fetched_at or datetime.now(UTC)
+    if latest_listed is None:
+        detail = "no Form 4 filings found"
+        values: dict[str, ClaimValue] = {}
+    elif s is None or s.filing_count == 0:
+        detail = f"no Form 4 filings about the company in the {_WINDOW}; most recent filed {latest_listed}"
+        values = _values(None, latest_listed)
+    else:
+        detail = (
+            f"{s.filing_count} Form 4 filings filed {s.first_filing_date} to {s.last_filing_date}; "
+            "officers and directors apart from 10% holders; codes P and S only"
+        )
+        values = _values(s, latest_listed)
 
-    A filing without ``primary_doc_text`` is skipped (counted), as is
-    one whose text fails to parse. Both failure modes are logged via
-    the caller's observability record, not raised — we want the rest
-    of the cluster.
-    """
-    all_txns: list[_Form4Transaction] = []
-    skipped = 0
-    for f in filings:
-        if not f.primary_doc_text:
-            skipped += 1
-            continue
-        try:
-            all_txns.extend(_parse_form_4_xml(f.primary_doc_text))
-        except Exception:  # noqa: BLE001 — one bad filing shouldn't kill the rest
-            skipped += 1
-    return all_txns, skipped
+    def source(text: str = detail) -> Source:
+        return Source(tool=TOOL, fetched_at=at, detail=text[:256])
+
+    claims = {
+        key: Claim(description=DESCRIPTIONS[key], value=values.get(key), unit=UNITS[key], source=source())
+        for key in CLAIM_KEYS
+    }
+    for i, person in enumerate(s.people if s else [], start=1):
+        claims[f"person.{i}"] = Claim(
+            description=f"{person.name} ({person.role}): net bought (+) or sold (−), {_WINDOW}"[:200],
+            value=person.net,
+            unit="usd",
+            source=source(f"bought {_usd(person.bought)}, sold {_usd(person.sold)} across {person.trades} trades"),
+        )
+    return claims
 
 
-# ── Async entry point ─────────────────────────────────────────────────
+# ── Tool ─────────────────────────────────────────────────────────────
 
 
-async def parse_form_4_cluster(
+async def fetch_insider_activity(
     symbol: str,
     *,
-    recent_n: int = 50,
-    edgar_provider: str = "sec",
+    provider: str = "sec",
+    today: date | None = None,
 ) -> dict[str, Claim]:
-    """
-    Pull the most recent ``recent_n`` Form 4 filings for ``symbol`` and
-    return a cluster summary as ``dict[str, Claim]``.
-
-    Stable shape: every key in ``CLAIM_KEYS`` is present, with
-    ``Claim.value=None`` when no filings (or no parsable filings) were
-    in the window. ``edgar_provider`` is forwarded to ``fetch_edgar``;
-    failures inside ``fetch_edgar`` (CIK lookup, rate limit, network)
-    propagate.
-    """
+    """Insider buying and selling over the last six months. See the
+    module docstring."""
     target = symbol.upper()
-    service_id = f"{edgar_provider}.form_4"
+    day = today or datetime.now(UTC).date()
+    cutoff = day - timedelta(days=WINDOW_DAYS)
 
-    with log_external_call(
-        service_id,
-        {"symbol": target, "recent_n": recent_n, "edgar_provider": edgar_provider},
-    ) as call:
-        filings = await fetch_edgar(
-            target,
-            form_type="4",
-            recent_n=recent_n,
-            include_text=True,
-            provider=edgar_provider,
+    with log_external_call(TOOL, {"symbol": target, "provider": provider}) as call:
+        listed = await fetch_edgar(
+            target, form_type="4", recent_n=MAX_FILINGS, include_text=False, provider=provider
         )
-        transactions, skipped = _parse_filings(filings)
-        agg = _aggregate(transactions, filings)
-        call.record_output(
-            {
-                "filing_count": len(filings),
-                "parsed_count": len(filings) - skipped,
-                "skipped_count": skipped,
-                "transaction_count": len(transactions),
-            }
+        in_window = sum(1 for f in listed if f.filed_at.date() >= cutoff)
+        filings = (
+            await fetch_edgar(target, form_type="4", recent_n=in_window, include_text=True, provider=provider)
+            if in_window
+            else []
         )
+        summary = summarize(filings, today=day) if filings else None
+        call.record_output({
+            "listed": len(listed),
+            "in_window": in_window,
+            "counted": summary.filing_count if summary else 0,
+            "other_issuer": summary.other_issuer_count if summary else 0,
+            "skipped": summary.skipped_count if summary else 0,
+        })
 
-    fetched_at = datetime.now(UTC)
-    detail = _build_detail(filings, agg)
-
-    out: dict[str, Claim] = {}
-    for key in CLAIM_KEYS:
-        out[key] = Claim(
-            description=_DESCRIPTIONS[key],
-            value=agg.get(key),
-            source=Source(tool=service_id, fetched_at=fetched_at, detail=detail),
-        )
-    return out
-
-
-def _build_detail(
-    filings: list[EdgarFiling], agg: dict[str, ClaimValue | None]
-) -> str:
-    """Source.detail string the agent can quote in the report citation."""
-    if not filings:
-        return "computed: no Form 4 filings found in window"
-    first = agg.get("cluster.first_filing_date")
-    last = agg.get("cluster.last_filing_date")
-    return (
-        f"computed: aggregate of {len(filings)} Form 4 filings "
-        f"filed {first} to {last}"
-    )
-
-
-# Re-exported for tests and external callers that want a thin handle on
-# the pure parser without going through the async + observability path.
-__all__ = ["CLAIM_KEYS", "parse_form_4_cluster", "_parse_form_4_xml"]
+    latest = max((f.filed_at.date() for f in listed), default=None)
+    return build_claims(summary, latest_listed=latest.isoformat() if latest else None)

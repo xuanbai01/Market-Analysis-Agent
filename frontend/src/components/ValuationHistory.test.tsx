@@ -79,11 +79,54 @@ describe("ValuationHistory", () => {
       Number(t.textContent),
     );
     expect(Math.max(...ticks)).toBeLessThan(60);
+    // The line does not run to the outlier: a marker at the top edge stands in.
+    expect(container.querySelectorAll("[data-testid='multi-line-off-scale']")).toHaveLength(1);
+  });
+
+  it("keeps a high year on the scale when the other years reach nearly as high", () => {
+    // XOM price / free cash flow: 84.9 in 2015 is over four times the
+    // median, but 2016 is at 63.7, so the axis runs that high anyway.
+    const { container } = render(
+      <ValuationHistory
+        panels={[{ ...PE, history: years([84.9, 63.7, 24.3, 17.7, 12.1]), median: 19.8, today: 16, premium: -0.19 }]}
+      />,
+    );
+    expect(screen.queryByTestId("own-history-off-scale")).toBeNull();
+    expect(container.querySelectorAll("[data-testid='multi-line-off-scale']")).toHaveLength(0);
+  });
+
+  it("labels axis ticks without rounding them into uneven steps", () => {
+    // Price / sales near 1: ticks at 0.75, 1, 1.25 … must not read 0.8, 1, 1.3.
+    const { container } = render(
+      <ValuationHistory
+        panels={[{ ...PS, history: years([1.4, 1.9, 1.0, 0.9, 1.6]), median: 1.2, today: 1.8, premium: 0.5 }]}
+      />,
+    );
+    const ticks = [...container.querySelectorAll("[data-testid='multi-line-y-tick']")].map((t) =>
+      Number(t.textContent),
+    );
+    const steps = ticks.slice(1).map((t, i) => Number((t - ticks[i]).toFixed(4)));
+    expect(new Set(steps).size).toBe(1);
   });
 
   it("keeps every year on the scale when none is far from the median", () => {
     render(<ValuationHistory panels={[PE]} />);
     expect(screen.queryByTestId("own-history-off-scale")).toBeNull();
+  });
+
+  it("leaves a gap for a year with no multiple instead of joining its neighbours", () => {
+    // XOM: a loss in 2020, so no P/E for that year.
+    const gappy = [
+      { period: "2021", value: 20 },
+      { period: "2022", value: 22 },
+      { period: "2024", value: 14 },
+      { period: "2025", value: 18 },
+    ];
+    const { container } = render(
+      <ValuationHistory panels={[{ ...PE, history: gappy, median: null, today: null, premium: null }]} />,
+    );
+    const d = container.querySelector("[data-series-line]")?.getAttribute("d") ?? "";
+    expect(d.match(/M/g)).toHaveLength(2);
   });
 
   it("says what the points are", () => {

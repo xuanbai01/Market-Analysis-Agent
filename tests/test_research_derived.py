@@ -39,7 +39,10 @@ FUND = {
     "forward_pe": c(26.0),
     "p_s": c(8.0),
     "ev_ebitda": c(25.0),
-    "gross_margin": c(0.62),
+    # Latest quarter, with its history; the trailing figure Yahoo reports
+    # (what peers are measured on) is a separate claim.
+    "gross_margin": c(0.63, [0.60, 0.61, 0.62, 0.62, 0.63]),
+    "gross_margin_ttm": c(0.62),
     "profit_margin": c(0.25),
     "dividend_yield": c(2.9),  # percent-form, as yfinance returns it
     "buyback_yield": c(0.01),
@@ -67,6 +70,9 @@ class TestQuality:
         assert op.value == pytest.approx(0.04)
         assert op.unit == "percentage_points"
         assert d["Free cash flow margin change, 2025-Q3 → 2026-Q3"].value == pytest.approx(-0.03)
+        # Gross margin on the same quarters as the chart and the trend
+        # cell (the fiscal-year change is a separate, labelled claim).
+        assert d["Gross margin change, 2025-Q3 → 2026-Q3"].value == pytest.approx(0.03)
 
     def test_per_share_growth_year_over_year(self) -> None:
         d = by_description(rd.quality_claims(FUND))
@@ -172,6 +178,8 @@ class TestValuation:
         assert d["EV/EBITDA vs peer median of 20.00: premium (+) or discount (−)"].value == pytest.approx(0.25)
 
     def test_gross_margin_gap_to_peers_in_points(self) -> None:
+        """On the trailing figure peers are measured on (0.62), not the
+        latest quarter from the statements (0.63)."""
         d = by_description(rd.valuation_claims(FUND, PEERS))
         gap = d["Gross margin vs peer median of 40.00%"]
         assert gap.value == pytest.approx(0.22)

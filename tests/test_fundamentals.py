@@ -1027,3 +1027,55 @@ def test_yfinance_metadata_none_when_info_missing(
     # sector_tag may resolve via the symbol map (curated names short-
     # circuit industry resolution); we don't assert here since "UNKNOWN"
     # isn't in any curated list.
+
+
+# ── Gross margin on one basis (2026-11, dogfood #20) ─────────────────
+
+
+def test_yfinance_gross_margin_snapshot_is_the_latest_quarter_of_its_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """XOM: Yahoo's ``info.grossMargins`` (29.8%) is on a different cost
+    basis from the statement rows behind the margin chart (24.2% in the
+    latest quarter), so the Quality card showed both. The snapshot now
+    comes from the same rows as its history."""
+    _patch_yfinance(
+        monkeypatch,
+        info={"grossMargins": 0.298, "profitMargins": 0.105},
+        quarterly_financials=_quarterly_financials_4q(),
+        quarterly_cashflow=_quarterly_cashflow_4q(),
+    )
+
+    raw, history = _fetch_yfinance_fundamentals("XOM")
+
+    assert raw["gross_margin"] == pytest.approx(70.0 / 100.0)
+    assert raw["gross_margin"] == history["gross_margin"][-1].value
+    # Yahoo's own figure stays available: peers are measured on it.
+    assert raw["gross_margin_ttm"] == 0.298
+    # Net margin's two figures share a definition and differ only in
+    # window; it keeps the trailing snapshot the layout signals read.
+    assert raw["profit_margin"] == 0.105
+
+
+def test_yfinance_gross_margin_falls_back_to_info_without_quarterly_statements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_yfinance(monkeypatch, info={"grossMargins": 0.745})
+
+    raw, _ = _fetch_yfinance_fundamentals("NVDA")
+
+    assert raw["gross_margin"] == 0.745
+    assert raw["gross_margin_ttm"] == 0.745
+
+
+async def test_gross_margin_claims_name_their_basis(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(PROVIDERS, "fake", _fake_provider())
+
+    result = await fetch_fundamentals("XOM", provider="fake")
+
+    assert result["gross_margin_ttm"].description == "Gross margin, trailing 12 months"
+    assert result["gross_margin_ttm"].unit == "fraction"
+    assert (
+        result["gross_margin_trend_1y"].description
+        == "Gross margin change, latest fiscal year vs the one before"
+    )

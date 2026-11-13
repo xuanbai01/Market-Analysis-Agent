@@ -33,7 +33,7 @@ import {
   type ResearchReport,
   type Section,
 } from "./schemas";
-import { extractMedian, extractSubject, groupPeers } from "./peer-grouping";
+import { extractMedian, extractSubject, groupPeers, subjectGrossMargin } from "./peer-grouping";
 
 // ── helpers ──────────────────────────────────────────────────────────
 
@@ -271,5 +271,23 @@ describe("extractSubject", () => {
       ],
     });
     expect(extractSubject(report)?.margin).toBe(0.46);
+  });
+
+  it("plots the subject on the trailing gross margin peers are measured on", () => {
+    // 2026-11 (dogfood #20): Quality's figure is the latest quarter from
+    // the statements; peers carry Yahoo's trailing figure, and the
+    // subject's own trailing figure is a Valuation claim.
+    const report = buildReport({
+      symbol: "XOM",
+      margin: 0.2421,
+      extraValuationClaims: [claim("Gross margin, trailing 12 months", 0.2981)],
+    });
+    expect(extractSubject(report)).toEqual({ symbol: "XOM", pe: 28.5, margin: 0.2981 });
+    expect(subjectGrossMargin(report)).toBe(0.2981);
+  });
+
+  it("falls back to Quality's gross margin for a report built before the split", () => {
+    expect(subjectGrossMargin(buildReport({ margin: 0.46 }))).toBe(0.46);
+    expect(subjectGrossMargin(buildReport({ hasQuality: false }))).toBeNull();
   });
 });

@@ -528,3 +528,48 @@ describe("SymbolDetailPage", () => {
     expect(wrapper?.className ?? "").toMatch(/max-w-screen-2xl/);
   });
 });
+
+describe("SymbolDetailPage — insider activity (2026-11)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function withInsiders(report: ResearchReport): ResearchReport {
+    const source = { tool: "sec.form_4", fetched_at: "2026-11-13T17:00:00+00:00" };
+    return {
+      ...report,
+      sections: [
+        ...report.sections,
+        {
+          title: "Insider Activity",
+          summary: "Directors sold.",
+          confidence: "high",
+          claims: [
+            { description: "Form 4 filings about the company, last 6 months", value: 12, source, history: [] },
+            { description: "Sales by officers and directors, last 6 months", value: 5_000_000, source, history: [] },
+            { description: "Purchases by officers and directors, last 6 months", value: 0, source, history: [] },
+          ],
+        },
+      ],
+    };
+  }
+
+  it("draws the insider card under its own anchor, not as a fallback table", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(withInsiders(fakeReport("NVDA")));
+    vi.spyOn(api, "fetchMarketPrices").mockRejectedValue(new Error("no prices in this test"));
+    const { container } = renderAt("NVDA");
+
+    expect(await screen.findByTestId("insider-card")).toBeInTheDocument();
+    expect(container.querySelector("[data-section-anchor='Insider Activity']")).not.toBeNull();
+    expect(screen.queryByRole("heading", { level: 3, name: "Insider Activity" })).toBeNull();
+  });
+
+  it("leaves the card out for a report built before the section", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(fakeReport("NVDA"));
+    vi.spyOn(api, "fetchMarketPrices").mockRejectedValue(new Error("no prices in this test"));
+    renderAt("NVDA");
+
+    await screen.findByTestId("report-freshness");
+    expect(screen.queryByTestId("insider-card")).toBeNull();
+  });
+});

@@ -177,9 +177,11 @@ def test_valuation_builder_takes_only_valuation_keys() -> None:
     claims = _tool_claims(_spec(Focus.FULL, "Valuation").builder(outputs))
     descriptions = {c.description for c in claims}
 
-    # 5 valuation metrics
-    assert len(claims) == 5
+    # 5 valuation metrics, plus the trailing gross margin the peer
+    # comparison is made on (2026-11, dogfood #20).
+    assert len(claims) == 6
     assert {"Trailing P/E", "Forward P/E", "P/S", "EV/EBITDA", "PEG"} <= descriptions
+    assert "Gross margin, trailing 12 months" in descriptions
     # Quality / capital-alloc keys are NOT in the Valuation section.
     assert "ROE" not in descriptions
     assert "Dividend yield" not in descriptions

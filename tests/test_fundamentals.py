@@ -44,6 +44,7 @@ def _fake_raw(**overrides: Any) -> dict[str, Any]:
         "peg": 1.4,
         "roe": 0.115,
         "gross_margin": 0.745,
+        "gross_margin_ttm": 0.745,
         "profit_margin": 0.55,
         "dividend_yield": 0.0001,
         "short_ratio": 1.2,

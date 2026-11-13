@@ -10,14 +10,14 @@ A research-report agent that produces beautifully-formatted hallucinations is wo
   3. **Latency** — wall-clock duration of the agent call.
 - **`golden.py`** — a list of golden questions: `(symbol, expected_facts)`. Each `expected_fact` is a value the report is expected to surface (P/E, latest 10-K date, etc.). Empty for now — populated as tools come online.
 - **`test_rubric.py`** — unit tests of the rubric framework itself, run on every PR. Validates that the rubric grades known-good and known-bad reports correctly.
-- **`test_golden.py`** — runs the agent against each golden question and grades it, on whichever provider `LLM_PROVIDER` selects ([ADR 0006](../../docs/adr/0006-pluggable-llm-provider.md)). **Marked `live_llm`, which the default pytest options deselect, and skipped when the active provider's API key is missing**, so it never burns cost on a normal test run. Run manually with `uv run pytest -m live_llm tests/evals/test_golden.py -v -s`, or add a CI job that runs nightly.
+- **`test_golden.py`** — runs the agent against each golden question and grades it, on whichever provider `LLM_PROVIDER` selects ([ADR 0006](../../docs/adr/0006-pluggable-llm-provider.md)). **Marked `live_llm`, which the default pytest options deselect, and skipped when the active provider's API key is missing**, so it never burns cost on a normal test run. Run it locally with `uv run pytest -m live_llm tests/evals/test_golden.py -v -s`, or on GitHub with the **Live Eval** workflow ([live-eval.yml](../../.github/workflows/live-eval.yml), started by hand; needs the provider's key as a repo secret).
 
 ## When evals run
 
 | Trigger | Suite | Why |
 |---|---|---|
 | Every PR (CI) | `test_rubric.py` | Free, fast — proves the rubric framework is intact |
-| Manual / nightly | `test_golden.py` | Real LLM calls — costs money, surfaces factuality regressions |
+| By hand, locally or the Live Eval workflow | `test_golden.py` | Real LLM calls — costs money, surfaces factuality regressions |
 | Pre-merge for tool PRs | `test_golden.py` | Required before adding a new tool to the agent's registry |
 
 ## Adding a golden question

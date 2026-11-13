@@ -74,12 +74,18 @@ TICKER_TO_CUSIP: dict[str, str] = {
     "LLY": "532457108",
     "MRK": "58933Y105",
     "PFE": "717081103",
-    # Oil & gas
-    "COP": "20825C104",
+    # Integrated oil (BP, SHEL and TTE are the US-listed ADRs)
+    "BP": "055622104",
     "CVX": "166764100",
-    "EOG": "26875P101",
-    "OXY": "674599105",
+    "SHEL": "780259305",
+    "TTE": "89151E109",
     "XOM": "30231G102",
+    # Oil & gas producers
+    "COP": "20825C104",
+    "DVN": "25179M103",
+    "EOG": "26875P101",
+    "FANG": "25278X109",
+    "OXY": "674599105",
     # Consumer staples (branded)
     "CL": "194162103",
     "KMB": "494368103",

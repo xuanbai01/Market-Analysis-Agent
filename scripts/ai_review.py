@@ -30,7 +30,9 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,9 +43,13 @@ DEFAULT_BASE_URL = "https://api.deepseek.com"
 # About 60K tokens of diff. A bigger PR loses its tests first, then
 # whole files, and the comment names what was left out.
 MAX_DIFF_CHARS = 240_000
-# Thinking is on by default for DeepSeek and its reasoning counts
-# toward max_tokens, so leave room for both.
-MAX_TOKENS = 16_000
+# Thinking is on by default for DeepSeek and its reasoning counts toward
+# max_tokens. On the first live run reasoning took all of 16K and left
+# no review, so it gets more room, and if it still runs out the review
+# is asked for again with thinking off (how the app itself calls it).
+THINKING_MAX_TOKENS = 32_000
+PLAIN_MAX_TOKENS = 8_000
+_THINKING_OFF = {"thinking": {"type": "disabled"}}
 LLM_TIMEOUT_SECONDS = 600
 GITHUB_TIMEOUT_SECONDS = 30
 
@@ -187,6 +193,22 @@ def review_text(response: dict) -> str:
     return text.strip()
 
 
+def request_review(ask: Callable[[dict], dict]) -> tuple[str, dict, bool]:
+    """Return (review, response, whether thinking was on).
+
+    ``ask`` takes the request options (max_tokens, thinking) and returns
+    DeepSeek's response. Thinking first; when its reasoning leaves no
+    answer, or the request fails, once more with thinking off.
+    """
+    try:
+        response = ask({"max_tokens": THINKING_MAX_TOKENS})
+        return review_text(response), response, True
+    except (RuntimeError, OSError) as exc:
+        print(f"::warning::With thinking on: {exc}. Asking again with thinking off.")
+    response = ask({"max_tokens": PLAIN_MAX_TOKENS, **_THINKING_OFF})
+    return review_text(response), response, False
+
+
 def render_comment(
     review: str, model: str, head_sha: str, generated: list[str], over_budget: list[str]
 ) -> str:
@@ -228,14 +250,19 @@ def _git_diff(base_sha: str, head_sha: str) -> str:
     ).stdout
 
 
-def _ask_deepseek(messages: list[dict[str, str]], *, key: str, model: str, base_url: str) -> dict:
-    return _request(
-        f"{base_url.rstrip('/')}/chat/completions",
-        token=key,
-        method="POST",
-        payload={"model": model, "messages": messages, "max_tokens": MAX_TOKENS},
-        timeout=LLM_TIMEOUT_SECONDS,
-    )
+def _ask_deepseek(messages: list[dict[str, str]], options: dict, *, key: str, model: str,
+                  base_url: str) -> dict:
+    try:
+        return _request(
+            f"{base_url.rstrip('/')}/chat/completions",
+            token=key,
+            method="POST",
+            payload={"model": model, "messages": messages, **options},
+            timeout=LLM_TIMEOUT_SECONDS,
+        )
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")[:500]
+        raise RuntimeError(f"DeepSeek returned HTTP {exc.code}: {detail}") from exc
 
 
 def _post_or_update(body: str, *, repo: str, number: int, token: str) -> str:
@@ -279,10 +306,13 @@ def main() -> int:
     print(f"Reviewing {len(kept)} files ({len(diff)} chars) with {model}; "
           f"left out {len(generated)} generated, {len(over_budget)} over budget.")
 
-    response = _ask_deepseek(messages, key=key, model=model, base_url=base_url)
-    review = review_text(response)
+    review, response, thinking = request_review(
+        lambda options: _ask_deepseek(messages, options, key=key, model=model, base_url=base_url)
+    )
     usage = response.get("usage") or {}
-    print(f"Tokens: {usage.get('prompt_tokens')} in, {usage.get('completion_tokens')} out.")
+    reasoning = (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
+    print(f"Thinking {'on' if thinking else 'off'}. Tokens: {usage.get('prompt_tokens')} in, "
+          f"{usage.get('completion_tokens')} out ({reasoning} reasoning).")
 
     body = render_comment(review, model, pr["head"]["sha"], generated, over_budget)
     action = _post_or_update(body, repo=os.environ["GITHUB_REPOSITORY"], number=pr["number"],

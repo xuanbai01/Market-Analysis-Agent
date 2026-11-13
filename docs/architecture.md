@@ -104,7 +104,8 @@ POST /v1/research/{symbol}
        ├▶ tool fan-out (asyncio.gather, return_exceptions=True)
        │    fetch_fundamentals / fetch_earnings / fetch_peers /
        │    fetch_macro / extract_10k_business / extract_10k_risks_diff /
-       │    fetch_annual_history (SEC XBRL, ten years per share + year-end multiples)
+       │    fetch_annual_history (SEC XBRL, ten years per share + year-end multiples) /
+       │    fetch_insider_activity (Form 4s, last six months)
        ├▶ deterministic claim builders   (per-section, code picks claims, not LLM)
        ├▶ llm.synth_call                 (Sonnet writes summary prose under forced schema)
        ├▶ research_thesis.compose_thesis (in parallel: the analyst view, claim-id citations)
@@ -146,7 +147,7 @@ Lazy-loading is the binding bundle constraint — the main chunk must stay under
 | `/login` | ✅ Pre-auth screen. Links to the demo when there is one. | main |
 | `/demo`, `/demo/:ticker` | ✅ Public read-only demo, no sign-in: an index of the demo tickers and the same dashboard, read through `/v1/demo`. No sidebar, search, market strip, Regenerate or watchlist. | **lazy** (shell + index; the dashboard chunk is shared) |
 | `/` | ✅ LandingPage — search bar + Past Reports (Watchlist and Recent live in the sidebar on every page). | main |
-| `/symbol/:ticker` | ✅ The dashboard: sticky section nav, HeroCard, AnalystViewCard, full-width Quality / Earnings / Valuation / Per-share growth, an equal-height row of Cash & capital · Capital returns · Risk · Macro (only the cards with data), Business + News. | **lazy** |
+| `/symbol/:ticker` | ✅ The dashboard: sticky section nav, HeroCard, AnalystViewCard, full-width Quality / Earnings / Valuation / Per-share growth, an equal-height row of Cash & capital · Capital returns · Risk · Macro (only the cards with data), Insider activity, Business + News. | **lazy** |
 | `/compare?a=X&b=Y` | ✅ Phase 4.6.A — two-ticker side-by-side. One % change price chart, growth by metric, risk on one scale. | **lazy** |
 | `/lens`, `/lens/:id` | ✅ ADR 0007 layer 3 — cross-company lenses: the yearly distribution of a metric across a group (DistributionChart), dollars by company (CapexBars), a latest-year table and a cited AI read. | **lazy** |
 | (overlay) `SearchModal` | ✅ Phase 4.7 — ⌘K-triggered. | **lazy** |
@@ -158,7 +159,7 @@ Errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/
 | Service | Purpose | Failure mode |
 |---|---|---|
 | yfinance | OHLCV, fundamentals, peers, earnings, ten years of closes for the year-end multiples | Defensive `_safe_loc` lookups; missing fields become `None`-valued claims with stable shape |
-| SEC EDGAR | Filings (10-K, Form 4, 13F-HR); XBRL company concepts for lenses and the ten-year per-share history | Disk-cached (XBRL 24 h); SEC `User-Agent` mandatory; 0.15s sleep between requests for polite-crawl. A company that moved to a new registrant is read across both (`sec_registrants.py`). A ticker SEC doesn't know fails `fetch_annual_history` only — the card falls back to the quarterly view |
+| SEC EDGAR | Filings (10-K, Form 4, 13F-HR); XBRL company concepts for lenses and the ten-year per-share history | Disk-cached: filing texts forever (filings never change), the list of filings 12 h, XBRL 24 h. SEC `User-Agent` mandatory; every request in the process spaced through one lock (8 a second, under SEC's 10). A company that moved to a new registrant is read across both (`sec_registrants.py`). A ticker SEC doesn't know fails the SEC tools only; their cards drop out and the page says so |
 | NewsAPI | News articles | Optional — skipped silently when `NEWSAPI_KEY` empty |
 | FRED | Macro series | Optional — `fetch_macro` emits metadata claims with None values when `FRED_API_KEY` empty |
 | Anthropic Claude | Synth (Sonnet 4.6) + triage (Haiku 4.5) when `LLM_PROVIDER=anthropic` (default) | `RuntimeError` → 503 problem+json (key not configured / provider API error) |

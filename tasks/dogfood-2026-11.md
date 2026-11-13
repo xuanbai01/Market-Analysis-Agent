@@ -82,6 +82,19 @@ Workstream B, checked on a local KO report and on real data for six tickers.
 
 Real-data checks: AAPL's year-end P/E runs 13.6 (2016) to 38.0 (2026) and NVDA's price-to-sales 3.3 to 27.1, both on split-adjusted figures; JPM has P/E and price-to-sales and no cash-flow multiple; RIVN has four year-ends of price-to-sales and nothing else, so no median; XOM skips its 2020 loss year. Live golden eval on the branch: 6 of 6 pass.
 
+## Insider activity — first real filings (2026-11-13)
+
+Running the Phase 2 Form 4 parser on real filings before putting it on the dashboard. It summed the 50 latest Form 4s in a company's SEC list.
+
+| # | Severity | Finding | Root cause / fix |
+|---|---|---|---|
+| 30 | **High** | XOM's largest "insider sale" was $277M by Exxon Mobil Corp itself. | A company that owns 10%+ of another files Form 4s as that owner, and they sit in its own SEC list: this was Exxon selling Imperial Oil shares. **Fixed:** only filings whose issuer is the company count. |
+| 31 | **High** | RIVN showed $1B of "insider buying". | Volkswagen, a 10% holder, buying as a strategic investment. **Fixed:** 10% holders and other owners are summed apart from officers and directors and shown on their own line. |
+| 32 | Medium | KO's regional presidents were counted with the 10% holders. | Coca-Cola files them as "other" with a title ("President, Latin America OU"). **Fixed:** an "other" owner whose title names an executive role counts as an officer. |
+| 33 | Medium | The SEC tools running in parallel threads could exceed SEC's 10 requests a second between them, and adding ~50 Form 4 downloads per report made it likely. | Each thread slept after its own requests. **Fixed:** one lock spaces every SEC request in the process (8 a second). Filing texts are now reused from disk, and the cached list of filings expires after 12 hours (it never did, so a long-lived cache never saw a new filing). |
+
+With the fixes, cold fetches take 2–8 s (15 s for TSM at the 100-filing cap) and about 0.2 s warm. Live golden eval with the new section: AAPL, NVDA, JPM, KO and XOM 1.000, RIVN 0.985; report times unchanged. TSM files Form 4s now: foreign issuers' officers began reporting in 2026.
+
 ## Coverage and the gate
 
 - **Tickers exercised:** AAPL, MSFT (fresh live reports); NVDA, AVGO, KO, RIVN (dashboard, local and live); JPM (live golden eval: the bank path); plus the seven lens companies. That spans healthy mega-cap, growth, distressed, dividend payer and bank. A cyclical (XOM) was added on 2026-11-13 — see the section above.

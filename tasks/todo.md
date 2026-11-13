@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Workstream C (public demo)** is in review on `feature/public-demo`. **D is next** (unordered; pick one). A merged as #92, A2 as #93, B as #94.
+- **Insider activity (workstream D)** is in review on `feature/insider-activity`. A, A2, B and C merged (#92–#95); C1 (README screenshots) is the owner's.
 
 ## Plan — after Phase 5 (2026-11-13)
 
@@ -52,7 +52,7 @@ ADR 0004 called "is this expensive versus its own history" the most-cited gap; t
 - [x] **ValuationCard** — "Against its own history": one small chart per multiple, each on its own scale, the median as a reference line, today at the end of the line. A year more than four times the median is named instead of drawn.
 - [x] **Data checks** on KO, NVDA (splits), AAPL (September year end), JPM (bank), RIVN (losses) and XOM (predecessor registrant).
 
-### C. Make it showable *(C2 and C3 on branch `feature/public-demo`, in review)*
+### C. Make it showable *(C2 and C3 merged as #95)*
 
 - [ ] **C1 README screenshots** — hero + analyst view, one full dashboard, the capex lens. The browser pane only saves small images, so these need capturing by hand (owner).
 - [x] **C2 Public read-only demo** — `/demo` and `/v1/demo/*`: the latest stored report and stored prices for the tickers in `DEMO_SYMBOLS`, never a generated report or a provider call. Off unless the setting is non-empty; production lists AAPL, NVDA, KO, JPM, RIVN and XOM.
@@ -62,7 +62,7 @@ ADR 0004 called "is this expensive versus its own history" the most-cited gap; t
 ### D. After those (unordered)
 
 - [ ] **More lenses** — R&D intensity, SBC ÷ revenue, buybacks vs dividends for the megacap group; `lens.py` and `xbrl.py` generalize. A trailing-12-month point for the partial year is the other open idea.
-- [ ] **Insider activity** — `form_4.py` (tested since Phase 2) has never reached the dashboard; a section and a card would serve the catalyst workflow. Decide `holdings_13f.py` at the same time: surface it or delete it.
+- [x] **Insider activity** *(branch `feature/insider-activity`, in review)* — `form_4.py` rewritten into `fetch_insider_activity`: officer and director purchases and sales over six months, 10% holders apart, the share sold under 10b5-1 plans, the top traders; an Insider Activity section (`REPORT_VERSION` 5) and a full-width card. `holdings_13f.py` stays unsurfaced: 13F holdings are quarterly and 45 days stale, a weaker signal than Form 4s; decide again if someone asks who the big holders are.
 - [ ] **Predecessor registrants for older reorganizations** — a company that moved to a new registrant years ago still has its 10-Ks, but its ten-year history stops at the move (candidates to check against SEC: DIS 2019, CI 2018, AVGO 2018, CHTR 2016, LIN 2018). Each is one verified line in `sec_registrants.py`; a merger shows up as a share-count jump, which the existing guard cuts at.
 - [ ] **Split modules past the 400-line convention when next touched** — `research_orchestrator.py`, `ten_k.py`, `earnings.py`, `fundamentals.py` and `research_derived.py` (the last grew past 500 lines with the own-history claims).
 
@@ -81,7 +81,6 @@ If you're picking this up after a gap:
 - **Vite HMR cache misses file mtime in `.claude/worktrees/...`** — see [lessons.md](lessons.md). Workaround: trust unit tests + `vite build`; fix candidate `server.watch.usePolling: true`.
 - **Cancel-on-navigate** (old Bug 8): leaving a ticker page mid-generation doesn't abort the request. Hasn't bitten in dogfood.
 - **Help overlay (`?` shortcut)** — still deferred; ⌘K is the only shortcut.
-- **The EDGAR disk cache never looks for a newer filing** once it holds as many as a call asks for (`edgar._try_cache`): a machine that cached two 10-Ks keeps serving them after a third is filed. Fly's disk is wiped on every stop, so production recovers by itself; a long-lived local `.edgar_cache` does not. Found 2026-11-13, not fixed.
 - **Yahoo's `info` can come back partial.** One KO fetch on 2026-11-13 had no price-to-sales, EV/EBITDA or gross margin; the report then shows "—" in those cells and "no trailing figure today" on two own-history panels until it is regenerated. A retry, or a fallback from the latest close and trailing per-share figures, would fix it. Not fixed.
 - **Alphabet's annual history starts in 2022.** Before then it tagged share counts per share class, which the SEC company-concept API doesn't return, so GOOGL has four years of per-share figures and multiples. The same limit applies to any company that reports shares only by class.
 - **Left from the 2026-11-13 security review of the demo** (low severity, not fixed): `app/core/logging.py` is never imported, so the `app.external` call log may not be written in production (unverified); two requests arriving as a demo cache entry expires each query the database once; `tool_calls_audit` (tool names and exception class names) is public on demo reports, which was accepted.

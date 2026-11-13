@@ -11,9 +11,10 @@
  * depend on the picture.
  *
  * One year can dwarf the rest: Coca-Cola's 2017 P/E was 158 on earnings
- * cut by a one-off tax charge. A point more than ``OFF_SCALE_MULTIPLE``
- * times the median is left off the scale and named under the title, so
- * the other years stay readable and the outlier is still stated.
+ * cut by a one-off tax charge. A point far above both the median and
+ * every other year is left off the scale and named under the title, so
+ * the other years stay readable and the outlier is still stated. The
+ * line breaks at that year and a triangle marks it at the top edge.
  *
  * The year-end points are fiscal-year figures from SEC filings; today's
  * point is the trailing-twelve-month multiple. The note under the
@@ -27,8 +28,13 @@ import { MultiLine } from "./MultiLine";
 const LINE_COLOR = "#6cb6ff"; // strata-valuation
 const PANEL_HEIGHT = 150;
 const TODAY = "Today";
-/** A point above this many times the median is named instead of drawn. */
+/** A point is named instead of drawn when it is above this many times
+ *  the median and also this many times the highest point left on the
+ *  scale. The second test keeps a point that is merely the highest of a
+ *  wide range: taking 84.9 off a scale that still runs to 80 hides a
+ *  value and gains nothing. */
 const OFF_SCALE_MULTIPLE = 4;
+const OFF_SCALE_OVER_REST = 2;
 
 const multiple = (v: number) => `${v.toFixed(1)}×`;
 
@@ -57,10 +63,14 @@ interface Scale {
 
 function scaleFor(points: ClaimHistoryPoint[], median: number | null): Scale {
   if (median === null || median <= 0) return { offScale: [] };
-  const cap = median * OFF_SCALE_MULTIPLE;
-  const offScale = points.filter((p) => p.value > cap);
-  const shown = points.filter((p) => p.value <= cap).map((p) => p.value);
-  if (offScale.length === 0 || shown.length === 0) return { offScale: [] };
+  const rest = points.filter((p) => p.value <= median * OFF_SCALE_MULTIPLE).map((p) => p.value);
+  if (rest.length === 0) return { offScale: [] };
+  const top = Math.max(...rest, median);
+  const offScale = points.filter(
+    (p) => p.value > median * OFF_SCALE_MULTIPLE && p.value > top * OFF_SCALE_OVER_REST,
+  );
+  if (offScale.length === 0) return { offScale: [] };
+  const shown = points.filter((p) => !offScale.includes(p)).map((p) => p.value);
   return { domain: [Math.min(...shown, median), Math.max(...shown, median)], offScale };
 }
 
@@ -69,6 +79,12 @@ function Panel({ panel }: { panel: OwnHistoryPanel }) {
     panel.today !== null ? [...panel.history, { period: TODAY, value: panel.today }] : panel.history;
   const last = history[history.length - 1].period;
   const { domain, offScale } = scaleFor(history, panel.median);
+  // Every fiscal year between the first and last year-end gets a slot,
+  // so a year with no multiple (a loss) shows as a gap in the line.
+  const firstYear = Number(panel.history[0].period);
+  const lastYear = Number(panel.history[panel.history.length - 1].period);
+  const axis = Array.from({ length: lastYear - firstYear + 1 }, (_, i) => String(firstYear + i));
+  if (panel.today !== null) axis.push(TODAY);
   return (
     <div data-testid="own-history-panel" data-multiple={panel.key}>
       <div className="font-mono text-[10px] uppercase tracking-kicker text-strata-valuation">{panel.label}</div>
@@ -88,8 +104,9 @@ function Panel({ panel }: { panel: OwnHistoryPanel }) {
         showLegend={false}
         baseline={panel.median ?? undefined}
         yDomain={domain}
+        periodAxis={axis}
         formatValue={multiple}
-        formatTick={(v) => String(Number(v.toFixed(1)))}
+        formatTick={(v) => String(Number(v.toFixed(2)))}
         formatPeriod={(period) => period}
         ariaLabel={`${panel.label} at each fiscal year-end${panel.today !== null ? ", then today" : ""}`}
       />

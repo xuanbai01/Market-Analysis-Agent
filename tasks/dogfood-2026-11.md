@@ -52,8 +52,19 @@ Generated in ~20 s. Every card rendered: hero + price chart, Quality rings + mar
 
 **Live golden eval** (DeepSeek Flash; AAPL, NVDA, RIVN, JPM, KO): factuality 1.000 on all five across three runs during #80, the last with the citation check (621 numbers in the prose, none unmatched).
 
+## XOM — the cyclical check (2026-11-13, local stack)
+
+A fresh XOM report on a local stack (`LLM_PROVIDER=anthropic`, no `FRED_API_KEY`), about a minute to generate. Every card that had data rendered, with no distress pills and the healthy card order: the layout rules did not misfire. XOM is profitable today, so a cyclical at the bottom of its cycle is still untested. An NVDA report generated on the same stack had its 10-K risk card and ten-year history, so findings 18–20 are about XOM's data, not the local setup.
+
+| # | Severity | Finding | Root cause / note |
+|---|---|---|---|
+| 18 | **High** | XOM has no 10-K risk card and no ten-year growth view, while `tool_calls_audit` reports every tool "ok". Overall confidence drops to LOW and nothing on the page says why. | Exxon reorganized under a holding company in 2026. SEC's ticker map now points XOM at the new registrant (CIK 0002115436, "ExxonMobil Holdings Corp": 43 filings, no 10-K, no XBRL revenue facts); the filing history sits under the old registrant. Every SEC-backed tool resolves a ticker to one CIK (`edgar._resolve_cik`), so the 10-K business text, the risk diff, the annual history and any lens would all come back empty. **Open** — plan A2: follow a successor registrant back to its predecessor, and report a tool that returned nothing as empty rather than ok. |
+| 19 | Medium | The Valuation prose and the analyst view call XOM's EV/EBITDA a 65.56% premium to peers and its gross margin 26.19 pts below them. | The `oil_gas` peer group mixes integrated majors (XOM, CVX) with pure producers (COP, OXY, EOG), whose gross margins run 49–74% and whose EV/EBITDA runs lower. The same class of error as KO against retailers (#15). **Open** — plan A2: split the group. |
+| 20 | Medium | The Quality card gives gross margin as 29.81% in its table and 24.2% at the end of its margin chart; the trend cell says "▲ 1.6 pts since 2025-Q3" while the year-over-year claim is −0.63 pts. | The snapshot and the year-over-year claim come from yfinance `info` and annual statements; the chart and the trend cell come from quarterly statements. For most tickers the two bases are close; for XOM they are 5.6 pts apart. **Open** — plan A2: one basis for the snapshot, the chart and the trend. |
+| 21 | Info | Macro values are null locally (no `FRED_API_KEY`), as in production. | Owner action in the plan. |
+
 ## Coverage and the gate
 
-- **Tickers exercised:** AAPL, MSFT (fresh live reports); NVDA, AVGO, KO, RIVN (dashboard, local and live); JPM (live golden eval: the bank path); plus the seven lens companies. That spans healthy mega-cap, growth, distressed, dividend payer and bank. **Not covered: a cyclical** (CAT, XOM) — check one the next time report generation changes.
-- **Open info items:** #4 (per-share growth spans ~5 quarters — yfinance's limit; longer history would come from XBRL, which the lenses now use) and #5 (news categories skew to OTHER) are unchanged.
+- **Tickers exercised:** AAPL, MSFT (fresh live reports); NVDA, AVGO, KO, RIVN (dashboard, local and live); JPM (live golden eval: the bank path); plus the seven lens companies. That spans healthy mega-cap, growth, distressed, dividend payer and bank. A cyclical (XOM) was added on 2026-11-13 — see the section above.
+- **Open info items:** #5 (news categories skew to OTHER) is unchanged. #4 (per-share growth spans ~5 quarters) was closed by #90 on 2026-11-10: the card now opens on ten years of annual history from SEC XBRL.
 - **Decision gate (Phase 5 vs 6):** the recurring signal was #15 — "show me what it means", plus cross-company depth — which is the Phase 5 narrative layer. It shipped as ADR 0007 (#79–#81). Nobody asked for segment or geography breakdowns, so Phase 6 stays deferred.

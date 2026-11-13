@@ -10,33 +10,76 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- Nothing in flight. **Phase 4 is done** (4.0 → 4.8, PRs #46 → #82) and the 4.8 gate's outcome, Phase 5, shipped as ADR 0007 (#79 → #81). The next piece of work is the owner's pick from "Next candidates" below.
+- **Workstream A (cleanup)** is in review on `chore/roadmap-and-cleanup`. **A2 is next** — see the plan below.
 
-## Handoff — pickup notes (2026-11-09)
+## Plan — after Phase 5 (2026-11-13)
+
+A review on 2026-11-13 found the roadmap exhausted: every phase was shipped or deferred, and the candidates list had no goal ordering it. **Goal for this stretch:** close the oldest open diligence gap (valuation against the company's own history) and make the product something a person other than the owner can see. Order: A → A2 → B → C, then D. One PR per workstream.
+
+### A. Cleanup *(branch `chore/roadmap-and-cleanup`)*
+
+- [x] **Remove the 501 stubs** — `/v1/analysis`, `/v1/reports/daily/latest`, `/v1/forecasts/{symbol}`: the routers, their mounting, the route-auth test's exemption, the doc rows.
+- [x] **Remove the unreachable Recharts path** — `SectionChart`, `lib/featured-claim.ts` and the `recharts` dependency. Every section the backend builds has a dedicated card (`CARD_SECTIONS` covers all nine titles in `SECTIONS_BY_FOCUS`), so the chart could never load. `ReportRenderer` stays as a plain claims table for a section that has no card yet: the next backend section shows up there until its card lands.
+- [x] **Live eval from GitHub** — `.github/workflows/live-eval.yml`, started by hand. ADR 0004 says the live golden eval gates report changes; until now it only ran on a laptop.
+- [x] **Docs** — the per-PR history moves from CLAUDE.md to `docs/changelog.md`; completed phases move from this file to [archive-phases-1-5.md](archive-phases-1-5.md); test counts and bundle sizes are stated once each (`docs/testing.md`, `frontend/README.md`) instead of in six files; stale statements fixed (design_doc tools table and risks row, dogfood item #4).
+- [x] **A cyclical through the dashboard** — XOM, 2026-11-13, on a local stack. The layout rules held (XOM is profitable today, so a cyclical in a trough is still untested). It found three data problems, logged as #18–#20 in [dogfood-2026-11.md](dogfood-2026-11.md) and planned as A2.
+
+Owner actions (they need an account or a decision):
+
+- [ ] **`FRED_API_KEY` on Fly** (`fly secrets import`) — without it the Macro card never renders in production.
+- [ ] **`DEEPSEEK_API_KEY` as a GitHub Actions secret** — the live-eval workflow needs it.
+- [ ] **`docs/screenshots/`** (the Strata mockups the archive links to) is untracked: commit it or delete it.
+- [ ] **Branch protection on `main`**, and `ANTHROPIC_API_KEY` as a repo secret for the AI PR review job.
+
+### A2. Fixes from the XOM check *(branch `fix/sec-successor-and-oil-peers`)*
+
+These change report content, so they come before B, which builds on the same SEC history.
+
+- [ ] **Successor registrants** (dogfood #18) — after Exxon's 2026 holding-company reorganization, SEC's ticker map points XOM at a new registrant with no 10-K and no XBRL history, so the risk card and the ten-year view vanish. Resolve a ticker to its filing history across the predecessor registrant too.
+- [ ] **A tool that returns nothing is not "ok"** (#18) — `tool_calls_audit` should say empty, and the page should say which sections had no data instead of only showing LOW confidence.
+- [ ] **Split the `oil_gas` peer group** (#19) into integrated majors and exploration & production, as consumer staples was split in ADR 0007.
+- [ ] **One basis for gross margin** (#20) — the snapshot, the margin chart and the trend cell should agree.
+- [ ] **Bump `REPORT_VERSION`** and run the live golden eval; consider adding XOM to the golden set.
+
+### B. Valuation against the company's own history *(branch `feature/valuation-history`)*
+
+ADR 0004 called "is this expensive versus its own history" the most-cited gap; the Valuation card still compares only against peers. The ten-year per-share history (#90) supplies the denominators.
+
+- [ ] **`fetch_valuation_history` tool** (`app/services/valuation_history.py`) — fiscal-year-end price ÷ that year's diluted EPS, revenue per share and FCF per share gives P/E, P/S and P/FCF for up to ten years. Needs ten years of closes (the price route stops at 5Y): split-adjusted but not dividend-adjusted, to match the split-adjusted per-share figures. A loss year has no P/E (P/S still draws). Banks: P/E and P/S only.
+- [ ] **Claims** in the Valuation section, with history, plus **derived claims** in `research_derived.py`: the ten-year median of each multiple, today's multiple against that median (premium or discount), and where today sits in the ten-year range. Each description names its basis (fiscal-year multiple vs today's trailing multiple).
+- [ ] **Prose and thesis** pick the claims up through the existing claim lines; **bump `REPORT_VERSION`**; live golden eval ≥ 0.97 on all five tickers.
+- [ ] **ValuationCard** — an own-history panel: one multiple at a time (P/E · P/S · P/FCF), a yearly line, the median, today marked. Read the dataviz rules before drawing.
+- [ ] **Data checks** on KO, NVDA (splits), AAPL (September year end), JPM (bank), RIVN (losses).
+
+### C. Make it showable *(C2 needs the owner's go-ahead on the design before any code)*
+
+- [ ] **C1 README screenshots** — hero + analyst view, one full dashboard, the capex lens. The last attempt found the browser pane only saves small JPEGs; these may need capturing by hand.
+- [ ] **C2 Public read-only demo** — design to confirm first: an unauthenticated route that serves the latest cached report for a fixed list of tickers (`DEMO_SYMBOLS`, empty = off), never generates a report and never calls a provider; cached prices for the same tickers; a "View demo" entry on the sign-in page; Regenerate and search hidden in demo mode. `tests/test_route_auth.py` lists the route as deliberately open and `docs/security.md` A01 records it.
+- [ ] **C3 Lower `RESEARCH_RATE_LIMIT_PER_HOUR`** from 30 to 3 in `fly.toml`, in the same PR as C2.
+
+### D. After those (unordered)
+
+- [ ] **More lenses** — R&D intensity, SBC ÷ revenue, buybacks vs dividends for the megacap group; `lens.py` and `xbrl.py` generalize. A trailing-12-month point for the partial year is the other open idea.
+- [ ] **Insider activity** — `form_4.py` (tested since Phase 2) has never reached the dashboard; a section and a card would serve the catalyst workflow. Decide `holdings_13f.py` at the same time: surface it or delete it.
+- [ ] **Split modules past the 400-line convention when next touched** — `research_orchestrator.py` (619), `ten_k.py` (614), `earnings.py` (532), `fundamentals.py` (520).
+
+Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a filing-level XBRL parser), the 4.6.B compare narrative, the Sonnet comparison run of the golden eval.
+
+## Handoff — pickup notes (2026-11-13)
 
 If you're picking this up after a gap:
 
-1. **Read [CLAUDE.md](../CLAUDE.md) "Current state" first** — every shipped PR with bundle sizes and test counts — then [tasks/dogfood-2026-11.md](dogfood-2026-11.md) for what the owner reacted to and why each fix exists.
-2. **Production:** dashboard <https://market-analysis-agent-red.vercel.app>, API <https://market-analysis-agent.fly.dev>, `LLM_PROVIDER=deepseek`. A push to `main` deploys both; the owner sets Fly secrets ([docs/deployment.md](../docs/deployment.md) §7). Cached reports generated before a prompt or claim change need **Regenerate** to pick it up.
-3. **Test counts on a clean checkout:** `uv run pytest -v` → 849 backend (5 live-LLM golden cases deselected unless `-m live_llm`). `cd frontend && npm run test` → 591. Main bundle 88.87 KB gz (11.13 KB under budget).
-
-**Next candidates (none committed):**
-
-- **Lower `RESEARCH_RATE_LIMIT_PER_HOUR`** in `fly.toml` (30 → the code default 3) before the URL is shared with anyone.
-- **Set `FRED_API_KEY` on Fly** (free key; owner, via `fly secrets import`) — without it the Macro card never renders in production. The redrawn panels (#83) are unit-tested only.
-- **More lenses** — the XBRL client + `lens.py` generalize; candidates: R&D intensity, SBC ÷ revenue, buybacks vs dividends across the same megacaps, or capex for another group. A trailing-12-month point for the latest partial year is the other open lens idea.
-- **A cyclical ticker** (CAT, XOM) through the dashboard — the one layout-matrix cell the dogfood didn't cover.
-- **Phase 6 (XBRL Tier 2)** only if segment or geography mix is asked for.
-- **4.6.B compare narrative** only if Compare gets used; the dogfood never reached for it.
-- **Sonnet comparison run** of the golden eval (needs an Anthropic key), and **branch protection on `main`** (repo setting, owner's call).
+1. **Read [CLAUDE.md](../CLAUDE.md) "Current state"**, then the plan above. What shipped and why is in [docs/changelog.md](../docs/changelog.md); what the owner reacted to is in [dogfood-2026-11.md](dogfood-2026-11.md); the phase-by-phase task detail is in [archive-phases-1-5.md](archive-phases-1-5.md).
+2. **Production:** dashboard <https://market-analysis-agent-red.vercel.app>, API <https://market-analysis-agent.fly.dev>, `LLM_PROVIDER=deepseek`. A push to `main` deploys both; the owner sets Fly secrets ([docs/deployment.md](../docs/deployment.md) §7). A change to report content bumps `REPORT_VERSION`, and cached reports rebuild on their next visit.
+3. **Test counts and bundle sizes:** [docs/testing.md](../docs/testing.md) and [frontend/README.md](../frontend/README.md) are the only places that state them.
 
 **Known minor issues:**
 
-- **Vite HMR cache misses file mtime in `.claude/worktrees/...`** — see [tasks/lessons.md](lessons.md). Workaround: trust unit tests + `vite build`; fix candidate `server.watch.usePolling: true`.
+- **Vite HMR cache misses file mtime in `.claude/worktrees/...`** — see [lessons.md](lessons.md). Workaround: trust unit tests + `vite build`; fix candidate `server.watch.usePolling: true`.
 - **Cancel-on-navigate** (old Bug 8): leaving a ticker page mid-generation doesn't abort the request. Hasn't bitten in dogfood.
 - **Help overlay (`?` shortcut)** — still deferred; ⌘K is the only shortcut.
 
-**`tasks/lessons.md`** — read before non-trivial work to avoid retreading earlier mistakes.
+**[lessons.md](lessons.md)** — read before non-trivial work to avoid retreading earlier mistakes.
 
 ## Local-dev gotchas (Windows)
 
@@ -44,571 +87,6 @@ A clean checkout on Windows often hits two issues that cost dev hours if not pre
 
 1. **Native Postgres 18 service collides with Docker's :5432 mapping.** When the Windows `postgresql-x64-18` service is running, Docker's `5432:5432` mapping silently bumps the host port. Check with `docker ps` — if you see `0.0.0.0:5433->5432/tcp`, update `.env`'s `DATABASE_URL` to `localhost:5433`. Alternative: `Stop-Service postgresql-x64-18` to free :5432, then `docker compose down && up -d db`.
 2. **`.env`'s `DATABASE_URL` defaults to whatever the previous user set.** If the alembic / uvicorn stack hangs forever or fails with `ConnectionRefusedError`, check whether the URL points at Neon (`...neon.tech...?sslmode=require`) when you meant local. Neon connections appear in stack traces as `_create_ssl_connection`. Replace with `postgresql+asyncpg://postgres:postgres@localhost:5432/marketdb` for local.
-
-## Phase 4 — Symbol-centric dashboard ✅ done (2026-11-09)
-
-> **Why this is Phase 4:** dogfooding the Phase 3 visual depth (sparklines, section charts, peer scatter) against MSFT / NVDA / AMZN / AAPL / RIVN locally surfaced that the *data and visualization were right* but the *container was wrong*. "Click Generate → scroll a static report" feels like a generated artifact, not a tool. profitviz / stockanalysis / finchat all converge on a symbol-centric dashboard for a reason. See [ADR 0005](../docs/adr/0005-symbol-centric-dashboard.md) for the full reasoning.
->
-> **What this is NOT:** a polish task. The Strata design pivot is structural — adaptive layouts (RIVN reframes to cash runway / burn / risk; healthy names show valuation + quality + growth), bookmarkable URLs, sidebar persistence, and Compare mode are all impossible in the report shape regardless of how much polish we apply.
->
-> **Phase 3 status:** schema (3.1) ✅; data-tool history (3.2.A–F) ✅; frontend visualization (3.3.A–C) ✅; eval rubric history (3.4) ✅. All survives. The frontend visualizations get partially deprecated — `Sparkline` and the chart helpers live on; `SectionChart` / `PeerScatter` / `ReportRenderer` get replaced by Strata variants. The `/v1/research/{symbol}` endpoint and same-day cache layer stay; the renderer that consumes them is what changes.
->
-> **Vercel deploy:** moved from Phase 3.5 to Phase 4.8. Holding the deploy until the new UI lands rather than shipping a public deploy that immediately needs a redesign.
-
-### 4.0 Token system + sidebar shell + route refactor ✅ done *(this PR)*
-
-- [x] **Tailwind extend with Strata tokens** — slate base (canvas / surface / raise / line / border / muted / dim / fg / hi), 9 semantic accents (valuation / quality / growth / cashflow / balance / earnings / peers / macro / risk), 4 state colors (pos / neg / neutral / highlight), Inter + JetBrains Mono font families, `letterSpacing.kicker` for category labels.
-- [x] **`SidebarShell`** — 72 px fixed-width left rail with brand mark + 5 nav buttons. Search wired (opens stub modal); Compare / Watchlist / Recent / Export disabled in 4.0 (activate in 4.6/4.7).
-- [x] **`RequireAuth`** — route guard; redirects to /login when no token; preserves original URL via location state.
-- [x] **`AppShell`** — sidebar + main outlet; persistent across authenticated routes.
-- [x] **`LandingPage`** — `/` route. Centered search bar + Recent reports list (`PastReportsList` integration). Submit navigates to `/symbol/:ticker` (uppercased).
-- [x] **`SymbolDetailPage`** — `/symbol/:ticker` route. Reads URL param, fetches via existing TanStack Query path, renders hero placeholder + restyled `ReportRenderer`. Centralized 401 → clear token + bounce to /login.
-- [x] **`react-router-dom@^6`** added (~7 KB gz net after the rest of the changes).
-- [x] **Existing components restyled for dark theme** — `ReportRenderer`, `Sparkline`, `ConfidenceBadge`, `LoadingState`, `ErrorBanner`, `PastReportsList`, `LoginScreen` all switched to Strata tokens.
-- [x] **Deleted** — `Dashboard.tsx`, `ReportForm.tsx` (replaced by AppShell + LandingPage + SymbolDetailPage split).
-- [x] **111/111 frontend tests pass** (was 94; +17). Bundle 83.84 KB gz (was 76.92; +7 KB) — under 100 KB budget.
-- [ ] **`SearchModal` (deferred to 4.7)** — Search button currently focuses the landing-page input; modal lands when watchlist + recent functionality also do.
-- [ ] **Backend additions deferred to 4.1** — `/v1/market/:ticker/prices?range=60D` and logo URL resolution land alongside hero card implementation.
-
-### 4.1 Hero card + Earnings card ✅ done *(this PR)*
-
-- [x] **`HeroCard`** — three-column glow-shadowed card. Logo letter circle + ticker eyebrow + sector tag + name + big tabular price + colored delta + MCAP/VOL/52W meta (left); 60-day price chart with 6 range pills (center); 3 featured stats with peer/historical sub-context (right).
-- [x] **`EarningsCard`** — replaces ReportRenderer's Earnings claims table. "X of N beat consensus" headline + Next print date + EpsBars chart + 3 stat tiles (Beat rate / Surprise μ / EPS TTM, the last computed client-side from history).
-- [x] **`LineChart` primitive** — hand-rolled SVG, default 560×140, configurable stroke + optional area fill. Used by HeroCard's price chart.
-- [x] **`EpsBars` primitive** — 20-bar SVG chart. Beat/miss coloring (strata-pos / strata-neg); estimate ticks render as horizontal lines for periods with matching estimates; negative actuals (RIVN-class) render with a zero baseline.
-- [x] **`hero-extract.ts`** — pure helper pulls hero data via description matching; reads top-level `name`/`sector` from ResearchReport.
-- [x] **Backend: `GET /v1/market/:ticker/prices?range={60D|1Y|5Y}`** — read-through `candles` cache; falls through to `ingest_market_data` (yfinance) on cache miss with 80% coverage threshold.
-- [x] **Backend: 4 new fundamentals claims** — `name`, `sector_tag`, `fifty_two_week_high`, `fifty_two_week_low`. Plus orchestrator lifts `name`/`sector` to top-level `ResearchReport.name`/`.sector` (Pydantic + Zod schema mirrored).
-- [x] **Visible after 4.1:** `/symbol/AAPL` renders a real hero region with price chart + 3 KPIs + 20-quarter earnings history. Backend 522/522, frontend 146/146 tests pass; main bundle 86.82 KB gz.
-
-### 4.2 Quality scorecard + Valuation matrix + PeerScatter v2 ✅ done *(this PR)*
-
-> **Scope:** all-frontend. No backend changes. Replaces ReportRenderer's
-> Valuation / Quality / Peers cards with dedicated Strata variants;
-> introduces two hand-rolled SVG primitives so the 4.2 work doesn't lean
-> on Recharts. The Recharts shared chunk stays for now (SectionChart still
-> uses it for Capital Allocation / Macro until 4.3); PeerScatter's recharts
-> dep is gone — the file is deleted.
-
-- [x] **`MetricRing` primitive** — circular SVG ring with center value, label below, optional sub-label. Configurable accent + ratio (0–1, clamped). Hand-rolled. `data-testid='metric-ring'`. 8 tests.
-- [x] **`MultiLine` primitive** — 2-4 series on a shared axis with x-labels + 3 horizontal grid lines + per-series legend chip row. Hand-rolled SVG. Used by QualityCard's gross/operating/FCF margin chart. `data-testid='multi-line'`. 8 tests.
-- [x] **`QualityCard`** — replaces ReportRenderer's Quality section card. Header (kicker + ticker eyebrow) → 3 MetricRings (ROE, ROIC TTM, FCF margin) → MultiLine (Gross / Operating / FCF margins) → hybrid claims table: default 6 (ROE / Gross margin / Operating margin / FCF margin / ROIC / Net profit margin) with "Show all 16" disclosure. Disclosure auto-hides when there are ≤6 claims to avoid the "show all 5" awkward case. 8 tests.
-- [x] **`ValuationCard`** — replaces ReportRenderer's Valuation + Peers section cards. Header → 4-cell grid (P/E trailing, P/E forward, P/S, EV/EBITDA), each cell shows subject value + peer median + horizontal percentile bar (peer min → max with subject dot + median tick) → PeerScatterV2 below. 7 tests.
-- [x] **`PeerScatterV2`** — hand-rolled SVG (replaces 3.3.C Recharts version). 3 axis presets via inline pill row: **P/E × Gross Margin** (default), **P/S × Gross Margin**, **EV/EBITDA × Gross Margin**. All three pairs drawn from the 4 existing `PEER_METRICS` so 4.2 needs no backend change. Subject as larger labeled colored dot; peers as smaller dots with inline ticker labels; median as a small cross. X + Y axis labels + min/max ticks visible. 9 tests.
-- [x] **`quality-extract.ts`** — `extractQualityRings(section)` returns `{roe, roic, fcfMargin}`; `extractMarginSeries(section)` returns 3 history series for MultiLine; `extractPrimaryQualityClaims(section)` + `extractAllQualityClaims(section)` for the 6+expand split. 11 tests.
-- [x] **`valuation-extract.ts`** — for each of the 4 metrics: `{subject, peerMedian, peerMin, peerMax, percentile}`. Reads Valuation section for subject and Peers section for peer/median values. Percentile = `count(peer ≤ subject) / peer_count`; null when subject missing or peer set < 2. 8 tests.
-- [x] **`peer-grouping.ts` extension** — generic `groupPeersForAxes(claims, xMetric, yMetric)` and `extractMedianForAxes(claims, xMetric, yMetric)` so PeerScatterV2 can pivot axes; legacy `groupPeers` / `extractMedian` re-implement on top of the generic helpers. 9 new tests.
-- [x] **SymbolDetailPage** — plucks Quality section; renders `<ValuationCard report={…}/>` and `<QualityCard section={…}/>` above ReportRenderer; ReportRenderer's `excludeSections` widens to `["Earnings","Valuation","Quality","Peers"]`.
-- [x] **Deleted** `components/PeerScatter.tsx` + `.test.tsx` (3.3.C Recharts version replaced by v2). ReportRenderer's lazy `PeerScatter` import + isPeers handling removed; SectionChart still lazy-loaded for Capital Allocation / Macro.
-- [x] **Net result:** 204/204 frontend tests pass (was 146 + 7 PeerScatter; +65 net new across 5 components + 2 extractors + 1 lib extension). Backend untouched at 522/522. Main bundle 90.20 KB gz (was 86.82; +3.4 KB; under 100 KB budget). SectionChart chunk now solo at 103 KB gz (used to share with PeerScatter; loads only on-demand for sections with featuredClaim). Typecheck + lint clean.
-
-**Design decision: axis-preset list.** The original sketch was *P/E × Gross Margin / P/S × Operating Margin / EV/EBITDA × ROIC*. Backend `fetch_peers` only carries 4 metrics (`trailing_pe`, `p_s`, `ev_ebitda`, `gross_margin`); adding operating_margin + ROIC to peers requires per-peer TTM compute (the ROIC formula already exists for the subject in `fundamentals_history.py`). Deferring that backend extension keeps 4.2 frontend-only / one PR. The presets above are all peer-coverage-complete. Richer axis options come back in 4.5/4.8 if dogfooding asks for them.
-
-### 4.3.A Per-share growth + Cash & capital + Risk diff + Macro ✅ done *(this PR)*
-
-> **Scope:** all-frontend. No backend changes. Fills the row-3 (Per-share
-> growth) and row-4 (Cash & capital + Risk diff + Macro) cards from the
-> Strata design's `direction-strata.jsx`. Capital Allocation remains in
-> ReportRenderer for now (its 6 non-history claims — dividend_yield,
-> buyback_yield, sbc_pct_revenue, short_ratio, shares_short, market_cap
-> — don't fit the 4 new cards cleanly; revisit in 4.4 if the context
-> band absorbs them).
-
-- [x] **`PerShareGrowthCard`** — 5 per-share history series (Revenue, Gross Profit, Op Income, FCF, OCF), each **rebased so the series' first point = 100**, plotted via existing `MultiLine` primitive. Below the chart: 5 multiplier pills ("Rev 6.2×", "GP 7.2×", etc.). Reads from Quality section. 7 tests.
-- [x] **`CashAndCapitalCard`** — cross-section card. Top stack: `MultiLine` of CapEx + SBC per-share (from Capital Allocation). Bottom stack: `MultiLine` of Cash + Debt per-share (from Quality). Highlight box: Net cash / share = (cash − debt) at latest snapshot, colored pos/neg. 7 tests.
-- [x] **`RiskDiffCard`** — inline horizontal bar chart of `{added, removed, kept, char_delta}` from the Risk Factors section's existing 4 claims. Prose summary below ("Disclosure expanded. Net +9 ¶ ..." / "Disclosure shrank ..." / "Disclosure stable ..."). When 4.3.B lands the Haiku categorizer, the bars become per-category — the card already gates on extractor returning null so pre-4.3.B reports keep rendering. 6 tests.
-- [x] **`MacroPanel`** — vertical stack of mini area-chart panels (one per FRED series). Each panel: kicker label + current value badge + 36-month sparkline area chart via existing `LineChart` primitive (`areaFill={true}`). Reads from Macro section. 5 tests.
-- [x] **`growth-extract.ts`** — `extractGrowthSeries(section)` returns 5 `MultiLineSeries` (rebased to first-point = 100); `extractGrowthMultipliers(section)` returns 5 `latest / first` ratios. Drops series whose history is empty or whose first value is zero. 8 tests.
-- [x] **`cash-capital-extract.ts`** — `extractCapexSbcSeries(capAlloc)` + `extractCashDebtSeries(quality)` + `extractNetCashPerShare(quality)`. Net cash supports negative (debt-heavy) values. 10 tests.
-- [x] **`risk-extract.ts`** — `extractRiskDiffBars(section)` returns `{added, removed, kept, charDelta} | null`; `extractRiskDiffSummary(section)` returns the prose framing (`"expanded"` / `"shrank"` / `"stable"`) + signed `netDelta`. 9 tests.
-- [x] **`macro-extract.ts`** — `extractMacroPanels(section)` returns `{id, label, latest, history, observationDate}[]`. Reads `<label> (latest observation)` (value-bearing, history-bearing), `<label> observation date`, and the metadata claim `Human-readable label for FRED series <id>` for the optional id. Skips series with non-numeric latest or empty history. 6 tests.
-- [x] **SymbolDetailPage** — plucks Quality, Capital Allocation, Risk Factors, Macro sections; renders `<PerShareGrowthCard>` after QualityCard, then a 3-column grid `<CashAndCapitalCard> | <RiskDiffCard> | <MacroPanel>` matching the design's row-4 layout. Widens `excludeSections` to `["Earnings","Valuation","Quality","Peers","Risk Factors","Macro"]` — Capital Allocation stays through ReportRenderer.
-- [x] **Net result:** 262/262 frontend tests pass (was 204; +58 net new across 4 cards + 4 extractors). Backend untouched at 522/522. Main bundle 92.93 KB gz (was 90.20; +2.7 KB; under 100 KB budget). SectionChart chunk unchanged at 103 KB gz (still loads on-demand for Capital Allocation's featured-claim chart). Typecheck + lint clean.
-
-### 4.3.X Data correctness + format-helper unit hint *(this PR)*
-
-> **Why this PR exists:** dogfooding the post-PR-#50 dashboard surfaced
-> six substantive bugs in five minutes — see [tasks/dogfood-2026-05-03.md](dogfood-2026-05-03.md).
-> The cards look great but the *numbers are wrong* in places that matter
-> (ROE displayed as `1.41` instead of `141%`, dividend yield as `39.09%`
-> instead of `0.39%`, per-share dollars as `16.02%` instead of `$0.16`).
-> Plus a critical FK violation in the prices route that breaks the
-> HeroCard chart for every ticker that isn't NVDA or SPY.
->
-> **Why before 4.4 / 4.5:** both downstream phases compound on the data
-> + format layer. 4.5's adaptive-layout signals derive from the same
-> `Claim.value`s being misformatted today. 4.4's per-card narratives
-> need a clean per-card narrative-strip surface (item 3 below blocks).
-> Cheaper to fix the foundation now than to layer features on a moving
-> foundation.
-
-- [x] **Schema unit hint** — `Claim.unit: ClaimUnit | None = None` shipped (Pydantic + Zod). 33 keys in `app/services/fundamentals.py` annotated via parallel `_UNITS` dict + import-time `assert _UNITS == CLAIM_KEYS` so a forgotten annotation fails loudly. Frontend `formatClaimValue(value, unit?)` dispatches deterministically; falls through to legacy heuristic when unit is undefined/null. Wired into QualityCard rings + claim table, ReportRenderer claim table, HeroCard ROIC/FCF, CashAndCapitalCard net cash. Fixes Bugs 2/3/4. *(Other tools — `peers`, `earnings`, `macro`, `research_tool_registry`, `form_4`, `holdings_13f` — keep their unit field default to `None` for now; the legacy heuristic handles their values correctly because the bugs were concentrated in `fetch_fundamentals`. Cleanup follow-up if/when those tools start rendering values that hit the same edge cases.)*
-
-- [x] **Symbols upsert in price ingest path** — `data_ingestion.py::ingest_market_data` does `pg_insert(Symbol).on_conflict_do_nothing` before the candle insert. Test in `tests/test_market_prices.py::test_prices_succeeds_for_symbol_not_pre_seeded` asserts 200 + `Symbol` row created. Fixes Bug 1.
-
-- [x] **Drop section narrative from `PerShareGrowthCard`** — `section.summary` block removed; comment notes per-card narratives return in 4.4. Test flipped to assert the prose is NOT in the card. Fixes Bug 5.
-
-- [x] **HeroCard top-level metadata backfill** — `backfill_top_level_metadata(report)` helper added to `research_orchestrator.py`; called from `research.py` router after `lookup_recent` returns a hit. Lifts `Company name` / `Resolved sector tag` claim values to top-level when `report.name`/`.sector` are None. 3 unit tests pin happy path + preserve-existing-values + missing-claims-no-error. Fixes Bug 6 (a). VOL + 52W (b) come back automatically once fresh reports regenerate.
-
-- [x] **Loading-state copy + ghost skeleton** — copy widened to "30–90 seconds"; ghost skeleton renders the dashboard's 4 row layout (Hero + 2-col 40/60 + 3-col grid) under `animate-pulse`. Fixes Bug 7.
-
-- [x] **Cosmetic backlog from PR #50 audit** — all four shipped:
-  - HeroCard exchange chip combining ticker + sector token (`data-testid='hero-exchange-chip'`).
-  - ValuationCard "n = X peers · sector medians" annotation (`data-testid='valuation-peer-count'`); `countPeers` helper extracts distinct tickers from `<TICKER>: <metric>` claim descriptions.
-  - QualityCard "MARGINS · 5Y" sub-kicker with inline GM/OM/FCF values via the same `formatClaimValue` (`data-testid='quality-margins-subkicker'`).
-  - `MultiLine` paths switch to Catmull-Rom-to-Bezier monotone cubic curves (tension 1/6); endpoints mirror the nearest neighbor so curves start/end tangent without overshoot.
-
-- [ ] **Defer:** Bug 8 (mid-flight nav silently cancels POST) — small standalone ticket; fix is risky enough to keep out of a polish PR.
-
-- [x] **Capture lessons** — entry added to `tasks/lessons.md` covering (a) the heuristic-formatter trap, (b) the test-fixture dogfood gap, and (c) the symbols-FK seeding gotcha for /v1/market/:ticker/prices.
-
-- [x] **Update test counts** — backend 522 → **531** (+9), frontend 262 → **277** (+15). Updated in `CLAUDE.md`, `docs/architecture.md`, this file. Main bundle 92.98 → **93.95 KB gz** (+0.97; under 100 KB budget, ~6 KB headroom retained).
-
-### 4.3.X review *(filled in after the GREEN + docs commits land)*
-
-- **What changed in shape:** `Claim.unit` is the only new schema field; everything else lives behind it (frontend dispatch + tool annotations) or is pure presentation (cosmetic backlog) / single-line correctness (symbols upsert) / single helper (backfill_top_level_metadata).
-- **What didn't change:** the surface of `POST /v1/research/{symbol}` is unchanged for callers that don't read `unit` — backwards-compat default `None` keeps pre-4.3.X cached JSONB rows round-tripping.
-- **Net deltas:** backend +9 tests, frontend +15 tests, main bundle +0.97 KB gz. No new dependencies, no new chunks.
-- **Followups noted but deferred:** unit annotations for the other 5 tools (peers / earnings / macro / research_tool_registry / form_4 / holdings_13f) — wait until a specific bug surfaces; cancel-on-nav (Bug 8) — small standalone ticket; per-card narratives — return in 4.4.
-
-### 4.3.B Risk Haiku categorizer *(this PR)*
-
-> **Why:** RiskDiffCard currently shows 4 aggregate bars (added /
-> removed / kept / char-delta) — useful but missing the "what kind of
-> risk grew?" signal. The Strata design's screenshot 1 shows 8
-> per-category bars (AI / supply / cyber / competition / IP / macro /
-> regulatory / other). The aggregates miss the texture: NVDA might
-> add 5 paragraphs about export controls and remove 2 about FX while
-> a competitor adds 4 about competition and 3 about cybersecurity —
-> both look like "+3 ¶" in the aggregate.
->
-> Cost discipline: Haiku-only (~$0.001-0.005/report on typical 10–15
-> paragraph diffs). Skipped entirely when added+removed = 0 so a
-> stable disclosure costs nothing. Backwards-compat: pre-4.3.B
-> cached rows lack the per-category fields, the card falls back to
-> the aggregate bars.
-
-#### Backend
-
-- [x] **`RiskCategory` enum** in `app/schemas/ten_k.py` — 9 categories shipped: `AI_REGULATORY`, `EXPORT_CONTROLS`, `SUPPLY_CONCENTRATION`, `CUSTOMER_CONCENTRATION`, `COMPETITION`, `CYBERSECURITY`, `IP`, `MACRO`, `OTHER`. String-valued so JSONB serializes as plain strings.
-
-- [x] **Extend `Risk10KDiff`** with `category_deltas: dict[RiskCategory, int] = Field(default_factory=dict)` — net delta per category. Default empty so pre-4.3.B JSONB rows round-trip unchanged.
-
-- [x] **`app/services/risk_categorizer.py`** — `categorize_risk_paragraphs(added, removed)` short-circuits on empty inputs, otherwise issues one `triage_call` (Haiku 4.5) with the forced `RiskCategorization` tool schema. Drops zero-net buckets and defends against out-of-range indices in the model's response.
-
-- [x] **Wire categorizer into `extract_10k_risks_diff`** — `try/except` around the call so categorizer failures (rate limit / network) degrade to `category_deltas={}` rather than failing the whole diff. Adds `category_buckets` count to the existing `log_external_call` output summary.
-
-- [x] **`_build_risk_factors` in `research_tool_registry.py`** — emits one extra `Claim` per non-zero category with description `"<Label> risk paragraph delta vs prior 10-K"`. `_RISK_CATEGORY_LABELS` map centralizes the labels — frontend's `risk-extract.ts` mirrors them verbatim, kept in sync via `risk-extract.test.ts` description-match assertions.
-
-- [x] **Frontend `risk-extract.ts`** — `extractRiskCategoryDeltas(section)` returns null when no per-category claims are present, otherwise a sorted `RiskCategoryDelta[]` (largest |delta| first). New `RiskCategory` type union + `RISK_CATEGORY_LABELS` map mirroring backend.
-
-- [x] **`RiskDiffCard.tsx`** — when `extractRiskCategoryDeltas` returns non-null, renders the new `CategoryBars` SVG (positive deltas in risk accent, negative in quality accent, scaled to absolute max). Otherwise falls back to the existing 4-bar aggregate.
-
-- [x] **Tests** — backend 531 → 544 (+13: 4 schema + 5 categorizer + 2 ten_k integration + 2 registry); frontend 277 → 285 (+8: 5 extractor + 3 card).
-
-- [x] **Cost / observability** — categorizer skips Haiku entirely on `len(added)+len(removed)==0`. `log_external_call` records `category_buckets` count so cost-per-report is chartable from the A09 stream. Real-LLM cost validation deferred to dogfooding (target: ≤$0.005/report, $0 stable).
-
-- [x] **Bundle** — main 93.95 → 94.40 KB gz (+0.45). Under 100 KB budget; ~5.6 KB headroom retained for 4.4. SectionChart on-demand chunk unchanged at 103.01 KB gz.
-
-- [x] **Update test counts** — backend 531 → **544**, frontend 277 → **285**. Updated in `CLAUDE.md`, `docs/architecture.md`, this file.
-
-### 4.3.B review *(filled in after the GREEN + docs commits land)*
-
-- **What changed in shape:** one new enum (`RiskCategory`) and one new dict field on `Risk10KDiff`; one new service module; one new wire-through; one new frontend extractor + bar chart. No new top-level routes, no schema breaks, no new dependencies.
-- **What didn't change:** the 4 aggregate `Claim`s still ship for every diff so the existing card render path + extractor work on pre-4.3.B JSONB rows + on stable disclosures (the categorizer skips the Haiku call and `category_deltas` lands as `{}`).
-- **Net deltas:** backend +13 tests / +1 service module; frontend +8 tests / +1 helper / 1 component upgrade; main bundle +0.45 KB gz. No ADR needed.
-- **Followups noted:**
-  - Real-LLM cost telemetry from a few dogfooded reports → confirm/refute the $0.005-target estimate.
-  - The 9-bucket catalog will need to grow if `OTHER` dominates real diffs. Add a guardrail in 4.4 dogfooding to flag issuers where `OTHER >= 50%` of their bucketed paragraphs.
-
-### 4.3.B.1 Layout polish + range pills + responsive SVGs *(this PR)*
-
-> **Why:** dogfooding PR #51 surfaced four UX rough edges that don't
-> warrant a phase rename but visibly hurt the dashboard's trust:
-> price-chart pills 1D / 5D / 1M all rendered the same 60-bar chart
-> (no client-side slicing); EarningsCard + PerShareGrowthCard had
-> hundreds of pixels of empty canvas below their content (no row
-> partner of similar height); chart elements escaped card borders on
-> narrow viewports because every primitive hardcoded its width.
-
-- [x] **Price chart pills** — `frontend/src/lib/price-range.ts::sliceForRange` slices the 60D feed to last 2 / 5 / 22 points for 1D / 5D / 1M; passes through unchanged for 3M / 1Y / 5Y. HeroCard wires it in front of LineChart's data prop and the subtitle reflects the actual span shown ("22 trading days" not "60 trading days").
-
-- [x] **EarningsCard `RecentPrints`** — last-4-quarters mini-table below the 3 stat tiles. Period · actual · estimate · surprise %, surprise color-coded pos/neg. Hidden when section has no EPS history. Adds substantive content (not just height-padding) — recent prints is canonical for an earnings card.
-
-- [x] **PerShareGrowthCard CAGR annotations** — each multiplier pill grows a sub-line "+58.3% / Q" computed via `extractGrowthCagr` (multiplier^(1/n_periods) − 1, defends against sign-change endpoints + zero/negative ratios). Em-dash on null. ~30px per pill row, closes most of the blank-canvas gap to ValuationCard.
-
-- [x] **Responsive SVG widths** — LineChart, EpsBars, MultiLine, RiskDiffCard's aggregate bars switched from hardcoded `width` props to `width="100%"` with viewBox preserving internal coords. Chart elements stay inside the card border at any viewport. Height stays numeric so visual height is stable. Same pattern Sparkline already used.
-
-- [x] **LineChart path discriminators** — `data-line-stroke` / `data-line-area` on the two paths so tests can count segments on the line specifically (the area path adds 3 extra commands when `areaFill={true}`).
-
-- [x] **Tests** — frontend 277 → **295** (+18: 7 price-range/Hero, 3 RecentPrints, 3 CAGR, 4 SVG-width updates, 1 EarningsCard label-collision fix). Backend untouched at 531/531.
-
-- [x] **Bundle** — main 93.95 → **94.46 KB gz** (+0.51). Under 100 KB budget; ~5.5 KB headroom retained for 4.4. SectionChart on-demand chunk unchanged at 103.01 KB.
-
-### 4.3.B.2 Price chart axes + hover tooltip *(this PR)*
-
-> **Why:** dogfooding PR #51 + #53 surfaced that the hero price chart
-> read as decorative — the line shape was visible but you couldn't
-> read prices, dates, or hover over it for exact values. The 4.1
-> docstring (``no axes, no tooltip, no grid — the hero card composes
-> those separately around the chart``) was a deferral that the hero
-> never came back to.
-
-- [x] **`LineChart` axis labels** — new opt-in `showAxes` prop renders y-axis min/max price labels formatted as `$X.XX` on the left edge and x-axis first/last date labels (UTC-formatted to avoid TZ drift, since yfinance timestamps bars at UTC midnight). Off by default so any non-Hero caller stays lean. New testids `line-chart-y-axis-{min,max}` + `line-chart-x-axis-{start,end}` for regression assertions.
-
-- [x] **`LineChart` hover tooltip** — new opt-in `showTooltip` prop wires `onMouseMove` and `onMouseLeave` on the SVG. Cursor x maps to viewBox space via the SVG's bounding rect (with a happy-dom fallback for tests); nearest data point selected by linear scan. Three new SVG artifacts under stable testids: `line-chart-hover-{guide,dot,tooltip}` — guide is a vertical dashed line; dot is a filled circle on the line at the nearest point; tooltip is a small floating panel with date + price. Tooltip flips left when too close to the right edge so it stays in-frame.
-
-- [x] **HeroCard wiring** — sets `showAxes={true} showTooltip={true}` on its LineChart. Other consumers (none today) keep the lean default.
-
-- [x] **Bonus: rescue per-category bars regression** — the PR #52 ↔ PR #53 merge silently dropped the conditional render of `CategoryBars` in `RiskDiffCard.tsx`; the `CategoryBars` function survived in the file but was never called from JSX. Two of PR #52's tests were failing on main because of it. Restored the `{categoryDeltas ? <CategoryBars/> : <svg .../>}` ternary. Also made `CategoryBars`' SVG responsive width (matching what PR #53 did for the aggregate bars).
-
-- [x] **Tests** — frontend 295 → **314** (+19: 13 LineChart axes/hover, 3 HeroCard wire-through, 2 rescued RiskDiffCard tests, 1 prior-test fix). Backend untouched at 544/544.
-
-- [x] **Bundle** — main 94.46 → **95.71 KB gz** (+1.25). ~4.3 KB headroom retained under the 100 KB budget. SectionChart on-demand chunk unchanged at 103.01 KB.
-
-### 4.4 News + Business + section narratives
-
-> **Split:** ship as two PRs to keep each reviewable.
-> - **4.4.A — ContextBand (Business + News)** *(this PR)*. The "above the grid" content the user expects from a research dashboard.
-> - **4.4.B — Per-card section narratives** *(follow-up)*. Cross-cutting concern (touches every card + the synth call schema).
-
-#### 4.4.A ContextBand: Business + News *(this PR)*
-
-> **Why:** the dashboard at `/symbol/:ticker` opens straight into Hero → numeric grid. There's no "what does this company *do*" card and no "what's the latest news" feed. Both are canonical for a research dashboard and Strata's screenshot 5 calls them out as the ContextBand layer between Hero and the row-2 grid.
-
-**Backend:**
-
-- [ ] **`app/services/business_info.py`** — new tool `async def fetch_business_info(symbol)` returning `dict[str, Claim]`. Pulls from yfinance `Ticker.info`: `longBusinessSummary` (~3-5 sentences), city/state/country (joined as HQ string), `fullTimeEmployees`. Founded year skipped — yfinance doesn't carry it cleanly. One `log_external_call` record under service id `yfinance.business_info`.
-- [ ] **`app/services/news.py`** — new `async def fetch_news(symbol) -> dict[str, Claim]`. Opens its own AsyncSession, calls `news_repository.list_news(symbol, hours=168, limit=30)`, calls `news_categorizer.categorize_news_headlines` to classify each headline, returns one Claim per article with description=title, value=sentiment, source.url=article_url, source.detail=`"category=<bucket>"`. Returns `{}` cleanly when no articles exist (no upstream-provider call yet — ingestion stays driven by `POST /v1/news/ingest`; revisit if dogfooding shows stale data).
-- [ ] **`app/services/news_categorizer.py`** — mirrors `risk_categorizer.py`. Single Haiku call with a forced-tool `NewsCategorization` schema (`list[HeadlineClassification(index, category, sentiment)]`). Two enums: `NewsCategory` (EARNINGS / PRODUCT / REGULATORY / M_AND_A / SUPPLY / STRATEGY / OTHER, 7 buckets) + `NewsSentiment` (POSITIVE / NEUTRAL / NEGATIVE). Short-circuits on empty input. Defensive on out-of-range indices. Cost target ≤$0.005/report on a typical 20-30 headline batch.
-- [ ] **`research_tool_registry.py`** — add `Business` and `News` sections to `SECTIONS_BY_FOCUS[Focus.FULL]` (placed first so the orchestrator processes them before the numeric sections). New `_build_business` + `_build_news` builders that pass through the tool's `dict[str, Claim]` directly. EARNINGS focus: News only (Business is full-research-only).
-- [ ] **`research_orchestrator.py`** — wire `fetch_business_info` + `fetch_news` into `TOOL_DISPATCH`. Cache miss → fan-out runs them alongside fundamentals/peers/etc. via `asyncio.gather(return_exceptions=True)`.
-
-**Frontend:**
-
-- [ ] **`lib/business-extract.ts`** — `extractBusinessInfo(section)` returns `{summary: string|null, hq: string|null, employeeCount: number|null}` from a Business section's claims.
-- [ ] **`lib/news-extract.ts`** — `extractNewsItems(section)` returns `NewsItem[]` parsed from each Claim (description = title; value = sentiment; source.url = article url; source.detail's `category=<bucket>` substring → category enum). Drops malformed items.
-- [ ] **`components/BusinessCard.tsx`** — single card. Header eyebrow "BUSINESS · {ticker}" + 1-paragraph summary (truncate to ~3 lines with overflow `...`) + small metadata row (HQ · {N} employees). Renders nothing when summary is empty.
-- [ ] **`components/NewsList.tsx`** — header eyebrow "NEWS · LAST 7 DAYS · {N} items" + filter pill row (ALL / EARNINGS / PRODUCT / REGULATORY / M&A / SUPPLY / STRATEGY / OTHER) + 5 latest items by default with title/source/date + category chip + sentiment dot. "View {N} more" disclosure expands. State: filter selection + expand toggle.
-- [ ] **`components/ContextBand.tsx`** — thin 2-col grid wrapper (40/60 same rhythm as rows 2 + 3) holding `<BusinessCard>` (left) + `<NewsList>` (right). Stacks 1-col below `lg:`. Returns null when both children empty.
-- [ ] **`components/SymbolDetailPage.tsx`** — pluck `Business` + `News` sections, render `<ContextBand>` between `<HeroCard>` and the row-2 grid.
-
-**Tests:**
-
-- [ ] Backend ~14 new: 5 categorizer (mirrors risk_categorizer's pattern), 3 business_info, 3 news fetch, 2 registry section-builders, 1 orchestrator wire-through.
-- [ ] Frontend ~10 new: 2 business-extract, 3 news-extract, 2 BusinessCard, 2 NewsList, 1 ContextBand.
-
-**Bundle math:** main currently 95.71 KB / 100 KB gz → 4.3 KB headroom. NewsList (~3 KB) + BusinessCard (~1 KB) + ContextBand (~0.5 KB) ≈ 4.5 KB total. **Tight — may need to lazy-load NewsList** if final size pushes over budget. Decide after the implementation lands.
-
-#### 4.4.B Per-card section narratives *(this PR)*
-
-> **Why:** the dashboard's dedicated cards (Quality, Earnings,
-> PerShareGrowth, RiskDiff, Macro) shipped without inline prose on the
-> card itself — only the section's broad ``summary`` was rendered, and
-> only in the QualityCard's header. The Strata Rivian screenshot
-> (`docs/screenshots/image-1777831007647.png`) calls out a punchy
-> 1-2 sentence headline strip at the *bottom* of every card body
-> ("Loss is narrowing. EPS −3.82 → −0.78 over 20Q") that's distinct
-> from the longer summary in tone and length. PerShareGrowthCard's
-> narrative slot (removed in 4.3.X because it duplicated Quality's
-> ``summary``) returns cleanly via this card-specific field.
-
-- [x] **Schema: `Section.card_narrative: str | None = None`** in `app/schemas/research.py`. Default ``None`` for back-compat with pre-4.4.B JSONB rows; same 4000-char cap as ``summary``. Mirrored in Zod (`SectionSchema.card_narrative: z.string().nullable().optional()` — optional so existing test fixtures don't churn; the rendering layer handles undefined / null / empty uniformly).
-- [x] **Synth tool schema: `SectionSummary.card_narrative: str = ""`** — defaults to empty string; the orchestrator normalizes empty / whitespace to ``None`` when stitching onto `Section.card_narrative` so the frontend's truthy-check uniformly hides the strip.
-- [x] **Orchestrator wiring** — new `_resolve_card_narrative(title, summaries)` matches the synth output by title (last-wins on duplicates) and collapses empty / whitespace to `None`. Stitched into the `Section(...)` build alongside `summary` and `confidence`.
-- [x] **System prompt extended** — added a 7th rule (`Don't duplicate. summary and card_narrative are different surfaces`), 5 style examples covering each card type, and split rule 5 into two length disciplines (`summary 2-4`, `card_narrative 1-2`). Explicitly instructs the model to write distinct prose for each surface.
-- [x] **Eval rubric: `score_factuality` polices `card_narrative` too** — iterates `summary` + `card_narrative` per section so the LLM can't dodge the rubric by writing the hallucination into the card-strip. Pre-4.4.B reports (no `card_narrative`) score the same as before.
-- [x] **`NarrativeStrip` primitive** — single component, ~25 lines. Rounded inset card-within-card at the bottom of each card body; `data-testid='card-narrative'`. Returns `null` for null / undefined / empty / whitespace so older cached rows render cleanly.
-- [x] **Wired into 5 cards** — QualityCard, EarningsCard, PerShareGrowthCard, RiskDiffCard, MacroPanel each render `<NarrativeStrip text={section.card_narrative} />` at the bottom of their body. PerShareGrowthCard's 4.3.X removal comment replaced with the new slot.
-- [x] **SymbolDetailPage** — passes PerShareGrowthCard a Quality section with `card_narrative` cleared so the LLM's single Quality narrative doesn't render twice on the page (QualityCard is the canonical home; 4.5+ will give PerShareGrowth its own section so the prose can differentiate).
-- [x] **Cards skipped intentionally** — BusinessCard (its body IS prose), NewsList (filter pills + headlines are the message), ValuationCard / CashAndCapitalCard (cross-section / cross-report sources, ambiguous which section's narrative drives the card). Add later if dogfooding asks for them.
-- [x] **Tests** — backend 565 → **577** (+12: 5 schema + 4 orchestrator + 3 rubric); frontend 336 → **353** (+17: 3 schema + 4 NarrativeStrip + 10 per-card pairs).
-- [x] **Bundle** — main 97.06 → **97.17 KB gz** (+0.11). ~2.83 KB headroom retained under the 100 KB budget.
-- [x] **Verified back-compat** — preview against the cached pre-4.4.B NVDA report confirms all 5 cards render without the strip when `card_narrative` is absent. No console errors.
-- [x] **Update test counts** — backend 565 → **577**, frontend 336 → **353**. Updated in `CLAUDE.md`, `docs/architecture.md`, this file.
-
-### 4.4.B review *(filled in after the GREEN + docs commits land)*
-
-- **What changed in shape:** one new optional field on `Section` (`card_narrative`) + one new optional field on the synth's `SectionSummary` tool schema. One new frontend primitive (`NarrativeStrip`). One additional iteration in `score_factuality`. No new top-level routes, no new dependencies, no schema breaks.
-- **What didn't change:** ``Section.summary`` still ships verbatim — the rubric still polices it, ReportRenderer still falls back to it, every existing card that surfaces `summary` keeps doing so. Pre-4.4.B JSONB rows round-trip with `card_narrative=None` and the strip is hidden.
-- **Net deltas:** backend +12 tests / +1 schema field / +1 synth field / +1 resolver helper; frontend +17 tests / +1 primitive / +1 schema field / 5 cards extended; main bundle +0.11 KB gz.
-- **Followups noted:**
-  - Real-LLM dogfood will reveal whether the prompt's "don't duplicate" rule actually keeps the model from writing the same prose into both surfaces. If it doesn't, tighten the prompt with negative examples; if it still doesn't, downsize ``summary`` to a deterministic claim-recap and let ``card_narrative`` carry all the prose weight.
-  - PerShareGrowthCard's narrative is suppressed at the wiring layer because both it and QualityCard read from Quality. When 4.5+ adds a dedicated growth section (or a derived "Trajectory" claim group), PerShareGrowth gets its own narrative independently.
-  - ValuationCard / CashAndCapitalCard could grow strips later — both read from a single primary section (Valuation / Capital Allocation) but share peer / Quality data with neighbors. Hold until a specific dogfood signal asks for them.
-
-### 4.5 Adaptive layout for distressed names *(the differentiator)*
-
-> **Split:** ship as two PRs to keep each reviewable.
-> - **4.5.A — Backend layout_signals + Header pills + Hero metric swap** *(this PR)*. The "this dashboard reframes for distress" headline visual.
-> - **4.5.B — Card adaptations + section reordering + LLM signal feed** *(follow-up)*. The in-card distressed-mode polish + the structural reordering + the LLM prose adaptation.
-
-#### 4.5.A Backend signals + header pills + hero swap *(this PR)*
-
-> **Why this slice:** the most visible "distress" indicator from the
-> Strata Rivian screenshot (`docs/screenshots/image-1777831007647.png`)
-> is the *header chrome* — UNPROFITABLE / LIQUIDITY WATCH pills + the
-> hero's right-column trio swapping from healthy-name metrics
-> (Forward P/E + ROIC + FCF margin) to distressed-name metrics
-> (P/Sales + Cash Runway + red FCF margin). Both consume
-> ``layout_signals`` read-only — no per-card content changes yet, so
-> 4.5.A ships the foundation (signals derivation + payload field) +
-> the two read-only consumers in one tight PR.
-
-- [x] **`LayoutSignals` schema** — new Pydantic model in `app/schemas/research.py` with five flags (`is_unprofitable_ttm`, `beat_rate_below_30pct`, `cash_runway_quarters: float | None`, `gross_margin_negative`, `debt_rising_cash_falling`). Defaults to healthy values so pre-4.5 cached JSONB rows hydrate cleanly. Mirrored in Zod with per-field defaults; `HEALTHY_LAYOUT_SIGNALS` exported for test fixtures.
-- [x] **`ResearchReport.layout_signals`** field with `default_factory=LayoutSignals` for back-compat.
-- [x] **`app/services/research_layout_signals.py`** — pure `derive_layout_signals(report)` reads claim values via description matching (mirrors orchestrator + frontend extractors). Cash runway = `max(net_cash, 0) / |FCF TTM burn|`, computed only when FCF TTM < 0; clamps to `0.0` when net cash is already negative AND burning. Slope signals require ≥ 3 history points.
-- [x] **Orchestrator wiring** — `compose_research_report` runs the derivation as a final step before returning; `backfill_layout_signals(report)` helper recomputes for cached pre-4.5 rows (only when current is the healthy default — never overwrites populated values).
-- [x] **`/v1/research/{symbol}` cache-hit path** — runs both `backfill_top_level_metadata` and `backfill_layout_signals` so the dashboard's adaptive UI works on cache hits without forcing a fresh LLM call.
-- [x] **`HeaderPills`** primitive — renders "● UNPROFITABLE · TTM" / "⚠ LIQUIDITY WATCH" / "● BOTTOM DECILE BEAT RATE" / "▲ DEBT RISING · CASH FALLING" pills above the hero. Returns null when every signal is healthy. `is_unprofitable_ttm` and `gross_margin_negative` collapse to one pill (avoids visual noise on Rivian-class names where both fire). `data-testid='header-pill'`.
-- [x] **HeaderPills wired** into SymbolDetailPage at the page top-right above the hero.
-- [x] **HeroCard right-column trio swap** — when `is_unprofitable_ttm`: Forward P/E → P/Sales (P/E meaningless for negative E), ROIC TTM → Cash Runway (`~Q remaining`, with "raise likely needed" sub-line when < 6Q), FCF margin label kept but value colored red when negative. Healthy reports render the original Forward P/E + ROIC + FCF margin trio unchanged.
-- [x] **`hero-extract.ts`** grows `priceToSales` reader for the swap path.
-- [x] **Tests** — backend 577 → **605** (+28: 4 schema, 18 derivation across all 5 signals + edge cases + compound Rivian fixture, 4 orchestrator wire-through + backfill, 2 router cache-hit). Frontend 353 → **371** (+18: 5 schema, 9 HeaderPills, 4 HeroCard swap).
-- [x] **Bundle** — main 97.17 → **97.92 KB gz** (+0.75). ~2.08 KB headroom retained under the 100 KB budget.
-- [x] **Verified back-compat** — preview against the cached pre-4.5 NVDA report renders the default trio with no header pills (signals backfilled to healthy default). No console errors.
-- [x] **Update test counts** — backend 577 → **605**, frontend 353 → **371**. Updated in `CLAUDE.md`, `docs/architecture.md`, this file.
-
-### 4.5.A review *(filled in after the GREEN + docs commits land)*
-
-- **What changed in shape:** one new model (`LayoutSignals`) + one new field on `ResearchReport`. One new derivation module + one new backfill helper. One new frontend primitive (HeaderPills) + one HeroCard trio swap. Zero new top-level routes, zero new dependencies, no schema breaks.
-- **What didn't change:** healthy reports render unchanged. Pre-4.5 cached JSONB rows round-trip with `LayoutSignals()` default and the cache-hit backfill recomputes from claims so the dashboard's adaptive UI activates without a fresh LLM call.
-- **Net deltas:** backend +28 tests / +1 service module / +1 schema model / +1 helper; frontend +18 tests / +1 primitive / +1 schema field / 1 card swap; main bundle +0.75 KB gz.
-- **Followups noted (4.5.B-bound):**
-  - In-card distressed-mode polish: EarningsCard "bottom decile" annotation, CashAndCapitalCard runway highlight + raise-needed framing, QualityCard ring colors flip to red when ratio < 0.
-  - Section reordering when distressed: Cash & Capital moves up (above Per-share growth); Risk diff moves up (above Macro).
-  - Synth prompt receives `layout_signals` as context so Sonnet's narratives adapt ("Trajectory positive, level negative" tone for distressed names).
-  - Test fixtures across the layout matrix: healthy mature (NVDA), slowing growth (F or GM), unprofitable growth (RIVN), distressed (TBD by current data). Lands in 4.5.B or 4.5.C.
-
-#### 4.5.B Card adaptations + section reordering + LLM signal feed *(this PR)*
-
-> **Why this slice:** 4.5.A laid the foundation (signals + header chrome).
-> 4.5.B closes the loop: the dedicated cards each consume a relevant
-> signal, the section grid reorders for distressed names, and Sonnet
-> receives the signals as framing context so its narratives adapt
-> their tone. Together with 4.5.A, this completes Phase 4.5 — the
-> adaptive-layout differentiator from ADR 0005.
-
-- [x] **EarningsCard "bottom decile"** annotation when `beat_rate_below_30pct`. New optional `distressed?: { beat_rate_below_30pct?: boolean }` prop; pill renders next to the X-of-N beat headline. Wired in SymbolDetailPage to read from `layout_signals.beat_rate_below_30pct`.
-- [x] **CashAndCapitalCard** runway stat tile when `cash_runway_quarters` is non-null. New optional `runwayQuarters?: number | null` prop. Tile shows "~X.XQ" runway value; sub-line "raise likely needed" + red value coloring when < 6Q. Wired in SymbolDetailPage. FCF-positive companies + pre-4.5 cache rows omit the tile.
-- [x] **QualityCard rings flip red** when ROE / ROIC TTM / FCF margin values are negative. Each ring picks `text-strata-neg` (loss accent) when its value < 0, else its default (`text-strata-quality` for ROE/ROIC, `text-strata-cashflow` for FCF margin).
-- [x] **SymbolDetailPage row reorder** when distressed (`is_unprofitable_ttm OR cash_runway_quarters < 6`). Default = row 3 Valuation+Growth / row 4 Cash+Risk+Macro. Distressed = row 3 Cash+Risk+Macro / row 4 Valuation+Growth. `data-row='dashboard-row-{3,4}'` markers + `data-row-content` attribute let the reorder logic be regression-tested deterministically.
-- [x] **`_build_user_prompt` accepts layout_signals** and emits a "Layout signals (framing context)" block listing active flags + values when at least one is non-default. Sonnet's narratives adapt tone (challenge framing for distressed names) without breaking the citation-discipline contract — every cited number must still appear in the section's claim list.
-- [x] **Orchestrator wiring** — `compose_research_report` derives layout_signals from a stub (claims-only) report BEFORE the synth call so the prompt receives them; reuses the same signal value when wrapping the final `ResearchReport` to avoid double-derivation.
-- [x] **Tests** — backend 605 → **607** (+2: prompt includes signals when distressed, omits block when healthy). Frontend 371 → **387** (+16: 3 EarningsCard, 5 CashAndCapital, 4 QualityCard, 4 SymbolDetailPage).
-- [x] **Bundle** — main 97.92 → **98.37 KB gz** (+0.45). ~1.63 KB headroom remaining under the 100 KB budget.
-- [x] **Update test counts** — backend 605 → **607**, frontend 371 → **387**. Updated in `CLAUDE.md`, `docs/architecture.md`, this file.
-
-### 4.5.B review *(filled in after the GREEN + docs commits land)*
-
-- **What changed in shape:** three optional props (one each for EarningsCard, CashAndCapitalCard, the EarningsCard-style on QualityCard's accent) + one optional kwarg on `_build_user_prompt`. Plus a SymbolDetailPage IIFE that picks between two row orderings based on a derived `isDistressed` boolean. No new components, no schema changes.
-- **What didn't change:** healthy reports render unchanged. Pre-4.5 cached rows (where signals are at the healthy default after the 4.5.A backfill) take the unchanged code path everywhere.
-- **Net deltas:** backend +2 tests / +1 prompt helper / 1 prompt-builder signature change; frontend +16 tests / 4 cards extended / 1 IIFE-based reorder; main bundle +0.45 KB gz.
-- **Followups noted:**
-  - **Live-LLM dogfood with a distressed name** (RIVN / LCID) is the natural next validation step. The prompt's framing block should produce visibly different narrative tone; verify the prose actually adapts. Lands during the 4.8 dogfood gate.
-  - **Test fixture matrix** (NVDA / F / RIVN / TBD) deferred — can fold into 4.8 dogfood or a dedicated 4.5.C if we want named-symbol regression coverage.
-  - **Bundle headroom** is now 1.63 KB. Phase 4.6 (Compare page) is ~3 KB net, will need either a chunk split for the new route or compression of an existing card. Address in 4.6 specifically.
-
-### 4.5.C Layout polish from dogfood feedback *(this PR)*
-
-> **Why this exists:** the 4.5.B dogfood surfaced four UX issues the
-> unit tests couldn't catch — page-level whitespace on big monitors,
-> row-internal height mismatch where shorter cards left blank canvas
-> below them, ContextBand placement burying the numeric content, and
-> "UNAVAILABLE" placeholder cards wasting column slots on cached
-> reports. All four are layout-shape issues, not data correctness;
-> shipping them in 4.5.C keeps 4.5.B's behavioral diff reviewable
-> separately from this surface refresh.
-
-- [x] **Container width** — SymbolDetailPage's `max-w-6xl` (1152px) → `max-w-screen-2xl` (1536px). Padding shrinks from `px-8` to `px-6` on small breakpoints, growing back to `lg:px-8 / xl:px-10` on bigger ones to keep content from hugging the edges. Dashboards now breathe at 1920px+ resolutions while staying readable at 1280px.
-- [x] **`items-start` on every multi-column grid** — cards render at natural height with honest gaps below shorter cards rather than stretching to row height. Option (b) from the user's choice — adapts to different resolutions because the gap "absorbs" the height difference.
-- [x] **ContextBand moved to bottom** — Business + News now render after row 4 (and before the trailing ReportRenderer fallback) instead of between hero and row 2. Hero → row 2 → row 3 → row 4 → ContextBand keeps numeric content up top.
-- [x] **Auto-collapse row 4 to N columns** — RiskDiffCard + MacroPanel return `null` instead of placeholder "UNAVAILABLE" cards. SymbolDetailPage's row 4 grid uses `lg:grid-cols-{1,2,3}` based on a populated-card count. Cash + Risk + Macro on healthy data; Cash alone fills the row width when Risk and Macro are empty. `data-card-count` attribute exposed for regression tests.
-- [x] **DashboardRows extracted** from SymbolDetailPage's main render for readability. The IIFE in 4.5.B was inline; refactoring it to a named subcomponent kept the parent component's JSX scannable.
-- [x] **Tests** — 387 → **392** frontend (+5 net: 5 new SymbolDetailPage layout assertions; 2 placeholder-render tests on RiskDiffCard / MacroPanel flipped to null-return assertions). Backend untouched at 607.
-- [x] **Bundle** — main 98.37 → **98.42 KB gz** (+0.05). Headroom unchanged at ~1.58 KB.
-- [x] **Update test counts** — backend stays at 607, frontend 387 → **392**. Updated in `CLAUDE.md`, `docs/architecture.md`, this file.
-
-### 4.5.C review *(filled in after the GREEN + docs commits land)*
-
-- **What changed in shape:** one container className change. One `items-start` class added to every grid (5 grids). One subcomponent extraction (DashboardRows). Two `if !data return null` branches added to RiskDiffCard / MacroPanel. ContextBand moved one position. No new components, no new dependencies, no schema changes.
-- **What didn't change:** healthy reports' card content. The new auto-collapse is back-compat: a section that returns 4 claims renders the same RiskDiffCard as before; a section with 0 claims used to render a placeholder, now renders nothing — and the surrounding row picks a tighter grid.
-- **Net deltas:** backend zero; frontend +5 tests / 2 cards null-return / 1 IIFE → DashboardRows refactor / 1 grid-cols-N column count switch; main bundle +0.05 KB gz.
-- **Followups noted:**
-  - The Vite HMR cache wasn't picking up file changes during preview verification (same issue as 4.5.B). Tracked as: when the worktree is in `.claude/worktrees/...`, Vite's file watcher misses mtime updates. Workaround: trust unit tests; rely on `vite build` to verify production rendering. Long-term fix: investigate whether `server.watch.usePolling` in `vite.config.ts` would resolve.
-  - Bundle headroom still ~1.58 KB. Phase 4.6 Compare page will need a chunk split for the new route. Plan to use `React.lazy()` on the `/compare` route component so the bundle bills only get hit when the user navigates there.
-
-### 4.6.A Compare page — visual-only *(this PR)*
-
-> **Why this is next:** the symbol dashboard answers "is this name distressed / healthy / overvalued?" in isolation, but the natural follow-up is "vs what?" A side-by-side compare page reuses every Phase 4 card primitive against two reports at once. Strata mockup at `docs/screenshots/image-1777831012413.png` shows the target shape.
->
-> **Bundle note:** main bundle was at 98.42 KB gz with ~1.58 KB headroom. Compare ships as its own lazy chunk via `React.lazy(() => import("./components/compare/ComparePage"))`, so the entire 4.6.A deliverable lives in a separate 6.34 KB chunk and only the route tree node lands in main. Pattern mirrors `SectionChart` in `frontend/src/components/ReportRenderer.tsx`.
->
-> **Scope split:** 4.6.A is visual-only (this PR). 4.6.B (LLM compare narrative) is conditional on dogfood signal — defer unless reviewing the compare page produces a "wish it had narrative" reaction.
-
-**Frontend:**
-
-- [x] **`/compare?a=NVDA&b=AVGO`** route — two-ticker side-by-side dashboard, lazy-loaded. Reads both tickers from the query string, uppercases both, fires two `fetchResearchReport` queries in parallel via `useQueries` from TanStack Query. Missing either param redirects to landing.
-- [x] **`CompareHero`** — two ticker cards side-by-side with mini area charts in per-side accent colors (`COMPARE_COLOR_A` cyan / `COMPARE_COLOR_B` violet). "VS" badge between them on `lg+` viewports. Reuses `LineChart` with `areaFill={true}` + default no-axes-no-tooltip lean profile. `HeaderPills` renders inside each column so the distress chrome appears only on the affected side (not page-level).
-- [x] **`CompareMetricRow`** — generic horizontal-bar row used for both Valuation (3 metrics: P/E FWD, P/S, EV/EBITDA, `lowerIsBetter=true`, "lower = cheaper" hint) and Quality (4 metrics: Gross / Op / FCF margin / ROIC, `lowerIsBetter=false`, "higher = better" hint). "Winning" side highlighted in `strata-pos`; null values render em-dash. PEG omitted (not currently a backend claim).
-- [x] **`CompareMarginOverlay`** — 20Q operating margin, both tickers, single `MultiLine` SVG, shared axis. Returns null when neither side has the underlying claim history. Narrative call-out deferred to 4.6.B.
-- [x] **`CompareGrowthOverlay`** — 5Y per-share growth (Revenue + FCF per share, both rebased to 100), single `MultiLine` SVG with up to 4 series, multiplier pills below ("NVDA Rev 6.2× · NVDA FCF 12.2× · AVGO Rev 3.9× · AVGO FCF 4.4×"). Same rebase logic as `growth-extract.ts`.
-- [x] **`CompareRiskDiff`** — both tickers' 10-K risk paragraph deltas as parallel SVG bar charts, side-by-side. Per-category bars when 4.3.B's Haiku categorizer ran on the side; aggregate fallback (Added / Removed / Kept / CharDelta) when categorizer absent. Returns null when both sides lack a Risk Factors section.
-- [x] **`CompareFooter`** — "What survives the compare" / "What's cut" honest-scope strip. Explicit about what compare deliberately drops (Macro, full Business descriptions, News, Cash & capital deep dive, Peer scatter — since the comparison IS the peer view).
-- [x] **Add ticker / Swap controls** — top-right. Add ticker is rendered disabled with a "coming in 4.7" tooltip (real search modal lands in 4.7); Swap mutates `?a` ↔ `?b` in place via `useSearchParams`.
-
-**Backend:** untouched. 4.6.A is 100% frontend.
-
-**Tests:**
-
-- [x] **Frontend +22 new tests** across 3 files:
-  - `lib/compare-extract.test.ts` (10 tests) — covers all 5 extractors with empty/missing/zero-base edge cases.
-  - `components/compare/ComparePage.test.tsx` (8 tests) — parallel fetch, both tickers render, 3+4 metric rows, swap mutates URL, missing ?a/?b redirects, per-side distress pill, footer strip.
-  - `components/compare/CompareMetricRow.test.tsx` (4 tests) — row count, em-dash on null, hint text per direction.
-- [x] **Backend untouched at 607/607.**
-
-**Implementation notes:**
-
-- The 4.5.A `LayoutSignals` work applies per-ticker — `signalsA` and `signalsB` are passed to the respective hero columns; the distress chrome activates per-side. The compare metric rows themselves (P/E FWD, etc.) keep consistent axes regardless of distress to preserve cross-ticker comparison; only the per-column hero shows the distress pill.
-- Bundle resistance: ALL of `compare/` lives in one folder, imported only by the lazy `ComparePage` entry. Vite splits the entire subtree into one chunk. Sub-components (`CompareHero`, `CompareMetricRow`, `CompareMarginOverlay`, `CompareGrowthOverlay`, `CompareRiskDiff`, `CompareFooter`) are NOT individually lazy-loaded.
-- Bundle math: main 98.42 → **98.56 KB gz** (+0.14); new ComparePage chunk **6.34 KB gz**; SectionChart chunk unchanged at 103.01 KB gz. Headroom under the 100 KB main-bundle budget: **1.44 KB**. Phase 4.7 still gets to land in main without splitting.
-
-### 4.6.A review *(filled in after the GREEN + docs commits land)*
-
-- **What changed in shape:** one new route (`/compare`); one new directory (`frontend/src/components/compare/`) holding the lazy entry + 6 sub-components; one new extractor module (`lib/compare-extract.ts`). No new top-level routes on the backend, no schema changes, no new dependencies.
-- **What didn't change:** `/symbol/:ticker` is unchanged. `LayoutSignals` is consumed read-only per side; no schema additions. PEG, the compare narrative, three-way compare, and a real Add-ticker button all remain explicit follow-ups.
-- **Net deltas:** backend zero; frontend +22 tests / +1 extractor module / +7 component files / 1 lazy route wired in `App.tsx`; main bundle +0.14 KB gz; new lazy chunk 6.34 KB gz.
-- **Followups noted:**
-  - **4.6.B (compare narrative)** — Sonnet writes "NVDA's operating margin overtook AVGO's in Q2-23" against both reports' Quality sections, plus eval-rubric coverage. New `compose_compare_narrative` orchestrator helper + thin `POST /v1/compare/narrative` route. Land only if dogfood signals "wish there was a narrative."
-  - **PEG metric** — needs a backend claim addition to `fetch_fundamentals` (yfinance `Ticker.info[trailingPegRatio]`). Cheap if dogfood asks; otherwise stay at 3-metric Valuation.
-  - **Real Add-ticker button** — wires to 4.7's search modal; the compare page already has the chrome.
-  - **Three-way compare** (`?a&b&c`) — speculative; revisit only if used.
-  - **EARNINGS-focus compare** — current code reads `focus="full"` only; if dogfood asks for earnings-focus compare, this is one queryFn change.
-
-### 4.7 Search + Watchlist + Recent + bundle hygiene *(this PR)*
-
-> **Why this is next:** the three sidebar nav buttons (Watchlist / Recent / Search) have been visually present but disabled since 4.0. The Strata mockup at `docs/screenshots/image-1777830988606.png` shows them all wired with count badges. This PR activates all three, adds the ⌘K shortcut, and grows the LandingPage to surface recent + watchlist tickers.
->
-> **Bundle hygiene split:** main was at **98.56 / 100 KB gz** with 1.44 KB headroom — uncomfortably tight for any new work. This PR ships ``SymbolDetailPage`` as a lazy chunk (mirroring the 4.6.A ComparePage pattern) so all per-card Strata components move out of main. Net: main drops to **83.02 KB**, headroom jumps to **16.98 KB**. Phase 4.8 + 5/6 can land without bundle anxiety.
-
-**Frontend (no backend changes):**
-
-- [x] **`lib/watchlist.ts`** — localStorage CRUD (``addToWatchlist`` / ``removeFromWatchlist`` / ``toggleWatchlist`` / ``listWatchlist`` / ``isWatched``). Uppercases on the way in; dedup; corrupt-payload survival.
-- [x] **`lib/recent.ts`** — MRU list (``pushRecent`` prepends + dedupes + caps at ``RECENT_MAX``=10; ``listRecent``).
-- [x] **`lib/popular-tickers.ts`** — 12 curated names for SearchModal default suggestions when recent + watchlist are empty.
-- [x] **`WatchlistButton`** — ★ toggle on /symbol/:ticker. Local-mirrored aria-pressed state so click feels instant.
-- [x] **`SearchModal`** — ⌘K-triggered. Filterable input over recent ∪ watchlist ∪ POPULAR_TICKERS (deduped, source-tagged). Enter submits → onSelect uppercased; clicking a suggestion → onSelect; Esc → onClose. Lazy-loaded by App.tsx so the ~1.3 KB chunk only ships on first open.
-- [x] **`SidebarShell` extension** — optional ``onCompareClick`` / ``onWatchlistClick`` / ``onRecentClick`` props enable the corresponding nav button (backward-compat with pre-4.6 callers). ``watchlistCount`` / ``recentCount`` props render ``data-badge='*-count'`` badges when > 0.
-- [x] **`AppShell` wiring** — global ⌘K / Ctrl+K keydown listener opens SearchModal. useEffect re-reads localStorage counts on every route change so badges stay live. Compare nav handler navigates to ``/compare?a=<recent[0]>&b=<recent[1]>`` (or NVDA/AVGO defaults). Watchlist + Recent nav handlers surface inside the search modal (no dedicated routes this PR — defer if dogfood asks).
-- [x] **`SymbolDetailPage` updates** — ``pushRecent`` on report-success (typos / 404 tickers stay out of recent). ``WatchlistButton`` rendered next to the ``HeaderPills`` container.
-- [x] **`LandingPage` upgrade** — Recent Tickers + Watchlist sections above the search bar. Click-to-navigate ticker-card grids; hidden when empty so a fresh-clone landing stays clean. Per-card sparklines deliberately omitted to keep the surface fast (no fan-out of fetchMarketPrices on landing mount); revisit if dogfood asks.
-
-**Bundle hygiene companion:**
-
-- [x] **Lazy-load `SymbolDetailPage`** — added default export + `lazy(() => import("./components/SymbolDetailPage"))` + Suspense wrapping in App.tsx. Moves all per-card Strata components (HeroCard, EarningsCard, QualityCard, ValuationCard, PerShareGrowthCard, CashAndCapitalCard, RiskDiffCard, MacroPanel, BusinessCard, NewsList, ContextBand, HeaderPills, NarrativeStrip, MetricRing, MultiLine, LineChart, EpsBars, PeerScatterV2, all extractors) out of main into a 14.49 KB on-demand chunk. Vite auto-extracted ``risk-extract.ts`` into a shared chunk because both SymbolDetailPage and ComparePage import it.
-
-**Tests:**
-
-- [x] **Frontend +33 new tests** across 4 new files + 2 extensions:
-  - `lib/watchlist.test.ts` (6 tests) — list/add/remove/toggle/isWatched + corrupt-payload survival.
-  - `lib/recent.test.ts` (6 tests) — list/push (MRU + dedup + cap)/uppercase + corrupt-payload survival.
-  - `components/WatchlistButton.test.tsx` (4 tests) — empty/filled aria-pressed; click toggles persistence; uppercases ticker prop.
-  - `components/search/SearchModal.test.tsx` (8 tests) — open/closed renders; popular + recent + watchlist surfaced; filter; Enter submits; click selects; Esc closes.
-  - `components/SidebarShell.test.tsx` (+7 tests) — Compare/Watchlist/Recent become enabled with handlers; count badges render when > 0; Export stays disabled.
-  - `components/LandingPage.test.tsx` (+2 tests) — Recent / Watchlist sections render from localStorage entries.
-- [x] **Backend untouched at 607/607.**
-
-**Bundle math (vite build):**
-
-| | Before | After |
-|---|---|---|
-| main entry | 98.56 KB gz | **83.02 KB** (−15.54) |
-| SymbolDetailPage chunk | — | 14.49 KB (new lazy) |
-| SearchModal chunk | — | 1.31 KB (new lazy) |
-| risk-extract chunk | — | 4.27 KB (auto-extracted shared) |
-| ComparePage chunk | 6.34 KB | 6.35 KB (unchanged) |
-| SectionChart chunk | 103.01 KB | 103.03 KB (unchanged) |
-
-Headroom under 100 KB main-bundle budget: **1.44 → 16.98 KB**. Phase 4.8 + Phase 5/6 land without budget anxiety.
-
-### 4.7 review *(filled in after the GREEN + docs commits land)*
-
-- **What changed in shape:** three new lib modules (``watchlist`` / ``recent`` / ``popular-tickers``); two new components (``WatchlistButton`` / ``SearchModal``); five existing files extended (``AppShell``, ``SidebarShell``, ``LandingPage``, ``SymbolDetailPage``, ``App.tsx``). No new top-level routes (the SearchModal is a portal-overlay-style dialog, not a route), no schema changes, no new dependencies.
-- **What didn't change:** the per-symbol dashboard's data flow (cache lookup → tools → synth) is unchanged. The Compare page is unchanged. Pre-4.7 cached reports render unchanged. Backward-compat preserved on SidebarShell — pre-4.7 callers (only ``onSearchClick``) keep their existing disabled-button behavior because the new handlers are all optional.
-- **Net deltas:** backend zero; frontend +33 tests / +3 lib modules / +2 components / 5 files extended; main bundle **−15.54 KB gz**; +3 lazy chunks (SymbolDetailPage 14.49 / SearchModal 1.31 / risk-extract 4.27).
-- **Followups noted:**
-  - **4.6.B (compare narrative)** — Sonnet writes "NVDA's operating margin overtook AVGO's in Q2-23" against both reports' Quality sections. Optional, conditional on 4.8 dogfood signal.
-  - **Per-card sparklines on LandingPage's recent / watchlist grids** — would fan out fetchMarketPrices for each visible ticker. Cheap if all share the existing TanStack Query cache (recent visits would already be warm). Land if dogfood says the cards feel naked.
-  - **Backend ticker-search endpoint** — current SearchModal is frontend-only. If dogfood surfaces "I want to search for AVGO before I've ever visited it" beyond the popular-tickers list, add a yfinance-backed lookup or a seeded-symbols endpoint. 4.7.B territory.
-  - **Help overlay (`?` shortcut)** — mockup footer "Press ? for shortcuts" suggests a keyboard-help modal. Defer until 4.7's ⌘K is dogfooded enough to know what other shortcuts users want.
-
-### 4.8 Vercel deploy + dogfood gate ✅ done (2026-11-09)
-
-#### Execution plan (2026-11-08)
-
-Survey findings that reorder the original list below:
-
-- **Only `/v1/research/*` checks the shared secret.** `GET /v1/market/{symbol}/prices` (documented as auth-gated; it falls through to a yfinance ingest + DB write on cache miss), `POST /v1/market/ingest`, `POST /v1/news/ingest` (spends the 100/day NewsAPI quota) and `POST /v1/symbols` are open to anyone, even once `BACKEND_SHARED_SECRET` is set. The frontend already sends the bearer token on every call, so gating them breaks nothing.
-- **The News card can never fill on its own.** `fetch_news` only reads `news_items`; the only writer is a manual `POST /v1/news/ingest`, and `news_symbols` has an FK to `symbols`, so ingesting a ticker that isn't already in `symbols` would fail (same trap as the candles FK in `tasks/lessons.md`).
-- **CI never runs the frontend** (lint, typecheck, vitest, build) and never builds the production image.
-
-Order — code first (each its own PR; the account steps can run in parallel):
-
-1. [x] **Lock down the API** — `require_shared_secret` on prices + every POST that writes or spends quota; tests for 401 without / 200 with the token; fix the architecture doc's claim. → **#68**, merged 2026-11-08.
-2. [x] **Fresh news per report** — `fetch_news` ingests the symbol's latest headlines (Yahoo RSS; NewsAPI when keyed) before reading, upserting the `symbols` row first; any ingest failure degrades to the DB read. → **#69** (live: RIVN 0 → 19 headlines), merged 2026-11-08.
-3. [x] **CI coverage** — frontend job (lint, typecheck, vitest, build) + a production-image job (docker build + boot against Postgres). → **#70**, both new jobs green on their first run, merged 2026-11-08.
-4. [x] **Local-dev docs** — folded into a rewritten `docs/GETTING_STARTED.md` (troubleshooting section) rather than a new `LOCAL_DEV.md`; `FRONTEND_ORIGIN=http://localhost:5173` in `.env.example`; compose gets a named volume + auto-created `test_db`. → **#71**, merged 2026-11-08.
-5. [x] **Deploy (needs the owner's accounts)** — Fly CLI login → `BACKEND_SHARED_SECRET`, `LLM_PROVIDER=deepseek` + rotated `DEEPSEEK_API_KEY`, `FRONTEND_ORIGIN`; Vercel project import from `frontend/` with `VITE_BACKEND_URL`.
-   - 2026-11-08: Fly CLI installed + logged in; Vercel project imported and deployed; DeepSeek key rotated. **Fly had only `DATABASE_URL` set — no LLM key ever**, so production could never generate a report; the cached April/May reports in Neon came from local runs whose `.env` pointed at Neon. `market-analysis-agent.vercel.app` is someone else's project; ours is `https://market-analysis-agent-red.vercel.app`.
-   - `FRONTEND_ORIGIN` + `LLM_PROVIDER=deepseek` go in `fly.toml` `[env]` (not secrets) → **#72**. Before it, the deployed page's `fetch` to the API fails on CORS.
-   - Secrets (`BACKEND_SHARED_SECRET`, `DEEPSEEK_API_KEY`) are set by the owner with `flyctl secrets import` (stdin) — not `secrets set NAME=value`, because this machine's PSReadLine 2.0.0 writes typed commands, values included, to its history file.
-   - Verified 2026-11-08: both secrets show `Deployed`; unauthenticated `GET /v1/research` → 401 "Missing Authorization header." (was 200 with data); `/v1/health` → 200. Prices still answer without a token until #68 deploys; the Vercel login needs #72.
-   - After #68–#72 merged and deployed (`33e963d`, CI all green incl. the new frontend + image jobs): from the Vercel origin, `/v1/health` → 200 (CORS works); research, prices and `POST /v1/news/ingest` → 401 without a token, research → 401 "Invalid token." with a wrong one.
-   - First live report (owner logged in): 503 "DeepSeek API returned HTTP 401: Authentication Fails" for the key ending `d2af`. The local `.env` holds the same key and DeepSeek's free `/models` endpoint also returns 401 for it, so the key itself is revoked — not an import problem. Fix: a fresh key into `.env`, then piped to Fly from `.env` (no secret on the command line).
-   - Fresh key `…0ae2` validated (`/models` → 200) and deployed (Fly v55). **First successful live report: AAPL in ~20 s, all cards incl. 17 news headlines.** Findings in [`tasks/dogfood-2026-11.md`](dogfood-2026-11.md) — top issue: LLM prose cites raw stored values without units (misleading buyback-vs-dividend comparison).
-6. [x] **Dogfood** the deployed stack on 8–10 tickers (items below); log in `tasks/dogfood-2026-11.md`; fix the worst.
-   - Done 2026-11-09: AAPL, MSFT, NVDA, AVGO, KO, RIVN, JPM plus the seven lens companies — healthy mega-cap, growth, distressed, dividend payer and bank covered; **a cyclical was not**. 17 findings logged; every High and Medium one fixed in #73–#82 (sidebar #76, market strip #77, Regenerate + error boundaries + three small fixes #78, interpretive prose #79, analyst view #80, capex lens #81, layout pass #82). Info items #4 and #5 stay open.
-   - Earlier progress: tickers AAPL (live), NVDA (local). Fixed and merged 2026-11-08: prose units (#74), dogfood rate limit 30/h (#73), readable charts — axes, baselines, $/share panels, stat tiles, trend cells (#75). Still to cover: a distressed name (RIVN), a bank (JPM), a dividend payer (KO), a cyclical.
-   - Verified in production after #73–#75 deployed (Fly + Vercel, `2a06881`): AAPL (cached) renders the new charts — 2 per-share panels, 3 charts with value axes + baselines, 4 cash tiles, stated trend changes; a fresh MSFT report (22 s) cites display units throughout ("67.66% gross margin", "$12.39 of revenue", "dividend yield of 0.74% with a 0.57% buyback yield").
-7. [x] **Docs sweep + Phase 5/6 decision gate** (items below).
-   - Gate: the recurring signal was "the cards just display data" plus a wish for cross-company depth (dogfood #15) → Phase 5, shipped as ADR 0007 (#79–#81). No one asked for segment / geography mix → Phase 6 stays deferred.
-   - Docs (this PR, 2026-11-09): README and design_doc rewritten for the deployed product; CLAUDE.md, architecture, deployment (§7 production configuration), security (A01/A05/A07 now describe the shared secret + CORS), testing (actual suites), frontend/README rewritten. Screenshots not added — the browser pane only saves small JPEG captures; add real ones by hand if the README needs them.
-
-Not in this pass: Bug 8 (cancel-on-nav — pick up if dogfood hits it), Sonnet comparison run (needs an Anthropic key), branch protection on `main` (a repo setting — owner's call).
-
-#### Original 4.8 items
-
-- [x] **Vercel push-to-deploy** from `frontend/`. Set `VITE_BACKEND_URL`, set backend `FRONTEND_ORIGIN`, set `BACKEND_SHARED_SECRET` on both sides. *(plan item 5, #72)*
-- [x] **Backend env-var hardening** — confirm Fly secrets match the new dashboard's needs (`LLM_PROVIDER` + `DEEPSEEK_API_KEY` or `ANTHROPIC_API_KEY` per ADR 0006, `NEWSAPI_KEY`, `FRED_API_KEY`, `BACKEND_SHARED_SECRET`). *(plan items 1 + 5; FRED / NewsAPI keys stay optional)*
-- [x] **Dogfood** the deployed stack against 8–10 real symbols spanning the layout matrix (healthy mega-cap, growth, distressed, dividend payer, cyclical). Note rough edges. *(plan item 6; no cyclical yet)*
-- [x] **Decision gate for Phase 5 vs Phase 6:** if dogfooding surfaces "I want a real bull/bear case" repeatedly, escalate to Phase 5 (narrative layer). If it surfaces "I need segment / geography breakdowns", escalate to Phase 6 (XBRL Tier 2). If neither dominates, the dashboard is the product and remaining work is polish. *(→ Phase 5)*
-- [x] **README + design_doc + CLAUDE.md** sweep — current state reflects Phase 4, screenshots, deploy URL. Update portfolio framing too. *(plan item 7; no screenshots)*
-
-### LLM provider switch — DeepSeek ✅ done *(ADR 0006, this PR)*
-
-- [x] **`LLM_PROVIDER`** (`anthropic` | `deepseek`, Literal-validated) + per-tier `LLM_TRIAGE_MODEL` / `LLM_SYNTH_MODEL` overrides, read at call time. `triage_call` / `synth_call` signatures unchanged; no caller edits.
-- [x] **`app/services/llm_deepseek.py`** — openai SDK against `https://api.deepseek.com`; forced named function with thinking disabled; Pydantic `$defs` inlined; cache hits from `prompt_cache_hit_tokens`; service ids `deepseek.triage` / `deepseek.synth`.
-- [x] **Both adapters** turn provider API errors into `RuntimeError` → 503 with the provider's message (e.g. DeepSeek 402 out of credit) instead of a bare 500.
-- [x] **Live golden eval** is opt-in (`-m live_llm`), provider-aware, and covers AAPL / NVDA / RIVN / JPM / KO.
-- [x] Backend 607 → **640** tests (+21 LLM adapter tests, +3 risk-categorizer budget tests, +9 rubric tests).
-- [x] **Live eval on DeepSeek** (ADR 0006 "Evidence"): with the fixed rubric AAPL 0.988 / NVDA 1.000 / RIVN 1.000 / JPM 0.967 / KO 0.987 — all pass; ~$0.001–0.009 per report off-peak. First-run misses were all rubric false positives.
-- [x] **Golden cases share one event loop** (`loop_scope="module"`) — per-test loops made a later case reuse a dead loop's pooled asyncpg connection once the set grew past one case.
-- [x] **Risk categorizer output budget** now scales with paragraph count — RIVN's 248-paragraph diff overflowed the fixed 4096 ceiling on both providers.
-- [x] **10-K risk diff was 24–316 s per report** — profiled: ~99% in `_paragraph_diff`'s all-pairs `SequenceMatcher` scan (EDGAR cached, HTML parsing 1–3 s). Same output, now verbatim fast path + reusable matchers + `quick_ratio` bounds + early exit scanning outward from the paragraph's position: KO 88.5→2.2 s, AAPL 24.1→3.2 s, NVDA 99.1→5.2 s, RIVN 316.5→29.2 s, byte-identical on all four. RIVN's remaining time is ~250 genuinely changed paragraphs that must be compared against every candidate to keep the result exact.
-- [x] **Rubric fixes** — unit-suffixed numbers ("14.03x", "$888.27B") are read whole instead of truncated to their integer part (which also let a fabricated "14.9x" pass), and numbers quoted literally in the same section's claim text ("last 20 quarters", "10-K", "founded 1799") count as backed.
-- [x] **Production switch** — `LLM_PROVIDER=deepseek` in `fly.toml` (#72) + the `DEEPSEEK_API_KEY` Fly secret (set 2026-11-08). Code default stays `anthropic`.
-- [ ] **Sonnet comparison run** — same golden set with `LLM_PROVIDER=anthropic` (needs an Anthropic key locally) to compare factuality + prose side by side.
-
-## Phase 5 — Narrative layer ✅ done *(ADR 0007, #79–#81)*
-
-> **Shipped 2026-11-09** after the 4.8 gate: derived comparison claims + interpretive card prose (#79), the analyst view — headline, bull / bear, what changed, what to watch, each point citing claims checked in code (#80), and the megacap capex lens (#81). Mapping to the original items: Bulls / Bears Say → the analyst view's bull and bear points (`claim_refs: list[ClaimRef]`, rubric-policed); What Changed → its "changed" points over derived YoY claims; catalyst awareness → "what to watch" (news deliberately excluded as an input after the NVDA run); `?focus=thesis` → not needed, the analyst view rides on full reports.
->
-> *Original framing, kept for history:* deferred until Phase 4 ships and is dogfooded. The dashboard's adaptive layout for distressed names (Phase 4.5) plus inline section narratives (Phase 4.4) already deliver a meaningful slice of "what would Bulls Say / Bears Say articulate?" — the killer questions ("EPS narrowing toward break-even but cash runway tightening" or "Operating margin expansion outpacing peers") get answered by the dashboard's data presentation. Phase 5 lands only if dogfooding surfaces a recurring "I want a real bull/bear case" signal that the inline narratives don't satisfy.
-
-- [x] **Bulls Say / Bears Say** sections — explicit bullet lists with `claim_refs: list[str]` per argument so the rubric can enforce "every bullet cites at least one Claim." Schema work + LLM prompt work + rubric extension all required.
-- [x] **What Changed** section — surfaces quarter-over-quarter and year-over-year deltas mechanically (from Phase 3 history). LLM writes 1–2 sentence framing per delta. Some of this already exists implicitly in Phase 4.5 adaptive narratives.
-- [x] **Catalyst awareness** — already partially in Phase 4.4 (next-print date + recent news with sentiment). Phase 5 expansion would tie news directly to the bull/bear thesis ("Q3 print added +7 ¶ to risk factors — feeds the bear case below").
-- [x] **`?focus=thesis`** — new focus mode oriented around the bull/bear case for active investing decisions, complementing existing `full` (broad diligence) and `earnings` (event-driven). *(Not needed: the analyst view rides on full reports.)*
 
 ## Phase 6 — XBRL Tier 2 (deferred; the 4.8 gate did not ask for it)
 
@@ -625,17 +103,9 @@ Not in this pass: Bug 8 (cancel-on-nav — pick up if dogfood hits it), Sonnet c
 These were sketched during Phase 3 but never landed; either Phase 4 absorbs them (news, price history) or they stay deferred:
 
 - [x] **News in report** — absorbed into Phase 4.4 (NewsList component + Haiku categorization).
-- [ ] **`fetch_valuation_history` (new derived tool)** — rolling P/E / EV/EBIT / EV/EBITDA over time with median bands. Would unlock a SectionChart for Valuation. *(Still deferred — Phase 4.2's Valuation matrix uses point-in-time + peer percentile bars instead. Revisit if Phase 4.8 dogfooding shows users want "trades at 28× vs 5Y median 26×" framing.)*
+- [ ] **`fetch_valuation_history` (new derived tool)** — multiples over time with a median. *(Now workstream B in the plan above, built on the ten-year per-share history from #90.)*
 - [ ] **`fetch_dividends_history` (new tool, conditional)** — yfinance `Ticker.dividends` for quarterly history; would unlock a `DividendsCard`. *(Still deferred — niche to dividend payers. Revisit if a recurring use case surfaces.)*
 - [ ] **Price-and-technicals history** — partially absorbed into Phase 4.0/4.1 (60-day price chart in hero). Full SMA / RSI overlay and 5Y price view still TBD; revisit if Phase 4.8 dogfooding shows demand.
-
-## Cross-cutting (do alongside, not blocked on Phase 4)
-
-- [ ] Turn on branch protection for `main` and add `ANTHROPIC_API_KEY` as a repo secret for the AI PR review job
-- [x] `.python-version` respected by CI's uv setup — the backend job's log shows "Using CPython 3.11.18" (checked 2026-11-08).
-- [x] **Set `ANTHROPIC_API_KEY` as a Fly secret** — needed before `/v1/research/*` works in prod: `fly secrets set 'ANTHROPIC_API_KEY=sk-ant-...'` *(Superseded: production runs DeepSeek — `DEEPSEEK_API_KEY` secret + `LLM_PROVIDER` in `fly.toml`, #72.)*
-- [x] **Local-dev defaults sweep** — write a `LOCAL_DEV.md` in the repo root capturing the Phase 3 dogfood lessons: (1) `.env` `DATABASE_URL` should default to local Docker (`postgresql+asyncpg://postgres:postgres@localhost:5432/marketdb`) not Neon; (2) Windows users with native Postgres on :5432 need to either stop the service or remap docker to :5433; (3) `RESEARCH_CACHE_MAX_AGE_HOURS=0` disables cache for debug; (4) browser extensions can rewrite responses — test in incognito to isolate. *(Done in #71 as the troubleshooting section of `docs/GETTING_STARTED.md`.)*
-- [x] **`.env.example`** — recommend `FRONTEND_ORIGIN=http://localhost:5173` as the obvious local-dev value (currently empty trips up fresh-clone sessions). *(Done in #71.)*
 
 ## Future scope (deliberately deferred — revisit when there's a concrete trigger)
 
@@ -647,96 +117,6 @@ These were sketched during Phase 3 but never landed; either Phase 4 absorbs them
 - [ ] **Discord bot client** — was original v1 vision; deferred indefinitely.
 - [ ] **Real-time / 15-min scheduled ingest, Celery, Redis** — cut by ADR 0003.
 - [ ] **Real auth + per-user cost caps + abuse logging** — only when there are real users. Phase 3.0's shared-secret gate is enough until then.
-
-## Done
-
-- [x] Phase 1 — Core Infrastructure
-    - [x] Scaffold FastAPI app with v1 routers and RFC 7807 error handling
-    - [x] Copy Claude Code harness (`CLAUDE.md`, docs, skills, agent, CI) from the project template
-    - [x] Stand up tests/, async client + rollback-per-test DB fixtures, 12 endpoint tests
-    - [x] Wire Alembic for schema migrations; baseline migration creates `symbols` + `news_items` + `candles`, seeds NVDA + SPY
-    - [x] Real yfinance ingest with `ON CONFLICT DO UPDATE` upsert; provider-registry pattern
-    - [x] `log_external_call` observability helper (A09 — service id, input/output summary, latency, timestamp, outcome)
-    - [x] Replace fake bar in `market_repository` with real query against `candles`
-    - [x] RSI + SMA20/50/200 in `technicals.py`; wired into `get_latest_snapshot`
-    - [x] [ADR 0001](../docs/adr/0001-stack-choice.md) — FastAPI + async SQLAlchemy + PostgreSQL
-    - [x] [ADR 0002](../docs/adr/0002-deployment.md) — Deploy to Fly.io, Postgres on Neon
-    - [x] Fly.io + Neon deploy plumbing (`fly.toml`, GitHub Actions deploy workflow, runbook)
-    - [x] Live deploy verified: `/v1/health` ✓, `/v1/symbols` ✓, `/v1/market/NVDA/ingest` returns 251 bars, technicals populate end-to-end
-    - [x] [ADR 0003](../docs/adr/0003-pivot-equity-research.md) — Pivot to AI Equity Research Assistant
-
-- [x] Phase 2 — v2 Equity Research Assistant
-    - [x] **2.0 Foundations** — eval harness skeleton (`tests/evals/` + rubric + `GoldenCase`); citation-enforcing structured-output schema (`app/schemas/research.py`); LLM client + cost-tier routing (Haiku triage + Sonnet synth, both forced-schema, both `log_external_call`-wrapped, prompt caching on system blocks).
-    - [x] **2.1 Tool registry** — 9/9 active tools shipped:
-        - [x] `fetch_news` (PR #13) — NewsAPI dev tier + Yahoo per-ticker RSS, symbol tagging, `news_symbols` join
-        - [x] `fetch_fundamentals` (PR #14) — yfinance valuation + quality + capital allocation + short interest + market cap
-        - [x] `fetch_peers` (PR #15) — curated sector map + yfinance fallback, 4-metric peer matrix
-        - [x] `fetch_edgar` (PR #17) — generic SEC filing fetcher with disk cache + polite-crawl
-        - [x] `parse_filing` — `form_4` (PR #19), `13f` (PR #22), `10k_business` (PR #21), `10k_risks_diff`
-        - [x] `fetch_earnings` (PR #18) — last 4Q EPS history + forward consensus + beat-rate (history extends in 3.2)
-        - [x] `fetch_macro` (PR #20) — FRED with sector→series map (history extends in 3.2)
-    - [x] **2.2 Agent + endpoint** — `POST /v1/research/{symbol}` (PR #26, deterministic-everything-except-prose); same-day cache (PR #28); per-IP rate limit (PR #29 + post-cache refinement). Real-LLM golden eval at factuality 0.97.
-
-- [x] Phase 3.0 — Frontend backend prereqs (PR #31)
-    - [x] **A1 — Shared-secret auth dep** (`app/core/auth.py::require_shared_secret`) — `Authorization: Bearer <BACKEND_SHARED_SECRET>` with `hmac.compare_digest`. No-op when secret is empty (default).
-    - [x] **A2 — CORS middleware** (`app/core/cors.py::configure_cors`) — single-origin allowlist (never `*`), wired into `app/main.py` from `settings.FRONTEND_ORIGIN`.
-    - [x] **A3 — `GET /v1/research`** list endpoint — paginated `ResearchReportSummary[]` for the dashboard sidebar; uses Postgres `->>` JSONB operator for cheap `overall_confidence` extraction.
-    - 30 new tests; 426 passing in the full suite.
-
-- [x] Phase 3.1 — Frontend MVP (PR #32) *(merged; deploy held pending Phase 3 visual-depth work per ADR 0004)*
-    - [x] **`frontend/`** — Vite + React 18 + TS + Tailwind + TanStack Query + Zod
-    - [x] **LoginScreen** with `probeAuth` against `GET /v1/research?limit=1`
-    - [x] **Dashboard** with form, report renderer, past-reports sidebar, status-code-aware error banners
-    - [x] **Vitest** smoke tests for Zod schemas + format helper + auth localStorage round-trip
-    - [x] **`vercel.json`** + `frontend/README.md` deploy walkthrough
-    - 19 vitest tests passing; production build 253 KB / 75 KB gzipped.
-
-- [x] Phase 3.1 schema — `Claim.history` (PR #35)
-    - [x] `ClaimHistoryPoint(period: str, value: float)` — Pydantic frozen model + Zod mirror
-    - [x] `Claim.history: list[ClaimHistoryPoint] = Field(default_factory=list)` — backwards-compat default
-    - [x] Field validator rejects str/bool on `value` (only floats sparkline)
-    - [x] JSONB round-trip test confirms cached pre-3.1 rows still parse
-
-- [x] Phase 3.2 — Tool history (PRs #36 → #40)
-    - [x] **3.2.A** (PR #36) — `fetch_fundamentals` per-share growth + margin trends (7 new claims, 2 existing get history)
-    - [x] **3.2.B+C** (PR #37) — cash flow components + balance sheet trend (6 new claims)
-    - [x] **3.2.D** (PR #38) — TTM ROE + ROIC via 4Q rolling sum + flat 21% NOPAT tax rate (1 new claim, ROE gets history)
-    - [x] **3.2.E** (PR #39) — `fetch_earnings` 21 q-prefixed keys → 9 flat keys with 20Q lookback via `get_earnings_dates(limit=24)`
-    - [x] **3.2.F** (PR #40) — `fetch_macro` ~36 monthly observations per FRED series via `frequency=m`; provider tuple shape converged across all three multi-period tools
-    - **Net result:** 19+ history-bearing claims, all snapshot/`history[-1]` consistent by construction. 499/499 backend tests pass.
-
-- [x] Phase 3.3.A — Sparkline + Trend column (PR #41)
-    - [x] Hand-rolled SVG `Sparkline` component (~30 lines, no Recharts for inline use)
-    - [x] ReportRenderer "Trend" column added; hidden below `sm:` breakpoint
-    - [x] `recharts ^2.13` installed (used by 3.3.B); tree-shaken away from 3.3.A bundle
-    - [x] 40/40 frontend tests pass (was 19; +21 new). Bundle 75 KB gz (+0.5 KB).
-
-- [x] Phase 3.3.B — SectionChart (PR #42)
-    - [x] `featured-claim.ts` picker — exact-description match per section title; macro suffix predicate; null-guards for unknown / sparse / pre-3.2 cached reports
-    - [x] Recharts `LineChart` SectionChart component — 300×120 default, slate-700 primary + dashed slate-400 secondary, reuses `formatClaimValue` for ticks/tooltip
-    - [x] Lazy-loaded via `React.lazy()` so recharts splits into its own chunk; main bundle 76 KB gz (under 100 KB budget); SectionChart chunk 103 KB gz on-demand
-    - [x] 67/67 frontend tests pass (was 40; +15 featured-claim + 8 SectionChart + 4 ReportRenderer wiring)
-
-- [x] Phase 3.3.C — PeerScatter (PR #43)
-    - [x] `peer-grouping.ts` helpers — `groupPeers` parses `<TICKER>: <metric>` descriptions; `extractMedian` pulls `Peer median: …` claims; `extractSubject` cross-joins Valuation + Quality for the report's own ticker
-    - [x] Recharts `ScatterChart` PeerScatter component — peers / subject / median as three Scatter series; subject 9px slate-900, peers 6px slate-500, median slate-400 cross; reuses `formatClaimValue` for axes
-    - [x] Vite auto-chunking hoists recharts into a shared chunk used by both SectionChart and PeerScatter; main bundle 76.92 KB gz (was 76.25; +0.7 KB); per-component chunks 4.84 KB + 6.03 KB; recharts chunk 100 KB shared
-    - [x] 94/94 frontend tests pass (was 67; +17 peer-grouping + 7 PeerScatter + 3 ReportRenderer wiring)
-    - [x] EARNINGS focus mode falls back to peers + median only (no Quality section to extract subject's gross margin from)
-
-- [x] Phase 3.4 — Eval rubric history *(this branch)*
-    - [x] `_claim_numeric_values` widens to yield each history point alongside the snapshot
-    - [x] Module + function docstrings updated to document the history-aware mode
-    - [x] 6 new rubric unit tests: prose-cites-history, "rose from X to Y", percent display of historical fraction, anti-regression on fabrication, pre-3.2 backwards compat, cross-section history matching
-    - [x] 25/25 rubric tests pass (was 19; +6); ruff clean
-    - [x] Live-LLM golden eval auto-benefits via existing AAPL/full case
-
-- [x] Phase 4 — Symbol-centric dashboard (PRs #46 → #82; per-PR detail in CLAUDE.md "Current state")
-    - [x] **4.0 → 4.7** (#46 → #62) — Strata tokens + router, dedicated cards and SVG primitives, per-card narratives, adaptive layouts for distressed names, Compare, search / watchlist / recent, lazy route chunks
-    - [x] **LLM provider switch** (#65, ADR 0006) and the 40× faster 10-K risk diff (#66)
-    - [x] **4.8 deploy + dogfood gate** (#68 → #82) — route auth, per-report news, frontend + image CI, Fly + Vercel + DeepSeek in production; dogfood fixes: prose units, readable charts, sidebar, market strip, Regenerate, error boundaries, layout pass. Log: [dogfood-2026-11.md](dogfood-2026-11.md)
-
-- [x] Phase 5 — Narrative layer (#79 → #81, ADR 0007) — derived comparison claims, interpretive card prose, the cited analyst view, the megacap capex lens. Live golden eval 1.000 on all five tickers.
 
 ## Blocked / waiting
 

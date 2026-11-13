@@ -7,8 +7,9 @@ Write failing tests first. Implement minimum code to pass. Refactor. This is not
 ## State today
 
 - **Backend:** 875 tests in `tests/` (flat, one `test_<module>.py` per service or router), plus `tests/evals/` — the factuality rubric's unit tests (run on every PR) and 5 live golden cases (AAPL, NVDA, RIVN, JPM, KO) that call the real LLM and run only with `-m live_llm`. `tests/conftest.py` provides the async client and the rollback-per-test DB session.
-- **Frontend:** 628 vitest + Testing Library tests under `frontend/src`, next to the component or helper they cover (`HeroCard.test.tsx`, `lib/format.test.ts`), on happy-dom.
+- **Frontend:** 601 vitest + Testing Library tests under `frontend/src`, next to the component or helper they cover (`HeroCard.test.tsx`, `lib/format.test.ts`), on happy-dom.
 - **CI** runs both suites, lint and typecheck, and boots the production image (see "When to run tests").
+- These two counts are the only place the numbers are kept; other docs link here.
 
 ## What to test (by layer)
 
@@ -48,8 +49,9 @@ The separation makes code review dramatically easier and gives you git history t
 ## When to run tests
 
 - **Pre-commit:** tests for the layer you touched.
-- **Pre-push:** full suite + `ruff check app`.
+- **Pre-push:** full suite + `ruff check app tests`.
 - **CI on PR:** backend `ruff` + `pytest`; frontend lint, typecheck, vitest and build; a production-image job that builds the Dockerfile and boots it against Postgres (alembic upgrade + `/v1/health`); Gitleaks; Claude AI PR review.
+- **Before merging a change to report content** (prompts, claims, tools, the thesis): the live golden eval, locally (`uv run pytest -m live_llm tests/evals -s`) or with the **Live Eval** workflow (`gh workflow run live-eval.yml -f provider=deepseek`). It is started by hand because it costs money and calls live providers.
 
 ## Fixtures and test data
 

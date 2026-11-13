@@ -13,7 +13,7 @@
  *
  * ## Why descriptions, not keys
  *
- * Same reason as ``featured-claim`` / ``hero-extract``: the Pydantic
+ * Same reason as ``hero-extract``: the Pydantic
  * schema flattens ``dict[str, Claim]`` into ``Section.claims:
  * list[Claim]`` and the stable backend keys (``AMD.trailing_pe``, …)
  * don't survive the round-trip. Descriptions are stable strings

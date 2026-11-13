@@ -15,7 +15,7 @@
  * four prints as a table.
  *
  * Reads claim values via description matching (same philosophy as
- * featured-claim.ts / hero-extract.ts). Falls back gracefully when
+ * hero-extract.ts). Falls back gracefully when
  * any individual claim is missing.
  */
 import { shortPeriod, usdPerShare } from "../lib/chart-format";

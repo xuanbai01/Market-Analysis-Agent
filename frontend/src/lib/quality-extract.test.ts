@@ -2,7 +2,7 @@
  * quality-extract tests (Phase 4.2).
  *
  * Pure functions that pull QualityCard's data out of the Quality
- * Section. Same description-matching philosophy as featured-claim /
+ * Section. Same description-matching philosophy as
  * hero-extract / peer-grouping — backend keys don't survive the
  * Pydantic flatten, so we match on the human-readable descriptions
  * defined in app/services/fundamentals.py::_DESCRIPTIONS.

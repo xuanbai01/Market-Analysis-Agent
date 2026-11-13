@@ -1,0 +1,111 @@
+name: Live Eval
+
+# The golden eval against a real LLM (tests/evals/test_golden.py): five
+# fresh reports (AAPL, NVDA, RIVN, JPM, KO), every number in the prose
+# checked against the report's claims.
+#
+# It costs money (about a cent per report on DeepSeek) and calls the
+# live data providers, so it never runs on a push. Start it by hand
+# before merging a change to report content — prompts, claims, tools,
+# the thesis:
+#
+#   Actions tab → Live Eval → Run workflow
+#   gh workflow run live-eval.yml -f provider=deepseek
+#
+# Required repo secret (Settings → Secrets and variables → Actions):
+#   DEEPSEEK_API_KEY   for provider "deepseek" (what production runs)
+#   ANTHROPIC_API_KEY  for provider "anthropic"
+# Optional:
+#   EDGAR_USER_AGENT   "Name email" — SEC asks for a monitored address
+#   FRED_API_KEY       without it the Macro section has no values
+#
+# A failure here can also be the runner, not the model: Yahoo sometimes
+# rate-limits cloud IPs, which empties sections. The log prints each
+# case's sections and factuality, so read it before blaming a prompt.
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: LLM provider to evaluate
+        type: choice
+        options:
+          - deepseek
+          - anthropic
+        default: deepseek
+
+permissions:
+  contents: read
+
+# One eval at a time: runs share the providers' rate limits.
+concurrency:
+  group: live-eval
+  cancel-in-progress: false
+
+jobs:
+  golden:
+    name: Golden eval (${{ inputs.provider }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: eval_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/eval_db
+      LLM_PROVIDER: ${{ inputs.provider }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+      # An unset secret is an empty string, which would replace the
+      # code default and get every SEC request refused.
+      EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || 'Market Analysis Agent admin@example.com' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Install deps
+        run: uv sync
+
+      # The golden test skips itself when the key is missing, and a
+      # skipped run would show green. Fail instead.
+      - name: Check the provider key is set
+        run: |
+          if [ "$LLM_PROVIDER" = "deepseek" ] && [ -z "$DEEPSEEK_API_KEY" ]; then
+            echo "::error::The DEEPSEEK_API_KEY repo secret is not set."
+            exit 1
+          fi
+          if [ "$LLM_PROVIDER" = "anthropic" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::The ANTHROPIC_API_KEY repo secret is not set."
+            exit 1
+          fi
+
+      # fetch_news reads and writes through the app's own engine, so
+      # the schema has to exist (unit tests build theirs per test).
+      - name: Create the schema
+        run: uv run alembic upgrade head
+
+      - name: Golden eval
+        run: |
+          set -o pipefail
+          uv run pytest -m live_llm tests/evals/test_golden.py -v -s | tee eval.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Golden eval (${LLM_PROVIDER})"
+            echo '```'
+            grep -E "factuality=|PASSED|FAILED|SKIPPED|passed|failed" eval.log || echo "no results in the log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -35,7 +35,7 @@ async def news_ingest(
     return {"job_id": "local-inline", "ingested": count}
 
 
-@router.get("/news", response_model=NewsListResponse)
+@router.get("/news", response_model=NewsListResponse, dependencies=[Depends(require_shared_secret)])
 async def news_list(
     symbol: str | None = Query(None),
     hours: int = Query(24, ge=1, le=168),
@@ -47,7 +47,7 @@ async def news_list(
     return NewsListResponse(items=items, next_cursor=next_cursor)
 
 
-@router.get("/news/{news_id}", response_model=NewsItemOut)
+@router.get("/news/{news_id}", response_model=NewsItemOut, dependencies=[Depends(require_shared_secret)])
 async def news_detail(news_id: str, session: AsyncSession = Depends(get_session)):
     item = await get_news_by_id(session, news_id)
     if not item:

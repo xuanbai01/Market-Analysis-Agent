@@ -1,9 +1,12 @@
+import logging
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class ProblemDetail(BaseModel):
@@ -58,7 +61,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    return _problem_response(status=500, title="Internal Server Error", detail=str(exc))
+    # The exception's text can carry a SQL fragment, a hostname or a
+    # file path, and some routes are open: it goes to the log, and the
+    # caller gets an id to quote.
+    problem_id = str(uuid.uuid4())
+    logger.error("unhandled error %s on %s %s", problem_id, request.method, request.url.path, exc_info=exc)
+    return _problem_response(
+        status=500,
+        title="Internal Server Error",
+        detail=f"Something went wrong on the server (reference {problem_id}).",
+    )
 
 
 def add_problem_handlers(app: FastAPI) -> None:

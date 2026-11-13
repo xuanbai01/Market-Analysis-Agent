@@ -12,9 +12,17 @@ How the content stays current: the owner opens a demo ticker while
 signed in, which builds or rebuilds its report through the normal route;
 the demo shows that report from then on, with its date.
 
-Because the routes are open, repeat requests are answered from a short
-in-memory cache: a loop against a demo URL costs a dictionary lookup,
-not a database query.
+**Built to be hammered.** The routes are open, so the cost of one
+request has to be close to nothing:
+
+- Responses are cached in memory for five minutes as the **serialized
+  bytes**. A report is a large document; validating and serializing it
+  per request would let a loop pin the one shared CPU. A hit is a
+  dictionary lookup and a write to the socket.
+- The cache can only hold keys for listed tickers and the three allowed
+  ranges, so a caller can't grow it.
+- The routes add ``Cache-Control`` so browsers and proxies repeat less,
+  and a per-IP limit (``DEMO_RATE_LIMIT_PER_MINUTE``) slows one caller.
 
 ``DEMO_SYMBOLS`` empty (the default) turns the demo off: the index is
 empty and every other route answers 404.
@@ -24,20 +32,30 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.settings import settings
 from app.schemas.demo import DemoIndex, DemoSymbol
-from app.schemas.market import MarketPricesOut
-from app.schemas.research import ResearchReport
 from app.services import market_prices, research_cache, research_orchestrator
 
 # The demo shows full reports only: the dashboard never asks for another.
 FOCUS = "full"
 CACHE_TTL_SECONDS = 300.0
 _TICKER = re.compile(r"^[A-Z][A-Z0-9.\-]{0,15}$")
+
+
+@dataclass(frozen=True)
+class StoredReport:
+    """A report as it will be sent, plus what the index needs from it."""
+
+    body: bytes
+    name: str | None
+    generated_at: datetime
+
 
 _cache: dict[tuple[str, ...], tuple[float, Any]] = {}
 
@@ -72,41 +90,49 @@ async def _cached(key: tuple[str, ...], load: Callable[[], Awaitable[Any]]) -> A
     return value
 
 
-async def latest_report(session: AsyncSession, symbol: str) -> ResearchReport | None:
-    """The newest stored full report for a demo ticker, however old; None
-    for a ticker off the list or with nothing stored. Never builds one."""
+async def stored_report(session: AsyncSession, symbol: str) -> StoredReport | None:
+    """The newest stored full report for a demo ticker, however old,
+    serialized once; None for a ticker off the list or with nothing
+    stored. Never builds one."""
     target = symbol.upper()
     if not is_demo_symbol(target):
         return None
 
-    async def _load() -> ResearchReport | None:
+    async def _load() -> StoredReport | None:
         report = await research_cache.lookup_latest(session, symbol=target, focus=FOCUS)
         if report is None:
             return None
         # The same repairs the signed-in route applies to an older row.
         report = research_orchestrator.backfill_top_level_metadata(report)
-        return research_orchestrator.backfill_layout_signals(report)
+        report = research_orchestrator.backfill_layout_signals(report)
+        return StoredReport(
+            body=report.model_dump_json().encode("utf-8"),
+            name=report.name,
+            generated_at=report.generated_at,
+        )
 
     return await _cached(("report", target), _load)
 
 
-async def cached_prices(session: AsyncSession, symbol: str, range_str: str) -> MarketPricesOut | None:
-    """Stored prices for a demo ticker (possibly none); None for a ticker
-    off the list. Never fetches from the provider."""
+async def stored_prices(session: AsyncSession, symbol: str, range_str: str) -> bytes | None:
+    """Stored prices for a demo ticker (possibly none), serialized once;
+    None for a ticker off the list. Never fetches from the provider."""
     target = symbol.upper()
     if not is_demo_symbol(target):
         return None
-    return await _cached(
-        ("prices", target, range_str),
-        lambda: market_prices.get_cached_prices(session, target, range_str),
-    )
+
+    async def _load() -> bytes:
+        prices = await market_prices.get_cached_prices(session, target, range_str)
+        return prices.model_dump_json().encode("utf-8")
+
+    return await _cached(("prices", target, range_str), _load)
 
 
 async def index(session: AsyncSession) -> DemoIndex:
     """The demo tickers that have a report to show."""
     entries: list[DemoSymbol] = []
     for symbol in demo_symbols():
-        report = await latest_report(session, symbol)
+        report = await stored_report(session, symbol)
         if report is not None:
             entries.append(DemoSymbol(symbol=symbol, name=report.name, generated_at=report.generated_at))
     return DemoIndex(symbols=entries)

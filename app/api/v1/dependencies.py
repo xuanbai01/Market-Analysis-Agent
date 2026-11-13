@@ -103,6 +103,36 @@ async def enforce_research_rate_limit(request: Request) -> None:
     )
 
 
+_DEMO_BUCKET: TokenBucket | None = None
+
+
+async def enforce_demo_rate_limit(request: Request) -> None:
+    """Per-IP rate limit for the open ``/v1/demo`` routes. They serve
+    cached bytes, so the limit is there to stop one caller crowding out
+    the rest. 429 with Retry-After on deny; 0 disables it."""
+    global _DEMO_BUCKET
+    per_minute = settings.DEMO_RATE_LIMIT_PER_MINUTE
+    if per_minute <= 0:
+        return
+    if _DEMO_BUCKET is None:
+        _DEMO_BUCKET = TokenBucket(capacity=per_minute, window_seconds=60.0)
+    allowed, retry_after = await _DEMO_BUCKET.take(_client_ip(request))
+    if allowed:
+        return
+    retry_int = 60 if math.isinf(retry_after) else max(1, int(math.ceil(retry_after)))
+    raise HTTPException(
+        status_code=429,
+        detail=f"Too many requests. Retry in ~{retry_int} seconds.",
+        headers={"Retry-After": str(retry_int)},
+    )
+
+
+def reset_demo_rate_limit_for_tests() -> None:
+    """Drop the demo bucket so the next request rebuilds it (tests only)."""
+    global _DEMO_BUCKET
+    _DEMO_BUCKET = None
+
+
 def reset_research_rate_limit_for_tests() -> None:
     """Drop the module-level bucket so tests start with fresh state.
 

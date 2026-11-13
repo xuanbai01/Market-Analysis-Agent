@@ -340,6 +340,35 @@ def test_comments_are_read_past_the_first_page(monkeypatch):
     assert calls[-1] == ("https://api.github.com/repos/o/r/issues/comments/500", "PATCH")
 
 
+def test_main_posts_the_review_judged_against_the_base_rules(pr_env, monkeypatch):
+    # From the review: the success path had no test, and a PR could
+    # weaken the rules it is judged by. The rules come from the base.
+    monkeypatch.setattr(ai_review, "_git_diff", lambda base, head: _file("app/a.py"))
+    shown = []
+
+    def base_file(sha, path):
+        shown.append((sha, path))
+        return "**Rules that came out of shipped work**\n\n- **Base rule.**\n\n**Deferred**\n"
+
+    monkeypatch.setattr(ai_review, "_file_at", base_file)
+    asked = []
+
+    def ask(messages, options, **kwargs):
+        asked.append(messages)
+        return _answer("1. **high** · `app/a.py:1` — bug.")
+
+    monkeypatch.setattr(ai_review, "_ask_deepseek", ask)
+
+    assert ai_review.main() == 0
+    assert shown == [("aaaaaaa1", "CLAUDE.md")]
+    assert "- **Base rule.**" in asked[0][0]["content"]
+    assert "+x = 1" in asked[0][1]["content"]
+    assert pr_env[0].startswith(ai_review.MARKER)
+    assert "1. **high** · `app/a.py:1` — bug." in pr_env[0]
+    assert "bbbbbbb" in pr_env[0]
+    assert "deepseek-flash" in pr_env[0]
+
+
 def test_main_fails_without_the_key(pr_env, monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "")
     assert ai_review.main() == 1

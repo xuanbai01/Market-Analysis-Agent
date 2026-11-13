@@ -72,6 +72,7 @@ import httpx
 from app.core.observability import log_external_call
 from app.core.settings import settings
 from app.schemas.edgar import EdgarFiling
+from app.services import sec_registrants
 
 # ── Form-type allowlist ───────────────────────────────────────────────
 # Forms the parsers understand. 13F-HR is filed by *institutions* about
@@ -232,6 +233,23 @@ def _fetch_edgar_sec(
     """
     if cik is None:
         cik = _resolve_cik(symbol)
+    # A company that reorganized under a new registrant keeps its older
+    # filings under the one before it (sec_registrants). A filing made
+    # jointly appears under both; the current registrant's copy is kept.
+    by_accession: dict[str, EdgarFiling] = {}
+    for registrant in sec_registrants.registrant_chain(cik):
+        for filing in _recent_filings(symbol, registrant, form_type, recent_n):
+            by_accession.setdefault(filing.accession, filing)
+    newest = sorted(by_accession.values(), key=lambda f: f.filed_at, reverse=True)[:recent_n]
+    if not include_text:
+        return newest
+    return [_with_text(filing) for filing in newest]
+
+
+def _recent_filings(
+    symbol: str, cik: str, form_type: str, recent_n: int
+) -> list[EdgarFiling]:
+    """One registrant's ``recent_n`` latest ``form_type`` filings, metadata only."""
     submissions = _sec_get(
         f"https://data.sec.gov/submissions/CIK{cik}.json"
     ).json()
@@ -254,16 +272,6 @@ def _fetch_edgar_sec(
         primary = _strip_xsl_prefix(
             primary_docs[i] if i < len(primary_docs) else ""
         )
-        url = (
-            f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/"
-            f"{accession.replace('-', '')}/{primary}"
-        )
-        text: str | None = None
-        if include_text and primary:
-            try:
-                text = _sec_get(url).text
-            except Exception:  # noqa: BLE001 — text is optional, don't kill the call
-                text = None
         out.append(
             EdgarFiling(
                 cik=cik,
@@ -274,12 +282,26 @@ def _fetch_edgar_sec(
                 period_of_report=_parse_iso_date_only(report_dates[i])
                 if i < len(report_dates) and report_dates[i]
                 else None,
-                primary_doc_url=url,
-                primary_doc_text=text,
+                primary_doc_url=(
+                    f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/"
+                    f"{accession.replace('-', '')}/{primary}"
+                ),
                 size_bytes=sizes[i] if i < len(sizes) else 0,
             )
         )
     return out
+
+
+def _with_text(filing: EdgarFiling) -> EdgarFiling:
+    """``filing`` with its primary document's text; unchanged when the
+    filing names no primary document or the fetch fails (text is optional)."""
+    if filing.primary_doc_url.endswith("/"):
+        return filing
+    try:
+        text = _sec_get(filing.primary_doc_url).text
+    except Exception:  # noqa: BLE001 — text is optional, don't kill the call
+        return filing
+    return filing.model_copy(update={"primary_doc_text": text})
 
 
 def _parse_iso_date(s: str) -> Any:

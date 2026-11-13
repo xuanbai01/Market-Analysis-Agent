@@ -40,15 +40,20 @@ MARKER = "<!-- ai-review:deepseek -->"
 DEFAULT_MODEL = "deepseek-flash"
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 
-# About 60K tokens of diff. A bigger PR loses its tests first, then
-# whole files, and the comment names what was left out.
+# Roughly 60-80K tokens of diff. deepseek-flash reads 1M, so this is a
+# cap on cost and on how much one review can hold in view, not on the
+# context. A bigger PR loses its tests first, then whole files, and the
+# comment names what was left out.
 MAX_DIFF_CHARS = 240_000
-# Thinking is on by default for DeepSeek and its reasoning counts toward
-# max_tokens. On the first live run reasoning took all of 16K and left
-# no review, so it gets more room, and if it still runs out the review
-# is asked for again with thinking off (how the app itself calls it).
-THINKING_MAX_TOKENS = 32_000
+# Thinking is on by default (effort "high") and its reasoning counts
+# toward max_tokens. On the live runs it took all of 16K, then 31.7K of
+# 32K, leaving no review and then half of one. DeepSeek has no budget
+# for reasoning, only an effort level, so: low effort, plenty of room,
+# and when the answer still comes back empty or cut off, once more with
+# thinking off (how the app itself calls DeepSeek).
+THINKING_MAX_TOKENS = 64_000
 PLAIN_MAX_TOKENS = 8_000
+_THINKING_LOW = {"reasoning_effort": "low"}
 _THINKING_OFF = {"thinking": {"type": "disabled"}}
 LLM_TIMEOUT_SECONDS = 600
 GITHUB_TIMEOUT_SECONDS = 30
@@ -186,10 +191,11 @@ def build_messages(title: str, body: str | None, diff: str, rules: str) -> list[
 def review_text(response: dict) -> str:
     choice = response["choices"][0]
     text = (choice.get("message") or {}).get("content") or ""
+    finish = choice.get("finish_reason")
     if not text.strip():
-        raise RuntimeError(
-            f"DeepSeek returned no review text (finish_reason={choice.get('finish_reason')!r})"
-        )
+        raise RuntimeError(f"DeepSeek returned no review text (finish_reason={finish!r})")
+    if finish == "length":
+        raise RuntimeError("DeepSeek's review was cut off at the token limit (finish_reason='length')")
     return text.strip()
 
 
@@ -201,7 +207,7 @@ def request_review(ask: Callable[[dict], dict]) -> tuple[str, dict, bool]:
     answer, or the request fails, once more with thinking off.
     """
     try:
-        response = ask({"max_tokens": THINKING_MAX_TOKENS})
+        response = ask({"max_tokens": THINKING_MAX_TOKENS, **_THINKING_LOW})
         return review_text(response), response, True
     except (RuntimeError, OSError) as exc:
         print(f"::warning::With thinking on: {exc}. Asking again with thinking off.")
@@ -221,6 +227,15 @@ def render_comment(
     if left_out:
         footer += " Not reviewed — " + "; ".join(left_out) + "."
     return f"{MARKER}\n### AI review (DeepSeek)\n\n{review}\n\n---\n<sub>{footer}</sub>\n"
+
+
+def render_nothing_to_review(head_sha: str, generated: list[str]) -> str:
+    files = ", ".join(f"`{p}`" for p in generated) or "none"
+    return (
+        f"{MARKER}\n### AI review (DeepSeek)\n\n"
+        f"Nothing to review at {head_sha[:7]}: every changed file is generated "
+        f"(lockfiles, snapshots, binaries). Left out: {files}.\n"
+    )
 
 
 def find_comment_id(comments: list[dict]) -> int | None:
@@ -293,10 +308,16 @@ def main() -> int:
     model = os.environ.get("AI_REVIEW_MODEL") or DEFAULT_MODEL
     base_url = os.environ.get("DEEPSEEK_BASE_URL") or DEFAULT_BASE_URL
 
+    repo, number, token = os.environ["GITHUB_REPOSITORY"], pr["number"], os.environ["GITHUB_TOKEN"]
+
     files = split_diff(_git_diff(pr["base"]["sha"], pr["head"]["sha"]))
     kept, generated, over_budget = select_files(files, MAX_DIFF_CHARS)
     if not kept:
-        print("Nothing to review: the diff has no reviewable files.")
+        # Say so on the PR: no comment reads as a review that never ran,
+        # and a review of code since removed would otherwise stand.
+        body = render_nothing_to_review(pr["head"]["sha"], generated)
+        action = _post_or_update(body, repo=repo, number=number, token=token)
+        print(f"Nothing to review: every changed file is generated. Comment {action}.")
         return 0
 
     claude_md = Path("CLAUDE.md")
@@ -315,8 +336,7 @@ def main() -> int:
           f"{usage.get('completion_tokens')} out ({reasoning} reasoning).")
 
     body = render_comment(review, model, pr["head"]["sha"], generated, over_budget)
-    action = _post_or_update(body, repo=os.environ["GITHUB_REPOSITORY"], number=pr["number"],
-                             token=os.environ["GITHUB_TOKEN"])
+    action = _post_or_update(body, repo=repo, number=number, token=token)
     print(f"Review comment {action}.")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:

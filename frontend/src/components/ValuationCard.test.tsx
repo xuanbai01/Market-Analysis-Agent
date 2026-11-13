@@ -180,3 +180,25 @@ describe("ValuationCard", () => {
     expect(() => render(<ValuationCard report={report} />)).not.toThrow();
   });
 });
+
+describe("ValuationCard — against its own history (2026-11)", () => {
+  it("draws the year-end multiples when the report carries them", () => {
+    const report = buildReport();
+    const valuation = report.sections.find((s) => s.title === "Valuation");
+    valuation?.claims.push({
+      ...claim("P/E at fiscal year-end (SEC filings)", 18),
+      history: [10, 12, 14, 16, 18].map((value, i) => ({ period: String(2021 + i), value })),
+    });
+    valuation?.claims.push(claim("Median P/E across 5 fiscal year-ends (2021–2025)", 14));
+
+    const { getAllByTestId, getByTestId } = render(<ValuationCard report={report} />);
+
+    expect(getAllByTestId("own-history-panel")).toHaveLength(1);
+    expect(getByTestId("own-history-read").textContent).toContain("median 14.0×");
+  });
+
+  it("leaves the block out for a report built before them", () => {
+    const { queryByTestId } = render(<ValuationCard report={buildReport()} />);
+    expect(queryByTestId("own-history")).toBeNull();
+  });
+});

@@ -58,6 +58,10 @@ CLAIM_KEYS: tuple[str, ...] = (
     "p_s",
     "ev_ebitda",
     "peg",
+    # Valuation — the gross margin Yahoo reports, which is what peers
+    # are measured on (see ``gross_margin`` in the provider for why the
+    # Quality figure is a different number).
+    "gross_margin_ttm",
     # Quality (legacy point-in-time)
     "roe",
     "gross_margin",
@@ -110,6 +114,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "p_s": "Price-to-sales ratio (trailing 12 months)",
     "ev_ebitda": "Enterprise value to EBITDA",
     "peg": "PEG ratio (P/E to growth, trailing)",
+    "gross_margin_ttm": "Gross margin, trailing 12 months",
     "roe": "Return on equity",
     "gross_margin": "Gross margin",
     "profit_margin": "Net profit margin",
@@ -135,7 +140,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "market_cap": "Market capitalization",
     "buyback_yield": "Buyback yield (latest fiscal year)",
     "sbc_pct_revenue": "Stock-based compensation as % of revenue (latest fiscal year)",
-    "gross_margin_trend_1y": "Gross margin, year-over-year change",
+    "gross_margin_trend_1y": "Gross margin change, latest fiscal year vs the one before",
     "name": "Company name",
     "sector_tag": "Resolved sector tag",
     "fifty_two_week_high": "52-week high",
@@ -151,8 +156,12 @@ _DETAILS: dict[str, str] = {
     "p_s": "info.priceToSalesTrailing12Months",
     "ev_ebitda": "info.enterpriseToEbitda",
     "peg": "info.trailingPegRatio",
+    "gross_margin_ttm": "info.grossMargins (the figure peers are compared on)",
     "roe": "info.returnOnEquity",
-    "gross_margin": "info.grossMargins",
+    "gross_margin": (
+        "computed: quarterly_financials.GrossProfit / TotalRevenue, latest "
+        "quarter (info.grossMargins when there are no quarterly statements)"
+    ),
     "profit_margin": "info.profitMargins",
     "revenue_per_share": (
         "computed: quarterly_financials.TotalRevenue / DilutedAverageShares"
@@ -239,6 +248,7 @@ _UNITS: dict[str, str] = {
     "p_s": "ratio",
     "ev_ebitda": "ratio",
     "peg": "ratio",
+    "gross_margin_ttm": "fraction",
     "roe": "fraction",
     "gross_margin": "fraction",
     "profit_margin": "fraction",
@@ -286,6 +296,7 @@ _INFO_KEYS: dict[str, str] = {
     "p_s": "priceToSalesTrailing12Months",
     "ev_ebitda": "enterpriseToEbitda",
     "peg": "trailingPegRatio",
+    "gross_margin_ttm": "grossMargins",
     "roe": "returnOnEquity",
     "gross_margin": "grossMargins",
     "profit_margin": "profitMargins",
@@ -414,11 +425,10 @@ def _fetch_yfinance_fundamentals(
         raw["gross_margin_trend_1y"] = None
 
     # 5. Phase 3.2.A/B/C snapshot values for the new history-bearing
-    #    claims. Snapshot = latest quarter (history[-1].value). For the
-    #    two legacy claims that gained .history (gross_margin /
-    #    profit_margin), we keep the .info-derived snapshot — it's the
-    #    user-facing TTM figure. The sparkline shows quarterly drift
-    #    around it.
+    #    claims. Snapshot = latest quarter (history[-1].value).
+    #    profit_margin keeps its .info snapshot: the trailing-12-month
+    #    figure, same definition as its quarterly history (the layout
+    #    signals read it as TTM). gross_margin is handled below.
     for key in (
         # 3.2.A
         "revenue_per_share",
@@ -443,6 +453,17 @@ def _fetch_yfinance_fundamentals(
         "roic",
     ):
         raw[key] = latest_value(history_map.get(key, []))
+
+    # Gross margin: Yahoo's info.grossMargins is on a different cost
+    # basis from its own statement rows for some industries (XOM 29.8%
+    # vs 24.2% in the latest quarter; CVX, COP and CAT likewise), and
+    # the chart and the trend cell are drawn from the statements. So
+    # the snapshot is the latest quarter of the same history, and the
+    # info figure survives as gross_margin_ttm for the peer comparison
+    # (peers only have the info figure). Dogfood 2026-11 #20.
+    latest_gross_margin = latest_value(history_map.get("gross_margin", []))
+    if latest_gross_margin is not None:
+        raw["gross_margin"] = latest_gross_margin
 
     # 6. Phase 4.1 — sector tag derives from the curated sectors map
     #    (industry → sector). The resolver also short-circuits to a

@@ -55,8 +55,10 @@ THINKING_MAX_TOKENS = 64_000
 PLAIN_MAX_TOKENS = 8_000
 _THINKING_LOW = {"reasoning_effort": "low"}
 _THINKING_OFF = {"thinking": {"type": "disabled"}}
-LLM_TIMEOUT_SECONDS = 600
+# Two attempts (thinking, then not) must fit in the job's 15 minutes.
+LLM_TIMEOUT_SECONDS = 300
 GITHUB_TIMEOUT_SECONDS = 30
+_PAGE_SIZE = 100
 
 GENERATED_PATTERNS = (
     "uv.lock",
@@ -229,13 +231,17 @@ def render_comment(
     return f"{MARKER}\n### AI review (DeepSeek)\n\n{review}\n\n---\n<sub>{footer}</sub>\n"
 
 
-def render_nothing_to_review(head_sha: str, generated: list[str]) -> str:
-    files = ", ".join(f"`{p}`" for p in generated) or "none"
-    return (
-        f"{MARKER}\n### AI review (DeepSeek)\n\n"
-        f"Nothing to review at {head_sha[:7]}: every changed file is generated "
-        f"(lockfiles, snapshots, binaries). Left out: {files}.\n"
-    )
+def render_nothing_to_review(head_sha: str, generated: list[str], over_budget: list[str]) -> str:
+    def names(paths: list[str]) -> str:
+        return ", ".join(f"`{p}`" for p in paths)
+
+    reasons = []
+    if over_budget:
+        reasons.append(f"too big to review in one pass: {names(over_budget)}")
+    if generated:
+        reasons.append(f"generated (lockfiles, snapshots, binaries): {names(generated)}")
+    why = "; ".join(reasons) or "the diff has no files"
+    return f"{MARKER}\n### AI review (DeepSeek)\n\nNothing to review at {head_sha[:7]}. Left out — {why}.\n"
 
 
 def find_comment_id(comments: list[dict]) -> int | None:
@@ -260,7 +266,10 @@ def _request(url: str, *, token: str, method: str = "GET", payload: dict | None 
 
 def _git_diff(base_sha: str, head_sha: str) -> str:
     return subprocess.run(
-        ["git", "diff", "--no-color", "--no-ext-diff", f"{base_sha}...{head_sha}"],
+        # quotepath off: git would otherwise quote a non-ASCII path
+        # ("a/caf\303\251.md") and the header pattern would skip the file.
+        ["git", "-c", "core.quotepath=off", "diff", "--no-color", "--no-ext-diff",
+         f"{base_sha}...{head_sha}"],
         check=True, capture_output=True, text=True, encoding="utf-8",
     ).stdout
 
@@ -283,9 +292,15 @@ def _ask_deepseek(messages: list[dict[str, str]], options: dict, *, key: str, mo
 def _post_or_update(body: str, *, repo: str, number: int, token: str) -> str:
     api = f"https://api.github.com/repos/{repo}"
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
-    comments = _request(f"{api}/issues/{number}/comments?per_page=100", token=token,
-                        extra_headers=headers)
-    existing = find_comment_id(comments)
+    existing = None
+    page = 1
+    while existing is None:
+        comments = _request(f"{api}/issues/{number}/comments?per_page={_PAGE_SIZE}&page={page}",
+                            token=token, extra_headers=headers)
+        existing = find_comment_id(comments)
+        if len(comments) < _PAGE_SIZE:
+            break
+        page += 1
     if existing is None:
         _request(f"{api}/issues/{number}/comments", token=token, method="POST",
                  payload={"body": body}, extra_headers=headers)
@@ -315,9 +330,10 @@ def main() -> int:
     if not kept:
         # Say so on the PR: no comment reads as a review that never ran,
         # and a review of code since removed would otherwise stand.
-        body = render_nothing_to_review(pr["head"]["sha"], generated)
+        body = render_nothing_to_review(pr["head"]["sha"], generated, over_budget)
         action = _post_or_update(body, repo=repo, number=number, token=token)
-        print(f"Nothing to review: every changed file is generated. Comment {action}.")
+        print(f"Nothing reviewable: {len(generated)} generated, {len(over_budget)} over budget. "
+              f"Comment {action}.")
         return 0
 
     claude_md = Path("CLAUDE.md")

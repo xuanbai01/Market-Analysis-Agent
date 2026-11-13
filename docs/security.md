@@ -67,7 +67,7 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 See `.github/workflows/ci.yml`:
 
 1. **Gitleaks** — secrets detection on every push and PR.
-2. **Claude AI PR review** — flags suspicious patterns in the diff on every PR.
+2. **AI PR review (DeepSeek)** — reads the diff of every PR from a branch of this repo and posts one comment: bugs, security holes, broken project rules ([`scripts/ai_review.py`](../scripts/ai_review.py)). A different model family from the one that writes the code. Advisory; it never blocks a merge. It sees the diff only, so it is no substitute for `/security-review`.
 3. **`security-review` skill** — run manually via `/security-review` before merging anything that touches a new route, service, or external call.
 
 ## Do / Don't Cheat Sheet

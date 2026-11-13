@@ -29,7 +29,8 @@ Owner actions (they need an account or a decision):
 - [x] **`FRED_API_KEY` on Fly** — set by the owner 2026-11-13. Reports cached before it keep an empty Macro section until they rebuild (the version bump in A2 does that).
 - [x] **`DEEPSEEK_API_KEY` as a GitHub Actions secret** — set 2026-11-13; the Live Eval workflow ran on `main` the same day, 5 of 5 at factuality 1.000.
 - [ ] **`docs/screenshots/`** (the Strata mockups the archive links to) is untracked: commit it or delete it.
-- [ ] **Branch protection on `main`**, and `ANTHROPIC_API_KEY` as a repo secret for the AI PR review job.
+- [ ] **Branch protection on `main`.**
+- [x] **AI PR review on DeepSeek** *(branch `chore/deepseek-review`, in review)* — the Claude Code Action needed an `ANTHROPIC_API_KEY` that was never set, so it passed having reviewed nothing. `scripts/ai_review.py` sends the diff to DeepSeek with the `DEEPSEEK_API_KEY` secret already set for the Live Eval and keeps one PR comment.
 
 ### A2. Fixes from the XOM check ✅ *(#93, merged 2026-11-13)*
 

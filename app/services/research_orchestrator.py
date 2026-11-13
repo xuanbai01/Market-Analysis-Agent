@@ -175,6 +175,12 @@ units ("ROE of 142.26%"), never as the raw decimal behind them \
 For a signed change, say the direction in words and drop the sign: \
 "down 2.65 pts", never "down -2.65 pts".
 
+2c. **A value is as of when its description says.** A claim described \
+as "at fiscal year-end" or "annual" belongs to the fiscal year its \
+history ends on, not to today: name that year. Say "today" or \
+"currently" only for trailing figures and for the claims that compare \
+today with a median.
+
 3. **Acknowledge missing data.** If a section's claim list is empty or \
 every value is None, ``summary`` is one sentence explaining that data \
 was unavailable, and ``card_narrative`` is the empty string (omit the \

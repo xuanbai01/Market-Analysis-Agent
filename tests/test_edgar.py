@@ -62,9 +62,10 @@ def _mk_filing(
     )
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def edgar_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Point EDGAR_CACHE_DIR at a per-test tmp_path so writes are isolated."""
+    """Point EDGAR_CACHE_DIR at a per-test tmp_path so no test reads or
+    writes the real on-disk cache (autouse: the provider reuses cached text)."""
     from app.core import settings as settings_module
 
     monkeypatch.setattr(settings_module.settings, "EDGAR_CACHE_DIR", str(tmp_path))
@@ -768,3 +769,104 @@ def test_sec_provider_is_unchanged_for_a_registrant_with_no_predecessor(monkeypa
 
     assert [f.accession for f in filings] == ["0000320193-25-000079"]
     assert len(calls) == 1  # one submissions request, nothing else
+
+
+# ── SEC client: pacing, text reuse, index freshness (2026-11) ─────────
+
+
+def test_sec_requests_are_spaced_across_threads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SEC allows 10 requests a second per client, and several tools hit it
+    from parallel threads. Spacing per thread let them add up past the limit."""
+    import threading
+    import time as _time
+
+    import httpx
+
+    stamps: list[float] = []
+
+    def _fake_get(url: str, **_kw: Any) -> httpx.Response:
+        stamps.append(_time.monotonic())
+        return httpx.Response(200, json={}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(edgar_module.httpx, "get", _fake_get)
+    # Windows clocks tick every ~15 ms, so the spacing is set well above that.
+    monkeypatch.setattr(edgar_module, "_SEC_MIN_INTERVAL_SECONDS", 0.06)
+
+    def _burst() -> None:
+        for _ in range(5):
+            edgar_module._sec_get("https://data.sec.gov/x.json")
+
+    threads = [threading.Thread(target=_burst) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    gaps = [b - a for a, b in zip(sorted(stamps), sorted(stamps)[1:], strict=False)]
+    assert len(stamps) == 15
+    assert min(gaps) >= 0.04
+
+
+def test_the_provider_reuses_text_it_already_downloaded(
+    monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
+) -> None:
+    """Filings never change, so a filing's text is downloaded once. Before,
+    every provider call fetched every text again."""
+    from app.services.edgar import _write_filing_to_cache
+
+    seen = _mk_filing(
+        cik=_NEW_CIK,
+        symbol="XOM",
+        accession="0002115436-26-000007",
+        form_type="10-K",
+        filed_at=datetime(2026, 11, 3, tzinfo=UTC),
+        primary_doc_url="https://www.sec.gov/Archives/edgar/data/2115436/000211543626000007/doc.htm",
+        primary_doc_text="<html>already here</html>",
+    )
+    _write_filing_to_cache(edgar_cache, seen)
+    calls = _fake_sec(monkeypatch, {
+        _NEW_CIK: _submissions(
+            ("10-K", "0002115436-26-000009", "2026-11-10"),
+            ("10-K", "0002115436-26-000007", "2026-11-03"),
+        ),
+        _OLD_CIK: _submissions(),
+    })
+
+    filings = edgar_module._fetch_edgar_sec("XOM", "10-K", 2, True)
+
+    assert [f.primary_doc_text for f in filings] == ["<html>filing text</html>", "<html>already here</html>"]
+    assert [u for u in calls if u.endswith("doc.htm")] == [
+        "https://www.sec.gov/Archives/edgar/data/2115436/000211543626000009/doc.htm"
+    ]
+
+
+async def test_a_stale_cached_index_asks_the_provider_again(
+    monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
+) -> None:
+    """Once the cache held enough filings it served them forever, so a new
+    Form 4 or 10-K never appeared. An index older than its TTL is a miss."""
+    import os
+    import time as _time
+
+    from app.services.edgar import INDEX_TTL_SECONDS, _index_path, _write_filing_to_cache
+
+    old = _mk_filing()
+    _write_filing_to_cache(edgar_cache, old)
+    newer = _mk_filing(accession="0000320193-25-000079", filed_at=datetime(2025, 10, 31, tzinfo=UTC))
+    calls: list[int] = []
+
+    def _provider(*_a: Any) -> list[EdgarFiling]:
+        calls.append(1)
+        return [newer]
+
+    monkeypatch.setitem(PROVIDERS, "fake", _provider)
+
+    # Fresh index: served from disk.
+    first = await fetch_edgar("AAPL", form_type="10-K", recent_n=1, provider="fake")
+    assert [f.accession for f in first] == [old.accession] and calls == []
+
+    # Past the TTL: the provider is asked and the newer filing comes back.
+    stale = _time.time() - INDEX_TTL_SECONDS - 60
+    os.utime(_index_path(edgar_cache, "AAPL", "10-K"), (stale, stale))
+    second = await fetch_edgar("AAPL", form_type="10-K", recent_n=1, provider="fake")
+    assert [f.accession for f in second] == [newer.accession] and calls == [1]

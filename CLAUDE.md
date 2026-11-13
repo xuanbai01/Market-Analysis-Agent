@@ -34,7 +34,7 @@ Phases 1–5 are shipped and deployed. The open plan is in [`tasks/todo.md`](tas
 
 **What exists**
 
-- **Backend:** `POST /v1/research/{symbol}` builds a report. Tools fan out in parallel (`fetch_fundamentals`, `fetch_earnings`, `fetch_peers`, `fetch_macro`, `fetch_news`, `fetch_business_info`, the 10-K extractors, `fetch_annual_history`); code builds the claims and the derived comparisons (`research_derived.py`); two LLM calls in parallel write the section prose and the analyst view (`research_thesis.py`); code checks citations and sets confidence and layout signals. Also `GET /v1/market/{symbol}/prices`, `GET /v1/market/overview` and `GET /v1/lens/{id}`.
+- **Backend:** `POST /v1/research/{symbol}` builds a report. Tools fan out in parallel (`fetch_fundamentals`, `fetch_earnings`, `fetch_peers`, `fetch_macro`, `fetch_news`, `fetch_business_info`, the 10-K extractors, `fetch_annual_history`, `fetch_insider_activity`); code builds the claims and the derived comparisons (`research_derived.py`); two LLM calls in parallel write the section prose and the analyst view (`research_thesis.py`); code checks citations and sets confidence and layout signals. Also `GET /v1/market/{symbol}/prices`, `GET /v1/market/overview` and `GET /v1/lens/{id}`.
 - **Frontend:** the `/symbol/:ticker` dashboard (one card per section, reordered for distressed names), `/compare`, `/lens/:id`, search / watchlist / recent, the market strip, and a public read-only demo at `/demo` (`useDemo()` switches the fetchers and hides what a visitor can't do). Charts are hand-rolled SVG; there is no charting library.
 - **Production:** Vercel + Fly + Neon behind the shared secret, `LLM_PROVIDER=deepseek` ([ADR 0006](docs/adr/0006-pluggable-llm-provider.md); the code default is `anthropic`). `FRED_API_KEY` is not set there, so the Macro card does not render in production.
 
@@ -42,7 +42,7 @@ Phases 1–5 are shipped and deployed. The open plan is in [`tasks/todo.md`](tas
 
 **Rules that came out of shipped work** (the changelog or `tasks/lessons.md` has the story behind each):
 
-- **Bump `REPORT_VERSION`** (`app/services/report_version.py`, now 4) in the same PR as any change to what a fresh report contains; cached reports then rebuild on their next visit (docs/conventions.md).
+- **Bump `REPORT_VERSION`** (`app/services/report_version.py`, now 5) in the same PR as any change to what a fresh report contains; cached reports then rebuild on their next visit (docs/conventions.md).
 - **Code computes, the model writes** ([ADR 0007](docs/adr/0007-analytical-narratives.md)). A comparison the prose should make is a derived claim in `research_derived.py`; the prompt forbids arithmetic and the factuality rubric fails any number no claim holds.
 - **Run the live golden eval before merging a change to report content** (prompts, claims, tools, the thesis): `uv run pytest -m live_llm tests/evals -s`, or the Live Eval workflow on GitHub.
 - **A claim that renders carries a `unit`.** The frontend formats from the unit, never from the size of the number.
@@ -51,6 +51,8 @@ Phases 1–5 are shipped and deployed. The open plan is in [`tasks/todo.md`](tas
 - **A company that moved to a new SEC registrant gets a line in `app/services/sec_registrants.py`**, checked against SEC. SEC publishes no link between the two, and the 10-Ks and XBRL history stay under the old one.
 - **Peers carry only Yahoo's figures, so a peer comparison uses the subject's Yahoo figure too** (`gross_margin_ttm`), not one computed from statements.
 - **A fiscal-year figure is not today's.** The year-end multiples (`valuation_history.py`) are as of each fiscal year's last trading day; today's are the trailing claims. Descriptions say which, and both prompts tell the model to name the year.
+- **Every SEC request goes through `edgar._sec_get`**, which spaces all of them in the process (several tools hit SEC from parallel threads; SEC allows 10 a second).
+- **Insider trades are officers' and directors' purchases and sales** of the company's own stock (`form_4.py`): 10% holders apart, other issuers' Form 4s out, grants and withholding counted as routine.
 - **A section needs a card.** `CARD_SECTIONS` in `SymbolDetailPage.tsx` lists the sections with one; any other section falls to the plain `ReportRenderer` table until its card exists.
 - **A card with nothing to draw returns null**, and a row counts only the cards that will render (each card's own empty check), so no row reserves an empty column.
 - **Every `lazy()` goes through `lib/lazy-with-reload.ts`**, and every authenticated route except `/` is its own chunk. The main chunk must stay under 100 KB gzipped (current sizes: `frontend/README.md`).

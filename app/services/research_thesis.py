@@ -55,6 +55,7 @@ SECTION_CODES: dict[str, str] = {
     "Peers": "P",
     "Risk Factors": "R",
     "Macro": "M",
+    "Insider Activity": "I",
 }
 
 # Points kept per list; the model is asked for fewer.

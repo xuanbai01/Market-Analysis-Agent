@@ -51,8 +51,18 @@ fair-access policy can do their worst without breaking the suite.
 
 SEC requires a ``User-Agent`` identifying the client. ``EDGAR_USER_AGENT``
 in settings is the source of truth; the provider attaches it to every
-HTTP call. SEC's rate limit is ≤10 req/sec; the production provider
-sleeps 0.15s between calls (= 6.7 req/sec ceiling, comfortable margin).
+HTTP call. SEC's rate limit is ≤10 req/sec per client. Several tools
+call SEC from parallel threads (the 10-K extractors, the annual history,
+insider activity), so ``_sec_get`` spaces requests across all of them
+with one lock: at most 8 a second for the whole process.
+
+## Cache freshness
+
+A filing's text never changes, so it is downloaded once and reused by
+accession. The per-(symbol, form) index of which filings exist does
+change: it is trusted for ``INDEX_TTL_SECONDS`` and then the provider
+is asked again (until 2026-11 it was trusted forever, so a machine that
+had cached two 10-Ks never saw a third).
 Both rules are documented at
 https://www.sec.gov/os/accessing-edgar-data.
 """
@@ -62,6 +72,7 @@ import asyncio
 import json
 import os
 import re
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -100,6 +111,11 @@ EdgarProvider = Callable[[str, str, int, bool, str | None], list[EdgarFiling]]
 
 
 # ── Cache helpers ─────────────────────────────────────────────────────
+
+
+# How long the list of which filings exist is trusted before SEC is
+# asked again. Filing texts themselves are cached forever.
+INDEX_TTL_SECONDS = 12 * 3600
 
 
 def _cache_root() -> Path:
@@ -175,7 +191,11 @@ def _write_filing_to_cache(root: Path, filing: EdgarFiling) -> None:
 # point's log_external_call records the outcome accurately.
 
 
-_SEC_RATE_LIMIT_SLEEP_SECONDS = 0.15  # 6.7 req/sec ceiling
+# Minimum gap between any two SEC requests from this process, whatever
+# thread they come from: 8 a second, under SEC's 10.
+_SEC_MIN_INTERVAL_SECONDS = 0.125
+_sec_lock = threading.Lock()
+_sec_last_request = 0.0
 
 # SEC's submissions JSON returns ``primaryDocument`` as the
 # stylesheet-rendered HTML version for filings whose underlying
@@ -196,14 +216,20 @@ def _strip_xsl_prefix(primary_doc: str) -> str:
 
 
 def _sec_get(url: str) -> httpx.Response:
-    """One polite GET against SEC: required User-Agent + rate-limit sleep."""
+    """One polite GET against SEC: required User-Agent, and spaced from
+    every other SEC request in the process (see the module docstring)."""
+    global _sec_last_request
+    with _sec_lock:
+        wait = _sec_last_request + _SEC_MIN_INTERVAL_SECONDS - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _sec_last_request = time.monotonic()
     headers = {
         "User-Agent": settings.EDGAR_USER_AGENT,
         "Accept": "application/json,text/html,*/*",
     }
     resp = httpx.get(url, headers=headers, timeout=15.0, follow_redirects=True)
     resp.raise_for_status()
-    time.sleep(_SEC_RATE_LIMIT_SLEEP_SECONDS)
     return resp
 
 
@@ -294,9 +320,13 @@ def _recent_filings(
 
 def _with_text(filing: EdgarFiling) -> EdgarFiling:
     """``filing`` with its primary document's text; unchanged when the
-    filing names no primary document or the fetch fails (text is optional)."""
+    filing names no primary document or the fetch fails (text is optional).
+    Text already on disk for the accession is reused, not downloaded."""
     if filing.primary_doc_url.endswith("/"):
         return filing
+    cached = _read_cached_filing(_cache_root(), filing.cik, filing.accession)
+    if cached is not None and cached.primary_doc_text:
+        return filing.model_copy(update={"primary_doc_text": cached.primary_doc_text})
     try:
         text = _sec_get(filing.primary_doc_url).text
     except Exception:  # noqa: BLE001 — text is optional, don't kill the call
@@ -415,6 +445,9 @@ def _try_cache(
     prior metadata-only cache entry silently satisfies a text request
     and the caller receives a useless empty-text filing.
     """
+    path = _index_path(root, symbol, form_type)
+    if not path.exists() or time.time() - path.stat().st_mtime > INDEX_TTL_SECONDS:
+        return []  # no index, or too old to say what the latest filings are
     index = _read_cached_index(root, symbol, form_type)
     out: list[EdgarFiling] = []
     for entry in index:

@@ -30,6 +30,7 @@ const TOOL_LABELS: Record<string, string | null> = {
   fetch_earnings: "earnings",
   fetch_fundamentals: "fundamentals",
   fetch_business_info: "business profile",
+  fetch_insider_activity: "insider activity",
 };
 
 function labelFor(tool: string): string | null {

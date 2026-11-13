@@ -296,3 +296,8 @@ def test_cached_points_without_titles_still_parse() -> None:
     }
     thesis = Thesis.model_validate(cached)
     assert thesis.bull[0].title is None
+
+
+def test_insider_claims_can_be_cited_in_the_analyst_view() -> None:
+    assert rt.SECTION_CODES["Insider Activity"] == "I"
+    assert len(set(rt.SECTION_CODES.values())) == len(rt.SECTION_CODES)

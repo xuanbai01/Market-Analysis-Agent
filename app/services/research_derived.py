@@ -523,3 +523,24 @@ def valuation_history_claims(fundamentals: Any, annual: Any) -> list[Claim]:
                 a,
             ))
     return out
+
+
+# ── Insider activity ─────────────────────────────────────────────────
+
+_INSIDER_SHARES = (
+    ("sell_dollars", "Officer and director sales as a share of market cap, last 6 months"),
+    ("buy_dollars", "Officer and director purchases as a share of market cap, last 6 months"),
+)
+
+
+def insider_claims(insider: Any, fundamentals: Any) -> list[Claim]:
+    """Insider dollars as a share of market cap: $1.4B sold reads as a
+    lot until it is 0.03% of a $4T company. Only for a direction that had
+    trades."""
+    i, f = _claims(insider), _claims(fundamentals)
+    out: list[Claim] = []
+    for key, label in _INSIDER_SHARES:
+        share = _ratio(_num(i, key), _num(f, "market_cap"))
+        if share is not None and share > 0:
+            out.append(_claim(label, share, "fraction", f"{key} ÷ market_cap", i, f))
+    return out

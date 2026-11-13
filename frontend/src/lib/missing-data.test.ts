@@ -49,3 +49,11 @@ describe("missingFromAudit", () => {
     expect(missingFromAudit([])).toEqual([]);
   });
 });
+
+describe("missingFromAudit — insider activity", () => {
+  it("names the insider tool in words", () => {
+    expect(missingFromAudit(["fetch_insider_activity: empty"])).toEqual([
+      { label: "insider activity", reason: "empty" },
+    ]);
+  });
+});

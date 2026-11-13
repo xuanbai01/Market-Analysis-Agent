@@ -111,7 +111,8 @@ Tools live in `app/services/`. Each is a focused async function; sync providers 
 | `fetch_news` | Yahoo RSS + NewsAPI, ingested per report, categorized by triage LLM | News |
 | `xbrl.annual_series` | SEC company-concept API (tags merged per year, CY frames) | Lenses |
 | `fetch_annual_history` | SEC XBRL annual facts, split-adjusted with yfinance splits; ten years of closes | Quality (ten-year per-share growth), Valuation (P/E, P/S and P/FCF at each fiscal year-end) |
-| `parse_filing` (Form 4, 13F), `compute_technicals` | Phase 2 parsers, RSI/SMA | not on the dashboard today |
+| `fetch_insider_activity` | SEC Form 4s, last six months (company's own filings only) | Insider Activity |
+| `parse_filing` (13F), `compute_technicals` | Phase 2 parser, RSI/SMA | not on the dashboard today |
 
 **Derived claims** (`app/services/research_derived.py`, ADR 0007) are computed in code and added to sections with source `computed.analytics`: year-over-year margin and per-share changes between named quarters, TTM FCF margin and yield, FCF ÷ net income, payout, shareholder yield, dividend coverage, capex intensity, SBC ÷ FCF, net debt ÷ operating cash flow, premium or discount to the peer median, the median of each year-end multiple and today's premium or discount to it, implied EPS growth, beat streak, latest surprise vs average. Banks skip FCF, capex, gross margin and net debt. These give the model comparisons to argue from without ever computing a number itself.
 
@@ -195,7 +196,9 @@ Real auth and per-user cost caps land only when there are real users.
 
 **Public read-only demo (done, 2026-11-13).** `/demo` shows pre-built reports for a configured list of tickers without sign-in; the production rate limit dropped from 30 to 10 an hour alongside.
 
-**Next (plan in [tasks/todo.md](tasks/todo.md)):** README screenshots; then more lenses and insider activity from the Form 4 parser. A compare narrative (4.6.B) waits until Compare gets used.
+**Insider activity (done, 2026-11-13).** Officer and director trades from Form 4s, holders apart, on their own card.
+
+**Next (plan in [tasks/todo.md](tasks/todo.md)):** README screenshots; then more lenses. A compare narrative (4.6.B) waits until Compare gets used.
 
 **Indefinitely deferred.** `search_history` (pgvector RAG), `compute_options`, Reddit sentiment, real auth + per-user cost caps + Redis-backed rate limiting.
 

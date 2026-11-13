@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from app.schemas.research import Claim, ClaimHistoryPoint, Source
 from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
 from app.services.research_derived import DERIVED_TOOL
@@ -94,6 +96,7 @@ def test_focus_full_section_catalog() -> None:
         "Earnings",
         "Peers",
         "Risk Factors",
+        "Insider Activity",
         "Macro",
     ]
 
@@ -131,6 +134,7 @@ def test_tools_for_full_lists_every_required_tool() -> None:
         "fetch_business_info",
         "fetch_news",
         "fetch_annual_history",
+        "fetch_insider_activity",
     }
 
 
@@ -656,3 +660,31 @@ def test_a_multiple_with_no_history_stays_out_of_valuation() -> None:
     descriptions = {c.description for c in _spec(Focus.FULL, "Valuation").builder(outputs)}
 
     assert "Price-to-free-cash-flow at fiscal year-end (SEC filings)" not in descriptions
+
+
+# ── Insider activity (2026-11) ───────────────────────────────────────
+
+
+def _insider_output(sell: float | None = 1_378_000_000.0) -> dict[str, Claim]:
+    from app.services import form_4
+
+    claims = {key: _claim(form_4.DESCRIPTIONS[key], None) for key in form_4.CLAIM_KEYS}
+    claims["sell_dollars"] = _claim(form_4.DESCRIPTIONS["sell_dollars"], sell)
+    claims["buy_dollars"] = _claim(form_4.DESCRIPTIONS["buy_dollars"], 0.0)
+    claims["person.1"] = _claim("STEVENS MARK A (Director): net bought (+) or sold (−), last 6 months", -1_353_000_000.0)
+    return claims
+
+
+def test_the_insider_section_carries_the_tool_claims_people_and_comparison() -> None:
+    spec = _spec(Focus.FULL, "Insider Activity")
+    assert set(spec.tools_required) == {"fetch_insider_activity", "fetch_fundamentals"}
+
+    fundamentals = {"market_cap": _claim("Market capitalization", 4_400_000_000_000.0)}
+    claims = spec.builder({"fetch_insider_activity": _insider_output(), "fetch_fundamentals": fundamentals})
+    descriptions = [c.description for c in claims]
+
+    assert "Sales by officers and directors, last 6 months" in descriptions
+    assert "STEVENS MARK A (Director): net bought (+) or sold (−), last 6 months" in descriptions
+    share = next(c for c in claims if c.description.startswith("Officer and director sales as a share of market cap"))
+    assert share.value == pytest.approx(1_378_000_000 / 4_400_000_000_000)
+    assert share.source.tool == DERIVED_TOOL

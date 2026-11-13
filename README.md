@@ -23,7 +23,7 @@ An **AI Equity Research Assistant**. Open a ticker and get a research dashboard:
 
 | Route | What it shows |
 |---|---|
-| `/symbol/:ticker` | Sticky section nav; **Hero** (price chart with axes + hover, featured stats; distress pills and a metric swap for unprofitable names); **Analyst view** (headline, then bull / bear and what changed / what to watch as one line each: a short title and its key figure, opening to the full reasoning and the claims behind it, each jumping to its card); full-width **Quality**, **Earnings** (20Q EPS bars, beat rate, recent prints), **Valuation** (multiples vs peer median + peer scatter, and P/E, P/S and P/FCF against the company's own fiscal year-ends), **Per-share growth**; one equal-height row of **Cash & capital**, **Capital returns**, **10-K risk diff** and **Macro** (only the cards with data); **Business** + **News**. "Generated 2 days ago · Regenerate" replaces a stale cached report. |
+| `/symbol/:ticker` | Sticky section nav; **Hero** (price chart with axes + hover, featured stats; distress pills and a metric swap for unprofitable names); **Analyst view** (headline, then bull / bear and what changed / what to watch as one line each: a short title and its key figure, opening to the full reasoning and the claims behind it, each jumping to its card); full-width **Quality**, **Earnings** (20Q EPS bars, beat rate, recent prints), **Valuation** (multiples vs peer median + peer scatter, and P/E, P/S and P/FCF against the company's own fiscal year-ends), **Per-share growth**; one equal-height row of **Cash & capital**, **Capital returns**, **10-K risk diff** and **Macro** (only the cards with data); **Insider activity** (officer and director buying and selling, 10% holders apart); **Business** + **News**. "Generated 2 days ago · Regenerate" replaces a stale cached report. |
 | `/compare?a=X&b=Y` | Two tickers side by side: hero, valuation and quality rows, operating-margin and per-share growth overlays, risk diffs. |
 | `/lens/:id` | One metric across a group of companies over 10 years from SEC XBRL, with a cited AI read. First lens: **megacap tech capex** (AAPL, MSFT, GOOGL, AMZN, META, NVDA, TSLA) — capex intensity distribution by year, capex dollars by company, capex ÷ operating cash flow. |
 | `/` | Search + past reports. The sidebar (Search ⌘K · Home · Compare · Lenses · Watchlist · Recent) and a **market strip** (S&P 500, Nasdaq 100, Dow, VIX, our fear & greed estimate, Russell 2000, 10Y, dollar, gold, WTI, bitcoin) sit on every page. |
@@ -124,7 +124,8 @@ POST /v1/research/{symbol}?focus=full
 | `fetch_business_info` | yfinance business summary, HQ, employees |
 | `fetch_news` | Yahoo per-ticker RSS (+ NewsAPI when keyed), ingested per report, categorized by the triage model |
 | `xbrl` (lenses) | SEC company-concept API, tags merged year by year, calendar frames |
-| Form 4 / 13F parsers, technicals | parsers and RSI/SMA from Phase 2, not on the dashboard today |
+| `fetch_insider_activity` | officer and director purchases and sales from Form 4s, last six months, 10% holders apart |
+| 13F parser, technicals | Phase 2, not on the dashboard today |
 
 **LLM:** `LLM_PROVIDER` picks the backend at call time ([ADR 0006](docs/adr/0006-pluggable-llm-provider.md)): Anthropic (Haiku 4.5 triage + Sonnet 4.6 synthesis; the code default) or DeepSeek V4.1 Flash for both tiers (production). Triage runs the risk and news categorizers; synthesis writes the section prose, the analyst view and the lens read.
 
@@ -197,7 +198,7 @@ A push to `main` deploys both halves: [`.github/workflows/deploy.yml`](.github/w
 - **Phase 4 — Symbol-centric dashboard** ✅ ([ADR 0005](docs/adr/0005-symbol-centric-dashboard.md)) Strata design, dedicated cards and SVG charts, adaptive layouts for distressed names, Compare, search / watchlist / recent; 4.8 deployed it and ran the dogfood gate, which also brought readable chart axes, the sidebar rewrite, the market strip, Regenerate, error boundaries and the layout pass.
 - **Phase 5 — Narrative layer** ✅ (the 4.8 gate's outcome, [ADR 0007](docs/adr/0007-analytical-narratives.md)) Derived comparison claims and interpretive card prose, the cited analyst view, and the megacap capex lens.
 - **Phase 6 — XBRL Tier 2** ⏸ Segment and geography revenue, RPO. Dogfooding hasn't asked for it yet; the XBRL client the lenses use is the starting point.
-- **Next** ([tasks/todo.md](tasks/todo.md)) README screenshots, more lenses, insider activity.
+- **Next** ([tasks/todo.md](tasks/todo.md)) README screenshots, more lenses.
 - **Indefinitely deferred** ⏸ `search_history` (pgvector RAG), options / IV, Reddit sentiment, real auth + per-user cost caps.
 
 [design_doc.md](design_doc.md) has the system design; the [ADRs](docs/adr/) have the reasoning behind each pivot.

@@ -40,7 +40,7 @@ from typing import Any
 
 from app.schemas.research import Claim, Source
 from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
-from app.services import annual_history, research_derived
+from app.services import annual_history, research_derived, valuation_history
 
 
 class Focus(str, Enum):
@@ -143,13 +143,22 @@ def _build_valuation(outputs: dict[str, Any]) -> list[Claim]:
     fundamentals = outputs.get("fetch_fundamentals")
     # The trailing gross margin is here for the peer comparison; a bank
     # has no meaningful one (ADR 0007).
-    keys = tuple(
-        key
-        for key in _VALUATION_KEYS
-        if not (key == "gross_margin_ttm" and research_derived.is_balance_sheet_business(fundamentals))
-    )
-    return _filter_keys(fundamentals, keys) + research_derived.valuation_claims(
-        fundamentals, outputs.get("fetch_peers")
+    bank = research_derived.is_balance_sheet_business(fundamentals)
+    keys = tuple(key for key in _VALUATION_KEYS if not (key == "gross_margin_ttm" and bank))
+    annual = outputs.get("fetch_annual_history")
+    # 2026-11 — the year-end multiples that have a history (a bank's
+    # free-cash-flow multiple is left out), then today against them.
+    own_history = [
+        claim
+        for claim in _filter_keys(annual, valuation_history.MULTIPLE_KEYS)
+        if claim.history
+        and not (claim.description == valuation_history.DESCRIPTIONS["pfcf_annual"] and bank)
+    ]
+    return (
+        _filter_keys(fundamentals, keys)
+        + research_derived.valuation_claims(fundamentals, outputs.get("fetch_peers"))
+        + own_history
+        + research_derived.valuation_history_claims(fundamentals, annual)
     )
 
 
@@ -170,7 +179,7 @@ def _annual_claims(annual: Any, fundamentals: Any) -> list[Claim]:
     book, not the business)."""
     keys = tuple(
         key
-        for key in annual_history.CLAIM_KEYS
+        for key in annual_history.PER_SHARE_KEYS
         if not (key == "fcf_per_share_annual" and research_derived.is_balance_sheet_business(fundamentals))
     )
     return [claim for claim in _filter_keys(annual, keys) if claim.history]
@@ -342,7 +351,12 @@ SECTIONS_BY_FOCUS: dict[Focus, list[SectionSpec]] = {
         SectionSpec("Business", ("fetch_business_info",), _build_business),
         SectionSpec("News", ("fetch_news",), _build_news),
         # Peers feed Valuation's premium/discount claims (ADR 0007).
-        SectionSpec("Valuation", ("fetch_fundamentals", "fetch_peers"), _build_valuation),
+        # 2026-11 — SEC annual history also prices each fiscal year-end.
+        SectionSpec(
+            "Valuation",
+            ("fetch_fundamentals", "fetch_peers", "fetch_annual_history"),
+            _build_valuation,
+        ),
         # 2026-11 — SEC annual history feeds the 10-year per-share view.
         SectionSpec("Quality", ("fetch_fundamentals", "fetch_annual_history"), _build_quality),
         SectionSpec(

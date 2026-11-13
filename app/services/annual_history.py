@@ -25,30 +25,41 @@ Years are the SEC's calendar frames (``CY2025`` is the ~365-day fiscal
 year best matching calendar 2025; NVDA's year ending Jan 2026 is CY2025).
 Banks get revenue and EPS only: they don't report operating income, and
 free cash flow says nothing about a bank (ADR 0007).
+
+The same tool returns each fiscal year-end's valuation multiples (P/E,
+price-to-sales, price-to-free-cash-flow): the per-share figures above
+under that day's close. The maths is in ``valuation_history.py``; this
+module fetches the period ends and the closes alongside the facts, so
+one SEC read serves both.
 """
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.core.observability import log_external_call
 from app.schemas.research import Claim, ClaimHistoryPoint, Source
-from app.services import edgar, xbrl
+from app.services import edgar, valuation_history, xbrl
 
-CLAIM_KEYS: tuple[str, ...] = (
+PER_SHARE_KEYS: tuple[str, ...] = (
     "revenue_per_share_annual",
     "operating_income_per_share_annual",
     "fcf_per_share_annual",
     "eps_diluted_annual",
 )
+# Every claim the tool returns: the per-share series, then the year-end
+# multiples built from them.
+CLAIM_KEYS: tuple[str, ...] = PER_SHARE_KEYS + valuation_history.MULTIPLE_KEYS
 
 DESCRIPTIONS: dict[str, str] = {
     "revenue_per_share_annual": "Revenue per share, annual (SEC filings)",
     "operating_income_per_share_annual": "Operating income per share, annual (SEC filings)",
     "fcf_per_share_annual": "Free cash flow per share, annual (SEC filings)",
     "eps_diluted_annual": "Diluted EPS, annual (SEC filings)",
+    **valuation_history.DESCRIPTIONS,
 }
 
 _DETAILS: dict[str, str] = {
@@ -59,6 +70,7 @@ _DETAILS: dict[str, str] = {
     "operating_income_per_share_annual": "us-gaap OperatingIncomeLoss ÷ diluted weighted shares, split-adjusted",
     "fcf_per_share_annual": "(operating cash flow − capex) ÷ diluted weighted shares, split-adjusted",
     "eps_diluted_annual": "us-gaap EarningsPerShareDiluted, split-adjusted",
+    **valuation_history.DETAILS,
 }
 
 assert set(DESCRIPTIONS) == set(CLAIM_KEYS) == set(_DETAILS)
@@ -66,6 +78,9 @@ assert set(DESCRIPTIONS) == set(CLAIM_KEYS) == set(_DETAILS)
 TOOL = "sec.xbrl"
 MAX_POINTS = 11  # eleven annual points = ten years of growth
 MAX_SHARE_JUMP = 1.6
+# Daily closes to fetch: the window of annual points plus slack for a
+# fiscal year that ended before the first calendar year in it.
+PRICE_YEARS = MAX_POINTS + 2
 GOODS_REVENUE_TAG = "SalesRevenueGoodsNet"
 SERVICES_REVENUE_TAG = "SalesRevenueServicesNet"
 
@@ -92,6 +107,8 @@ def _fetch_sec(symbol: str) -> Raw:
         "shares": xbrl.annual_series_with_filed(cik, xbrl.DILUTED_SHARES_TAGS, "shares"),
         "eps": xbrl.annual_series_with_filed(cik, xbrl.DILUTED_EPS_TAGS, "USD/shares"),
         "splits": _splits(symbol),
+        "period_ends": _period_ends(cik),
+        "closes": _closes(symbol),
     }
 
 
@@ -101,6 +118,15 @@ def _revenue(cik: str) -> dict[int, tuple[float, str]]:
         goods=xbrl.annual_series_with_filed(cik, (GOODS_REVENUE_TAG,)),
         services=xbrl.annual_series_with_filed(cik, (SERVICES_REVENUE_TAG,)),
     )
+
+
+def _period_ends(cik: str) -> dict[int, str]:
+    """Calendar year → fiscal period end, from the revenue facts (EPS
+    facts fill a year revenue lacks)."""
+    return {
+        **xbrl.annual_period_ends(cik, xbrl.DILUTED_EPS_TAGS, "USD/shares"),
+        **xbrl.annual_period_ends(cik, (*xbrl.REVENUE_TAGS, GOODS_REVENUE_TAG)),
+    }
 
 
 def merge_goods_revenue(
@@ -129,6 +155,25 @@ def _splits(symbol: str) -> list[tuple[str, float]]:
         series = yfinance.Ticker(symbol).splits
         return [(ts.date().isoformat(), float(ratio)) for ts, ratio in series.items() if float(ratio) > 0]
     except Exception:  # noqa: BLE001 — a missing split list is not fatal
+        return []
+
+
+def _closes(symbol: str) -> list[tuple[str, float]]:
+    """(ISO date, close), oldest first, for the last ``PRICE_YEARS`` years.
+    Yahoo's ``Close`` is adjusted for splits and not for dividends, the
+    same share basis as the split-adjusted per-share figures. [] on any
+    failure; the year-end multiples are then left out."""
+    import yfinance  # noqa: PLC0415  (lazy: tests swap in a fake provider)
+
+    try:
+        start = (datetime.now(UTC) - timedelta(days=366 * PRICE_YEARS)).date().isoformat()
+        frame = yfinance.Ticker(symbol).history(start=start, interval="1d", auto_adjust=False)
+        return [
+            (ts.date().isoformat(), float(close))
+            for ts, close in frame["Close"].items()
+            if math.isfinite(float(close))
+        ]
+    except Exception:  # noqa: BLE001 — no prices is not fatal
         return []
 
 
@@ -176,7 +221,7 @@ def per_share_series(raw: Raw) -> dict[str, list[ClaimHistoryPoint]]:
     splits = raw.get("splits") or []
 
     window = sorted(set(revenue) & set(shares))[-MAX_POINTS:]
-    out: dict[str, list[ClaimHistoryPoint]] = {key: [] for key in CLAIM_KEYS}
+    out: dict[str, list[ClaimHistoryPoint]] = {key: [] for key in PER_SHARE_KEYS}
     for year in window:
         sh = shares[year]
         period = str(year)
@@ -197,6 +242,18 @@ def per_share_series(raw: Raw) -> dict[str, list[ClaimHistoryPoint]]:
     return out
 
 
+def all_series(raw: Raw) -> dict[str, list[ClaimHistoryPoint]]:
+    """The per-share series plus the year-end multiples built from them
+    (empty when the raw facts carry no period ends or closes)."""
+    series = per_share_series(raw)
+    series.update(
+        valuation_history.multiples_series(
+            series, raw.get("period_ends") or {}, raw.get("closes") or []
+        )
+    )
+    return series
+
+
 def build_claims(
     series: Mapping[str, list[ClaimHistoryPoint]],
     fetched_at: datetime | None = None,
@@ -212,7 +269,7 @@ def build_claims(
         claims[key] = Claim(
             description=DESCRIPTIONS[key],
             value=points[-1].value if points else None,
-            unit="usd_per_share",
+            unit="ratio" if key in valuation_history.MULTIPLE_KEYS else "usd_per_share",
             source=Source(tool=TOOL, fetched_at=at, detail=_DETAILS[key]),
             history=points,
         )
@@ -227,6 +284,6 @@ async def fetch_annual_history(symbol: str, *, provider: str = "sec") -> dict[st
     target = symbol.upper()
     with log_external_call(f"{TOOL}.annual_history", {"symbol": target, "provider": provider}) as call:
         raw = await asyncio.to_thread(fetch, target)
-        series = per_share_series(raw)
+        series = all_series(raw)
         call.record_output({key: len(points) for key, points in series.items()})
     return build_claims(series)

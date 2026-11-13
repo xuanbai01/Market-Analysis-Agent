@@ -125,3 +125,19 @@ def annual_series_with_filed(
             for year, fact in annual_facts(fetch_concept(registrant, tag), unit).items():
                 merged.setdefault(year, fact)
     return dict(sorted(merged.items()))
+
+
+def annual_period_ends(cik: str, tags: Sequence[str], unit: str = "USD") -> dict[int, str]:
+    """Calendar year → the ISO date that fiscal year ended, from the same
+    annual frames ``annual_series_with_filed`` reads (and the same
+    registrant chain). A year-end price needs the date: Apple's CY2025
+    ended on 27 September 2025, Nvidia's on 25 January 2026."""
+    ends: dict[int, str] = {}
+    for registrant in sec_registrants.registrant_chain(cik):
+        for tag in tags:
+            for fact in fetch_concept(registrant, tag).get("units", {}).get(unit, []):
+                frame = fact.get("frame", "")
+                end = str(fact.get("end", ""))
+                if len(frame) == 6 and frame.startswith("CY") and frame[2:].isdigit() and end:
+                    ends.setdefault(int(frame[2:]), end)
+    return dict(sorted(ends.items()))

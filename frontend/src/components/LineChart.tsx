@@ -1,7 +1,7 @@
 /**
  * LineChart — bigger sibling of Sparkline, used by the hero price
  * chart at 560×140 default. Hand-rolled SVG (same philosophy as
- * Sparkline / SectionChart's hand-rolled fallback).
+ * Sparkline).
  *
  * Phase 4.1 shipped the chart with ``no axes, no tooltip, no grid``
  * on the assumption that the host card would compose those separately.

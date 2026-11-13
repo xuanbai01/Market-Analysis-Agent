@@ -2,8 +2,7 @@
  * hero-extract — pure helper that pulls the data the HeroCard needs
  * out of a ResearchReport. Phase 4.1.
  *
- * Same description-matching philosophy as Phase 3.3.B's
- * `featured-claim.ts` and 3.3.C's `peer-grouping.ts` — the schema
+ * Same description-matching philosophy as 3.3.C's `peer-grouping.ts` — the schema
  * flattens claim keys into per-section lists, so the backend keys
  * don't survive the round-trip; we match on the stable
  * `_DESCRIPTIONS` strings instead.

@@ -2,8 +2,7 @@
  * hero-extract tests (Phase 4.1).
  *
  * Pure function that pulls the data the HeroCard needs out of a
- * ResearchReport. Like featured-claim.ts (3.3.B) and peer-grouping.ts
- * (3.3.C), it matches by claim description rather than key — the
+ * ResearchReport. Like peer-grouping.ts (3.3.C), it matches by claim description rather than key — the
  * backend keys don't survive the schema flatten.
  *
  * Tests pin: realistic descriptions resolve, missing data returns

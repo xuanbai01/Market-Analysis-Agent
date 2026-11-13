@@ -9,8 +9,7 @@
  *   - supports pivoting axes via 3 inline preset pills (no dropdown
  *     because the choice is small enough that 3 visible buttons read
  *     better than a hidden menu)
- *   - drops the recharts dep for this component (the shared chunk
- *     remains for SectionChart until 4.3 replaces it)
+ *   - needs no charting library (recharts left the project in 2026-11)
  *
  * The 3 axis presets are all drawn from ``PEER_METRICS`` on the
  * backend (``trailing_pe``, ``p_s``, ``ev_ebitda``, ``gross_margin``)

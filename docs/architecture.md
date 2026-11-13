@@ -134,6 +134,7 @@ POST /v1/research/{symbol}
 | Research list | `GET /v1/research?limit=20&offset=0&symbol=...` | ✅ paginated `ResearchReportSummary[]` for the dashboard sidebar |
 | Phase 4 — prices | `GET /v1/market/:ticker/prices?range={60D\|1Y\|5Y}` | ✅ Phase 4.1 — read-through `candles` cache, falls through to yfinance ingest on miss. Auth-gated. |
 | Market strip | `GET /v1/market/overview` | ✅ 2026-11 — headline quotes (S&P 500, Nasdaq 100, Dow, VIX, Russell 2000, US 10Y, dollar, gold, WTI, bitcoin) + our fear & greed estimate (`market_sentiment.py`: momentum, VIX, safe-haven and junk-bond demand, each ranked against its past year). yfinance, in-memory cache (5 min quotes / 1 h sentiment), serves stale on provider failure. Auth-gated. |
+| Demo | `GET /v1/demo`, `GET /v1/demo/research/{symbol}`, `GET /v1/demo/market/{symbol}/prices` | ✅ 2026-11 — public and read-only: the latest stored report and stored prices for the tickers in `DEMO_SYMBOLS`. Never generates or fetches; 5 min in-memory cache. **Not auth-gated, by design** (security.md A01). |
 | Lenses | `GET /v1/lens`, `GET /v1/lens/{id}` | ✅ 2026-11 (ADR 0007 layer 3) — cross-company lens built from SEC XBRL annual filings (`xbrl.py`: tag merging per year, SEC calendar frames, 24 h disk cache) and `lens.py` (10-year window ending at the latest year every company filed; per-year distribution stats; computed facts; cited AI narrative). First lens: megacap tech capex. In-memory cache 24 h, stale on failure, 503 when nothing cached. Auth-gated. |
 
 ## Frontend routes (current)
@@ -142,7 +143,8 @@ Lazy-loading is the binding bundle constraint — the main chunk must stay under
 
 | Route | State | Chunk |
 |---|---|---|
-| `/login` | ✅ Pre-auth screen. | main |
+| `/login` | ✅ Pre-auth screen. Links to the demo when there is one. | main |
+| `/demo`, `/demo/:ticker` | ✅ Public read-only demo, no sign-in: an index of the demo tickers and the same dashboard, read through `/v1/demo`. No sidebar, search, market strip, Regenerate or watchlist. | **lazy** (shell + index; the dashboard chunk is shared) |
 | `/` | ✅ LandingPage — search bar + Past Reports (Watchlist and Recent live in the sidebar on every page). | main |
 | `/symbol/:ticker` | ✅ The dashboard: sticky section nav, HeroCard, AnalystViewCard, full-width Quality / Earnings / Valuation / Per-share growth, an equal-height row of Cash & capital · Capital returns · Risk · Macro (only the cards with data), Business + News. | **lazy** |
 | `/compare?a=X&b=Y` | ✅ Phase 4.6.A — two-ticker side-by-side. One % change price chart, growth by metric, risk on one scale. | **lazy** |

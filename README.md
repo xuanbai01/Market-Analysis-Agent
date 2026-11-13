@@ -2,7 +2,8 @@
 
 An **AI Equity Research Assistant**. Open a ticker and get a research dashboard: price, quality, earnings, valuation against peers, per-share growth, cash and capital returns, the year-over-year change in 10-K risk factors, macro context, business and news, plus an **analyst view** (headline, bull case, bear case, what changed, what to watch). Every number on the page, and every number the AI writes, cites the data it came from. Free data only, on ~$5/mo of infrastructure.
 
-- **Dashboard:** <https://market-analysis-agent-red.vercel.app> (sign-in with the shared secret; internal use for now)
+- **Demo, no sign-in:** <https://market-analysis-agent-red.vercel.app/demo> (a few pre-built reports, read-only)
+- **Dashboard:** <https://market-analysis-agent-red.vercel.app> (sign-in with the shared secret; any ticker)
 - **API:** <https://market-analysis-agent.fly.dev/docs>
 
 > **Status — Phases 1–5 done (2026-11).** The symbol-centric dashboard ([ADR 0005](docs/adr/0005-symbol-centric-dashboard.md)) is deployed: React on Vercel, FastAPI on Fly, Postgres on Neon, DeepSeek V4.1 Flash for the prose ([ADR 0006](docs/adr/0006-pluggable-llm-provider.md)). The Phase 4.8 dogfood gate sent the project into the narrative layer: card prose that interprets instead of listing, a cited analyst view, and cross-company lenses built from SEC XBRL ([ADR 0007](docs/adr/0007-analytical-narratives.md)). Live golden eval: factuality 1.000 on all five golden tickers. Test counts are in [docs/testing.md](docs/testing.md), bundle sizes in [frontend/README.md](frontend/README.md), the open plan in [tasks/todo.md](tasks/todo.md) and the history in [docs/changelog.md](docs/changelog.md).
@@ -62,6 +63,7 @@ Verify with `curl http://localhost:8000/v1/health` → `{"status":"ok","db":true
 | `GET /v1/market/{symbol}/prices?range={60D\|1Y\|5Y}` | ✅ OHLCV from the `candles` cache, falling through to a yfinance ingest on a miss. |
 | `GET /v1/market/overview` | ✅ The market strip: headline quotes + our fear & greed estimate. In-memory cache, serves stale on provider failure. |
 | `GET /v1/lens`, `GET /v1/lens/{id}` | ✅ Cross-company lenses from SEC XBRL. |
+| `GET /v1/demo`, `/v1/demo/research/{symbol}`, `/v1/demo/market/{symbol}/prices` | ✅ Public, read-only: stored reports and prices for the tickers in `DEMO_SYMBOLS`. Never generates anything. |
 | `GET /v1/health` | ✅ Pings the DB. |
 | `GET/POST /v1/symbols`, `GET /v1/news`, `GET /v1/news/{id}`, `POST /v1/news/ingest`, `POST /v1/market/ingest`, `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | ✅ Phase 1 data routes. |
 
@@ -195,7 +197,7 @@ A push to `main` deploys both halves: [`.github/workflows/deploy.yml`](.github/w
 - **Phase 4 — Symbol-centric dashboard** ✅ ([ADR 0005](docs/adr/0005-symbol-centric-dashboard.md)) Strata design, dedicated cards and SVG charts, adaptive layouts for distressed names, Compare, search / watchlist / recent; 4.8 deployed it and ran the dogfood gate, which also brought readable chart axes, the sidebar rewrite, the market strip, Regenerate, error boundaries and the layout pass.
 - **Phase 5 — Narrative layer** ✅ (the 4.8 gate's outcome, [ADR 0007](docs/adr/0007-analytical-narratives.md)) Derived comparison claims and interpretive card prose, the cited analyst view, and the megacap capex lens.
 - **Phase 6 — XBRL Tier 2** ⏸ Segment and geography revenue, RPO. Dogfooding hasn't asked for it yet; the XBRL client the lenses use is the starting point.
-- **Next** ([tasks/todo.md](tasks/todo.md)) A public read-only demo, more lenses, insider activity.
+- **Next** ([tasks/todo.md](tasks/todo.md)) README screenshots, more lenses, insider activity.
 - **Indefinitely deferred** ⏸ `search_history` (pgvector RAG), options / IV, Reddit sentiment, real auth + per-user cost caps.
 
 [design_doc.md](design_doc.md) has the system design; the [ADRs](docs/adr/) have the reasoning behind each pivot.

@@ -145,6 +145,7 @@ Non-negotiable; every PR is held to them.
 | Market | `GET /v1/market/{symbol}/prices?range=`, `GET /v1/market/overview`, `POST /v1/market/ingest` | bearer |
 | Market (Phase 1 reads) | `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | open |
 | Lenses | `GET /v1/lens`, `GET /v1/lens/{id}` | bearer |
+| Demo | `GET /v1/demo`, `/v1/demo/research/{symbol}`, `/v1/demo/market/{symbol}/prices` | **open by design**: stored data for `DEMO_SYMBOLS` only, never generates |
 | Symbols / News | `GET /v1/symbols`, `GET /v1/news`, `GET /v1/news/{id}` open; `POST /v1/symbols`, `POST /v1/news/ingest` bearer | |
 
 Errors are RFC 7807 problem+json via [`app/core/errors.py`](app/core/errors.py); `Retry-After` (429) and `WWW-Authenticate` (401) survive the wrap.
@@ -166,7 +167,7 @@ The per-IP rate limit on fresh reports (default 3/h; 30/h in production during d
 
 Active OWASP mitigations in [docs/security.md](docs/security.md). The non-negotiables:
 
-- **A01 access.** Shared-secret bearer auth on every route that costs money, spends quota or writes; single-origin CORS.
+- **A01 access.** Shared-secret bearer auth on every route that costs money, spends quota or writes; single-origin CORS. The one open exception is the read-only demo, which serves stored reports for a configured list of tickers and can't spend anything.
 - **A09 observability.** Every external call (LLM, yfinance, SEC, FRED, news) logged with service id, input/output shape, latency, timestamp and outcome via `log_external_call`.
 - **A03 injection.** No user input in SQL strings (typed `select()`) or LLM prompts (structured slots only).
 - **Honest clients.** No bot-check circumvention: CNN's fear & greed endpoint refuses automated clients, so the strip shows our own labelled estimate instead.
@@ -192,7 +193,9 @@ Real auth and per-user cost caps land only when there are real users.
 
 **Valuation against own history (done, 2026-11-13).** Each fiscal year-end's multiples, their medians and today's premium or discount to them, drawn on the Valuation card.
 
-**Next (plan in [tasks/todo.md](tasks/todo.md)):** a public read-only demo and README screenshots, with the production rate limit lowered alongside; then more lenses and insider activity from the Form 4 parser. A compare narrative (4.6.B) waits until Compare gets used.
+**Public read-only demo (done, 2026-11-13).** `/demo` shows pre-built reports for a configured list of tickers without sign-in; the production rate limit dropped from 30 to 10 an hour alongside.
+
+**Next (plan in [tasks/todo.md](tasks/todo.md)):** README screenshots; then more lenses and insider activity from the Form 4 parser. A compare narrative (4.6.B) waits until Compare gets used.
 
 **Indefinitely deferred.** `search_history` (pgvector RAG), `compute_options`, Reddit sentiment, real auth + per-user cost caps + Redis-backed rate limiting.
 

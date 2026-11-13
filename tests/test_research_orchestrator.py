@@ -1533,3 +1533,13 @@ async def test_audit_says_empty_for_macro_labels_without_observations(
     _patch_tools(monkeypatch, {"fetch_macro": {**labels_only, "DCOILWTICO.value": observed}})
     _outputs, audit = await orch_module._run_tools_parallel("XOM", ["fetch_macro"])
     assert audit == ["fetch_macro: ok"]
+
+
+def test_both_prompts_say_a_year_end_figure_is_not_todays() -> None:
+    """First real report with year-end multiples (KO, 2026-11-13): the
+    prose called the fiscal-2025 price-to-free-cash-flow "today"."""
+    from app.services import research_thesis
+
+    for prompt in (orch_module._SYSTEM_PROMPT, research_thesis.THESIS_SYSTEM_PROMPT):
+        assert "A value is as of when its description says" in prompt
+        assert "at fiscal year-end" in prompt

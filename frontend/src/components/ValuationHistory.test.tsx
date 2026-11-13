@@ -67,6 +67,25 @@ describe("ValuationHistory", () => {
     expect(screen.getByTestId("own-history-read")).toHaveTextContent("Today 5.4× · 4 year-ends, too few for a median");
   });
 
+  it("names an outlier year instead of letting it flatten the chart", () => {
+    // Coca-Cola: a 2017 P/E of 158 on earnings cut by a one-off tax charge.
+    const { container } = render(
+      <ValuationHistory
+        panels={[{ ...PE, history: years([25, 28, 158, 30, 27]), median: 28, today: 29, premium: 0.04 }]}
+      />,
+    );
+    expect(screen.getByTestId("own-history-off-scale")).toHaveTextContent("off the scale: 2023 at 158.0×");
+    const ticks = [...container.querySelectorAll("[data-testid='multi-line-y-tick']")].map((t) =>
+      Number(t.textContent),
+    );
+    expect(Math.max(...ticks)).toBeLessThan(60);
+  });
+
+  it("keeps every year on the scale when none is far from the median", () => {
+    render(<ValuationHistory panels={[PE]} />);
+    expect(screen.queryByTestId("own-history-off-scale")).toBeNull();
+  });
+
   it("says what the points are", () => {
     render(<ValuationHistory panels={[PE]} />);
     expect(screen.getByTestId("own-history-note")).toHaveTextContent("fiscal year-end");

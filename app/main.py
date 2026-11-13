@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.api.v1.routers import lens, market, news, research, symbol
+from app.api.v1.routers import demo, lens, market, news, research, symbol
 from app.api.v1.routers.health import router as health_router
 from app.core.cors import configure_cors
 from app.core.errors import add_problem_handlers
@@ -28,6 +28,8 @@ app.include_router(news.router, prefix="/v1")
 app.include_router(research.router, prefix="/v1")
 app.include_router(symbol.router, prefix="/v1")
 app.include_router(lens.router, prefix="/v1")
+# Public read-only demo: open by design, off unless DEMO_SYMBOLS is set.
+app.include_router(demo.router, prefix="/v1")
 
 @app.get("/")
 def root():

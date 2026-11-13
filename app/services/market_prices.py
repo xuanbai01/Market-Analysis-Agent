@@ -144,6 +144,25 @@ async def get_prices_with_cache(
         cached = await _query_candles_in_window(session, symbol, start, end)
         points = [_candle_to_point(c) for c in cached]
 
+    return _prices_out(symbol, range_str, points, end)
+
+
+async def get_cached_prices(
+    session: AsyncSession,
+    symbol: str,
+    range_str: str,
+) -> MarketPricesOut:
+    """The stored candles for the range and nothing else: no coverage
+    check, no ingest. For the read-only demo, which must never reach
+    the provider. An empty result is a valid answer."""
+    start, end, _expected = _range_window(range_str)
+    cached = await _query_candles_in_window(session, symbol, start, end)
+    return _prices_out(symbol, range_str, [_candle_to_point(c) for c in cached], end)
+
+
+def _prices_out(
+    symbol: str, range_str: str, points: list[PricePoint], end: datetime
+) -> MarketPricesOut:
     if not points:
         # No data available even after ingest attempt.
         latest = PriceLatest(

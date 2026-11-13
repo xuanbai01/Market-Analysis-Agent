@@ -100,6 +100,12 @@ class Settings(BaseSettings):
     # allow-headers is Authorization/Content-Type, allow-credentials
     # is False (we use bearer tokens, not cookies).
     FRONTEND_ORIGIN: str = ""
+    # Public read-only demo (app/services/demo.py). A comma-separated
+    # list of tickers whose latest stored report and stored prices
+    # anyone may read at /v1/demo/* without the shared secret. Those
+    # routes never generate a report or call a provider. Empty (the
+    # default) turns the demo off.
+    DEMO_SYMBOLS: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

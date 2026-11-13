@@ -156,7 +156,15 @@ def _answer(text: str, finish: str = "stop") -> dict:
     return {"choices": [{"message": {"content": text}, "finish_reason": finish}], "usage": {}}
 
 
-def test_request_review_thinks_first():
+def test_review_text_rejects_an_answer_cut_off_at_the_token_limit():
+    # The second live run: reasoning took 31.7K of 32K tokens and the
+    # review stopped mid-sentence.
+    response = {"choices": [{"message": {"content": "1. **medium** · Check the real"}, "finish_reason": "length"}]}
+    with pytest.raises(RuntimeError, match="cut off"):
+        ai_review.review_text(response)
+
+
+def test_request_review_thinks_first_at_low_effort():
     calls = []
 
     def ask(options):
@@ -168,6 +176,7 @@ def test_request_review_thinks_first():
     assert thinking is True
     assert len(calls) == 1
     assert "thinking" not in calls[0]
+    assert calls[0]["reasoning_effort"] == "low"
     assert calls[0]["max_tokens"] == ai_review.THINKING_MAX_TOKENS
 
 
@@ -250,3 +259,47 @@ def test_find_comment_id_finds_the_review_comment():
 
 def test_find_comment_id_none_on_a_new_pr():
     assert ai_review.find_comment_id([{"id": 1, "body": "hi"}]) is None
+
+
+# ── main, network stubbed ────────────────────────────────────────────
+
+
+@pytest.fixture
+def pr_env(tmp_path, monkeypatch):
+    event = tmp_path / "event.json"
+    event.write_text(
+        '{"pull_request": {"number": 97, "title": "chore: lockfile", "body": null,'
+        ' "base": {"sha": "aaaaaaa1"}, "head": {"sha": "bbbbbbb2"}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "stub")
+    monkeypatch.setenv("GITHUB_TOKEN", "stub")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    posted = []
+    monkeypatch.setattr(ai_review, "_post_or_update", lambda body, **kw: posted.append(body) or "updated")
+    return posted
+
+
+def test_main_says_so_on_the_pr_when_nothing_is_reviewable(pr_env, monkeypatch):
+    # From the review of this script: returning early left a green check
+    # with no comment, and an earlier review of since-removed code stood.
+    monkeypatch.setattr(ai_review, "_git_diff", lambda base, head: _file("uv.lock") + _file("docs/a.png"))
+
+    def no_llm(*args, **kwargs):
+        raise AssertionError("nothing to review, so DeepSeek is not asked")
+
+    monkeypatch.setattr(ai_review, "_ask_deepseek", no_llm)
+
+    assert ai_review.main() == 0
+    assert len(pr_env) == 1
+    assert pr_env[0].startswith(ai_review.MARKER)
+    assert "Nothing to review" in pr_env[0]
+    assert "uv.lock" in pr_env[0]
+
+
+def test_main_fails_without_the_key(pr_env, monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "")
+    assert ai_review.main() == 1
+    assert pr_env == []

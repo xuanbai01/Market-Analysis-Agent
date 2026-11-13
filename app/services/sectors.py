@@ -37,7 +37,12 @@ SECTOR_PEERS: dict[str, list[str]] = {
     "streaming_media": ["NFLX", "DIS", "ROKU", "SPOT"],
     "auto_ev": ["TSLA", "F", "GM", "RIVN", "LCID"],
     "pharma": ["PFE", "JNJ", "MRK", "ABBV", "LLY"],
-    "oil_gas": ["XOM", "CVX", "COP", "OXY", "EOG"],
+    # Integrated majors also refine and sell fuel, so their gross margins
+    # (27-44%) sit far below a pure producer's (49-74%) and their
+    # EV/EBITDA higher. One mixed set made XOM look 65% expensive on
+    # EV/EBITDA and 26 points short on gross margin (dogfood 2026-11 #19).
+    "integrated_oil": ["XOM", "CVX", "SHEL", "BP", "TTE"],
+    "oil_gas_producers": ["COP", "OXY", "EOG", "DVN", "FANG"],
     # Branded staples (60%-ish gross margins) and the retailers that sell
     # them (10–25%) price and earn differently; comparing KO's P/S with
     # WMT's made every valuation gap meaningless (ADR 0007).
@@ -72,8 +77,8 @@ INDUSTRY_TO_SECTOR: dict[str, str] = {
     "Drug Manufacturers—General": "pharma",
     "Drug Manufacturers—Specialty & Generic": "pharma",
     "Biotechnology": "pharma",
-    "Oil & Gas Integrated": "oil_gas",
-    "Oil & Gas E&P": "oil_gas",
+    "Oil & Gas Integrated": "integrated_oil",
+    "Oil & Gas E&P": "oil_gas_producers",
     "Household & Personal Products": "consumer_staples",
     "Beverages—Non-Alcoholic": "consumer_staples",
     "Confectioners": "consumer_staples",

@@ -1454,3 +1454,82 @@ def test_reports_cached_before_versioning_read_as_version_zero() -> None:
     report = ResearchReport.model_validate(cached)
     assert report.report_version == 0
     assert is_outdated(report)
+
+
+# ── Audit: a tool that returned nothing is not "ok" (dogfood #18) ─────
+
+
+async def test_audit_says_empty_when_a_tool_succeeds_with_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """XOM, 2026-11: the SEC tools found no filings, raised nothing and
+    were audited "ok", so nothing said why two cards were missing."""
+    _patch_tools(
+        monkeypatch,
+        {
+            # No 10-K found: the extractor returns None.
+            "extract_10k_risks_diff": None,
+            # Stable shape, every value None.
+            "fetch_annual_history": {
+                "revenue_per_share_annual": _claim("Revenue per share, annual", None),
+                "eps_diluted_annual": _claim("Diluted EPS, annual", None),
+            },
+            # No headlines in the window.
+            "fetch_news": {},
+            # Some values missing is normal, not empty.
+            "fetch_fundamentals": {
+                "trailing_pe": _claim("P/E ratio (trailing 12 months)", 28.5),
+                "peg": _claim("PEG ratio", None),
+            },
+            "fetch_peers": RuntimeError("boom"),
+        },
+    )
+    names = [
+        "extract_10k_risks_diff",
+        "fetch_annual_history",
+        "fetch_fundamentals",
+        "fetch_news",
+        "fetch_peers",
+    ]
+    outputs, audit = await orch_module._run_tools_parallel("XOM", names)
+
+    assert audit == [
+        "extract_10k_risks_diff: empty",
+        "fetch_annual_history: empty",
+        "fetch_fundamentals: ok",
+        "fetch_news: empty",
+        "fetch_peers: error/RuntimeError",
+    ]
+    # An empty result still reaches the section builders, which handle
+    # it; only a tool that raised is left out.
+    assert set(outputs) == {
+        "extract_10k_risks_diff",
+        "fetch_annual_history",
+        "fetch_fundamentals",
+        "fetch_news",
+    }
+
+
+async def test_audit_says_empty_for_macro_labels_without_observations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without ``FRED_API_KEY`` fetch_macro still returns its sector and
+    series labels, so "any value at all" would call it ok. It has data
+    only when a series carries observations."""
+    labels_only = {
+        "sector": _claim("Resolved sector tag", "integrated_oil"),
+        "DCOILWTICO.label": _claim("Human-readable label for FRED series DCOILWTICO", "WTI crude oil price"),
+        "DCOILWTICO.value": _claim("WTI crude oil price (latest observation)", None),
+    }
+    observed = _claim("WTI crude oil price (latest observation)", 88.28)
+    observed = observed.model_copy(
+        update={"history": [ClaimHistoryPoint(period="2026-09", value=85.1), ClaimHistoryPoint(period="2026-10", value=88.28)]}
+    )
+
+    _patch_tools(monkeypatch, {"fetch_macro": labels_only})
+    _outputs, audit = await orch_module._run_tools_parallel("XOM", ["fetch_macro"])
+    assert audit == ["fetch_macro: empty"]
+
+    _patch_tools(monkeypatch, {"fetch_macro": {**labels_only, "DCOILWTICO.value": observed}})
+    _outputs, audit = await orch_module._run_tools_parallel("XOM", ["fetch_macro"])
+    assert audit == ["fetch_macro: ok"]

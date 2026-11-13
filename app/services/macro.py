@@ -55,7 +55,7 @@ NEWSAPI_KEY pattern in ``news_ingestion``.
 | megacap_tech, cloud_saas | DGS10 | Long-duration cash flows; rate-sensitive |
 | consumer_staples, staples_retail, ecommerce_retail | UMCSENT, RSAFS | Consumer health |
 | auto_ev | UMCSENT, DGS10 | Consumer health + financing rates |
-| oil_gas | DCOILWTICO, DCOILBRENTEU | Direct revenue driver |
+| integrated_oil, oil_gas_producers | DCOILWTICO, DCOILBRENTEU | Direct revenue driver |
 | pharma | DGS10 | Less macro-coupled but still rate-sensitive in valuation |
 | streaming_media | UMCSENT | Discretionary spending |
 | _default_ | DGS10, UNRATE, CPIAUCSL | Three macro headlines for unknown sectors |
@@ -149,7 +149,11 @@ SECTOR_SERIES: dict[str, list[FredSeries]] = {
         FredSeries(id="UMCSENT", label="Consumer sentiment", units="index"),
         FredSeries(id="DGS10", label="10Y Treasury yield", units="%"),
     ],
-    "oil_gas": [
+    "integrated_oil": [
+        FredSeries(id="DCOILWTICO", label="WTI crude oil price", units="$/bbl"),
+        FredSeries(id="DCOILBRENTEU", label="Brent crude oil price", units="$/bbl"),
+    ],
+    "oil_gas_producers": [
         FredSeries(id="DCOILWTICO", label="WTI crude oil price", units="$/bbl"),
         FredSeries(id="DCOILBRENTEU", label="Brent crude oil price", units="$/bbl"),
     ],

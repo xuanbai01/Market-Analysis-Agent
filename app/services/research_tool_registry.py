@@ -77,7 +77,7 @@ class SectionSpec:
 # them across three sections so each section's prose is bounded and
 # themed. Order within each list is the display order in the report.
 
-_VALUATION_KEYS = ("trailing_pe", "forward_pe", "p_s", "ev_ebitda", "peg")
+_VALUATION_KEYS = ("trailing_pe", "forward_pe", "p_s", "ev_ebitda", "peg", "gross_margin_ttm")
 _QUALITY_KEYS = (
     # Legacy point-in-time
     "roe",
@@ -141,7 +141,14 @@ def _filter_keys(claims: dict[str, Claim] | None, keys: tuple[str, ...]) -> list
 
 def _build_valuation(outputs: dict[str, Any]) -> list[Claim]:
     fundamentals = outputs.get("fetch_fundamentals")
-    return _filter_keys(fundamentals, _VALUATION_KEYS) + research_derived.valuation_claims(
+    # The trailing gross margin is here for the peer comparison; a bank
+    # has no meaningful one (ADR 0007).
+    keys = tuple(
+        key
+        for key in _VALUATION_KEYS
+        if not (key == "gross_margin_ttm" and research_derived.is_balance_sheet_business(fundamentals))
+    )
+    return _filter_keys(fundamentals, keys) + research_derived.valuation_claims(
         fundamentals, outputs.get("fetch_peers")
     )
 

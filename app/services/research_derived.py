@@ -116,7 +116,13 @@ def _ratio(numerator: float | None, denominator: float | None) -> float | None:
 
 # ── Quality ──────────────────────────────────────────────────────────
 
-_MARGIN_LABELS = {"operating_margin": "Operating margin", "fcf_margin": "Free cash flow margin"}
+_MARGIN_LABELS = {
+    "gross_margin": "Gross margin",
+    "operating_margin": "Operating margin",
+    "fcf_margin": "Free cash flow margin",
+}
+# A bank's gross margin and free cash flow describe its loan book.
+_BANK_SKIPPED_MARGINS = frozenset({"gross_margin", "fcf_margin"})
 _GROWTH_LABELS = {
     "revenue_per_share": "Revenue per share",
     "operating_income_per_share": "Operating income per share",
@@ -131,7 +137,7 @@ def quality_claims(fundamentals: Any) -> list[Claim]:
     # Margin change vs the same quarter last year, in points.
     for key, label in _MARGIN_LABELS.items():
         pair = _year_apart(f, key)
-        if pair and not (bank and key == "fcf_margin"):
+        if pair and not (bank and key in _BANK_SKIPPED_MARGINS):
             then, now = pair
             out.append(_claim(
                 f"{label} change, {then.period} → {now.period}",
@@ -317,13 +323,16 @@ def valuation_claims(fundamentals: Any, peers: Any = None) -> list[Claim]:
                 p,
             ))
 
-    own_gm, median_gm = _num(f, "gross_margin"), _num(p, "median.gross_margin")
+    # Peers carry only the gross margin Yahoo reports, so the subject is
+    # compared on that figure too, not on the statement-based one in
+    # the Quality section.
+    own_gm, median_gm = _num(f, "gross_margin_ttm"), _num(p, "median.gross_margin")
     if own_gm is not None and median_gm is not None and not _is_balance_sheet_business(f):
         out.append(_claim(
             f"Gross margin vs peer median of {median_gm * 100:.2f}%",
             own_gm - median_gm,
             "percentage_points",
-            "gross_margin − median.gross_margin",
+            "gross_margin_ttm − median.gross_margin (both as Yahoo reports them)",
             f,
             p,
         ))

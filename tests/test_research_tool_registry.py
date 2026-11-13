@@ -42,6 +42,7 @@ def _make_fundamentals_output() -> dict[str, Claim]:
         "p_s": _claim("P/S", 7.2),
         "ev_ebitda": _claim("EV/EBITDA", 21.0),
         "peg": _claim("PEG", 2.1),
+        "gross_margin_ttm": _claim("Gross margin, trailing 12 months", 0.45),
         # Quality (legacy)
         "roe": _claim("ROE", 0.45),
         "gross_margin": _claim("Gross margin", 0.46),
@@ -176,9 +177,11 @@ def test_valuation_builder_takes_only_valuation_keys() -> None:
     claims = _tool_claims(_spec(Focus.FULL, "Valuation").builder(outputs))
     descriptions = {c.description for c in claims}
 
-    # 5 valuation metrics
-    assert len(claims) == 5
+    # 5 valuation metrics, plus the trailing gross margin the peer
+    # comparison is made on (2026-11, dogfood #20).
+    assert len(claims) == 6
     assert {"Trailing P/E", "Forward P/E", "P/S", "EV/EBITDA", "PEG"} <= descriptions
+    assert "Gross margin, trailing 12 months" in descriptions
     # Quality / capital-alloc keys are NOT in the Valuation section.
     assert "ROE" not in descriptions
     assert "Dividend yield" not in descriptions
@@ -582,3 +585,21 @@ def test_news_builder_passes_through_dict_claims() -> None:
 
     claims = _spec(Focus.FULL, "News").builder(outputs)
     assert len(claims) == 3
+
+
+def test_valuation_carries_the_gross_margin_peers_are_measured_on() -> None:
+    """Dogfood 2026-11 #20: the peer comparison cites Yahoo's trailing
+    gross margin, so that figure sits in the section that compares."""
+    outputs = {"fetch_fundamentals": _make_fundamentals_output()}
+
+    claims = _spec(Focus.FULL, "Valuation").builder(outputs)
+
+    assert "Gross margin, trailing 12 months" in {c.description for c in claims}
+
+
+def test_a_banks_valuation_leaves_gross_margin_out() -> None:
+    fundamentals = {**_make_fundamentals_output(), "sector_tag": _claim("Resolved sector tag", "banks")}
+
+    claims = _spec(Focus.FULL, "Valuation").builder({"fetch_fundamentals": fundamentals})
+
+    assert not any("gross margin" in c.description.lower() for c in claims)

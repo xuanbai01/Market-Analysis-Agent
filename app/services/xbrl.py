@@ -33,7 +33,7 @@ from pathlib import Path
 import httpx
 
 from app.core.settings import settings
-from app.services import edgar
+from app.services import edgar, sec_registrants
 
 CACHE_TTL_SECONDS = 24 * 3600
 
@@ -43,8 +43,15 @@ REVENUE_TAGS = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues
 OPERATING_INCOME_TAGS = ("OperatingIncomeLoss",)
 OCF_TAGS = ("NetCashProvidedByUsedInOperatingActivities",)
 CAPEX_TAGS = ("PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets")
-DILUTED_SHARES_TAGS = ("WeightedAverageNumberOfDilutedSharesOutstanding",)
-DILUTED_EPS_TAGS = ("EarningsPerShareDiluted",)
+# A company with nothing dilutive may tag one combined count, or only the
+# basic one: Exxon stopped tagging a diluted count after 2013. Those fill
+# the years that have no diluted count.
+DILUTED_SHARES_TAGS = (
+    "WeightedAverageNumberOfDilutedSharesOutstanding",
+    "WeightedAverageNumberOfSharesOutstandingBasicAndDiluted",
+    "WeightedAverageNumberOfSharesOutstandingBasic",
+)
+DILUTED_EPS_TAGS = ("EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted")
 _CONCEPT_URL = "https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{tag}.json"
 
 
@@ -98,19 +105,23 @@ def annual_values(payload: dict) -> dict[int, float]:
 
 def annual_series(cik: str, tags: Sequence[str]) -> dict[int, float]:
     """One metric across tag changes: per year, the first tag that has it."""
-    merged: dict[int, float] = {}
-    for tag in tags:
-        for year, value in annual_values(fetch_concept(cik, tag)).items():
-            merged.setdefault(year, value)
-    return dict(sorted(merged.items()))
+    return {year: value for year, (value, _filed) in annual_series_with_filed(cik, tags).items()}
 
 
 def annual_series_with_filed(
     cik: str, tags: Sequence[str], unit: str = "USD"
 ) -> dict[int, tuple[float, str]]:
-    """``annual_series`` in any unit, keeping each value's filing date."""
+    """``annual_series`` in any unit, keeping each value's filing date.
+
+    Reads ``cik`` and then the registrants it replaced
+    (``sec_registrants``): a company that reorganized under a new holding
+    company keeps its earlier years under the old registrant. A year the
+    current registrant has filed wins over the same year from an earlier
+    one.
+    """
     merged: dict[int, tuple[float, str]] = {}
-    for tag in tags:
-        for year, fact in annual_facts(fetch_concept(cik, tag), unit).items():
-            merged.setdefault(year, fact)
+    for registrant in sec_registrants.registrant_chain(cik):
+        for tag in tags:
+            for year, fact in annual_facts(fetch_concept(registrant, tag), unit).items():
+                merged.setdefault(year, fact)
     return dict(sorted(merged.items()))

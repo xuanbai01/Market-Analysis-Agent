@@ -53,10 +53,16 @@ class GoldenCase:
 # mega-caps (AAPL, NVDA), an unprofitable name that triggers the
 # distressed-layout prompt block (RIVN), a bank whose fundamentals look
 # nothing like a tech company's (JPM), and a dividend payer (KO).
+#
+# 2026-11-13: XOM added. A cyclical with no reported operating income,
+# whose SEC history sits under a predecessor registrant since its 2026
+# reorganization and whose peers are the integrated majors; the first
+# check of it found four data problems (tasks/dogfood-2026-11.md).
 GOLDEN_CASES: list[GoldenCase] = [
     GoldenCase(symbol="AAPL", focus="full"),
     GoldenCase(symbol="NVDA", focus="full"),
     GoldenCase(symbol="RIVN", focus="full"),
     GoldenCase(symbol="JPM", focus="full"),
     GoldenCase(symbol="KO", focus="full"),
+    GoldenCase(symbol="XOM", focus="full"),
 ]

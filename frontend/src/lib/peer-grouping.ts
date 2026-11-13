@@ -59,6 +59,9 @@ export interface SubjectPoint {
 
 const PE_METRIC = "P/E ratio (trailing 12 months)";
 const GROSS_MARGIN_METRIC = "Gross margin";
+// The subject's own figure on the basis peers carry (Yahoo's trailing
+// gross margin); a Valuation claim since 2026-11.
+const GROSS_MARGIN_TTM_DESC = "Gross margin, trailing 12 months";
 
 const MEDIAN_PE_DESC = `Peer median: ${PE_METRIC}`;
 const MEDIAN_MARGIN_DESC = `Peer median: ${GROSS_MARGIN_METRIC}`;
@@ -192,19 +195,35 @@ function findClaimValue(
 }
 
 /**
- * Cross-section join: subject's P/E from Valuation + gross margin
- * from Quality. Null when either section is absent (EARNINGS focus
- * mode skips Quality) or either value is non-numeric.
+ * The subject's gross margin on the basis its peers are measured on.
+ *
+ * Peers carry only the gross margin Yahoo reports. Quality's "Gross
+ * margin" is the latest quarter from the statements, which for some
+ * industries is a different cost basis (XOM: 24.2% vs 29.8%), so the
+ * scatter would put the subject on another scale from its peers
+ * (dogfood 2026-11 #20). Reports built before the split carry only
+ * Quality's figure, which was Yahoo's then.
+ */
+export function subjectGrossMargin(report: ResearchReport): number | null {
+  const valuation = findSection(report, "Valuation");
+  const trailing = valuation ? findClaimValue(valuation, GROSS_MARGIN_TTM_DESC) : null;
+  if (trailing !== null) return trailing;
+  const quality = findSection(report, "Quality");
+  return quality ? findClaimValue(quality, GROSS_MARGIN_METRIC) : null;
+}
+
+/**
+ * The subject's point for the peer scatter: P/E from Valuation and the
+ * gross margin peers are measured on. Null when either is missing.
  */
 export function extractSubject(
   report: ResearchReport,
 ): SubjectPoint | null {
   const valuation = findSection(report, "Valuation");
-  const quality = findSection(report, "Quality");
-  if (!valuation || !quality) return null;
+  if (!valuation) return null;
 
   const pe = findClaimValue(valuation, PE_METRIC);
-  const margin = findClaimValue(quality, GROSS_MARGIN_METRIC);
+  const margin = subjectGrossMargin(report);
   if (pe === null || margin === null) return null;
 
   return { symbol: report.symbol, pe, margin };

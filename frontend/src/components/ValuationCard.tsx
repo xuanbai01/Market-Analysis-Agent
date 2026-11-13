@@ -17,6 +17,7 @@
  * text values.
  */
 import { formatClaimValue } from "../lib/format";
+import { subjectGrossMargin } from "../lib/peer-grouping";
 import {
   extractValuationCells,
   type ValuationCell,
@@ -58,7 +59,7 @@ export function ValuationCard({ report }: Props) {
     trailing_pe: cells.find((c) => c.metric === "trailing_pe")?.subject ?? null,
     p_s: cells.find((c) => c.metric === "p_s")?.subject ?? null,
     ev_ebitda: cells.find((c) => c.metric === "ev_ebitda")?.subject ?? null,
-    gross_margin: gmSubjectFor(report),
+    gross_margin: subjectGrossMargin(report),
   };
 
   return (
@@ -116,20 +117,6 @@ export function ValuationCard({ report }: Props) {
       </div>
     </section>
   );
-}
-
-function gmSubjectFor(report: ResearchReport): number | null {
-  const quality = report.sections.find((s) => s.title === "Quality");
-  if (!quality) return null;
-  const claim = quality.claims.find((c) => c.description === "Gross margin");
-  if (
-    !claim ||
-    typeof claim.value !== "number" ||
-    !Number.isFinite(claim.value)
-  ) {
-    return null;
-  }
-  return claim.value;
 }
 
 function MetricCell({ cell }: { cell: ValuationCell }) {

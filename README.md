@@ -133,7 +133,7 @@ A research agent that produces well-formatted hallucinations is worse than none.
 1. **Citation discipline** — every claim cites the tool call that produced it; the schema leaves no other path. Analyst-view and lens points cite claim ids, checked in code.
 2. **The model never computes a number** — comparisons are derived claims computed in code; the prompt forbids arithmetic and outside facts.
 3. **Per-section confidence** (`high | medium | low`) set programmatically from freshness and sparsity, never by the LLM.
-4. **Eval harness** — the factuality rubric checks every number in the summaries, card narratives and analyst view against the claims (including their history). Rubric unit tests run on every PR; the live golden eval (AAPL, NVDA, RIVN, JPM, KO) is opt-in with `uv run pytest -m live_llm tests/evals -s`.
+4. **Eval harness** — the factuality rubric checks every number in the summaries, card narratives and analyst view against the claims (including their history). Rubric unit tests run on every PR; the live golden eval (AAPL, NVDA, RIVN, JPM, KO, XOM) is opt-in with `uv run pytest -m live_llm tests/evals -s`.
 5. **`fetched_at` per data point** so stale data never passes as fresh.
 
 ### Rate limit posture

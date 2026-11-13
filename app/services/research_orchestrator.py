@@ -38,6 +38,9 @@ eval harness shows the static catalog is too rigid. That's a Phase
   ``tool_calls_audit`` as ``"<name>: error/<ExceptionType>"``. The
   underlying tool already wrote a structured ``log_external_call``
   record for whatever went wrong; we don't want to double-report.
+- A tool that ran but found nothing is recorded as ``"<name>: empty"``,
+  not ``"ok"``; the dashboard lists both kinds under "Not in this
+  report".
 - A synth-call failure propagates — there's no useful report to
   return. The router converts to a 503 problem+json.
 - ``log_external_call`` is NOT used here. The orchestrator's job is
@@ -52,6 +55,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.schemas.research import (
+    Claim,
     Confidence,
     LayoutSignals,
     ResearchReport,
@@ -314,10 +318,10 @@ async def _run_tools_parallel(
     """Invoke every required tool concurrently; isolate failures.
 
     Returns ``(outputs, audit_entries)`` where ``outputs`` maps a tool
-    name to its result (only successful tools appear) and
+    name to its result (every tool that didn't raise appears) and
     ``audit_entries`` is a parallel list of audit strings —
-    ``"<name>: ok"`` for successes, ``"<name>: error/<ExceptionType>"``
-    for failures.
+    ``"<name>: ok"``, ``"<name>: empty"`` for a tool that ran but found
+    nothing, ``"<name>: error/<ExceptionType>"`` for one that raised.
     """
     coros = [TOOL_DISPATCH[name](symbol) for name in tool_names]
     results = await asyncio.gather(*coros, return_exceptions=True)
@@ -329,8 +333,28 @@ async def _run_tools_parallel(
             audit.append(f"{name}: error/{type(result).__name__}")
         else:
             outputs[name] = result
-            audit.append(f"{name}: ok")
+            audit.append(f"{name}: {'empty' if _found_nothing(name, result) else 'ok'}")
     return outputs, audit
+
+
+def _found_nothing(name: str, result: Any) -> bool:
+    """True when a tool ran without error and has nothing to show.
+
+    Tools degrade instead of raising: no 10-K on file returns ``None``,
+    no annual facts returns every claim with a ``None`` value, no
+    headlines returns ``{}``. Auditing those as "ok" hid why XOM's risk
+    card and ten-year history were missing (dogfood 2026-11 #18).
+    """
+    if result is None:
+        return True
+    if not isinstance(result, dict):
+        return False
+    claims = [c for c in result.values() if isinstance(c, Claim)]
+    if name == "fetch_macro":
+        # Its sector and series labels are always present; it has data
+        # only when a series came back with observations.
+        return not any(c.history for c in claims)
+    return not any(c.value is not None for c in claims)
 
 
 # ── Section assembly ──────────────────────────────────────────────────

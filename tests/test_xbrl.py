@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from app.core import settings as settings_module
-from app.services import xbrl
+from app.services import sec_registrants, xbrl
 
 
 def fact(frame: str | None, val: float) -> dict[str, Any]:
@@ -127,4 +127,80 @@ def test_annual_series_with_filed_merges_tags_like_annual_series(cache_dir: Path
     assert xbrl.annual_series_with_filed("0000000001", ["OldTag", "NewTag"]) == {
         2015: (1.0, "2016-02-01"),
         2016: (2.0, "2017-02-01"),
+    }
+
+
+# ── Successor registrants (2026-11, dogfood #18) ─────────────────────
+
+
+class FakeSecByCik:
+    """Like ``FakeSec`` but keyed by (cik, tag): two registrants, one tag."""
+
+    def __init__(self, responses: dict[tuple[str, str], Any]) -> None:
+        self.responses = responses
+
+    def __call__(self, url: str) -> httpx.Response:
+        parts = url.split("/")
+        cik, tag = parts[-3].removeprefix("CIK"), parts[-1].removesuffix(".json")
+        request = httpx.Request("GET", url)
+        if (cik, tag) not in self.responses:
+            return httpx.Response(404, request=request).raise_for_status()  # type: ignore[return-value]
+        return httpx.Response(200, json=self.responses[(cik, tag)], request=request)
+
+
+def test_a_successor_registrants_series_continue_into_its_predecessors(
+    cache_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exxon, 2026: the ticker moved to a new holding company whose own
+    filings hold no ten-year history. Years it has filed win; the
+    registrant before it fills the rest."""
+    new, old = "0000000002", "0000000001"
+    monkeypatch.setattr(sec_registrants, "PREDECESSOR_CIKS", {new: (old,)})
+    monkeypatch.setattr(xbrl.edgar, "_sec_get", FakeSecByCik({
+        (new, "Revenues"): payload(fact("CY2025", 21.0), fact("CY2026", 30.0)),
+        (old, "Revenues"): payload(fact("CY2024", 10.0), fact("CY2025", 20.0)),
+    }))
+    assert xbrl.annual_series(new, ["Revenues"]) == {2024: 10.0, 2025: 21.0, 2026: 30.0}
+    # Asked for directly, the old registrant is just itself.
+    assert xbrl.annual_series(old, ["Revenues"]) == {2024: 10.0, 2025: 20.0}
+
+
+def test_a_successor_with_no_annual_facts_yet_reads_entirely_from_its_predecessor(
+    cache_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    new, old = "0000000002", "0000000001"
+    monkeypatch.setattr(sec_registrants, "PREDECESSOR_CIKS", {new: (old,)})
+    monkeypatch.setattr(xbrl.edgar, "_sec_get", FakeSecByCik({
+        (old, "Shares"): {"units": {"shares": [
+            {"val": 4_000.0, "frame": "CY2024", "filed": "2025-02-19"},
+            {"val": 3_900.0, "frame": "CY2025", "filed": "2026-02-18"},
+        ]}},
+    }))
+    assert xbrl.annual_series_with_filed(new, ["Shares"], "shares") == {
+        2024: (4_000.0, "2025-02-19"),
+        2025: (3_900.0, "2026-02-18"),
+    }
+
+
+def test_share_counts_fall_back_to_basic_in_years_with_no_diluted_count(
+    cache_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exxon has no dilutive securities and stopped tagging a diluted
+    count after 2013; every later year carries only the basic one. A
+    year that has a diluted count keeps it."""
+
+    def shares(*points: tuple[str, float]) -> dict[str, Any]:
+        return {"units": {"shares": [{"val": v, "frame": f, "filed": "2026-02-18"} for f, v in points]}}
+
+    monkeypatch.setattr(xbrl.edgar, "_sec_get", FakeSecByCik({
+        ("0000034088", "WeightedAverageNumberOfDilutedSharesOutstanding"): shares(("CY2013", 4_419.0)),
+        ("0000034088", "WeightedAverageNumberOfSharesOutstandingBasic"): shares(
+            ("CY2013", 4_400.0), ("CY2024", 4_298.0), ("CY2025", 4_305.0)
+        ),
+    }))
+    series = xbrl.annual_series_with_filed("0000034088", xbrl.DILUTED_SHARES_TAGS, "shares")
+    assert {year: value for year, (value, _filed) in series.items()} == {
+        2013: 4_419.0,
+        2024: 4_298.0,
+        2025: 4_305.0,
     }

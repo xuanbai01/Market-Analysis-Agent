@@ -15,7 +15,7 @@ from app.services.sectors import (
 def test_curated_ticker_resolves_to_known_sector() -> None:
     assert resolve_sector("NVDA") == "semiconductors"
     assert resolve_sector("JPM") == "banks"
-    assert resolve_sector("XOM") == "oil_gas"
+    assert resolve_sector("XOM") == "integrated_oil"
 
 
 def test_industry_fallback_used_when_ticker_uncurated() -> None:
@@ -61,6 +61,27 @@ def test_branded_staples_and_staples_retailers_are_separate_peer_sets() -> None:
     assert resolve_sector("WMT") == "staples_retail"
     assert not {"WMT", "COST"} & set(SECTOR_PEERS["consumer_staples"])
     assert resolve_sector("XYZ", industry="Discount Stores") == "staples_retail"
+
+
+def test_integrated_majors_and_pure_producers_are_separate_peer_sets() -> None:
+    """Dogfood 2026-11 #19: measured against pure producers (gross margins
+    of 49-74%, EV/EBITDA of 5-6x), XOM read as a 65% EV/EBITDA premium and
+    26 points short on gross margin. A major also refines and sells fuel."""
+    assert resolve_sector("XOM") == "integrated_oil"
+    assert resolve_sector("CVX") == "integrated_oil"
+    assert resolve_sector("COP") == "oil_gas_producers"
+    assert not {"COP", "OXY", "EOG"} & set(SECTOR_PEERS["integrated_oil"])
+    assert not {"XOM", "CVX"} & set(SECTOR_PEERS["oil_gas_producers"])
+    assert resolve_sector("XYZ", industry="Oil & Gas Integrated") == "integrated_oil"
+    assert resolve_sector("XYZ", industry="Oil & Gas E&P") == "oil_gas_producers"
+    assert "oil_gas" not in SECTOR_PEERS
+
+
+def test_both_oil_sectors_track_crude_prices() -> None:
+    from app.services.macro import SECTOR_SERIES
+
+    for sector in ("integrated_oil", "oil_gas_producers"):
+        assert [s.id for s in SECTOR_SERIES[sector]] == ["DCOILWTICO", "DCOILBRENTEU"]
 
 
 def test_every_sector_has_macro_series() -> None:

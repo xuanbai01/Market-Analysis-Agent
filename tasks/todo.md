@@ -10,13 +10,13 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Workstream A (cleanup)** is in review on `chore/roadmap-and-cleanup`. **A2 is next** — see the plan below.
+- **Workstream A2 (fixes from the XOM check)** is in review on `fix/sec-successor-and-oil-peers`. **B is next** — see the plan below. A (cleanup) merged as #92.
 
 ## Plan — after Phase 5 (2026-11-13)
 
 A review on 2026-11-13 found the roadmap exhausted: every phase was shipped or deferred, and the candidates list had no goal ordering it. **Goal for this stretch:** close the oldest open diligence gap (valuation against the company's own history) and make the product something a person other than the owner can see. Order: A → A2 → B → C, then D. One PR per workstream.
 
-### A. Cleanup *(branch `chore/roadmap-and-cleanup`)*
+### A. Cleanup ✅ *(#92, merged 2026-11-13)*
 
 - [x] **Remove the 501 stubs** — `/v1/analysis`, `/v1/reports/daily/latest`, `/v1/forecasts/{symbol}`: the routers, their mounting, the route-auth test's exemption, the doc rows.
 - [x] **Remove the unreachable Recharts path** — `SectionChart`, `lib/featured-claim.ts` and the `recharts` dependency. Every section the backend builds has a dedicated card (`CARD_SECTIONS` covers all nine titles in `SECTIONS_BY_FOCUS`), so the chart could never load. `ReportRenderer` stays as a plain claims table for a section that has no card yet: the next backend section shows up there until its card lands.
@@ -26,8 +26,8 @@ A review on 2026-11-13 found the roadmap exhausted: every phase was shipped or d
 
 Owner actions (they need an account or a decision):
 
-- [ ] **`FRED_API_KEY` on Fly** (`fly secrets import`) — without it the Macro card never renders in production.
-- [ ] **`DEEPSEEK_API_KEY` as a GitHub Actions secret** — the live-eval workflow needs it.
+- [x] **`FRED_API_KEY` on Fly** — set by the owner 2026-11-13. Reports cached before it keep an empty Macro section until they rebuild (the version bump in A2 does that).
+- [x] **`DEEPSEEK_API_KEY` as a GitHub Actions secret** — set 2026-11-13; the Live Eval workflow ran on `main` the same day, 5 of 5 at factuality 1.000.
 - [ ] **`docs/screenshots/`** (the Strata mockups the archive links to) is untracked: commit it or delete it.
 - [ ] **Branch protection on `main`**, and `ANTHROPIC_API_KEY` as a repo secret for the AI PR review job.
 
@@ -35,11 +35,12 @@ Owner actions (they need an account or a decision):
 
 These change report content, so they come before B, which builds on the same SEC history.
 
-- [ ] **Successor registrants** (dogfood #18) — after Exxon's 2026 holding-company reorganization, SEC's ticker map points XOM at a new registrant with no 10-K and no XBRL history, so the risk card and the ten-year view vanish. Resolve a ticker to its filing history across the predecessor registrant too.
-- [ ] **A tool that returns nothing is not "ok"** (#18) — `tool_calls_audit` should say empty, and the page should say which sections had no data instead of only showing LOW confidence.
-- [ ] **Split the `oil_gas` peer group** (#19) into integrated majors and exploration & production, as consumer staples was split in ADR 0007.
-- [ ] **One basis for gross margin** (#20) — the snapshot, the margin chart and the trend cell should agree.
-- [ ] **Bump `REPORT_VERSION`** and run the live golden eval; consider adding XOM to the golden set.
+- [x] **Successor registrants** (dogfood #18) — SEC publishes no machine-readable link between a new holding company and the registrant it replaced, so `app/services/sec_registrants.py` keeps the links by hand (XOM so far). The EDGAR provider merges filings across the chain and the XBRL series fill earlier years from the predecessor.
+- [x] **Share-count fallback** (#22, found while checking the fix) — Exxon stopped tagging a diluted share count after 2013, which cut its annual history to three years; the combined and basic counts now fill those years.
+- [x] **A tool that returns nothing is not "ok"** (#18) — `tool_calls_audit` says `empty`, and the dashboard lists empty and failed tools under the header ("Not in this report: …").
+- [x] **Split the `oil_gas` peer group** (#19) — `integrated_oil` (XOM, CVX, SHEL, BP, TTE) and `oil_gas_producers` (COP, OXY, EOG, DVN, FANG).
+- [x] **One basis for gross margin** (#20) — the Quality claim is the latest quarter of its own history; Yahoo's trailing figure is a separate Valuation claim that the peer comparison and the scatter use.
+- [x] **`REPORT_VERSION` 3**; XOM added to the golden set (six cases).
 
 ### B. Valuation against the company's own history *(branch `feature/valuation-history`)*
 
@@ -47,7 +48,7 @@ ADR 0004 called "is this expensive versus its own history" the most-cited gap; t
 
 - [ ] **`fetch_valuation_history` tool** (`app/services/valuation_history.py`) — fiscal-year-end price ÷ that year's diluted EPS, revenue per share and FCF per share gives P/E, P/S and P/FCF for up to ten years. Needs ten years of closes (the price route stops at 5Y): split-adjusted but not dividend-adjusted, to match the split-adjusted per-share figures. A loss year has no P/E (P/S still draws). Banks: P/E and P/S only.
 - [ ] **Claims** in the Valuation section, with history, plus **derived claims** in `research_derived.py`: the ten-year median of each multiple, today's multiple against that median (premium or discount), and where today sits in the ten-year range. Each description names its basis (fiscal-year multiple vs today's trailing multiple).
-- [ ] **Prose and thesis** pick the claims up through the existing claim lines; **bump `REPORT_VERSION`**; live golden eval ≥ 0.97 on all five tickers.
+- [ ] **Prose and thesis** pick the claims up through the existing claim lines; **bump `REPORT_VERSION`**; live golden eval ≥ 0.97 on every golden ticker.
 - [ ] **ValuationCard** — an own-history panel: one multiple at a time (P/E · P/S · P/FCF), a yearly line, the median, today marked. Read the dataviz rules before drawing.
 - [ ] **Data checks** on KO, NVDA (splits), AAPL (September year end), JPM (bank), RIVN (losses).
 
@@ -61,6 +62,7 @@ ADR 0004 called "is this expensive versus its own history" the most-cited gap; t
 
 - [ ] **More lenses** — R&D intensity, SBC ÷ revenue, buybacks vs dividends for the megacap group; `lens.py` and `xbrl.py` generalize. A trailing-12-month point for the partial year is the other open idea.
 - [ ] **Insider activity** — `form_4.py` (tested since Phase 2) has never reached the dashboard; a section and a card would serve the catalyst workflow. Decide `holdings_13f.py` at the same time: surface it or delete it.
+- [ ] **Predecessor registrants for older reorganizations** — a company that moved to a new registrant years ago still has its 10-Ks, but its ten-year history stops at the move (candidates to check against SEC: DIS 2019, CI 2018, AVGO 2018, CHTR 2016, LIN 2018). Each is one verified line in `sec_registrants.py`; a merger shows up as a share-count jump, which the existing guard cuts at.
 - [ ] **Split modules past the 400-line convention when next touched** — `research_orchestrator.py` (619), `ten_k.py` (614), `earnings.py` (532), `fundamentals.py` (520).
 
 Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a filing-level XBRL parser), the 4.6.B compare narrative, the Sonnet comparison run of the golden eval.
@@ -78,6 +80,8 @@ If you're picking this up after a gap:
 - **Vite HMR cache misses file mtime in `.claude/worktrees/...`** — see [lessons.md](lessons.md). Workaround: trust unit tests + `vite build`; fix candidate `server.watch.usePolling: true`.
 - **Cancel-on-navigate** (old Bug 8): leaving a ticker page mid-generation doesn't abort the request. Hasn't bitten in dogfood.
 - **Help overlay (`?` shortcut)** — still deferred; ⌘K is the only shortcut.
+- **The EDGAR disk cache never looks for a newer filing** once it holds as many as a call asks for (`edgar._try_cache`): a machine that cached two 10-Ks keeps serving them after a third is filed. Fly's disk is wiped on every stop, so production recovers by itself; a long-lived local `.edgar_cache` does not. Found 2026-11-13, not fixed.
+- **XBRL revenue tags can mix definitions across years.** `xbrl.annual_series` takes the first tag that has a year, and XOM's 2017–2021 revenue comes from a narrower tag than the years around it (about 3% lower). The ends of its ten-year series are on one tag, so the growth rate is unaffected. Found 2026-11-13, not fixed.
 
 **[lessons.md](lessons.md)** — read before non-trivial work to avoid retreading earlier mistakes.
 

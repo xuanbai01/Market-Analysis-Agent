@@ -7,6 +7,7 @@ from its path rather than imported as a package. The network calls
 the model sees and what lands on the PR is.
 """
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,8 @@ import pytest
 _PATH = Path(__file__).resolve().parents[1] / "scripts" / "ai_review.py"
 _spec = importlib.util.spec_from_file_location("ai_review", _PATH)
 ai_review = importlib.util.module_from_spec(_spec)
+# dataclasses look their module up in sys.modules while the class is built.
+sys.modules["ai_review"] = ai_review
 _spec.loader.exec_module(ai_review)
 
 

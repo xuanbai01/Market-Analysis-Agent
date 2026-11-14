@@ -188,10 +188,12 @@ async def test_the_narrative_prompt_names_only_the_companies_in_the_lens(
     assert "Left out (no R&D figure in their filings): DDD" in prompts[0]
 
 
-def test_the_sbc_lens_reads_one_measure() -> None:
-    """The cash-flow add-back only: the income-statement allocation tag is
-    a different measure, and merging tags year by year would mix them."""
+def test_the_sbc_and_rnd_lenses_each_read_one_measure() -> None:
+    """Tags merge year by year, so a fallback tag that is a different
+    measure (SBC's income-statement allocation, R&D net of acquired
+    in-process R&D) would switch definitions mid-series."""
     assert lens.SBC.tags == ("ShareBasedCompensation",)
+    assert lens.RND.tags == ("ResearchAndDevelopmentExpense",)
 
 
 async def test_the_narrative_prompt_says_what_the_metric_is(monkeypatch: pytest.MonkeyPatch) -> None:

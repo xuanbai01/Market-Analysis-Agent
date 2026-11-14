@@ -796,7 +796,13 @@ async def test_a_failed_save_still_returns_the_report(
     _patch_orchestrator(monkeypatch, _stub_report("RIVN"))
 
     async def _closed(*_a: Any, **_kw: Any) -> None:
-        raise InterfaceError("INSERT ...", {}, Exception("the underlying connection is closed"))
+        # As SQLAlchemy raises it when the asyncpg dialect sees a disconnect.
+        raise InterfaceError(
+            "INSERT ...",
+            {},
+            Exception("cannot call PreparedStatement.fetch(): the underlying connection is closed"),
+            connection_invalidated=True,
+        )
 
     monkeypatch.setattr(cache_module, "upsert", _closed)
 
@@ -824,3 +830,65 @@ async def test_a_save_the_database_rejects_is_still_an_error(
     resp = await research_client.post("/v1/research/RIVN")
 
     assert resp.status_code == 500
+
+
+
+async def test_a_statement_timeout_at_the_save_is_still_an_error(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``OperationalError`` covers more than a dropped connection (a
+    statement timeout, a read-only standby); those would repeat on every
+    visit, so only an invalidated connection is forgiven."""
+    from sqlalchemy.exc import OperationalError
+
+    _patch_orchestrator(monkeypatch, _stub_report("RIVN"))
+
+    async def _timeout(*_a: Any, **_kw: Any) -> None:
+        raise OperationalError(
+            "INSERT ...", {}, Exception("canceling statement due to statement timeout")
+        )
+
+    monkeypatch.setattr(cache_module, "upsert", _timeout)
+
+    resp = await research_client.post("/v1/research/RIVN")
+
+    assert resp.status_code == 500
+
+
+async def test_the_build_gives_the_pooled_connection_back(
+    engine: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Against Postgres, with a real pooled engine like production's: the
+    lookup checks a connection out, and none is checked out while the
+    report builds. (The conftest sessions share one connection, so they
+    can't show this.)"""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from tests.conftest import TEST_DATABASE_URL
+
+    pooled = create_async_engine(TEST_DATABASE_URL, pool_size=1, max_overflow=0, pool_pre_ping=True)
+    sessions = async_sessionmaker(bind=pooled, expire_on_commit=False)
+    checked_out_during_build: list[int] = []
+
+    async def _session() -> AsyncIterator[Any]:
+        async with sessions() as session:
+            yield session
+
+    async def _compose(symbol: str, focus: Any) -> ResearchReport:
+        checked_out_during_build.append(pooled.pool.checkedout())
+        return _stub_report(symbol)
+
+    app.dependency_overrides[get_session] = _session
+    monkeypatch.setattr(orch_module, "compose_research_report", _compose)
+    monkeypatch.setattr(settings_module.settings, "RESEARCH_RATE_LIMIT_PER_HOUR", 0)
+    deps_module.reset_research_rate_limit_for_tests()
+    try:
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.post("/v1/research/AAPL")
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+        await pooled.dispose()
+
+    assert resp.status_code == 200
+    assert checked_out_during_build == [0]

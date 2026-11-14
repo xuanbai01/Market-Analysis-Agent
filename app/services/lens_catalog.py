@@ -83,7 +83,10 @@ RND = LensMetric(
     key="rnd",
     label="R&D",
     short="R&D",
-    tags=("ResearchAndDevelopmentExpense", "ResearchAndDevelopmentExpenseExcludingAcquiredInProcessCost"),
+    # One measure: ...ExcludingAcquiredInProcessCost is R&D net of acquired
+    # in-process R&D, and merging the two year by year would switch
+    # definitions mid-series. No megacap year needed it (checked 2026-11-14).
+    tags=("ResearchAndDevelopmentExpense",),
     definition="R&D is research and development expense as reported on the income statement.",
 )
 

@@ -11,9 +11,16 @@ the time went.
 
 Only ``app.*`` is raised to INFO. Every other logger stays at the root's
 WARNING: httpx logs each request URL at INFO, and FRED's carries the API
-key.
+key. The URL also reaches the log inside an error: httpx puts it in an
+``HTTPStatusError``'s message, which a failed external call's traceback
+prints, so a key in a query string is masked on every line this prints.
+
+``app`` keeps propagating, so pytest's ``caplog`` (a root handler) sees
+its records. Under uvicorn the root has no handler, so nothing prints
+twice; ``tests/test_observability.py`` checks that in a fresh process.
 """
 import logging
+import re
 import sys
 from typing import TextIO
 
@@ -29,11 +36,16 @@ _EXTERNAL_CALL_FIELDS = (
     "input_summary",
     "output_summary",
 )
+# A key passed in a query string: FRED's ``api_key``, NewsAPI's ``apiKey``.
+_KEY_IN_QUERY = re.compile(r"\b(api_?key|access_token|token)=[^&\s'\"]+", re.IGNORECASE)
 
 
 class _AppFormatter(logging.Formatter):
     """The usual line, then an external call's fields as ``name=value``
-    (a traceback, if any, follows)."""
+    (a traceback, if any, follows), with keys in URLs masked."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return _KEY_IN_QUERY.sub(r"\1=[REDACTED]", super().format(record))
 
     def formatMessage(self, record: logging.LogRecord) -> str:
         fields = [

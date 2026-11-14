@@ -431,8 +431,8 @@ def _paragraph_diff(
          a pair against ~400 µs for ``ratio()``, and the bound is tight:
          any two English paragraphs share most of their letters, so
          difflib's ``quick_ratio()`` passed 92% of RIVN's pairs, while
-         the LCS bound passes 1%. Length alone (``real_quick_ratio()``)
-         rules a candidate out before that.
+         the LCS bound passes 1%. Length alone (what
+         ``real_quick_ratio()`` checks) rules a candidate out before that.
       3. Each candidate that gets that far gets one reusable matcher with
          the candidate as ``seq2`` (difflib indexes ``seq2`` up front;
          ``set_seq1`` swaps the paragraph in cheaply). Argument order —
@@ -444,12 +444,11 @@ def _paragraph_diff(
          risk factors mostly keep their order year to year. (Scan order
          can't change an any-match answer.)
 
-    RIVN's diff took 20 CPU-seconds before step 2 and takes under one
-    now. On a Fly shared CPU that is the difference between a build of
-    minutes and one of seconds: past its burst allowance the machine runs
-    at 1/16 of a core. On real filings this returns byte-identical
-    results to the naive scan; see the equivalence tests in
-    ``tests/test_ten_k.py``.
+    RIVN's diff took 20 CPU-seconds before step 2 and takes 0.7 now. A
+    Fly shared CPU, once its burst allowance is spent, runs at 1/16 of a
+    core: at that quota RIVN's tool fan-out took 347 s before and 43 s
+    after. On 12 real filings this returns byte-identical results to the
+    naive scan; see also the equivalence tests in ``tests/test_ten_k.py``.
     """
     added = _unmatched(current, prior, similarity_threshold)
     removed = _unmatched(prior, current, similarity_threshold)

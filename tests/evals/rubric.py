@@ -379,11 +379,19 @@ LEVEL_BAND = 0.05
 _MAX_SUBJECT_GAP = 100
 _MAX_MEDIAN_GAP = 60
 _MEDIAN_RE = re.compile(r"\bmedian\b")
-# "median of 20.30", "median P/E of 20.30", "seven-year median (20.4x)"
+# "median of 20.30", "median P/E of 20.30", "seven-year median (20.4x)".
+# Only a metric's name may sit between "median" and the figure: "median
+# while price-to-sales of 2.08" cites the price-to-sales, not the median.
 _MEDIAN_OF_RE = re.compile(
-    r"\bmedian\b(?:\s+[\w/'-]+){0,3}?\s+(?:of\s+|at\s+|is\s+|was\s+|near\s+|around\s+|\()\$?"
-    r"(?P<num>\d[\d,]*(?:\.\d+)?)(?!\.?\d)"
+    r"\bmedian\b(?:\s+(?:p/e|p/s|p/fcf|ev/ebitda|price-to-[\w-]+))?"
+    r"\s+(?:of\s+|at\s+|is\s+|was\s+|near\s+|around\s+|\()\$?"
+    r"(?P<num>\d[\d,]*(?:\.\d+)?)(?!\.?\d)",
+    re.IGNORECASE,
 )
+# The prose whose subject is the company's own multiples. The Peers card
+# compares peer tickers with the peer median ("AMD at 19.28, above the
+# 5.29 median"), which the company's comparison claims don't describe.
+_CHECKED_SECTIONS = frozenset({"Valuation"})
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 # A colon, semicolon, dash or contrast word starts a new subject; a
 # comma does not ("price-to-sales, at 2.18, is below"). Without the
@@ -494,7 +502,13 @@ def _median_number_errors(sentence: str, medians: list[float]) -> list[str]:
 
 
 def _report_prose(report: ResearchReport) -> list[str]:
-    prose = [field for section in report.sections for field in (section.summary, section.card_narrative) if field]
+    prose = [
+        field
+        for section in report.sections
+        if section.title in _CHECKED_SECTIONS
+        for field in (section.summary, section.card_narrative)
+        if field
+    ]
     if report.thesis is not None:
         thesis = report.thesis
         prose.append(thesis.headline)
@@ -507,7 +521,8 @@ def score_attribution(report: ResearchReport) -> AttributionScore:
     the Disney prose gave the median as today's price-to-free-cash-flow
     and called a price-to-sales 26% under its median "above").
 
-    For every sentence of prose that mentions a median, two checks:
+    For every sentence of the Valuation prose and the analyst view that
+    mentions a median, two checks:
 
     - **Direction.** Each multiple named (P/E, price-to-sales,
       price-to-free-cash-flow, EV/EBITDA) takes the first direction word

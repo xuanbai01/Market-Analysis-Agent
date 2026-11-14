@@ -884,3 +884,26 @@ def test_attribution_reads_trails_as_below() -> None:
     errors = score_attribution(_report([section])).errors
     assert len(errors) == 1
     assert "'below' the peer median" in errors[0]
+
+
+def test_attribution_leaves_the_peers_card_alone() -> None:
+    """Live eval, NVDA Peers card (2026-11-14): the subject is AMD and
+    AVGO, not the company, so the company's comparison doesn't apply."""
+    peers = Section(
+        title="Peers",
+        claims=[],
+        summary="Price-to-sales of 19.28 for AMD and 18.59 for AVGO bracket Nvidia at 12.98, all far above the 5.29 median.",
+    )
+    report = _report([_dis_valuation("Valuation is mixed."), peers])
+    assert score_attribution(report).errors == []
+
+
+def test_attribution_reads_only_a_metric_name_between_median_and_its_figure() -> None:
+    """Live eval, DIS (2026-11-14): the number after "median while
+    price-to-sales of" or "median compares with spot at" is not cited as
+    the median."""
+    report = _report([_dis_valuation(
+        "Price-to-free-cash-flow of 24.62 is above its own median while price-to-sales of 2.18 sits below "
+        "its median of 2.95. The P/E median compares with the rest at 24.38."
+    )])
+    assert score_attribution(report).errors == []

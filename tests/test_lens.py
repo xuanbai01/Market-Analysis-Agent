@@ -98,6 +98,21 @@ def test_facts_describe_the_distribution_growth_and_positions() -> None:
     assert sources == {"computed.analytics", "sec.xbrl"}
 
 
+def test_facts_include_the_spread_between_the_ends() -> None:
+    """A live narrative wrote "a gap of roughly thirty-two points" between
+    the highest and lowest company: arithmetic the model did itself. The
+    spread is computed here so it has a fact to cite."""
+    _, companies, stats = built()
+    facts = {f.description: f for f in lens.lens_facts(lens.CAPEX, companies, stats)}
+    spread = facts["Spread between the highest and lowest capex intensity, CY2025 (AAA − BBB)"]
+    assert spread.value == pytest.approx(0.22)
+    assert spread.unit == "percentage_points"
+
+
+def test_the_narrative_prompt_forbids_numbers_the_facts_do_not_show() -> None:
+    assert "spell" in lens.LENS_SYSTEM_PROMPT and "round" in lens.LENS_SYSTEM_PROMPT
+
+
 def test_facts_name_the_lens_metric() -> None:
     """The same computation reads as SBC (or R&D) when the lens is about
     SBC: the descriptions are what the narrative quotes and cites."""
@@ -137,6 +152,7 @@ async def test_a_lens_names_the_companies_it_left_out(monkeypatch: pytest.Monkey
     assert [c.ticker for c in report.companies] == ["AAA", "BBB", "CCC"]
     assert report.excluded == ["DDD"]
     assert "DDD" in report.method
+    assert "a R&D" not in report.method
     assert report.metric.label == "R&D"
     assert report.stats[-1].companies == 3
 

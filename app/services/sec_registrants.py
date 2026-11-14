@@ -30,6 +30,27 @@ PREDECESSOR_CIKS: dict[str, tuple[str, ...]] = {
     # ExxonMobil Holdings Corp ← Exxon Mobil Corp. Holding-company
     # reorganization; 8-K12B filed 2026-07-01 (0001193125-26-291990).
     "0002115436": ("0000034088",),
+    # Older moves, checked 2026-11-13. A new registrant's first 10-K
+    # carries a few years back, so each of these had ten of its eleven
+    # annual points without the link.
+    # The Walt Disney Company (formerly TWDC Holdco 613 Corp.) ← TWDC
+    # Enterprises 18 Corp. (formerly Walt Disney Co/). 8-K12B 2019-03-20,
+    # with the 21st Century Fox acquisition; old 10-Ks to 2018-11-21.
+    "0001744489": ("0001001039",),
+    # The Cigna Group (formerly Halfmoon Parent, Inc.) ← Cigna Holding Co
+    # (formerly Cigna Corp). 8-K12B 2018-12-20, with the Express Scripts
+    # acquisition; old 10-Ks to 2018-02-28.
+    "0001739940": ("0000701221",),
+    # Broadcom Inc. ← Broadcom Pte. Ltd. (formerly Broadcom Ltd).
+    # 8-K12B 2018-04-04, redomiciled from Singapore to the US.
+    "0001730168": ("0001649338",),
+    # Broadcom Ltd ← Avago Technologies Ltd. 8-K12B 2016-02-02, with the
+    # Broadcom Corp acquisition; Avago's 10-Ks to 2015-12-17.
+    "0001649338": ("0001441634",),
+    # Not needed (checked the same day): CHTR resolves to the registrant
+    # with 10-Ks back to 2000, and LIN's history starts at the Praxair–
+    # Linde merger, where the share count nearly doubled and the share-
+    # jump guard in annual_history cuts it whichever registrant holds it.
 }
 
 

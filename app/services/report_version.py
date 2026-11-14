@@ -37,12 +37,15 @@ History:
        officer and director purchases and sales over six months, apart
        from 10% holders, the share sold under 10b5-1 plans, the top
        traders, and insider dollars as a share of market cap.
+    6  2026-11-13 — Disney, Cigna and Broadcom read their earlier SEC
+       registrants too, so their ten-year history has all eleven
+       annual points (2015 was missing).
 """
 from __future__ import annotations
 
 from app.schemas.research import ResearchReport
 
-REPORT_VERSION = 5
+REPORT_VERSION = 6
 
 
 def is_outdated(report: ResearchReport) -> bool:

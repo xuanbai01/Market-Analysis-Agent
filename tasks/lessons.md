@@ -93,3 +93,10 @@ Each entry has three parts:
 **Context:** Telling the owner how to send `FRED_API_KEY` from `.env` to Fly without the value appearing on a command line.
 **Mistake:** Two commands in a row failed for them. First the documented `grep ... | fly secrets import`: PowerShell has no `grep`. Then a PowerShell pipe, `(Select-String ...).Line | fly secrets import`, which I had not run: PowerShell 5.1 puts a byte-order mark in front of text it pipes to a native program, and Fly answered `"\ufeffFRED_API_KEY" is not a valid secret name`. My own shell tool is Git Bash, so neither failure could show up on my side.
 **Rule:** a command for the owner to run must be written for PowerShell 5.1 and tried there with dummy data first (`powershell -NoProfile -Command ...`). When text has to reach a native program byte for byte (a secret, anything parsed as NAME=value), run the pipeline inside `cmd /c "..."`: cmd passes bytes through untouched.
+
+### Unit tests can't see memory or a blocked event loop; the biggest filer can
+
+**Date:** 2026-11-14
+**Context:** Checking the shipped workstreams on the live dashboard. JPM's report killed the 512 MB Fly machine; the 10-K tools had passed every test since Phase 2.
+**Mistake:** the tests used small HTML fixtures, so nothing measured what a report costs on a real 13M-character 10-K: five full BeautifulSoup parses, all on the event loop. The health-check failure while XOM built was the same problem, unnoticed.
+**Rule:** for work whose cost grows with the input (parsing filings, diffing paragraphs), measure it on the largest real input we serve (JPM's 10-K, RIVN's risk factors) before merging: peak process memory and how long the event loop goes without running. Keep it under half the machine's memory, and run it off the loop.

@@ -42,7 +42,7 @@ Phases 1–5 are shipped and deployed. The open plan is in [`tasks/todo.md`](tas
 
 **Rules that came out of shipped work** (the changelog or `tasks/lessons.md` has the story behind each):
 
-- **Bump `REPORT_VERSION`** (`app/services/report_version.py`, now 5) in the same PR as any change to what a fresh report contains; cached reports then rebuild on their next visit (docs/conventions.md).
+- **Bump `REPORT_VERSION`** (`app/services/report_version.py`, now 6) in the same PR as any change to what a fresh report contains; cached reports then rebuild on their next visit (docs/conventions.md).
 - **Code computes, the model writes** ([ADR 0007](docs/adr/0007-analytical-narratives.md)). A comparison the prose should make is a derived claim in `research_derived.py`; the prompt forbids arithmetic and the factuality rubric fails any number no claim holds.
 - **Run the live golden eval before merging a change to report content** (prompts, claims, tools, the thesis): `uv run pytest -m live_llm tests/evals -s`, or the Live Eval workflow on GitHub.
 - **A claim that renders carries a `unit`.** The frontend formats from the unit, never from the size of the number.

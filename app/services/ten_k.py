@@ -177,14 +177,19 @@ def _pull_parser() -> etree.HTMLPullParser:
 def _parse_filing_html(html: str) -> _FlatFiling:
     """The one parse of a 10-K: HTML → text and paragraphs, streamed.
 
-    The whole tree of a big 10-K is the largest thing a report holds (JPM's:
-    140K elements, ~110 MB on Linux), so it is never built. When an element
-    ends, its text and its children (with their tails) are complete: its
-    subtree's text, adjacent pieces joined by a space so inline tags don't
-    run words together, replaces its children, leaving a childless element
-    holding one string. The result equals joining ``itertext()`` over the
-    full tree; script and style contribute nothing but their tails.
+    The full tree of a big 10-K is the largest thing a report holds (JPM's:
+    140K elements, ~110 MB on Linux), so it is collapsed as it is read.
+    When an element ends, its text and its children (with their tails) are
+    complete: its subtree's text, adjacent pieces joined by a space so
+    inline tags don't run words together, replaces its children, leaving a
+    childless element holding one string. What is in memory at any moment
+    is the open elements and, under each, its finished children reduced to
+    one string apiece (~55 MB for JPM). The result equals joining
+    ``itertext()`` over the full tree; script and style contribute nothing
+    but their tails.
     """
+    if not html.strip():
+        return _FlatFiling(text="", paragraphs=())
     paragraphs: list[str] = []
     last: Any = None
 
@@ -213,15 +218,14 @@ def _parse_filing_html(html: str) -> _FlatFiling:
             element.set(_HOLDS_BLOCK, "")
         last = element
 
+    # A parser error is not caught: the tool fails and the report says so,
+    # rather than showing an empty Business or Risk card as if it were real.
     parser = _pull_parser()
-    try:
-        for start in range(0, len(html), _FEED_CHARS):
-            parser.feed(html[start : start + _FEED_CHARS].encode("utf-8"))
-            for _event, element in parser.read_events():
-                collapse(element)
-        parser.close()
-    except etree.LxmlError:  # an empty or whitespace-only document
-        return _FlatFiling(text="", paragraphs=())
+    for start in range(0, len(html), _FEED_CHARS):
+        parser.feed(html[start : start + _FEED_CHARS].encode("utf-8"))
+        for _event, element in parser.read_events():
+            collapse(element)
+    parser.close()
     for _event, element in parser.read_events():
         collapse(element)
     if last is None:

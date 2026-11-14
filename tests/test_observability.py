@@ -128,15 +128,64 @@ def test_configuring_twice_does_not_print_twice() -> None:
     assert stream.getvalue().count("external_call") == 1
 
 
-def test_the_app_sets_up_its_logs_on_import() -> None:
-    import app.main  # noqa: F401
+def test_an_api_key_in_a_failed_calls_url_is_not_printed() -> None:
+    """NewsAPI and FRED take their keys in the query string, and httpx puts
+    the whole URL in an HTTPStatusError's message, which the traceback of a
+    failed external call prints."""
+    import io
 
-    assert logging.getLogger("app.external").isEnabledFor(logging.INFO)
-    assert logging.getLogger("app").handlers
+    import httpx
+
+    from app.core.logging import configure_logging
+
+    request = httpx.Request(
+        "GET",
+        "https://newsapi.org/v2/everything",
+        params={"q": "RIVN", "apiKey": "news-secret-1", "api_key": "fred-secret-2"},
+    )
+    stream = io.StringIO()
+    configure_logging(stream)
+    try:
+        with pytest.raises(httpx.HTTPStatusError):
+            with log_external_call("newsapi.everything"):
+                httpx.Response(401, request=request).raise_for_status()
+    finally:
+        configure_logging()
+
+    text = stream.getvalue()
+    assert "HTTPStatusError" in text and "newsapi.org/v2/everything?q=RIVN" in text
+    assert "news-secret-1" not in text and "fred-secret-2" not in text
+    assert "apiKey=[REDACTED]" in text and "api_key=[REDACTED]" in text
 
 
-def test_library_logs_stay_at_warning() -> None:
-    """httpx logs every request URL at INFO, and FRED's carries the API key."""
-    import app.main  # noqa: F401
+_FRESH_APP = """
+import logging
+import app.main
+from app.core.observability import log_external_call
+with log_external_call("sec.ten_k_risks_diff", {"symbol": "RIVN"}):
+    pass
+print(logging.getLogger("httpx").isEnabledFor(logging.INFO))
+"""
 
-    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
+
+def test_a_fresh_app_prints_each_external_call_once() -> None:
+    """In a new interpreter, as uvicorn loads it. Here conftest has already
+    imported app.main and earlier tests leave a handler on ``app``, so only
+    a fresh process shows that importing the app sets up the log. Once: a
+    root handler from anything the app imports would print it twice. And
+    httpx stays below INFO, where it logs request URLs."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    result = subprocess.run(
+        [sys.executable, "-c", _FRESH_APP],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).resolve().parents[1],
+        timeout=120,
+        check=True,
+    )
+
+    assert result.stderr.count("external_call service_id=sec.ten_k_risks_diff") == 1
+    assert result.stdout.strip() == "False"

@@ -65,6 +65,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import enforce_research_rate_limit, get_session
@@ -207,6 +208,12 @@ async def research(
             return outdated
         raise
 
+    # A build can run for minutes (RIVN's took 5.5 on Fly). End the
+    # lookup's read-only transaction so its connection goes back to the
+    # pool instead of sitting idle until Neon drops it; the save below
+    # checks out a fresh one, which pool_pre_ping tests first.
+    await session.rollback()
+
     try:
         report = await research_orchestrator.compose_research_report(
             target, focus
@@ -222,11 +229,21 @@ async def research(
             detail=f"Research synthesis unavailable: {exc}",
         ) from exc
 
-    await research_cache.upsert(
-        session,
-        symbol=target,
-        focus=focus.value,
-        report_date=report_date,
-        report=report,
-    )
+    try:
+        await research_cache.upsert(
+            session,
+            symbol=target,
+            focus=focus.value,
+            report_date=report_date,
+            report=report,
+        )
+    except DBAPIError as exc:
+        # Only a lost connection (the dialect's is_disconnect said so) is
+        # forgiven: the report is built and paid for, so serve it, uncached,
+        # and the next visit builds it again. Anything else (a constraint,
+        # a statement timeout, a read-only standby) would fail on every
+        # visit, each paying for a fresh build, so it stays an error.
+        if not exc.connection_invalidated:
+            raise
+        logger.exception("lost the database connection saving the %s report; serving it uncached", target)
     return report

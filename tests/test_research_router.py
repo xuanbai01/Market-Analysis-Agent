@@ -9,8 +9,8 @@ logic (covered in test_research_orchestrator.py) or the cache repo
 itself (covered in test_research_cache.py).
 
 The shared ``client`` fixture in conftest is DB-bound; we wire a
-local ASGI client that overrides ``get_session`` to yield None and
-mocks the cache module so tests don't need postgres available.
+local ASGI client that overrides ``get_session`` to yield a stand-in
+session (``_FakeSession``) and mocks the cache module so tests don't need postgres available.
 """
 from __future__ import annotations
 
@@ -38,6 +38,24 @@ from app.services import research_orchestrator as orch_module
 from app.services.report_version import REPORT_VERSION
 
 
+class _FakeSession:
+    """Stands in for the request's AsyncSession. Like the real one, a
+    query opens a transaction (holding a pooled connection) that lasts
+    until ``rollback()`` or ``commit()``."""
+
+    def __init__(self) -> None:
+        self.in_tx = False
+
+    def in_transaction(self) -> bool:
+        return self.in_tx
+
+    async def rollback(self) -> None:
+        self.in_tx = False
+
+    async def commit(self) -> None:
+        self.in_tx = False
+
+
 @pytest_asyncio.fixture
 async def research_client(
     monkeypatch: pytest.MonkeyPatch,
@@ -47,8 +65,8 @@ async def research_client(
     Defaults: cache always misses, upsert is a no-op, rate limit
     disabled. Tests that exercise rate limiting opt in via the
     ``_enable_rate_limit`` helper. The session dependency is
-    overridden to yield None — none of the cache functions
-    dereference it under these mocks.
+    overridden to yield a ``_FakeSession``; the mocked cache functions
+    ignore it.
 
     Rate limiting is disabled (RESEARCH_RATE_LIMIT_PER_HOUR=0) at
     fixture entry, AND the module-level bucket is reset, so test
@@ -60,8 +78,8 @@ async def research_client(
     rather than re-raising into the test runner.
     """
 
-    async def _no_session() -> AsyncIterator[None]:
-        yield None
+    async def _no_session() -> AsyncIterator[_FakeSession]:
+        yield _FakeSession()
 
     async def _miss(*_args: Any, **_kw: Any) -> None:
         return None
@@ -731,3 +749,146 @@ async def test_refresh_still_reports_a_failed_synthesis(
     resp = await research_client.post("/v1/research/AAPL?refresh=true")
 
     assert resp.status_code == 503
+
+
+
+# ── Long builds and the database connection ──────────────────────────
+#
+# Found 2026-11-14: RIVN's report took 5.5 minutes on Fly. The session
+# that served the cache lookup held its connection the whole time, Neon
+# dropped it as idle, and the finished report was lost at the save with
+# a 500 ("the underlying connection is closed").
+
+
+async def test_the_build_holds_no_database_connection(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lookup's transaction ends before the build, so the save starts
+    a new one on a fresh (pre-pinged) pooled connection."""
+    sessions: list[_FakeSession] = []
+    held_during_build: list[bool] = []
+
+    async def _lookup(session: _FakeSession, **_kw: Any) -> None:
+        sessions.append(session)
+        session.in_tx = True  # the SELECT opens a transaction
+        return None
+
+    async def _compose(symbol: str, focus: Any) -> ResearchReport:
+        held_during_build.append(sessions[0].in_transaction())
+        return _stub_report(symbol)
+
+    monkeypatch.setattr(cache_module, "lookup_recent", _lookup)
+    monkeypatch.setattr(orch_module, "compose_research_report", _compose)
+
+    resp = await research_client.post("/v1/research/AAPL")
+
+    assert resp.status_code == 200
+    assert held_during_build == [False]
+
+
+async def test_a_failed_save_still_returns_the_report(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The report is paid for and finished; a database error on the save
+    is logged and the report is served (the next visit rebuilds it)."""
+    from sqlalchemy.exc import InterfaceError
+
+    _patch_orchestrator(monkeypatch, _stub_report("RIVN"))
+
+    async def _closed(*_a: Any, **_kw: Any) -> None:
+        # As SQLAlchemy raises it when the asyncpg dialect sees a disconnect.
+        raise InterfaceError(
+            "INSERT ...",
+            {},
+            Exception("cannot call PreparedStatement.fetch(): the underlying connection is closed"),
+            connection_invalidated=True,
+        )
+
+    monkeypatch.setattr(cache_module, "upsert", _closed)
+
+    resp = await research_client.post("/v1/research/RIVN")
+
+    assert resp.status_code == 200
+    assert resp.json()["symbol"] == "RIVN"
+
+
+async def test_a_save_the_database_rejects_is_still_an_error(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a lost connection is forgiven. A report the table can't store
+    would otherwise rebuild, at full cost, on every visit with nothing but
+    a log line to show for it."""
+    from sqlalchemy.exc import IntegrityError
+
+    _patch_orchestrator(monkeypatch, _stub_report("RIVN"))
+
+    async def _rejected(*_a: Any, **_kw: Any) -> None:
+        raise IntegrityError("INSERT ...", {}, Exception("violates a constraint"))
+
+    monkeypatch.setattr(cache_module, "upsert", _rejected)
+
+    resp = await research_client.post("/v1/research/RIVN")
+
+    assert resp.status_code == 500
+
+
+
+async def test_a_statement_timeout_at_the_save_is_still_an_error(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``OperationalError`` covers more than a dropped connection (a
+    statement timeout, a read-only standby); those would repeat on every
+    visit, so only an invalidated connection is forgiven."""
+    from sqlalchemy.exc import OperationalError
+
+    _patch_orchestrator(monkeypatch, _stub_report("RIVN"))
+
+    async def _timeout(*_a: Any, **_kw: Any) -> None:
+        raise OperationalError(
+            "INSERT ...", {}, Exception("canceling statement due to statement timeout")
+        )
+
+    monkeypatch.setattr(cache_module, "upsert", _timeout)
+
+    resp = await research_client.post("/v1/research/RIVN")
+
+    assert resp.status_code == 500
+
+
+async def test_the_build_gives_the_pooled_connection_back(
+    engine: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Against Postgres, with a real pooled engine like production's: the
+    lookup checks a connection out, and none is checked out while the
+    report builds. (The conftest sessions share one connection, so they
+    can't show this.)"""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from tests.conftest import TEST_DATABASE_URL
+
+    pooled = create_async_engine(TEST_DATABASE_URL, pool_size=1, max_overflow=0, pool_pre_ping=True)
+    sessions = async_sessionmaker(bind=pooled, expire_on_commit=False)
+    checked_out_during_build: list[int] = []
+
+    async def _session() -> AsyncIterator[Any]:
+        async with sessions() as session:
+            yield session
+
+    async def _compose(symbol: str, focus: Any) -> ResearchReport:
+        checked_out_during_build.append(pooled.pool.checkedout())
+        return _stub_report(symbol)
+
+    app.dependency_overrides[get_session] = _session
+    monkeypatch.setattr(orch_module, "compose_research_report", _compose)
+    monkeypatch.setattr(settings_module.settings, "RESEARCH_RATE_LIMIT_PER_HOUR", 0)
+    deps_module.reset_research_rate_limit_for_tests()
+    try:
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.post("/v1/research/AAPL")
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+        await pooled.dispose()
+
+    assert resp.status_code == 200
+    assert checked_out_during_build == [0]

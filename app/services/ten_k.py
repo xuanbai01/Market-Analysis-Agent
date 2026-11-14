@@ -713,7 +713,7 @@ async def extract_10k_risks_diff(
             or []
         )
         # CPU-bound: RIVN's ~550 paragraphs a side take ~0.7 CPU-seconds,
-        # ~10 s on a Fly shared CPU throttled to 1/16 of a core.
+        # ~16 s on a Fly shared CPU throttled to 1/16 of a core.
         added, removed, kept_count = await _on_ten_k_thread(
             _paragraph_diff, current_paras, prior_paras
         )

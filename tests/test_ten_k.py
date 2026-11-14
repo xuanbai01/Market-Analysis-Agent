@@ -1269,7 +1269,7 @@ async def test_the_risk_paragraph_diff_runs_off_the_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """RIVN's ~550 paragraphs a side take ~0.7 CPU-seconds to compare,
-    ~10 s on a throttled Fly CPU; that too must not hold the event loop."""
+    ~16 s on a throttled Fly CPU; that too must not hold the event loop."""
     current, prior = _unique_risks_filings()
     _patch_fetch_edgar(monkeypatch, [current, prior])
     threads: list[int] = []

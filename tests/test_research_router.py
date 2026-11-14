@@ -9,8 +9,8 @@ logic (covered in test_research_orchestrator.py) or the cache repo
 itself (covered in test_research_cache.py).
 
 The shared ``client`` fixture in conftest is DB-bound; we wire a
-local ASGI client that overrides ``get_session`` to yield None and
-mocks the cache module so tests don't need postgres available.
+local ASGI client that overrides ``get_session`` to yield a stand-in
+session (``_FakeSession``) and mocks the cache module so tests don't need postgres available.
 """
 from __future__ import annotations
 
@@ -65,8 +65,8 @@ async def research_client(
     Defaults: cache always misses, upsert is a no-op, rate limit
     disabled. Tests that exercise rate limiting opt in via the
     ``_enable_rate_limit`` helper. The session dependency is
-    overridden to yield None — none of the cache functions
-    dereference it under these mocks.
+    overridden to yield a ``_FakeSession``; the mocked cache functions
+    ignore it.
 
     Rate limiting is disabled (RESEARCH_RATE_LIMIT_PER_HOUR=0) at
     fixture entry, AND the module-level bucket is reset, so test

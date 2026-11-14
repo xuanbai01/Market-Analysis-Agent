@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -69,8 +70,10 @@ async def auth_client(
     Without a per-test reset the secret would leak between cases.
     """
 
-    async def _no_session() -> AsyncIterator[None]:
-        yield None
+    async def _no_session() -> AsyncIterator[AsyncMock]:
+        # The route ends the lookup's transaction before a build; these
+        # tests only need that call to succeed.
+        yield AsyncMock()
 
     async def _miss(*_a: Any, **_kw: Any) -> None:
         return None

@@ -105,6 +105,16 @@ else:
             f"unmatched numbers in prose: {result.factuality.unmatched_numbers}"
         )
 
+        # Attribution (2026-11-14): the numbers can all be claims and
+        # still sit on the wrong labels — the median given as today's
+        # multiple, a discount called "above".
+        for error in result.attribution.errors:
+            print(f"   attribution: {error}")
+        assert not result.attribution.errors, (
+            f"{case.symbol}/{case.focus}: {len(result.attribution.errors)} misattributed "
+            f"valuation figure(s): {result.attribution.errors}"
+        )
+
 
 def _dump_report_for_diagnosis(report: Any, unmatched: list[float]) -> None:
     """Print every section's summary + claim values when factuality fails.

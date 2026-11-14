@@ -22,7 +22,13 @@ Three dimensions, in order of how cheap they are to enforce:
    quarters", or a string value like the business summary) also
    counts as backed.
 
-3. **Latency** — wall-clock duration of the run. Recorded by the test
+3. **Attribution** (2026-11-14) — a number can exist as a claim and
+   still sit on the wrong label. In a sentence about a median, the
+   direction a multiple is said to sit ("above", "below", "matches")
+   must agree with its comparison claim, and a number cited as "median
+   of N" must be a median. See ``score_attribution``.
+
+4. **Latency** — wall-clock duration of the run. Recorded by the test
    harness, not derived from the report itself.
 
 The factuality check is heuristic, not semantic: we extract decimal
@@ -85,6 +91,15 @@ class FactualityScore:
 
 
 @dataclass(frozen=True)
+class AttributionScore:
+    """One message per misattributed figure: a multiple said to sit on
+    the wrong side of its median, or a "median of N" whose N is no
+    median. Empty means every checked sentence agrees with its claims."""
+
+    errors: list[str]
+
+
+@dataclass(frozen=True)
 class LatencyScore:
     elapsed_ms: float
 
@@ -93,6 +108,7 @@ class LatencyScore:
 class RubricResult:
     structure: StructureScore
     factuality: FactualityScore
+    attribution: AttributionScore
     latency: LatencyScore
 
 
@@ -318,6 +334,202 @@ def score_factuality(
     )
 
 
+# ── Attribution ──────────────────────────────────────────────────────
+#
+# Heuristic, like factuality: it reads sentences that mention a median,
+# finds each multiple named in them and the first direction word after
+# it, and checks that direction against the comparison claim, which code
+# computed. The comparison claims are found by their formula
+# (``Source.detail``), which is the same in every report version.
+
+# Metric → how prose names it. A mention right after "median" names the
+# median ("the median P/E of 20.30"), not the subject, and is skipped; so
+# is a forward P/E, which no claim compares with a median.
+_METRIC_NAMES: dict[str, re.Pattern[str]] = {
+    "price-to-free-cash-flow": re.compile(
+        r"\b(?:p/fcf|price[- ]to[- ]free[- ]cash[- ]flow|(?:free[- ])?cash[- ]flow multiple)\b"
+    ),
+    "price-to-sales": re.compile(r"\b(?:p/s|price[- ]to[- ]sales|sales multiple)\b"),
+    "P/E": re.compile(r"(?<!forward )\b(?:p/e|price[- ]to[- ]earnings|earnings multiple)\b"),
+    "EV/EBITDA": re.compile(r"\bev/ebitda\b"),
+}
+_OWN_FORMULA = re.compile(r"^today's trailing multiple ÷ median\((?P<key>pe|ps|pfcf)_annual\)")
+_PEER_FORMULA = re.compile(r"^(?P<key>trailing_pe|p_s|ev_ebitda) / median\.")
+_METRIC_BY_KEY = {
+    "pe": "P/E",
+    "trailing_pe": "P/E",
+    "ps": "price-to-sales",
+    "p_s": "price-to-sales",
+    "pfcf": "price-to-free-cash-flow",
+    "ev_ebitda": "EV/EBITDA",
+}
+
+_ABOVE = "above"
+_BELOW = "below"
+_LEVEL = "level with"
+_DIRECTION_RE = re.compile(
+    r"\b(?P<above>above|premium|exceeds?|exceeding|higher than|richer than)\b"
+    r"|\b(?P<below>below|discount|under|beneath|lower than|cheaper than)\b"
+    r"|\b(?P<level>match(?:es|ing)?|in line with|level with|equals?|on par with)\b"
+)
+# A premium or discount this small may fairly be called "in line".
+LEVEL_BAND = 0.05
+# How far a direction word may sit from its multiple, and from the
+# median it is measured against (characters).
+_MAX_SUBJECT_GAP = 100
+_MAX_MEDIAN_GAP = 60
+_MEDIAN_RE = re.compile(r"\bmedian\b")
+# "median of 20.30", "median P/E of 20.30", "seven-year median (20.4x)"
+_MEDIAN_OF_RE = re.compile(
+    r"\bmedian\b(?:\s+[\w/'-]+){0,3}?\s+(?:of\s+|at\s+|is\s+|was\s+|near\s+|around\s+|\()\$?"
+    r"(?P<num>\d[\d,]*(?:\.\d+)?)(?!\.?\d)"
+)
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+# A colon, semicolon or dash starts a new subject; a comma does not
+# ("price-to-sales, at 2.18, is below").
+_CLAUSE_SPLIT = re.compile(r"\s*[:;—–]\s*|\s+-\s+")
+
+
+def _numeric(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def _comparisons(report: ResearchReport) -> tuple[dict[str, float], dict[str, float]]:
+    """(own-history, peer) premium or discount per metric, read from the
+    comparison claims' formulas."""
+    own: dict[str, float] = {}
+    peer: dict[str, float] = {}
+    for section in report.sections:
+        for claim in section.claims:
+            detail, value = claim.source.detail or "", _numeric(claim.value)
+            if value is None:
+                continue
+            if m := _OWN_FORMULA.match(detail):
+                own[_METRIC_BY_KEY[m["key"]]] = value
+            elif m := _PEER_FORMULA.match(detail):
+                peer[_METRIC_BY_KEY[m["key"]]] = value
+    return own, peer
+
+
+def _median_figures(report: ResearchReport) -> list[float]:
+    """Every figure that is a median: the own-history medians, the peer
+    medians, and the "median of N" quoted in comparison descriptions."""
+    out: list[float] = []
+    for section in report.sections:
+        for claim in section.claims:
+            value = _numeric(claim.value)
+            is_median = (claim.source.detail or "").startswith("median(") or claim.description.lower().startswith(
+                ("median", "peer median")
+            )
+            if value is not None and is_median:
+                out += [value, value * 100]
+            out += [float(m["num"].replace(",", "")) for m in _MEDIAN_OF_RE.finditer(claim.description)]
+    return out
+
+
+def _rounds_to(prose: str, value: float) -> bool:
+    """Whether ``prose`` ("20.4") is ``value`` (20.39) rounded to the
+    places the prose shows."""
+    places = len(prose.split(".")[1]) if "." in prose else 0
+    return abs(float(prose.replace(",", "")) - value) <= 0.5 * 10**-places + 1e-9
+
+
+def _direction(match: re.Match[str]) -> str:
+    if match["above"]:
+        return _ABOVE
+    if match["below"]:
+        return _BELOW
+    return _LEVEL
+
+
+def _agrees(direction: str, gap: float) -> bool:
+    if abs(gap) < LEVEL_BAND:
+        return True
+    return direction == (_ABOVE if gap > 0 else _BELOW)
+
+
+def _measured_against_peers(clause: str, direction_at: int) -> bool | None:
+    """Whether the median a direction word refers to is the peer median:
+    the nearest "median" after it (within reach), else the nearest one
+    before. None when the clause names no median."""
+    after = next(_MEDIAN_RE.finditer(clause, direction_at), None)
+    if after is not None and after.start() - direction_at <= _MAX_MEDIAN_GAP:
+        return "peer" in clause[direction_at : after.end()]
+    before = list(_MEDIAN_RE.finditer(clause, 0, direction_at))
+    if before:
+        return "peer" in clause[max(0, before[-1].start() - 15) : direction_at]
+    return None
+
+
+def _direction_errors(clause: str, own: dict[str, float], peer: dict[str, float]) -> list[str]:
+    errors: list[str] = []
+    for metric, pattern in _METRIC_NAMES.items():
+        for mention in pattern.finditer(clause):
+            if _MEDIAN_RE.search(clause[max(0, mention.start() - 12) : mention.start()]):
+                continue  # names the median, not the subject
+            word = _DIRECTION_RE.search(clause, mention.end())
+            if word is None or word.start() - mention.end() > _MAX_SUBJECT_GAP:
+                continue
+            peers = _measured_against_peers(clause, word.start())
+            gap = None if peers is None else (peer if peers else own).get(metric)
+            if gap is None:
+                continue
+            said = _direction(word)
+            if not _agrees(said, gap):
+                against = "the peer median" if peers else "its own median"
+                errors.append(f"{metric} called {said!r} {against}, but the claim is {gap * 100:+.2f}%: {clause!r}")
+    return errors
+
+
+def _median_number_errors(sentence: str, medians: list[float]) -> list[str]:
+    return [
+        f"{m['num']} cited as a median, but no median claim holds it: {sentence!r}"
+        for m in _MEDIAN_OF_RE.finditer(sentence)
+        if not any(_rounds_to(m["num"], v) for v in medians)
+    ]
+
+
+def _report_prose(report: ResearchReport) -> list[str]:
+    prose = [field for section in report.sections for field in (section.summary, section.card_narrative) if field]
+    if report.thesis is not None:
+        thesis = report.thesis
+        prose.append(thesis.headline)
+        prose += [p.text for points in (thesis.bull, thesis.bear, thesis.changed, thesis.watch) for p in points]
+    return prose
+
+
+def score_attribution(report: ResearchReport) -> AttributionScore:
+    """Check the words each valuation figure is attached to (2026-11-14:
+    the Disney prose gave the median as today's price-to-free-cash-flow
+    and called a price-to-sales 26% under its median "above").
+
+    For every sentence of prose that mentions a median, two checks:
+
+    - **Direction.** Each multiple named (P/E, price-to-sales,
+      price-to-free-cash-flow, EV/EBITDA) takes the first direction word
+      after it ("above", "premium", "below", "under", "matches"...). That
+      direction must agree with the comparison claim: the own-history
+      one, or the peer one when the median it is measured against is the
+      peer median. Within ``LEVEL_BAND`` any direction passes.
+    - **"Median of N".** N must be a median figure (rounded as shown),
+      not today's multiple or a fiscal year-end one.
+    """
+    own, peer = _comparisons(report)
+    medians = _median_figures(report)
+    errors: list[str] = []
+    for text in _report_prose(report):
+        for sentence in _SENTENCE_SPLIT.split(text):
+            lower = sentence.lower()
+            if not _MEDIAN_RE.search(lower):
+                continue
+            errors += _median_number_errors(lower, medians)
+            for clause in _CLAUSE_SPLIT.split(lower):
+                errors += _direction_errors(clause, own, peer)
+    return AttributionScore(errors=errors)
+
+
 def score_latency(elapsed_ms: float) -> LatencyScore:
     """Trivial wrapper for symmetry with the other scorers."""
     return LatencyScore(elapsed_ms=elapsed_ms)
@@ -329,9 +541,10 @@ def grade(
     *,
     factuality_tolerance: float = 0.01,
 ) -> RubricResult:
-    """Run all three scorers and bundle the result."""
+    """Run every scorer and bundle the result."""
     return RubricResult(
         structure=StructureScore(valid=True, errors=[]),  # already a model
         factuality=score_factuality(report, tolerance=factuality_tolerance),
+        attribution=score_attribution(report),
         latency=score_latency(elapsed_ms),
     )

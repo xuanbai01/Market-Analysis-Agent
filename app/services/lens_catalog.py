@@ -70,7 +70,10 @@ SBC = LensMetric(
     key="sbc",
     label="SBC",
     short="SBC",
-    tags=("ShareBasedCompensation", "AllocatedShareBasedCompensationExpense"),
+    # The cash-flow add-back only. AllocatedShareBasedCompensationExpense is
+    # an income-statement measure; merging the two year by year would mix
+    # them. No megacap year needed it (checked 2026-11-14).
+    tags=("ShareBasedCompensation",),
     definition=(
         "SBC is stock-based compensation: the non-cash cost of paying employees "
         "in shares, as added back in the cash flow statement."

@@ -305,17 +305,23 @@ stays out.
 """
 
 
-async def write_narrative(spec: LensSpec, facts: Sequence[Claim]) -> LensNarrative | None:
-    """The AI read of the distribution; None on any failure."""
+async def write_narrative(
+    spec: LensSpec, facts: Sequence[Claim], excluded: Sequence[str] = ()
+) -> LensNarrative | None:
+    """The AI read of the distribution; None on any failure. The prompt
+    names only the companies in the lens, and those left out as such."""
     if not facts:
         return None
     ids = {f"L{i + 1}": ClaimRef(section=LENS_SECTION, index=i) for i in range(len(facts))}
+    included = [c.ticker for c in spec.companies if c.ticker not in excluded]
     lines = [
         f"Lens: {spec.title}",
         f"Metric: {spec.metric.definition}",
-        f"Companies: {', '.join(c.ticker for c in spec.companies)}",
-        "",
+        f"Companies: {', '.join(included)}",
     ]
+    if excluded:
+        lines.append(f"Left out (no {spec.metric.short} figure in their filings): {', '.join(excluded)}")
+    lines.append("")
     lines += [format_claim_line(fact, claim_id=f"L{i + 1}") for i, fact in enumerate(facts)]
     try:
         draft: Any = await llm.synth_call(prompt="\n".join(lines), schema=LensDraft, system=LENS_SYSTEM_PROMPT)
@@ -346,7 +352,7 @@ async def build_lens(spec: LensSpec) -> LensReport:
     ]
     stats = year_stats(companies, years)
     facts = lens_facts(spec.metric, companies, stats)
-    narrative = await write_narrative(spec, facts)
+    narrative = await write_narrative(spec, facts, excluded)
     return LensReport(
         **spec.summary().model_dump(),
         method=_method(spec.metric, excluded),

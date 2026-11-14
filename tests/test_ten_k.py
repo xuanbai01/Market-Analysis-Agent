@@ -1215,3 +1215,29 @@ async def test_the_risk_paragraph_diff_runs_off_the_event_loop(
 
     assert threads
     assert threading.get_ident() not in threads
+
+
+async def test_10k_parses_share_one_dedicated_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One parse at a time, on a thread of its own: a parse waiting its
+    turn must not hold a thread of the default pool, which has five on a
+    one-CPU Fly machine and serves every other ``asyncio.to_thread``."""
+    reports = [_unique_risks_filings(), _unique_risks_filings()]
+    by_symbol = {"AAPL": list(reports[0]), "MSFT": list(reports[1])}
+
+    async def _fake_fetch_edgar(symbol: str, **_kw: Any) -> list[EdgarFiling]:
+        return by_symbol[symbol]
+
+    monkeypatch.setattr(ten_k_module, "fetch_edgar", _fake_fetch_edgar)
+    parses = _record_parses(monkeypatch)
+
+    await asyncio.gather(
+        extract_10k_business("AAPL"),
+        extract_10k_risks_diff("AAPL"),
+        extract_10k_business("MSFT"),
+        extract_10k_risks_diff("MSFT"),
+    )
+
+    assert len(parses) == 4
+    assert len(set(parses)) == 1

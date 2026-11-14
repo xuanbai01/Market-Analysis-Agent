@@ -1325,3 +1325,80 @@ def test_the_parse_does_not_depend_on_where_the_feed_splits(
 
     assert ten_k_module._parse_filing_html(html) == whole
     assert whole.paragraphs[-1] == "Café & Nestlé’s €5"
+
+
+def _full_tree_reference(html: str) -> tuple[str, tuple[str, ...]]:
+    """What the streaming parse must equal: the whole tree, then
+    ``itertext()`` (PR 100's method, kept here as the reference)."""
+    import re
+    from itertools import islice
+
+    import lxml.html
+
+    whitespace = re.compile(r"\s+")
+    blocks = ten_k_module._PARAGRAPH_BLOCK_TAGS
+    parser = lxml.html.HTMLParser(
+        encoding="utf-8", huge_tree=True, remove_comments=True, remove_pis=True
+    )
+    root = lxml.html.document_fromstring(html.encode("utf-8"), parser=parser)
+    for tag in list(root.iter("script", "style")):
+        tag.text = None
+        for child in list(tag):
+            tag.remove(child)
+
+    def joined(element: Any) -> str:
+        return whitespace.sub(" ", " ".join(element.itertext())).strip()
+
+    paragraphs = tuple(
+        text
+        for block in root.iter(*blocks)
+        if next(islice(block.iterdescendants(*blocks), 1), None) is None
+        and (text := joined(block))
+    )
+    return joined(root), paragraphs
+
+
+def _random_markup(rng: Any, depth: int = 0) -> str:
+    """Nested markup of every kind the parse treats differently: blocks,
+    inline tags, script/style, void tags, XBRL tags, text and tails."""
+    words = ["risk", "Item", "1A.", "revenue", "&amp;", "café", "  ", "\n", "€5"]
+    tags = ["p", "div", "li", "tr", "td", "span", "b", "ix:nonNumeric", "script", "style", "section"]
+    parts = []
+    for _ in range(rng.randint(1, 4)):
+        if depth < 4 and rng.random() < 0.6:
+            tag = rng.choice(tags)
+            inner = _random_markup(rng, depth + 1)
+            parts.append(f"<{tag}>{inner}</{tag}>")
+        elif rng.random() < 0.2:
+            parts.append("<br/>")
+        if rng.random() < 0.8:
+            parts.append(" ".join(rng.choice(words) for _ in range(rng.randint(1, 3))))
+    return "".join(parts)
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "_TRICKY_HTML",
+        "_html_with_item_1_and_1a",
+        "_html_with_toc_and_main_section",
+        "_html_with_xbrl_inline_tags",
+        "_html_with_all_caps_headers",
+        "_malformed_html_with_section",
+        "_html_item_1a_to_item_2_no_1b",
+    ],
+)
+def test_the_streaming_parse_equals_the_full_tree_on_every_fixture(fixture: str) -> None:
+    value = globals()[fixture]
+    html = value if isinstance(value, str) else value()
+    flat = ten_k_module._parse_filing_html(html)
+    assert (flat.text, flat.paragraphs) == _full_tree_reference(html)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_the_streaming_parse_equals_the_full_tree_on_random_markup(seed: int) -> None:
+    import random
+
+    html = _wrap_html(_random_markup(random.Random(seed)))
+    flat = ten_k_module._parse_filing_html(html)
+    assert (flat.text, flat.paragraphs) == _full_tree_reference(html)

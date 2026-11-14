@@ -1193,3 +1193,25 @@ async def test_a_whitespace_only_10k_extracts_nothing(
 ) -> None:
     _patch_fetch_edgar(monkeypatch, [_mk_filing(primary_doc_text="  \n ")])
     assert await extract_10k_business("AAPL") is None
+
+
+async def test_the_risk_paragraph_diff_runs_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RIVN's ~550 paragraphs a side take ~15 s to compare; that too
+    must not hold the event loop."""
+    current, prior = _unique_risks_filings()
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+    threads: list[int] = []
+    real_diff = ten_k_module._paragraph_diff
+
+    def _recording(*args: Any, **kwargs: Any) -> Any:
+        threads.append(threading.get_ident())
+        return real_diff(*args, **kwargs)
+
+    monkeypatch.setattr(ten_k_module, "_paragraph_diff", _recording)
+
+    await extract_10k_risks_diff("AAPL")
+
+    assert threads
+    assert threading.get_ident() not in threads

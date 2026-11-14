@@ -1,8 +1,8 @@
 /**
- * CapexBars — the lens's capex in dollars: one stacked bar per year, one
+ * AmountBars — the lens's metric in dollars: one stacked bar per year, one
  * segment per company (lens colors, fixed order bottom-up), the total on
  * top. Shows scale and concentration that intensity alone hides.
- * Hovering a year lists each company's spend, largest first.
+ * Hovering a year lists each company's amount, largest first.
  */
 import { useState } from "react";
 
@@ -12,7 +12,7 @@ import { useMeasuredWidth } from "../../lib/use-measured-width";
 import { niceTicks } from "../MultiLine";
 
 interface Props {
-  report: Pick<LensReport, "years" | "companies">;
+  report: Pick<LensReport, "years" | "companies" | "metric">;
   height?: number;
 }
 
@@ -23,13 +23,13 @@ const MIN_WIDTH = 360;
 const PAD = { top: 18, right: 12, bottom: 26, left: 50 };
 const SURFACE = "#0e1116";
 
-export function CapexBars({ report, height = 240 }: Props) {
+export function AmountBars({ report, height = 240 }: Props) {
   const [measureRef, measured] = useMeasuredWidth();
   const [hover, setHover] = useState<number | null>(null);
-  const { years, companies } = report;
+  const { years, companies, metric } = report;
   if (years.length === 0) return null;
 
-  const totals = years.map((_, i) => companies.reduce((sum, c) => sum + (c.points[i]?.capex ?? 0), 0));
+  const totals = years.map((_, i) => companies.reduce((sum, c) => sum + (c.points[i]?.value ?? 0), 0));
   const ticks = niceTicks(0, Math.max(...totals), 4);
   const yMax = ticks[ticks.length - 1] || 1;
   const W = Math.max(MIN_WIDTH, measured ?? FALLBACK_WIDTH);
@@ -48,7 +48,7 @@ export function CapexBars({ report, height = 240 }: Props) {
         height={height}
         viewBox={`0 0 ${W} ${height}`}
         role="img"
-        aria-label={`Total capex by year, ${usdBillions(totals[0])} in CY${years[0]} to ${usdBillions(totals[totals.length - 1])} in CY${years[years.length - 1]}.`}
+        aria-label={`Total ${metric.short} by year, ${usdBillions(totals[0])} in CY${years[0]} to ${usdBillions(totals[totals.length - 1])} in CY${years[years.length - 1]}.`}
         onMouseLeave={() => setHover(null)}
       >
         {ticks.map((t) => (
@@ -64,7 +64,7 @@ export function CapexBars({ report, height = 240 }: Props) {
           return (
             <g key={year}>
               {companies.map((c, index) => {
-                const v = c.points[i]?.capex ?? 0;
+                const v = c.points[i]?.value ?? 0;
                 if (v <= 0) return null;
                 const top = y(base + v);
                 const h = y(base) - top;
@@ -128,15 +128,15 @@ export function CapexBars({ report, height = 240 }: Props) {
           </p>
           <ul className="space-y-0.5">
             {companiesInYear(report, years[hover])
-              .filter((r) => r.capex !== null)
-              .sort((a, b) => (b.capex ?? 0) - (a.capex ?? 0))
+              .filter((r) => r.value !== null)
+              .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
               .map((row) => (
                 <li key={row.ticker} className="flex items-center justify-between gap-2">
                   <span className="flex items-center gap-1.5 text-strata-dim">
                     <span className="h-2 w-2 rounded-full" style={{ background: row.color }} aria-hidden="true" />
                     {row.ticker}
                   </span>
-                  <span className="text-strata-fg">{usdBillions(row.capex ?? 0)}</span>
+                  <span className="text-strata-fg">{usdBillions(row.value ?? 0)}</span>
                 </li>
               ))}
           </ul>

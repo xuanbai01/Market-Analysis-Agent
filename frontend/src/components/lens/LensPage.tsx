@@ -4,8 +4,8 @@
  *
  *   1. What the distribution shows — the AI read, every point citing the
  *      computed facts it quotes (chips)
- *   2. Capex intensity, distribution by year — DistributionChart
- *   3. Capex by company, in dollars — CapexBars
+ *   2. The metric's intensity, distribution by year — DistributionChart
+ *   3. The metric by company, in dollars — AmountBars
  *   4. The latest year, company by company — a table (also the
  *      accessible view of both charts)
  *   5. How it's built — data source and fiscal-year mapping
@@ -19,7 +19,7 @@ import { formatClaimValue } from "../../lib/format";
 import { companiesInYear, companyColor, firstReported, pct, usdBillions } from "../../lib/lens";
 import type { LensReport } from "../../lib/schemas";
 import { ErrorBanner } from "../ErrorBanner";
-import { CapexBars } from "./CapexBars";
+import { AmountBars } from "./AmountBars";
 import { DistributionChart } from "./DistributionChart";
 
 export function LensPage() {
@@ -56,16 +56,24 @@ function LensBody({ report }: { report: LensReport }) {
         </p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-strata-hi">{report.title}</h1>
         <p className="mt-1 max-w-3xl text-sm text-strata-dim">{report.description}</p>
+        {report.excluded.length > 0 && (
+          <p data-testid="lens-excluded" className="mt-2 text-xs text-strata-muted">
+            Not in this lens: {report.excluded.join(", ")} — no {report.metric.short} figure in their SEC filings.
+          </p>
+        )}
       </header>
 
       <Narrative report={report} />
 
-      <Panel title="Capex intensity — capex as a share of revenue" legend={<Legend report={report} withSummary />}>
+      <Panel
+        title={`${report.metric.label} intensity — ${report.metric.short} as a share of revenue`}
+        legend={<Legend report={report} withSummary />}
+      >
         <DistributionChart report={report} />
       </Panel>
 
-      <Panel title="Capex by company, in dollars" legend={<Legend report={report} />}>
-        <CapexBars report={report} />
+      <Panel title={`${report.metric.label} by company, in dollars`} legend={<Legend report={report} />}>
+        <AmountBars report={report} />
       </Panel>
 
       <LatestTable report={report} />
@@ -165,9 +173,9 @@ function LatestTable({ report }: { report: LensReport }) {
           <thead>
             <tr className="text-left font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
               <th className="pb-2 font-normal">Company</th>
-              <th className="pb-2 text-right font-normal">Capex</th>
-              <th className="pb-2 text-right font-normal">Capex ÷ revenue</th>
-              <th className="pb-2 text-right font-normal">Capex ÷ op. cash flow</th>
+              <th className="pb-2 text-right font-normal">{report.metric.label}</th>
+              <th className="pb-2 text-right font-normal">{report.metric.label} ÷ revenue</th>
+              <th className="pb-2 text-right font-normal">{report.metric.label} ÷ op. cash flow</th>
               <th className="pb-2 text-right font-normal">Intensity since</th>
             </tr>
           </thead>
@@ -185,9 +193,9 @@ function LatestTable({ report }: { report: LensReport }) {
                       <span className="font-sans text-xs text-strata-muted">{company?.name}</span>
                     </span>
                   </td>
-                  <td className="py-2 text-right text-strata-fg">{row.capex === null ? "—" : usdBillions(row.capex)}</td>
+                  <td className="py-2 text-right text-strata-fg">{row.value === null ? "—" : usdBillions(row.value)}</td>
                   <td className="py-2 text-right text-strata-fg">{row.intensity === null ? "—" : pct(row.intensity)}</td>
-                  <td className="py-2 text-right text-strata-fg">{row.capexToOcf === null ? "—" : pct(row.capexToOcf)}</td>
+                  <td className="py-2 text-right text-strata-fg">{row.toOcf === null ? "—" : pct(row.toOcf)}</td>
                   <td className="py-2 text-right text-strata-dim">
                     {change === null || !start
                       ? "—"

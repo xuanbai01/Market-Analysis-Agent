@@ -1,6 +1,6 @@
 /**
- * DistributionChart — how capex intensity is spread across the lens's
- * companies, year by year.
+ * DistributionChart — how the metric's intensity (÷ revenue) is spread
+ * across the lens's companies, year by year.
  *
  *   shaded band   the middle 50% (25th–75th percentile) of the group
  *   white line    the group median
@@ -18,7 +18,7 @@ import { useMeasuredWidth } from "../../lib/use-measured-width";
 import { niceTicks } from "../MultiLine";
 
 interface Props {
-  report: Pick<LensReport, "years" | "companies" | "stats">;
+  report: Pick<LensReport, "years" | "companies" | "stats" | "metric">;
   height?: number;
 }
 
@@ -34,13 +34,13 @@ const MEDIAN = "#f5f7fb";
 export function DistributionChart({ report, height = 300 }: Props) {
   const [measureRef, measured] = useMeasuredWidth();
   const [hover, setHover] = useState<number | null>(null);
-  const { years, companies, stats } = report;
+  const { years, companies, stats, metric } = report;
   if (years.length < 2 || stats.length === 0) return null;
 
   const W = Math.max(MIN_WIDTH, measured ?? FALLBACK_WIDTH);
   const innerW = W - PAD.left - PAD.right;
   const innerH = height - PAD.top - PAD.bottom;
-  const values = companies.flatMap((c) => c.points.map((p) => p.capex_intensity ?? 0));
+  const values = companies.flatMap((c) => c.points.map((p) => p.intensity ?? 0));
   const ticks = niceTicks(0, Math.max(...values, ...stats.map((s) => s.p75)), 5);
   const yMax = ticks[ticks.length - 1] || 1;
   const step = innerW / (years.length - 1);
@@ -59,7 +59,7 @@ export function DistributionChart({ report, height = 300 }: Props) {
   // Direct labels for the latest year, nudged apart top to bottom.
   const last = years.length - 1;
   const labels = companies
-    .map((c, index) => ({ ticker: c.ticker, color: companyColor(index), v: c.points[last]?.capex_intensity }))
+    .map((c, index) => ({ ticker: c.ticker, color: companyColor(index), v: c.points[last]?.intensity }))
     .filter((l): l is { ticker: string; color: string; v: number } => l.v !== null && l.v !== undefined)
     .map((l) => ({ ...l, y: y(l.v) }))
     .sort((a, b) => a.y - b.y);
@@ -80,7 +80,7 @@ export function DistributionChart({ report, height = 300 }: Props) {
         height={height}
         viewBox={`0 0 ${W} ${height}`}
         role="img"
-        aria-label={`Capex intensity by company, CY${years[0]}–CY${years[last]}. Median ${pct(first.median)} in CY${first.year}, ${pct(latest.median)} in CY${latest.year}.`}
+        aria-label={`${metric.label} intensity by company, CY${years[0]}–CY${years[last]}. Median ${pct(first.median)} in CY${first.year}, ${pct(latest.median)} in CY${latest.year}.`}
         onMouseLeave={() => setHover(null)}
       >
         {ticks.map((t) => (
@@ -109,11 +109,11 @@ export function DistributionChart({ report, height = 300 }: Props) {
           let pen = "M";
           const d = c.points
             .map((p, i) => {
-              if (p.capex_intensity === null) {
+              if (p.intensity === null) {
                 pen = "M";
                 return "";
               }
-              const seg = `${pen}${x(i)},${y(p.capex_intensity)}`;
+              const seg = `${pen}${x(i)},${y(p.intensity)}`;
               pen = "L";
               return seg;
             })
@@ -122,14 +122,14 @@ export function DistributionChart({ report, height = 300 }: Props) {
             <g key={c.ticker}>
               <path d={d} fill="none" stroke={color} strokeOpacity={0.35} strokeWidth={1.25} />
               {c.points.map((p, i) =>
-                p.capex_intensity === null ? null : (
+                p.intensity === null ? null : (
                   <circle
                     key={i}
                     data-testid="lens-dot"
                     data-ticker={c.ticker}
                     data-year={years[i]}
                     cx={x(i)}
-                    cy={y(p.capex_intensity)}
+                    cy={y(p.intensity)}
                     r={hover === i ? 4.5 : 3.5}
                     fill={color}
                     stroke={SURFACE}

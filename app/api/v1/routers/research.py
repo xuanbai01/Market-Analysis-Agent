@@ -65,7 +65,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import enforce_research_rate_limit, get_session
@@ -237,10 +237,13 @@ async def research(
             report_date=report_date,
             report=report,
         )
-    except (InterfaceError, OperationalError):
-        # The connection was lost. The report is built and paid for; serve
-        # it. Not cached, so the next visit builds it again. A save the
-        # database rejects (IntegrityError, DataError) is not caught: it
-        # would fail on every visit, each paying for a fresh build.
-        logger.exception("could not save the %s report; serving it uncached", target)
+    except DBAPIError as exc:
+        # Only a lost connection (the dialect's is_disconnect said so) is
+        # forgiven: the report is built and paid for, so serve it, uncached,
+        # and the next visit builds it again. Anything else (a constraint,
+        # a statement timeout, a read-only standby) would fail on every
+        # visit, each paying for a fresh build, so it stays an error.
+        if not exc.connection_invalidated:
+            raise
+        logger.exception("lost the database connection saving the %s report; serving it uncached", target)
     return report

@@ -21,6 +21,7 @@ from app.schemas.research import (
 )
 from tests.evals.rubric import (
     grade,
+    score_attribution,
     score_factuality,
     score_structure,
 )
@@ -715,3 +716,147 @@ def test_factuality_flags_a_fabricated_number_in_the_analyst_view() -> None:
     )
     assert 25.5 in result.unmatched_numbers
     assert result.score < 1.0
+
+
+# ── Attribution: today's multiple, the median, and the direction ─────
+#
+# 2026-11-14 (DIS, NVDA): every number in the Valuation prose existed as
+# a claim, so factuality passed, but the numbers sat on the wrong labels:
+# the median given as today's price-to-free-cash-flow, a price-to-sales
+# 26% under its own median called "above". These check the words the
+# numbers are attached to.
+
+
+def _derived(description: str, value: float, detail: str, unit: str = "fraction") -> Claim:
+    return Claim(
+        description=description,
+        value=value,
+        unit=unit,
+        source=Source(tool="computed.analytics", fetched_at=datetime(2026, 11, 14, tzinfo=UTC), detail=detail),
+    )
+
+
+def _dis_valuation(summary: str) -> Section:
+    """Disney's Valuation claims as of 2026-11-14 (the ones that matter)."""
+    return Section(
+        title="Valuation",
+        claims=[
+            Claim(description="P/E ratio (trailing 12 months)", value=24.38, unit="ratio", source=_src()),
+            Claim(description="Price-to-sales ratio (trailing 12 months)", value=2.18, unit="ratio", source=_src()),
+            _derived(
+                "Trailing P/E vs peer median of 30.00: today 24.38, below the peer median by",
+                24.38 / 30 - 1,
+                "trailing_pe / median.trailing_pe − 1",
+            ),
+            _derived("Price-to-free-cash-flow (trailing 12 months)", 24.62, "p_s ÷ (…)", unit="ratio"),
+            _derived("Median P/E across 7 fiscal year-ends (2019–2025)", 20.30, "median(pe_annual)", unit="ratio"),
+            _derived(
+                "Trailing P/E vs its own median of 20.30 across 7 fiscal year-ends",
+                24.38 / 20.30 - 1,
+                "today's trailing multiple ÷ median(pe_annual) − 1",
+            ),
+            _derived("Median price-to-sales across 7 fiscal year-ends", 2.95, "median(ps_annual)", unit="ratio"),
+            _derived(
+                "Price-to-sales vs its own median of 2.95 across 7 fiscal year-ends",
+                2.18 / 2.95 - 1,
+                "today's trailing multiple ÷ median(ps_annual) − 1",
+            ),
+            _derived(
+                "Median price-to-free-cash-flow across 7 fiscal year-ends", 20.39, "median(pfcf_annual)", unit="ratio"
+            ),
+            _derived(
+                "Price-to-free-cash-flow vs its own median of 20.39 across 7 fiscal year-ends",
+                24.62 / 20.39 - 1,
+                "today's trailing multiple ÷ median(pfcf_annual) − 1",
+            ),
+        ],
+        summary=summary,
+    )
+
+
+def test_attribution_flags_a_premium_called_in_line_with_the_median() -> None:
+    """The DIS prose, verbatim: P/FCF is 21% above its median."""
+    report = _report([_dis_valuation(
+        "Disney's price-to-free-cash-flow of 20.39 matches its own seven-year median exactly."
+    )])
+    errors = score_attribution(report).errors
+    assert len(errors) == 1
+    assert "price-to-free-cash-flow" in errors[0]
+
+
+def test_attribution_flags_a_discount_called_above() -> None:
+    """The DIS prose, verbatim: P/S is 26% below its median, P/E above."""
+    report = _report([_dis_valuation(
+        "The price-to-sales of 2.18 and a trailing P/E of 24.38 sit above the median P/E of 20.30."
+    )])
+    errors = score_attribution(report).errors
+    assert len(errors) == 1
+    assert "price-to-sales" in errors[0]
+
+
+def test_attribution_flags_todays_figure_given_as_the_median() -> None:
+    report = _report([_dis_valuation("Price-to-free-cash-flow sits above its own median of 24.62.")])
+    errors = score_attribution(report).errors
+    assert len(errors) == 1
+    assert "24.62" in errors[0]
+
+
+def test_attribution_passes_prose_that_names_each_figure_rightly() -> None:
+    report = _report([_dis_valuation(
+        "Price-to-free-cash-flow of 24.62 sits 20.74% above its own median of 20.4x, and the trailing "
+        "P/E of 24.38 is above its median of 20.30. Price-to-sales, at 2.18, is below its own median; "
+        "against peers the P/E trades at a discount to the peer median of 30.00."
+    )])
+    assert score_attribution(report).errors == []
+
+
+def test_attribution_passes_the_nvda_shape() -> None:
+    """NVDA's numbers were right, only the grammar was garbled."""
+    section = Section(
+        title="Valuation",
+        claims=[
+            _derived("Median price-to-free-cash-flow across 7 fiscal year-ends", 58.13, "median(pfcf_annual)", "ratio"),
+            _derived(
+                "Price-to-free-cash-flow vs its own median of 58.13 across 7 fiscal year-ends",
+                -0.467,
+                "today's trailing multiple ÷ median(pfcf_annual) − 1",
+            ),
+        ],
+        summary="Price-to-free-cash-flow of 30.98 sits 46.70% under its own median of 58.13.",
+    )
+    assert score_attribution(_report([section])).errors == []
+
+
+def test_attribution_checks_the_peer_median_against_the_peer_comparison() -> None:
+    report = _report([_dis_valuation("The trailing P/E trades at a premium to the peer median.")])
+    errors = score_attribution(report).errors
+    assert len(errors) == 1
+    assert "peer" in errors[0]
+
+
+def test_attribution_leaves_sentences_without_a_median_alone() -> None:
+    report = _report([_dis_valuation("The P/E of 24.38 looks rich, and price-to-sales is above 2.")])
+    assert score_attribution(report).errors == []
+
+
+def test_attribution_ignores_a_forward_pe() -> None:
+    report = _report([_dis_valuation("The forward P/E sits below its own median.")])
+    assert score_attribution(report).errors == []
+
+
+def test_attribution_polices_the_analyst_view() -> None:
+    report = _report([_dis_valuation("Valuation is mixed.")])
+    report.thesis = Thesis(
+        headline="A cheap-looking multiple.",
+        bull=[ThesisPoint(
+            text="Price-to-sales sits above its own median.",
+            claim_refs=[ClaimRef(section="Valuation", index=7)],
+        )],
+    )
+    errors = score_attribution(report).errors
+    assert len(errors) == 1
+
+
+def test_grade_carries_attribution() -> None:
+    report = _report([_dis_valuation("Price-to-free-cash-flow matches its own median.")])
+    assert grade(report, elapsed_ms=1.0).attribution.errors

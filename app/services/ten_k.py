@@ -48,11 +48,14 @@ BeautifulSoup each parse took 7.5 s and ~140 MB, a report parsed its two
 10-Ks five times (text and paragraphs separately, business and risk
 tools separately), all on the event loop, and on 2026-11-14 the 512 MB
 Fly machine was killed in the middle of JPM's report. So each filing is
-parsed once, by lxml (0.6 s, ~95 MB for JPM; identical sections on the
-19 filings compared), into both its text and its paragraphs, on a thread
+parsed once, by lxml, into both its text and its paragraphs, on a thread
 of its own (``_TEN_K_EXECUTOR``, which also runs the paragraph diff, one
 piece at a time), and the result is kept for the next tool
-(``_FLAT_CACHE``).
+(``_FLAT_CACHE``). The parse streams (``_parse_filing_html``): the full
+lxml tree of JPM's 10-K took ~110 MB on Linux and still left the machine
+short, so each element is collapsed into its text as soon as it ends
+(~55 MB). On the 19 filings compared, sections are identical to
+BeautifulSoup's and to the full-tree parse.
 
 ## Why a different output shape from the data tools
 
@@ -81,11 +84,9 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from itertools import islice
 from typing import Any, TypeVar
 
-import lxml.html
-from lxml.etree import ParserError
+from lxml import etree
 
 from app.core.observability import log_external_call
 from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
@@ -137,19 +138,15 @@ _PARAGRAPH_BLOCK_TAGS = (
     "tr",
 )
 
+_BLOCK_TAGS = frozenset(_PARAGRAPH_BLOCK_TAGS)
+_SKIPPED_TAGS = frozenset(("script", "style"))
 _WHITESPACE = re.compile(r"\s+")
+# Marks a collapsed element that is, or holds, a block element.
+_HOLDS_BLOCK = "data-flat-block"
+# Characters fed to the parser at a time; the document is never encoded whole.
+_FEED_CHARS = 1 << 20
 
 _T = TypeVar("_T")
-
-def _html_parser() -> lxml.html.HTMLParser:
-    """A parser per parse (cheap; lxml parsers mustn't be shared across
-    threads). The text is already decoded, so the parser is told it's
-    UTF-8 and the document's own ``<?xml encoding=...?>`` declaration is
-    ignored. ``huge_tree`` lifts libxml2's limits on very large
-    documents."""
-    return lxml.html.HTMLParser(
-        encoding="utf-8", huge_tree=True, remove_comments=True, remove_pis=True
-    )
 
 
 @dataclass(frozen=True)
@@ -163,35 +160,79 @@ class _FlatFiling:
     paragraphs: tuple[str, ...]
 
 
-def _joined_text(element: Any) -> str:
-    """An element's text, adjacent pieces joined by a space so inline
-    tags don't run their words together."""
-    return _WHITESPACE.sub(" ", " ".join(element.itertext())).strip()
-
-
-def _is_leaf_block(block: Any) -> bool:
-    return next(islice(block.iterdescendants(*_PARAGRAPH_BLOCK_TAGS), 1), None) is None
+def _pull_parser() -> etree.HTMLPullParser:
+    """A parser per parse (lxml parsers mustn't be shared across threads).
+    The text is already decoded, so the parser is told it's UTF-8 and the
+    document's own ``<?xml encoding=...?>`` declaration is ignored.
+    ``huge_tree`` lifts libxml2's limits on very large documents."""
+    return etree.HTMLPullParser(
+        events=("end",),
+        encoding="utf-8",
+        huge_tree=True,
+        remove_comments=True,
+        remove_pis=True,
+    )
 
 
 def _parse_filing_html(html: str) -> _FlatFiling:
-    """The one parse of a 10-K: HTML → text and paragraphs."""
-    try:
-        root = lxml.html.document_fromstring(html.encode("utf-8"), parser=_html_parser())
-    except ParserError:  # an empty or whitespace-only document
-        return _FlatFiling(text="", paragraphs=())
-    for tag in list(root.iter("script", "style")):
-        # Emptied rather than removed: removing would glue the text after
-        # the tag onto the text before it.
-        tag.text = None
-        for child in list(tag):
-            tag.remove(child)
+    """The one parse of a 10-K: HTML → text and paragraphs, streamed.
 
-    paragraphs = tuple(
-        text
-        for block in root.iter(*_PARAGRAPH_BLOCK_TAGS)
-        if _is_leaf_block(block) and (text := _joined_text(block))
+    The full tree of a big 10-K is the largest thing a report holds (JPM's:
+    140K elements, ~110 MB on Linux), so it is collapsed as it is read.
+    When an element ends, its text and its children (with their tails) are
+    complete: its subtree's text, adjacent pieces joined by a space so
+    inline tags don't run words together, replaces its children, leaving a
+    childless element holding one string. What is in memory at any moment
+    is the open elements and, under each, its finished children reduced to
+    one string apiece (~55 MB for JPM). The result equals joining
+    ``itertext()`` over the full tree; script and style contribute nothing
+    but their tails.
+    """
+    if not html.strip():
+        return _FlatFiling(text="", paragraphs=())
+    paragraphs: list[str] = []
+    last: Any = None
+
+    def collapse(element: Any) -> None:
+        nonlocal last
+        tag = element.tag if isinstance(element.tag, str) else ""
+        holds_block = False
+        text: str | None = None
+        if tag not in _SKIPPED_TAGS:
+            pieces = [element.text] if element.text is not None else []
+            for child in element:
+                if child.text:
+                    pieces.append(child.text)
+                if child.tail is not None:
+                    pieces.append(child.tail)
+                holds_block = holds_block or child.get(_HOLDS_BLOCK) is not None
+            text = " ".join(pieces)
+        if tag in _BLOCK_TAGS and not holds_block and text:
+            paragraph = _WHITESPACE.sub(" ", text).strip()
+            if paragraph:
+                paragraphs.append(paragraph)
+        # The tail is left alone: the parser may still be adding to it.
+        element.clear(keep_tail=True)
+        element.text = text
+        if holds_block or tag in _BLOCK_TAGS:
+            element.set(_HOLDS_BLOCK, "")
+        last = element
+
+    # A parser error is not caught: the tool fails and the report says so,
+    # rather than showing an empty Business or Risk card as if it were real.
+    parser = _pull_parser()
+    for start in range(0, len(html), _FEED_CHARS):
+        parser.feed(html[start : start + _FEED_CHARS].encode("utf-8"))
+        for _event, element in parser.read_events():
+            collapse(element)
+    parser.close()
+    for _event, element in parser.read_events():
+        collapse(element)
+    if last is None:
+        return _FlatFiling(text="", paragraphs=())
+    return _FlatFiling(
+        text=_WHITESPACE.sub(" ", last.text or "").strip(), paragraphs=tuple(paragraphs)
     )
-    return _FlatFiling(text=_joined_text(root), paragraphs=paragraphs)
 
 
 def _flatten_html_to_text(html: str) -> str:

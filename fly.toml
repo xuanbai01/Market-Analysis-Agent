@@ -15,6 +15,11 @@ kill_timeout = '10s'            # give in-flight requests time to drain
   APP_ENV = 'prod'
   PORT = '8000'
   TZ = 'UTC'
+  # glibc gives each thread its own heap ("arena", up to 8 on one CPU), so
+  # the yfinance and SEC threads of a report each keep freed memory the
+  # others can't reuse. Two arenas cut a JPM page load's peak by 25-40 MB
+  # on Linux (2026-11-14; the machine has 512 MB). See tasks/lessons.md.
+  MALLOC_ARENA_MAX = '2'
   # The Vercel dashboard's origin — the only one CORS lets the browser
   # call from (exact match, no trailing slash). Public, so it lives here.
   FRONTEND_ORIGIN = 'https://market-analysis-agent-red.vercel.app'

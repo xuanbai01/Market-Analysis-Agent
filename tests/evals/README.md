@@ -4,10 +4,11 @@ A research-report agent that produces beautifully-formatted hallucinations is wo
 
 ## What's here
 
-- **`rubric.py`** — three pure scorers run against any `ResearchReport`:
+- **`rubric.py`** — four pure scorers run against any `ResearchReport`:
   1. **Structure** — does the output validate as a `ResearchReport`? (Pydantic invariants enforced.)
   2. **Factuality** — does every numeric fact in `summary` prose also appear in the typed `claims` list? Flags numbers the LLM made up.
-  3. **Latency** — wall-clock duration of the agent call.
+  3. **Attribution** — is each number on the right label? In a sentence about a median, the direction a multiple is said to sit ("above", "below", "matches") must agree with its comparison claim, and a "median of N" must be a median. Catches real numbers attached to the wrong figure, which factuality can't (DIS, 2026-11-14).
+  4. **Latency** — wall-clock duration of the agent call.
 - **`golden.py`** — a list of golden questions: `(symbol, expected_facts)`. Each `expected_fact` is a value the report is expected to surface (P/E, latest 10-K date, etc.). Empty for now — populated as tools come online.
 - **`test_rubric.py`** — unit tests of the rubric framework itself, run on every PR. Validates that the rubric grades known-good and known-bad reports correctly.
 - **`test_golden.py`** — runs the agent against each golden question and grades it, on whichever provider `LLM_PROVIDER` selects ([ADR 0006](../../docs/adr/0006-pluggable-llm-provider.md)). **Marked `live_llm`, which the default pytest options deselect, and skipped when the active provider's API key is missing**, so it never burns cost on a normal test run. Run it locally with `uv run pytest -m live_llm tests/evals/test_golden.py -v -s`, or on GitHub with the **Live Eval** workflow ([live-eval.yml](../../.github/workflows/live-eval.yml), started by hand; needs the provider's key as a repo secret).

@@ -328,7 +328,7 @@ def test_full_valuation_reads_peers_for_premium_claims() -> None:
         "fetch_peers": {"median.trailing_pe": _claim("Median P/E", 30.0)},
     }
     descriptions = [c.description for c in spec.builder(outputs)]
-    assert "Trailing P/E vs peer median of 30.00: premium (+) or discount (−)" in descriptions
+    assert any(d.startswith("Trailing P/E vs peer median of 30.00: today ") for d in descriptions)
 
 
 def test_earnings_focus_valuation_does_not_add_a_peers_fetch() -> None:
@@ -638,7 +638,7 @@ def test_valuation_carries_the_year_end_multiples_and_their_comparisons() -> Non
 
     assert "P/E at fiscal year-end (SEC filings)" in descriptions
     assert "Price-to-sales at fiscal year-end (SEC filings)" in descriptions
-    assert "Median P/E across 5 fiscal year-ends (2021–2025)" in descriptions
+    assert any(d.startswith("Median P/E across 5 fiscal year-ends (2021–2025)") for d in descriptions)
     assert any(d.startswith("Trailing P/E vs its own median of 14.00") for d in descriptions)
     assert "fetch_annual_history" in _spec(Focus.FULL, "Valuation").tools_required
 

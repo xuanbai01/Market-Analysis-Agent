@@ -184,6 +184,18 @@ history ends on, not to today: name that year. Say "today" or \
 "currently" only for trailing figures and for the claims that compare \
 today with a median.
 
+2d. **A multiple against its own history.** Today's multiple is the \
+trailing claim ("P/E ratio (trailing 12 months)", "Price-to-free-cash-flow \
+(trailing 12 months)"); its norm is the "Median … across N fiscal \
+year-ends" claim, which is not today's figure; the "… vs its own median …" \
+claim states both. Take each number from the claim that names it, and \
+the direction from the comparison claim's words ("above the median by", \
+"below the median by"), never from your own reading of the numbers. \
+Compare a multiple only with its own median (P/E with the median P/E, \
+never price-to-sales with it), and leave the fiscal year-end values out \
+of a today-against-the-median sentence. The same holds for the "vs peer \
+median" claims.
+
 3. **Acknowledge missing data.** If a section's claim list is empty or \
 every value is None, ``summary`` is one sentence explaining that data \
 was unavailable, and ``card_narrative`` is the empty string (omit the \

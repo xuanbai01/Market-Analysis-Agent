@@ -40,12 +40,17 @@ History:
     6  2026-11-13 — Disney, Cigna and Broadcom read their earlier SEC
        registrants too, so their ten-year history has all eleven
        annual points (2015 was missing).
+    7  2026-11-14 — valuation prose names today's multiple and the median
+       apart: each "vs median" claim (own history and peers) carries
+       today's figure and says above or below in words, the median says
+       it is not today's figure, and both prompts say to compare a
+       multiple only with its own median.
 """
 from __future__ import annotations
 
 from app.schemas.research import ResearchReport
 
-REPORT_VERSION = 6
+REPORT_VERSION = 7
 
 
 def is_outdated(report: ResearchReport) -> bool:

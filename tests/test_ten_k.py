@@ -758,6 +758,76 @@ def test_paragraph_diff_skips_fuzzy_matching_for_verbatim_paragraphs(
     assert calls["ratio"] == 0
 
 
+def _lcs_length(a: str, b: str) -> int:
+    """Textbook dynamic program for the longest common subsequence."""
+    prev = [0] * (len(b) + 1)
+    for ch in a:
+        cur = [0]
+        for j, bj in enumerate(b):
+            cur.append(prev[j] + 1 if ch == bj else max(prev[j + 1], cur[j]))
+        prev = cur
+    return prev[-1]
+
+
+# Two unrelated risk factors of about the same length. Any two English
+# paragraphs share most of their letters, so quick_ratio() can't tell
+# them apart; their ratio() is 0.02-0.04.
+_SUPPLY_RISK = (
+    "Our vehicles rely on battery cells sourced from a limited number of "
+    "suppliers, and any disruption in their production or delivery, including "
+    "as a result of trade restrictions, could delay deliveries to customers "
+    "and increase our costs materially."
+)
+_RATES_RISK = (
+    "Changes in interest rates and in the availability of consumer credit may "
+    "reduce the demand for automobiles generally, and higher borrowing costs "
+    "for our customers could lead to fewer orders and greater cancellations "
+    "of existing reservations."
+)
+
+
+def test_a_pair_whose_common_subsequence_is_too_short_costs_no_ratio_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RIVN 2026-11: ratio() was 18 of the diff's 20 CPU-seconds (45,895
+    calls), and 81% of those pairs scored under 0.1. The characters
+    ratio() counts form a common subsequence of the two paragraphs, so
+    2·LCS/(len a + len b) bounds it from above; a pair under the threshold
+    on that bound can't match and needn't be compared."""
+    from difflib import SequenceMatcher
+
+    from app.services import ten_k
+
+    for a, b in ((_SUPPLY_RISK, _RATES_RISK), (_RATES_RISK, _SUPPLY_RISK)):
+        today = SequenceMatcher(None, a, b)
+        assert today.real_quick_ratio() >= 0.6 and today.quick_ratio() >= 0.6
+        assert 2 * _lcs_length(a, b) / (len(a) + len(b)) < 0.6
+
+    calls = {"ratio": 0}
+
+    class CountingMatcher(SequenceMatcher):
+        def ratio(self) -> float:
+            calls["ratio"] += 1
+            return super().ratio()
+
+    monkeypatch.setattr(ten_k, "SequenceMatcher", CountingMatcher)
+
+    assert ten_k._paragraph_diff([_SUPPLY_RISK], [_RATES_RISK]) == (
+        [_SUPPLY_RISK],
+        [_RATES_RISK],
+        0,
+    )
+    assert calls["ratio"] == 0
+
+
+def test_a_pair_exactly_at_the_threshold_is_kept() -> None:
+    """ratio() == 0.6 counts as kept; the bound must not round it away."""
+    from difflib import SequenceMatcher
+
+    assert SequenceMatcher(None, "abcde", "abcxy").ratio() == 0.6
+    assert _paragraph_diff(["abcde"], ["abcxy"]) == ([], [], 1)
+
+
 # ── extract_10k_risks_diff (fetch_edgar mocked) ────────────────────────
 
 
@@ -1198,8 +1268,8 @@ async def test_a_whitespace_only_10k_extracts_nothing(
 async def test_the_risk_paragraph_diff_runs_off_the_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """RIVN's ~550 paragraphs a side take ~15 s to compare; that too
-    must not hold the event loop."""
+    """RIVN's ~550 paragraphs a side take ~0.7 CPU-seconds to compare,
+    ~10 s on a throttled Fly CPU; that too must not hold the event loop."""
     current, prior = _unique_risks_filings()
     _patch_fetch_edgar(monkeypatch, [current, prior])
     threads: list[int] = []
@@ -1249,7 +1319,7 @@ async def test_the_risk_paragraph_diff_runs_on_the_10k_thread(
 ) -> None:
     """The diff is pure Python, so two never run in parallel anyway (the
     GIL); on the 10-K thread it waits there instead of holding a thread
-    of the default pool for ~15 s."""
+    of the default pool while it runs."""
     current, prior = _unique_risks_filings()
     _patch_fetch_edgar(monkeypatch, [current, prior])
     parses = _record_parses(monkeypatch)

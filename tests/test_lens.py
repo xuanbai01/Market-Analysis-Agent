@@ -21,6 +21,7 @@ SPEC = lens.LensSpec(
     id="test-lens",
     title="Test capex",
     description="Three companies.",
+    metric=lens.CAPEX,
     companies=(
         lens.LensCompanySpec("AAA", "Alpha", "1"),
         lens.LensCompanySpec("BBB", "Beta", "2"),
@@ -30,11 +31,11 @@ SPEC = lens.LensSpec(
 
 # AAA heavy spender, BBB light, CCC only reports from 2024 (like NVDA).
 RAW = {
-    "AAA": {"capex": {2023: 20.0, 2024: 30.0, 2025: 40.0}, "revenue": {2023: 100.0, 2024: 120.0, 2025: 160.0},
+    "AAA": {"value": {2023: 20.0, 2024: 30.0, 2025: 40.0}, "revenue": {2023: 100.0, 2024: 120.0, 2025: 160.0},
             "ocf": {2023: 40.0, 2024: 50.0, 2025: 50.0}},
-    "BBB": {"capex": {2023: 2.0, 2024: 2.0, 2025: 3.0}, "revenue": {2023: 100.0, 2024: 100.0, 2025: 100.0},
+    "BBB": {"value": {2023: 2.0, 2024: 2.0, 2025: 3.0}, "revenue": {2023: 100.0, 2024: 100.0, 2025: 100.0},
             "ocf": {2023: 30.0, 2024: 30.0, 2025: -5.0}},
-    "CCC": {"capex": {2024: 5.0, 2025: 10.0}, "revenue": {2024: 50.0, 2025: 100.0}, "ocf": {2025: 20.0}},
+    "CCC": {"value": {2024: 5.0, 2025: 10.0}, "revenue": {2024: 50.0, 2025: 100.0}, "ocf": {2025: 20.0}},
 }
 
 
@@ -48,21 +49,22 @@ def built() -> tuple[list[int], list[Any], list[Any]]:
 
 
 def test_window_ends_at_the_latest_year_everyone_reported() -> None:
-    partial = {**RAW, "BBB": {**RAW["BBB"], "capex": {2023: 2.0, 2024: 2.0}}}
+    partial = {**RAW, "BBB": {**RAW["BBB"], "value": {2023: 2.0, 2024: 2.0}}}
     assert lens.window(RAW, size=3) == [2023, 2024, 2025]
     assert lens.window(partial, size=2) == [2023, 2024]
-    assert lens.window({"X": {"capex": {}, "revenue": {}, "ocf": {}}}) == []
+    assert lens.window({"X": {"value": {}, "revenue": {}, "ocf": {}}}) == []
 
 
-def test_points_compute_intensity_and_capex_to_ocf() -> None:
+def test_points_compute_intensity_and_the_share_of_operating_cash_flow() -> None:
     _, companies, _ = built()
     aaa = companies[0].points[-1]
-    assert aaa.capex_intensity == pytest.approx(0.25)
-    assert aaa.capex_to_ocf == pytest.approx(0.8)
+    assert aaa.value == pytest.approx(40.0)
+    assert aaa.intensity == pytest.approx(0.25)
+    assert aaa.to_ocf == pytest.approx(0.8)
     # Negative operating cash flow: the ratio means nothing, so it's left out.
-    assert companies[1].points[-1].capex_to_ocf is None
+    assert companies[1].points[-1].to_ocf is None
     # A year a company didn't report stays empty.
-    assert companies[2].points[0].capex_intensity is None
+    assert companies[2].points[0].intensity is None
 
 
 def test_percentile_interpolates() -> None:
@@ -76,12 +78,12 @@ def test_year_stats_cover_only_the_companies_reporting() -> None:
     assert first.companies == 2 and last.companies == 3
     assert last.median == pytest.approx(0.10)  # [0.03, 0.10, 0.25]
     assert (last.high_ticker, last.low_ticker) == ("AAA", "BBB")
-    assert last.total_capex == pytest.approx(53.0)
+    assert last.total == pytest.approx(53.0)
 
 
 def test_facts_describe_the_distribution_growth_and_positions() -> None:
     _, companies, stats = built()
-    facts = {f.description: f for f in lens.lens_facts(companies, stats)}
+    facts = {f.description: f for f in lens.lens_facts(lens.CAPEX, companies, stats)}
     assert facts["Median capex intensity (capex ÷ revenue), CY2025, 3 companies"].value == pytest.approx(0.10)
     assert facts["Highest capex intensity, CY2025: AAA"].value == pytest.approx(0.25)
     # Growth only over companies reporting both ends (CCC joined later).
@@ -96,9 +98,75 @@ def test_facts_describe_the_distribution_growth_and_positions() -> None:
     assert sources == {"computed.analytics", "sec.xbrl"}
 
 
+def test_facts_name_the_lens_metric() -> None:
+    """The same computation reads as SBC (or R&D) when the lens is about
+    SBC: the descriptions are what the narrative quotes and cites."""
+    _, companies, stats = built()
+    facts = {f.description for f in lens.lens_facts(lens.SBC, companies, stats)}
+    assert "Median SBC intensity (SBC ÷ revenue), CY2025, 3 companies" in facts
+    assert "AAA SBC ÷ operating cash flow, CY2025" in facts
+    assert "Total SBC, 3 companies, CY2025" in facts
+    assert not any("capex" in d for d in facts)
+
+
+def test_a_company_with_no_figure_for_the_metric_is_left_out_of_the_window() -> None:
+    """Amazon tags no R&D expense: it must not empty the R&D lens's window
+    (the latest year *every* company reported)."""
+    no_rnd = {**RAW, "DDD": {"value": {}, "revenue": {2025: 500.0}, "ocf": {2025: 50.0}}}
+    assert lens.window(no_rnd, size=3) == [2023, 2024, 2025]
+    assert lens.without_figures(no_rnd) == ["DDD"]
+
+
+async def test_a_lens_names_the_companies_it_left_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = lens.LensSpec(
+        id="test-rnd",
+        title="Test R&D",
+        description="Four companies.",
+        metric=lens.RND,
+        companies=(*SPEC.companies, lens.LensCompanySpec("DDD", "Delta", "4")),
+    )
+    raw = {**RAW, "DDD": {"value": {}, "revenue": {2025: 500.0}, "ocf": {2025: 50.0}}}
+
+    async def no_narrative(*_a: Any) -> None:
+        return None
+
+    monkeypatch.setattr(lens, "fetch_raw", lambda _spec: raw)
+    monkeypatch.setattr(lens, "write_narrative", no_narrative)
+    report = await lens.build_lens(spec)
+
+    assert [c.ticker for c in report.companies] == ["AAA", "BBB", "CCC"]
+    assert report.excluded == ["DDD"]
+    assert "DDD" in report.method
+    assert report.metric.label == "R&D"
+    assert report.stats[-1].companies == 3
+
+
+def test_the_megacap_lenses_share_one_group() -> None:
+    megacaps = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"]
+    assert set(lens.LENSES) == {"megacap-capex", "megacap-sbc", "megacap-rnd"}
+    for spec in lens.LENSES.values():
+        assert [c.ticker for c in spec.companies] == megacaps
+    assert lens.LENSES["megacap-sbc"].metric is lens.SBC
+    assert lens.LENSES["megacap-rnd"].metric is lens.RND
+
+
+async def test_the_narrative_prompt_says_what_the_metric_is(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompts: list[str] = []
+
+    async def capture(**kw: Any) -> LensDraft:
+        prompts.append(kw["prompt"])
+        return LensDraft(headline="", points=[])
+
+    monkeypatch.setattr(lens.llm, "synth_call", capture)
+    _, companies, stats = built()
+    spec = lens.LensSpec(id="x", title="X", description="", metric=lens.SBC, companies=SPEC.companies)
+    await lens.write_narrative(spec, lens.lens_facts(lens.SBC, companies, stats))
+    assert lens.SBC.definition in prompts[0]
+
+
 async def test_narrative_keeps_points_citing_facts_they_quote(monkeypatch: pytest.MonkeyPatch) -> None:
     _, companies, stats = built()
-    facts = lens.lens_facts(companies, stats)
+    facts = lens.lens_facts(lens.CAPEX, companies, stats)
 
     async def fake(**_kw: Any) -> LensDraft:
         return LensDraft(
@@ -124,7 +192,7 @@ async def test_narrative_failure_leaves_none(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(lens.llm, "synth_call", boom)
     _, companies, stats = built()
-    assert await lens.write_narrative(SPEC, lens.lens_facts(companies, stats)) is None
+    assert await lens.write_narrative(SPEC, lens.lens_facts(lens.CAPEX, companies, stats)) is None
 
 
 @pytest.fixture

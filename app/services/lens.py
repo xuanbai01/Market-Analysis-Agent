@@ -215,6 +215,8 @@ def lens_facts(
         _fact(f"Highest {m} intensity, CY{y1}: {last.high_ticker}", last.high, "fraction", f"max of {m}/revenue"),
         _fact(f"Lowest {m} intensity, CY{y1}: {last.low_ticker}", last.low, "fraction", f"min of {m}/revenue"),
         _fact(f"Total {m}, {last.companies} companies, CY{y1}", last.total, "usd", f"sum of {m}"),
+        _fact(f"Spread between the highest and lowest {m} intensity, CY{y1} ({last.high_ticker} − {last.low_ticker})",
+              last.high - last.low, "percentage_points", "max − min of intensity"),
     ]
 
     # Growth of the metric vs revenue, over the companies reporting both
@@ -291,7 +293,9 @@ the facts it quotes, exactly as written in the brackets.
 
 Rules (non-negotiable):
 1. Every number in your text must be a value shown in the fact lines, in \
-the display units shown. Never compute a number yourself.
+the display units shown, written in digits exactly as shown. Never compute \
+a number yourself, and never round, approximate or spell one out \
+("roughly thirty points" is a number the facts don't show).
 2. For a signed change, say the direction in words and drop the sign.
 3. No outside facts: explain what the numbers imply, not why they \
 happened — no products, technologies, events, management actions or \
@@ -360,7 +364,7 @@ def _method(metric: LensMetric, excluded: Sequence[str]) -> str:
     method = METHOD.format(definition=metric.definition)
     if excluded:
         method += (
-            f" Not in this lens, for lack of a {metric.short} figure in their SEC filings: "
+            f" Not in this lens, because their SEC filings have no {metric.short} figure: "
             f"{', '.join(excluded)}."
         )
     return method

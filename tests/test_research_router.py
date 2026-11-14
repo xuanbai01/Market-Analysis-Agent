@@ -804,3 +804,23 @@ async def test_a_failed_save_still_returns_the_report(
 
     assert resp.status_code == 200
     assert resp.json()["symbol"] == "RIVN"
+
+
+async def test_a_save_the_database_rejects_is_still_an_error(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a lost connection is forgiven. A report the table can't store
+    would otherwise rebuild, at full cost, on every visit with nothing but
+    a log line to show for it."""
+    from sqlalchemy.exc import IntegrityError
+
+    _patch_orchestrator(monkeypatch, _stub_report("RIVN"))
+
+    async def _rejected(*_a: Any, **_kw: Any) -> None:
+        raise IntegrityError("INSERT ...", {}, Exception("violates a constraint"))
+
+    monkeypatch.setattr(cache_module, "upsert", _rejected)
+
+    resp = await research_client.post("/v1/research/RIVN")
+
+    assert resp.status_code == 500

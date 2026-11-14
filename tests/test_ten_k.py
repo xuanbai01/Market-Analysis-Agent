@@ -1273,3 +1273,55 @@ def test_script_and_style_with_child_elements_are_emptied_cleanly() -> None:
         "<p>Before</p><style><div>hidden</div>also hidden</style><p>After</p>"
     )
     assert _flatten_html_to_paragraphs(html) == ["Before", "After"]
+
+
+# ── The streaming parse, exactly ───────────────────────────────────────
+#
+# _parse_filing_html streams (it never builds the whole tree). Its output
+# must equal joining itertext() over the full tree: every text piece, in
+# document order, separated by a space, whitespace collapsed.
+
+_TRICKY_HTML = """<?xml version="1.0" encoding="ASCII"?>
+<html><head><title>JPM 10-K</title><style>p { color: red }</style></head>
+<body>
+  Loose text before any block.
+  <div>Outer <b>bold</b>text<div>Inner one<br/>after break</div> tail of inner
+    <p>Leaf <i>para</i><span>graph</span>.</p>
+  </div>
+  <table><tr><td>Cell A</td><td>Cell <b>B</b></td></tr></table>
+  <ul><li>First</li><li>Second <script>ignored()</script>still second</li></ul>
+  <ix:nonNumeric name="dei:X">Tagged</ix:nonNumeric> after tag.
+</body></html>"""
+
+
+def test_the_parse_gives_exactly_the_text_and_paragraphs_of_the_full_tree() -> None:
+    flat = ten_k_module._parse_filing_html(_TRICKY_HTML)
+
+    assert flat.text == (
+        "JPM 10-K Loose text before any block. Outer bold text Inner one after break "
+        "tail of inner Leaf para graph . Cell A Cell B First Second still second "
+        "Tagged after tag."
+    )
+    assert flat.paragraphs == (
+        "Inner one after break",
+        "Leaf para graph .",
+        "Cell A Cell B",
+        "First",
+        "Second still second",
+    )
+
+
+def test_the_parse_does_not_depend_on_where_the_feed_splits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The document is fed in pieces; a tag, an entity or a word cut at a
+    piece boundary must come out the same."""
+    html = _TRICKY_HTML.replace(
+        "</body>", "<p>Caf&eacute; &amp; Nestlé’s €5</p></body>"
+    )
+    whole = ten_k_module._parse_filing_html(html)
+
+    monkeypatch.setattr(ten_k_module, "_FEED_CHARS", 7)
+
+    assert ten_k_module._parse_filing_html(html) == whole
+    assert whole.paragraphs[-1] == "Café & Nestlé’s €5"

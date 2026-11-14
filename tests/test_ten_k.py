@@ -1241,3 +1241,34 @@ async def test_10k_parses_share_one_dedicated_thread(
 
     assert len(parses) == 4
     assert len(set(parses)) == 1
+
+
+async def test_the_risk_paragraph_diff_runs_on_the_10k_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The diff is pure Python, so two never run in parallel anyway (the
+    GIL); on the 10-K thread it waits there instead of holding a thread
+    of the default pool for ~15 s."""
+    current, prior = _unique_risks_filings()
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+    parses = _record_parses(monkeypatch)
+    diffs: list[int] = []
+    real_diff = ten_k_module._paragraph_diff
+
+    def _recording(*args: Any, **kwargs: Any) -> Any:
+        diffs.append(threading.get_ident())
+        return real_diff(*args, **kwargs)
+
+    monkeypatch.setattr(ten_k_module, "_paragraph_diff", _recording)
+
+    await extract_10k_risks_diff("AAPL")
+
+    assert diffs and parses
+    assert set(diffs) == set(parses)
+
+
+def test_script_and_style_with_child_elements_are_emptied_cleanly() -> None:
+    html = _wrap_html(
+        "<p>Before</p><style><div>hidden</div>also hidden</style><p>After</p>"
+    )
+    assert _flatten_html_to_paragraphs(html) == ["Before", "After"]

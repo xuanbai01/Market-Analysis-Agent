@@ -72,6 +72,24 @@ def edgar_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return tmp_path
 
 
+async def _seed(
+    monkeypatch: pytest.MonkeyPatch,
+    *filings: EdgarFiling,
+    form_type: str = "10-K",
+    include_text: bool = False,
+) -> None:
+    """Fill the cache the way production does: one provider call that
+    found ``filings`` (the newest ``len(filings)`` there are)."""
+    monkeypatch.setitem(PROVIDERS, "seed", lambda *_a: list(filings))
+    await fetch_edgar(
+        filings[0].symbol,
+        form_type=form_type,
+        recent_n=len(filings),
+        include_text=include_text,
+        provider="seed",
+    )
+
+
 # ── async entry point — provider fan-out ──────────────────────────────
 
 
@@ -305,18 +323,7 @@ async def test_cache_hit_skips_provider(
 ) -> None:
     """A filing already on disk is returned without invoking the provider."""
     filing = _mk_filing()
-    cache_dir = _cache_key_dir(edgar_cache, filing.cik, filing.accession)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    (cache_dir / "metadata.json").write_text(
-        filing.model_dump_json(), encoding="utf-8"
-    )
-    # Also pre-populate the index so the service knows what to read.
-    index_path = edgar_cache / "AAPL" / "10-K.json"
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.write_text(
-        json.dumps([{"cik": filing.cik, "accession": filing.accession}]),
-        encoding="utf-8",
-    )
+    await _seed(monkeypatch, filing)
 
     called = False
 
@@ -344,18 +351,7 @@ async def test_cache_hit_reflected_in_observability(
     """cache_hits in output_summary lets us measure cache effectiveness over time."""
     import logging
 
-    filing = _mk_filing()
-    cache_dir = _cache_key_dir(edgar_cache, filing.cik, filing.accession)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    (cache_dir / "metadata.json").write_text(
-        filing.model_dump_json(), encoding="utf-8"
-    )
-    index_path = edgar_cache / "AAPL" / "10-K.json"
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.write_text(
-        json.dumps([{"cik": filing.cik, "accession": filing.accession}]),
-        encoding="utf-8",
-    )
+    await _seed(monkeypatch, _mk_filing())
 
     monkeypatch.setitem(PROVIDERS, "fake", lambda *_a: [])
 
@@ -382,23 +378,8 @@ async def test_text_request_bypasses_metadata_only_cache(
     The fix: cache hits only count when the cached entry has text, when
     text was requested.
     """
-    # Cache a filing WITHOUT text (mimics a prior include_text=False call).
-    metadata_only = _mk_filing(primary_doc_text=None)
-    cache_dir = _cache_key_dir(
-        edgar_cache, metadata_only.cik, metadata_only.accession
-    )
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    (cache_dir / "metadata.json").write_text(
-        metadata_only.model_dump_json(), encoding="utf-8"
-    )
-    index_path = edgar_cache / "AAPL" / "10-K.json"
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.write_text(
-        json.dumps(
-            [{"cik": metadata_only.cik, "accession": metadata_only.accession}]
-        ),
-        encoding="utf-8",
-    )
+    # Cache a filing WITHOUT text (a prior include_text=False call).
+    await _seed(monkeypatch, _mk_filing(primary_doc_text=None))
 
     # Provider returns the same filing WITH text. The provider must be
     # called — the metadata-only cache entry doesn't satisfy the request.
@@ -434,28 +415,10 @@ async def test_text_cache_hit_skips_provider(
     monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
 ) -> None:
     """A cached filing WITH text DOES satisfy ``include_text=True``."""
-    cached_with_text = _mk_filing(
-        primary_doc_text="<html>Item 1A. cached body.</html>"
-    )
-    cache_dir = _cache_key_dir(
-        edgar_cache, cached_with_text.cik, cached_with_text.accession
-    )
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    (cache_dir / "metadata.json").write_text(
-        cached_with_text.model_dump_json(), encoding="utf-8"
-    )
-    index_path = edgar_cache / "AAPL" / "10-K.json"
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.write_text(
-        json.dumps(
-            [
-                {
-                    "cik": cached_with_text.cik,
-                    "accession": cached_with_text.accession,
-                }
-            ]
-        ),
-        encoding="utf-8",
+    await _seed(
+        monkeypatch,
+        _mk_filing(primary_doc_text="<html>Item 1A. cached body.</html>"),
+        include_text=True,
     )
 
     called = False
@@ -657,19 +620,35 @@ class _FakeResponse:
         return self._body if isinstance(self._body, str) else json.dumps(self._body)
 
 
-def _submissions(*rows: tuple[str, str, str]) -> dict[str, Any]:
-    """rows: (form, accession, filing date)."""
+def _page(*rows: tuple[str, str, str]) -> dict[str, Any]:
+    """One block of SEC's column-wise filing lists: the ``recent`` block of
+    a submissions JSON, or a whole older page. rows: (form, accession,
+    filing date), newest first."""
     return {
-        "filings": {
-            "recent": {
-                "form": [r[0] for r in rows],
-                "accessionNumber": [r[1] for r in rows],
-                "filingDate": [r[2] for r in rows],
-                "reportDate": ["" for _ in rows],
-                "primaryDocument": ["doc.htm" for _ in rows],
-                "size": [100 for _ in rows],
-            }
-        }
+        "form": [r[0] for r in rows],
+        "accessionNumber": [r[1] for r in rows],
+        "filingDate": [r[2] for r in rows],
+        "reportDate": ["" for _ in rows],
+        "primaryDocument": ["doc.htm" for _ in rows],
+        "size": [100 for _ in rows],
+    }
+
+
+def _submissions(
+    *rows: tuple[str, str, str], files: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """rows: (form, accession, filing date). ``files`` lists older pages."""
+    return {"filings": {"recent": _page(*rows), "files": files or []}}
+
+
+def _page_ref(cik: str, number: int, filing_from: str, filing_to: str) -> dict[str, Any]:
+    """An entry of ``filings.files``. ``_fake_sec`` serves the page under
+    the key ``f"{cik}-submissions-{number:03d}"``."""
+    return {
+        "name": f"CIK{cik}-submissions-{number:03d}.json",
+        "filingCount": 2000,
+        "filingFrom": filing_from,
+        "filingTo": filing_to,
     }
 
 
@@ -848,10 +827,10 @@ async def test_a_stale_cached_index_asks_the_provider_again(
     import os
     import time as _time
 
-    from app.services.edgar import INDEX_TTL_SECONDS, _index_path, _write_filing_to_cache
+    from app.services.edgar import INDEX_TTL_SECONDS, _index_path
 
     old = _mk_filing()
-    _write_filing_to_cache(edgar_cache, old)
+    await _seed(monkeypatch, old)
     newer = _mk_filing(accession="0000320193-25-000079", filed_at=datetime(2025, 10, 31, tzinfo=UTC))
     calls: list[int] = []
 
@@ -870,3 +849,219 @@ async def test_a_stale_cached_index_asks_the_provider_again(
     os.utime(_index_path(edgar_cache, "AAPL", "10-K"), (stale, stale))
     second = await fetch_edgar("AAPL", form_type="10-K", recent_n=1, provider="fake")
     assert [f.accession for f in second] == [newer.accession] and calls == [1]
+
+
+# ── SEC provider: a big filer's older pages (2026-11-14) ──────────────
+# SEC's submissions JSON lists a registrant's latest filings under
+# ``filings.recent`` (a year's at least, or 1,000) and the rest in older
+# pages named in ``filings.files``, newest first. A bank that issues notes
+# every day fills a year with tens of thousands: JPM's ``recent`` held
+# 26,439 filings from 2025-11-14 on, and its 10-K of 2025-02-14 was on
+# page 8 (BAC's and GS's on page 4, WFC's on page 1).
+
+_JPM = "0000019617"
+
+
+def _page_urls(calls: list[str]) -> list[str]:
+    return [u for u in calls if "-submissions-" in u]
+
+
+def test_sec_provider_reads_older_pages_for_the_10k_before_last(monkeypatch: pytest.MonkeyPatch) -> None:
+    """JPM, 2026-11-14: only one 10-K came back, so the risk diff had
+    nothing to compare and the dashboard said "Not in this report"."""
+    calls = _fake_sec(monkeypatch, {
+        _JPM: _submissions(
+            ("424B2", "0001213900-26-100001", "2026-11-13"),
+            ("10-K", "0001628280-26-008131", "2026-02-13"),
+            ("424B2", "0001213900-25-100001", "2025-11-14"),
+            files=[
+                _page_ref(_JPM, 1, "2025-10-16", "2025-11-12"),
+                _page_ref(_JPM, 2, "2025-02-14", "2025-03-17"),
+                _page_ref(_JPM, 3, "2025-01-10", "2025-02-12"),
+            ],
+        ),
+        f"{_JPM}-submissions-001": _page(("424B2", "0001213900-25-090001", "2025-11-12")),
+        f"{_JPM}-submissions-002": _page(
+            ("424B2", "0001213900-25-020001", "2025-03-18"),
+            ("10-K", "0000019617-25-000270", "2025-02-14"),
+        ),
+        f"{_JPM}-submissions-003": _page(("10-Q", "0000019617-24-000500", "2025-01-10")),
+    })
+
+    filings = edgar_module._fetch_edgar_sec("JPM", "10-K", 2, False, _JPM)
+
+    assert [(f.accession, f.filed_at.date()) for f in filings] == [
+        ("0001628280-26-008131", date(2026, 2, 13)),
+        ("0000019617-25-000270", date(2025, 2, 14)),
+    ]
+    assert filings[1].primary_doc_url == (
+        "https://www.sec.gov/Archives/edgar/data/19617/000001961725000270/doc.htm"
+    )
+    # Newest page first, and none after the page that completed the list.
+    assert _page_urls(calls) == [
+        f"https://data.sec.gov/submissions/CIK{_JPM}-submissions-001.json",
+        f"https://data.sec.gov/submissions/CIK{_JPM}-submissions-002.json",
+    ]
+
+
+def test_sec_provider_reads_no_older_page_when_recent_has_enough(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _fake_sec(monkeypatch, {
+        "0000320193": _submissions(
+            ("10-K", "0000320193-26-000026", "2026-11-03"),
+            ("10-K", "0000320193-25-000079", "2025-10-31"),
+            files=[_page_ref("0000320193", 1, "1994-01-26", "2015-10-05")],
+        ),
+    })
+
+    filings = edgar_module._fetch_edgar_sec("AAPL", "10-K", 2, False, "0000320193")
+
+    assert [f.accession for f in filings] == ["0000320193-26-000026", "0000320193-25-000079"]
+    assert len(calls) == 1
+
+
+def test_sec_provider_reads_no_page_from_before_its_lookback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A form asked for in bulk (Form 4's hundred) or rarely filed would
+    otherwise page through a bank's whole history: JPM's runs to 72 pages
+    of 2,000. Pages are read back to three years before the latest filing."""
+    calls = _fake_sec(monkeypatch, {
+        _JPM: _submissions(
+            ("4", "0001225208-26-000001", "2026-11-13"),
+            files=[
+                _page_ref(_JPM, 1, "2024-11-14", "2025-11-12"),
+                _page_ref(_JPM, 2, "2023-01-03", "2023-11-10"),
+            ],
+        ),
+        f"{_JPM}-submissions-001": _page(("4", "0001225208-25-000001", "2025-11-12")),
+        f"{_JPM}-submissions-002": _page(("4", "0001225208-23-000001", "2023-11-10")),
+    })
+
+    filings = edgar_module._fetch_edgar_sec("JPM", "4", 100, False, _JPM)
+
+    assert [f.accession for f in filings] == ["0001225208-26-000001", "0001225208-25-000001"]
+    assert _page_urls(calls) == [f"https://data.sec.gov/submissions/CIK{_JPM}-submissions-001.json"]
+
+
+# ── Cache: the index is the provider's last answer (2026-11-14) ───────
+# AAPL, 2026-11-14: the index was appended in arrival order and its first
+# ``recent_n`` entries were served. The FY2026 10-K, found once the index
+# expired, went to the end, so for the next 12 hours the FY2025 and FY2024
+# ones came back as the latest two.
+
+_FY24 = _mk_filing(accession="0000320193-24-000123", filed_at=datetime(2024, 11, 1, tzinfo=UTC))
+_FY25 = _mk_filing(accession="0000320193-25-000079", filed_at=datetime(2025, 10, 31, tzinfo=UTC))
+_FY26 = _mk_filing(accession="0000320193-26-000026", filed_at=datetime(2026, 11, 3, tzinfo=UTC))
+
+
+class _Sec:
+    """A provider over what SEC lists: the newest ``recent_n``. Counts calls."""
+
+    def __init__(self, *filings: EdgarFiling) -> None:
+        self.filings = list(filings)
+        self.calls = 0
+
+    def __call__(
+        self, _sym: str, _form: str, recent_n: int, _txt: bool, _cik: str | None = None
+    ) -> list[EdgarFiling]:
+        self.calls += 1
+        return sorted(self.filings, key=lambda f: f.filed_at, reverse=True)[:recent_n]
+
+
+def _expire_index(edgar_cache: Path) -> None:
+    import os
+    import time as _time
+
+    from app.services.edgar import INDEX_TTL_SECONDS, _index_path
+
+    stale = _time.time() - INDEX_TTL_SECONDS - 60
+    os.utime(_index_path(edgar_cache, "AAPL", "10-K"), (stale, stale))
+
+
+async def _latest(recent_n: int, *, include_text: bool = False) -> list[str]:
+    filings = await fetch_edgar(
+        "AAPL", form_type="10-K", recent_n=recent_n, include_text=include_text, provider="sec_fake"
+    )
+    return [f.accession for f in filings]
+
+
+async def test_a_new_filing_leads_the_cached_list_once_found(
+    monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
+) -> None:
+    sec = _Sec(_FY24, _FY25)
+    monkeypatch.setitem(PROVIDERS, "sec_fake", sec)
+    assert await _latest(2) == [_FY25.accession, _FY24.accession]
+
+    sec.filings.append(_FY26)
+    _expire_index(edgar_cache)
+    assert await _latest(2) == [_FY26.accession, _FY25.accession]
+
+    # From the cache now, and still newest first.
+    assert await _latest(2) == [_FY26.accession, _FY25.accession]
+    assert await _latest(1) == [_FY26.accession]
+    assert sec.calls == 2
+
+
+async def test_a_list_cached_for_fewer_filings_does_not_answer_more(
+    monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
+) -> None:
+    """The cache held last year's 10-K and this year's, each found by a
+    request for one. Asked for two, it gave those and skipped the year
+    between."""
+    sec = _Sec(_FY24)
+    monkeypatch.setitem(PROVIDERS, "sec_fake", sec)
+    assert await _latest(1) == [_FY24.accession]
+
+    sec.filings += [_FY25, _FY26]
+    _expire_index(edgar_cache)
+    assert await _latest(1) == [_FY26.accession]
+    assert await _latest(2) == [_FY26.accession, _FY25.accession]
+
+
+async def test_an_answer_shorter_than_asked_is_trusted_until_it_expires(
+    monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
+) -> None:
+    """SEC had one 10-K to give. Asking again on every report would read a
+    bank's older pages every time."""
+    sec = _Sec(_FY26)
+    monkeypatch.setitem(PROVIDERS, "sec_fake", sec)
+
+    assert await _latest(2) == [_FY26.accession]
+    assert await _latest(2) == [_FY26.accession]
+    assert sec.calls == 1
+
+
+async def test_a_smaller_request_does_not_shrink_the_cached_list(
+    monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
+) -> None:
+    """Form 4's pattern: list up to a hundred, then fetch the texts of the
+    ones in its window. The second call must not leave an index that sends
+    the next listing back to SEC."""
+    sec = _Sec(_FY24, _FY25, _FY26)
+    monkeypatch.setitem(PROVIDERS, "sec_fake", sec)
+
+    await _latest(3)
+    await _latest(1, include_text=True)  # cached without text: the provider is asked
+    assert await _latest(3) == [_FY26.accession, _FY25.accession, _FY24.accession]
+    assert sec.calls == 2
+
+
+async def test_an_index_in_the_old_format_is_a_miss(
+    monkeypatch: pytest.MonkeyPatch, edgar_cache: Path
+) -> None:
+    """Before 2026-11-14 the index was a list in arrival order; AAPL's read
+    FY2025, FY2024, FY2026. The provider is asked and its answer replaces it."""
+    from app.services.edgar import _index_path, _write_filing_to_cache
+
+    order = (_FY25, _FY24, _FY26)
+    for filing in order:
+        _write_filing_to_cache(edgar_cache, filing)
+    index = _index_path(edgar_cache, "AAPL", "10-K")
+    index.parent.mkdir(parents=True, exist_ok=True)
+    index.write_text(
+        json.dumps([{"cik": f.cik, "accession": f.accession} for f in order]), encoding="utf-8"
+    )
+    sec = _Sec(*order)
+    monkeypatch.setitem(PROVIDERS, "sec_fake", sec)
+
+    assert await _latest(2) == [_FY26.accession, _FY25.accession]
+    assert await _latest(2) == [_FY26.accession, _FY25.accession]
+    assert sec.calls == 1

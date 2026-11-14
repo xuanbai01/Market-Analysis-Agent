@@ -369,7 +369,7 @@ _BELOW = "below"
 _LEVEL = "level with"
 _DIRECTION_RE = re.compile(
     r"\b(?P<above>above|premium|exceeds?|exceeding|higher than|richer than)\b"
-    r"|\b(?P<below>below|discount|under|beneath|lower than|cheaper than)\b"
+    r"|\b(?P<below>below|discount|under|beneath|lower than|cheaper than|trails?)\b"
     r"|\b(?P<level>match(?:es|ing)?|in line with|level with|equals?|on par with)\b"
 )
 # A premium or discount this small may fairly be called "in line".
@@ -385,9 +385,11 @@ _MEDIAN_OF_RE = re.compile(
     r"(?P<num>\d[\d,]*(?:\.\d+)?)(?!\.?\d)"
 )
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
-# A colon, semicolon or dash starts a new subject; a comma does not
-# ("price-to-sales, at 2.18, is below").
-_CLAUSE_SPLIT = re.compile(r"\s*[:;—–]\s*|\s+-\s+")
+# A colon, semicolon, dash or contrast word starts a new subject; a
+# comma does not ("price-to-sales, at 2.18, is below"). Without the
+# contrast words, "P/E of 20.59 vs a 36.18 peer median, but sales 145%
+# above peers" gave the P/E the sales' "above" (live eval, 2026-11-14).
+_CLAUSE_SPLIT = re.compile(r"\s*[:;—–]\s*|\s+-\s+|\b(?:but|while|whereas|yet|although|though)\b")
 
 
 def _numeric(value: object) -> float | None:

@@ -860,3 +860,27 @@ def test_attribution_polices_the_analyst_view() -> None:
 def test_grade_carries_attribution() -> None:
     report = _report([_dis_valuation("Price-to-free-cash-flow matches its own median.")])
     assert grade(report, elapsed_ms=1.0).attribution.errors
+
+
+def test_attribution_ends_a_clause_at_but() -> None:
+    """Live eval, NVDA analyst view (2026-11-14): the "above" belongs to
+    sales, not to the P/E before the "but"."""
+    report = _report([_dis_valuation(
+        "Cheap on earnings: P/E of 24.38 vs a 30.00 peer median, but sales 59.51% above peers."
+    )])
+    assert score_attribution(report).errors == []
+
+
+def test_attribution_reads_trails_as_below() -> None:
+    """Live eval, KO card (2026-11-14): "Trailing P/E trails the peer
+    median" when it was 37% above it."""
+    section = _dis_valuation("")
+    section.card_narrative = "Trailing P/E trails the peer median, yet sits above its own median."
+    section.claims[2] = _derived(
+        "Trailing P/E vs peer median of 20.98: today 28.77, above the peer median by",
+        0.3715,
+        "trailing_pe / median.trailing_pe − 1",
+    )
+    errors = score_attribution(_report([section])).errors
+    assert len(errors) == 1
+    assert "'below' the peer median" in errors[0]

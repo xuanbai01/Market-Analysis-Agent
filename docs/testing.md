@@ -6,7 +6,7 @@ Write failing tests first. Implement minimum code to pass. Refactor. This is not
 
 ## State today
 
-- **Backend:** 1012 tests in `tests/` (flat, one `test_<module>.py` per service or router), plus `tests/evals/` — the rubric's unit tests (factuality and attribution, run on every PR) and 7 live golden cases (AAPL, NVDA, RIVN, JPM, KO, XOM, DIS) that call the real LLM and run only with `-m live_llm`. `tests/conftest.py` provides the async client and the rollback-per-test DB session.
+- **Backend:** 1014 tests in `tests/` (flat, one `test_<module>.py` per service or router), plus `tests/evals/` — the rubric's unit tests (factuality and attribution, run on every PR) and 7 live golden cases (AAPL, NVDA, RIVN, JPM, KO, XOM, DIS) that call the real LLM and run only with `-m live_llm`. `tests/conftest.py` provides the async client and the rollback-per-test DB session.
 - **Frontend:** 668 vitest + Testing Library tests under `frontend/src`, next to the component or helper they cover (`HeroCard.test.tsx`, `lib/format.test.ts`), on happy-dom.
 - **CI** runs both suites, lint and typecheck, and boots the production image (see "When to run tests").
 - These two counts are the only place the numbers are kept; other docs link here.

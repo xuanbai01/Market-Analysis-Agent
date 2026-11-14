@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { LensPage } from "./LensPage";
-import { LENS } from "./fixture";
+import { LENS, SBC_METRIC } from "./fixture";
 import { fetchLens } from "../../lib/api";
 
 vi.mock("../../lib/api", () => ({ fetchLens: vi.fn() }));
@@ -57,6 +57,25 @@ describe("LensPage", () => {
     expect(rows[0]).toHaveTextContent("▲ 5.0 pts since CY2023");
     expect(rows[2]).toHaveTextContent("—"); // negative operating cash flow: no ratio
     expect(screen.getByTestId("lens-method")).toHaveTextContent("SEC XBRL");
+  });
+
+  it("names an SBC lens's metric in its headings and table, and the companies it left out", async () => {
+    fetchMock.mockResolvedValue({ ...LENS, title: "Megacap SBC", metric: SBC_METRIC, excluded: ["DDD"] });
+    renderPage();
+    await screen.findByTestId("lens-distribution");
+    expect(screen.getByText("SBC intensity — SBC as a share of revenue")).toBeInTheDocument();
+    expect(screen.getByText("SBC by company, in dollars")).toBeInTheDocument();
+    const headers = within(screen.getByTestId("lens-table")).getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers).toEqual(["Company", "SBC", "SBC ÷ revenue", "SBC ÷ op. cash flow", "Intensity since"]);
+    expect(screen.getByTestId("lens-excluded")).toHaveTextContent("Not in this lens: DDD");
+    expect(document.body.textContent).not.toMatch(/capex/i);
+  });
+
+  it("says nothing about left-out companies when none were", async () => {
+    fetchMock.mockResolvedValue(LENS);
+    renderPage();
+    await screen.findByTestId("lens-distribution");
+    expect(screen.queryByTestId("lens-excluded")).toBeNull();
   });
 
   it("still renders the data when the AI read is missing", async () => {

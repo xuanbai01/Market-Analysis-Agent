@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-import { CapexBars } from "./CapexBars";
+import { AmountBars } from "./AmountBars";
 import { DistributionChart } from "./DistributionChart";
-import { LENS } from "./fixture";
+import { LENS, SBC_METRIC } from "./fixture";
 
 describe("DistributionChart", () => {
   it("draws a dot per reported company-year, the median and the middle-50% band", () => {
@@ -34,20 +34,35 @@ describe("DistributionChart", () => {
   });
 });
 
-describe("CapexBars", () => {
+describe("AmountBars", () => {
   it("stacks one segment per company-year with spend, totals on top", () => {
-    render(<CapexBars report={LENS} />);
+    render(<AmountBars report={LENS} />);
     expect(screen.getAllByTestId("lens-segment")).toHaveLength(8);
     expect(screen.getAllByTestId("lens-bar-total").map((t) => t.textContent)).toEqual(["$22B", "$37B", "$53B"]);
   });
 
   it("lists each company's spend on hover, largest first", () => {
-    render(<CapexBars report={LENS} />);
+    render(<AmountBars report={LENS} />);
     fireEvent.mouseEnter(screen.getAllByTestId("lens-bar-column")[2]);
     const tip = screen.getByTestId("lens-bars-tooltip");
     expect(tip).toHaveTextContent("CY2025");
     expect(tip).toHaveTextContent("$53.0B");
     expect(tip.textContent?.indexOf("AAA")).toBeLessThan(tip.textContent?.indexOf("CCC") ?? 0);
+  });
+});
+
+describe("charts name the lens's metric", () => {
+  it("describes the bars and the distribution in the metric's words", () => {
+    const sbc = { ...LENS, metric: SBC_METRIC };
+    render(
+      <>
+        <DistributionChart report={sbc} />
+        <AmountBars report={sbc} />
+      </>,
+    );
+    const labels = screen.getAllByRole("img").map((svg) => svg.getAttribute("aria-label") ?? "");
+    expect(labels[0]).toMatch(/^SBC intensity by company/);
+    expect(labels[1]).toMatch(/^Total SBC by year/);
   });
 });
 
@@ -69,7 +84,7 @@ describe("narrow containers", () => {
     const { container } = render(
       <>
         <DistributionChart report={LENS} />
-        <CapexBars report={LENS} />
+        <AmountBars report={LENS} />
       </>,
     );
     const widths = Array.from(container.querySelectorAll("rect")).map((r) => Number(r.getAttribute("width")));

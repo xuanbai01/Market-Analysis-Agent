@@ -1241,6 +1241,7 @@ async def test_10k_parses_share_one_dedicated_thread(
 
     assert len(parses) == 4
     assert len(set(parses)) == 1
+    assert threading.get_ident() not in parses
 
 
 async def test_the_risk_paragraph_diff_runs_on_the_10k_thread(

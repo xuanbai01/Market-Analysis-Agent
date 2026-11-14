@@ -19,14 +19,15 @@ filings) lands; until then a directory of JSON files is plenty.
 
 The cache layout is:
 
-    {EDGAR_CACHE_DIR}/{cik}/{accession}/metadata.json    — EdgarFiling JSON
-    {EDGAR_CACHE_DIR}/{cik}/{accession}/{filename}        — primary doc text
-    {EDGAR_CACHE_DIR}/{symbol}/{form_type}.json           — accession index
+    {EDGAR_CACHE_DIR}/{cik}/{accession}/metadata.json    — EdgarFiling JSON, with its text
+    {EDGAR_CACHE_DIR}/{symbol}/{form_type}.json           — the latest filings
 
 The ``{symbol}/{form_type}.json`` index is what lets us answer "give me
 the most recent 3 10-Ks for AAPL" without re-hitting EDGAR's submissions
-endpoint. On a cache miss we write through both the per-filing
-metadata AND update the per-(symbol, form_type) index.
+endpoint. It is the provider's last answer: ``recent_n``, how many
+filings it was asked for, and ``filings``, the newest it found, newest
+first. On a cache miss we write each filing's metadata and replace the
+index.
 
 ## Why an explicit form_type allowlist
 
@@ -62,9 +63,23 @@ A filing's text never changes, so it is downloaded once and reused by
 accession. The per-(symbol, form) index of which filings exist does
 change: it is trusted for ``INDEX_TTL_SECONDS`` and then the provider
 is asked again (until 2026-11 it was trusted forever, so a machine that
-had cached two 10-Ks never saw a third).
+had cached two 10-Ks never saw a third). While fresh it answers any
+request for up to ``recent_n`` filings, including one where SEC had
+fewer. Until 2026-11-14 it was a list appended in the order filings were
+first seen, and its first entries were served: a new 10-K went to the
+end, and the two before it were served as the latest.
 Both rules are documented at
 https://www.sec.gov/os/accessing-edgar-data.
+
+## Older pages
+
+``filings.recent`` in SEC's submissions JSON holds a year of filings at
+least (or 1,000); older ones are in pages listed under ``filings.files``.
+For most companies a year holds two 10-Ks. A bank that issues notes
+every day does not: JPM's ``recent`` is one year of 26,000 filings, so
+until 2026-11-14 its 10-K before last was never found and its report had
+no risk changes. The provider reads older pages until it has enough,
+back to ``OLDER_PAGES_YEARS`` before the latest filing.
 """
 from __future__ import annotations
 
@@ -75,6 +90,7 @@ import re
 import threading
 import time
 from collections.abc import Callable
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -158,31 +174,53 @@ def _read_cached_filing(root: Path, cik: str, accession: str) -> EdgarFiling | N
         return None
 
 
-def _read_cached_index(root: Path, symbol: str, form_type: str) -> list[dict[str, str]]:
-    """Read the accession index for a (symbol, form_type); [] if absent or unreadable."""
-    idx = _index_path(root, symbol, form_type)
-    if not idx.exists():
-        return []
+def _read_fresh_index(root: Path, symbol: str, form_type: str) -> dict[str, Any] | None:
+    """The (symbol, form_type) index if written within ``INDEX_TTL_SECONDS``.
+
+    None when it is missing, older, unreadable, or in the format from
+    before 2026-11-14: a plain list in the order filings were first seen,
+    which on a warm cache led with the oldest (AAPL's read FY2025, FY2024,
+    FY2026, so its two "latest" 10-Ks were a year behind).
+    """
+    path = _index_path(root, symbol, form_type)
     try:
-        return json.loads(idx.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001 — corrupt index → treat as empty
-        return []
+        if time.time() - path.stat().st_mtime > INDEX_TTL_SECONDS:
+            return None
+        index = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not (
+        isinstance(index, dict)
+        and isinstance(index.get("recent_n"), int)
+        and isinstance(index.get("filings"), list)
+    ):
+        return None
+    return index
+
+
+def _write_index(
+    root: Path, symbol: str, form_type: str, recent_n: int, newest: list[EdgarFiling]
+) -> None:
+    """Record the provider's answer to a request for ``recent_n`` filings:
+    ``newest``, newest first, and fewer than ``recent_n`` when that is all
+    there is. A fresh index that answers more is kept: Form 4 lists up to a
+    hundred, then asks for the texts of the few in its window, and that
+    second answer must not send the next listing back to SEC."""
+    current = _read_fresh_index(root, symbol, form_type)
+    if current is not None and current["recent_n"] > recent_n:
+        return
+    entries = [{"cik": f.cik, "accession": f.accession} for f in newest]
+    _atomic_write(
+        _index_path(root, symbol, form_type),
+        json.dumps({"recent_n": recent_n, "filings": entries}),
+    )
 
 
 def _write_filing_to_cache(root: Path, filing: EdgarFiling) -> None:
-    """Cache one filing's metadata + extend the per-(symbol, form_type) index."""
+    """Cache one filing's metadata (and text, when it has it)."""
     cache_dir = _cache_key_dir(root, filing.cik, filing.accession)
     cache_dir.mkdir(parents=True, exist_ok=True)
     _atomic_write(cache_dir / "metadata.json", filing.model_dump_json())
-
-    # Update the index. Read-modify-write isn't atomic across concurrent
-    # callers; that's an acceptable trade-off for a cache (worst case is
-    # a duplicate accession in the list, which we de-dup on read).
-    index = _read_cached_index(root, filing.symbol, filing.form_type)
-    entry = {"cik": filing.cik, "accession": filing.accession}
-    if entry not in index:
-        index.append(entry)
-    _atomic_write(_index_path(root, filing.symbol, filing.form_type), json.dumps(index))
 
 
 # ── Production provider — SEC HTTP ────────────────────────────────────
@@ -190,6 +228,13 @@ def _write_filing_to_cache(root: Path, filing: EdgarFiling) -> None:
 # Kept defensive (any HTTP / parsing failure raises) so the async entry
 # point's log_external_call records the outcome accurately.
 
+
+# How far back older pages of a submissions JSON are read, from the
+# registrant's latest filing. The 10-K before last is under two years
+# old; without a limit, a form asked for in bulk (Form 4's hundred) or
+# rarely filed would page through all of a bank's history (JPM: 72 pages
+# of 2,000 filings).
+OLDER_PAGES_YEARS = 3
 
 # Minimum gap between any two SEC requests from this process, whatever
 # thread they come from: 8 a second, under SEC's 10.
@@ -275,24 +320,59 @@ def _fetch_edgar_sec(
 def _recent_filings(
     symbol: str, cik: str, form_type: str, recent_n: int
 ) -> list[EdgarFiling]:
-    """One registrant's ``recent_n`` latest ``form_type`` filings, metadata only."""
-    submissions = _sec_get(
-        f"https://data.sec.gov/submissions/CIK{cik}.json"
-    ).json()
-    recent = submissions.get("filings", {}).get("recent", {})
+    """One registrant's ``recent_n`` latest ``form_type`` filings, metadata only.
 
-    accession_numbers: list[str] = recent.get("accessionNumber", [])
-    forms: list[str] = recent.get("form", [])
-    filing_dates: list[str] = recent.get("filingDate", [])
-    report_dates: list[str] = recent.get("reportDate", [])
-    primary_docs: list[str] = recent.get("primaryDocument", [])
-    sizes: list[int] = recent.get("size", [])
+    SEC's submissions JSON lists a registrant's latest filings under
+    ``filings.recent`` (a year's at least, or 1,000) and the rest in older
+    pages named in ``filings.files``, newest first. A bank that issues
+    notes every day fills a year with tens of thousands: JPM's ``recent``
+    holds one year, and its 10-K before last is eight pages back. Older
+    pages are read, newest first, until ``recent_n`` are found.
+    """
+    out, older_pages = _from_recent(symbol, cik, form_type, recent_n)
+    for name in older_pages:
+        if len(out) >= recent_n:
+            break
+        page = _sec_get(f"https://data.sec.gov/submissions/{name}").json()
+        out += _matching(symbol, cik, form_type, page, recent_n - len(out))
+    return out
+
+
+def _from_recent(
+    symbol: str, cik: str, form_type: str, recent_n: int
+) -> tuple[list[EdgarFiling], list[str]]:
+    """The matches in a registrant's ``recent`` filings, and the names of
+    the older pages that may hold the rest: those with filings from the
+    last ``OLDER_PAGES_YEARS`` before its latest one. Its own function so
+    the submissions JSON (5 MB for JPM) is freed before any page is read."""
+    filings = _sec_get(f"https://data.sec.gov/submissions/CIK{cik}.json").json().get("filings", {})
+    recent = filings.get("recent", {})
+    out = _matching(symbol, cik, form_type, recent, recent_n)
+    dates: list[str] = recent.get("filingDate", [])
+    if len(out) >= recent_n or not dates:
+        return out, []
+    horizon = (_parse_iso_date_only(max(dates)) - timedelta(days=365 * OLDER_PAGES_YEARS)).isoformat()
+    return out, [p["name"] for p in filings.get("files", []) if p.get("filingTo", "") >= horizon]
+
+
+def _matching(
+    symbol: str, cik: str, form_type: str, block: dict[str, list[Any]], limit: int
+) -> list[EdgarFiling]:
+    """The first ``limit`` ``form_type`` filings in one block of SEC's
+    column-wise filing lists (``recent``, or an older page), which run
+    newest first. The form must match exactly: a ``10-K/A`` is not a 10-K."""
+    accession_numbers: list[str] = block.get("accessionNumber", [])
+    forms: list[str] = block.get("form", [])
+    filing_dates: list[str] = block.get("filingDate", [])
+    report_dates: list[str] = block.get("reportDate", [])
+    primary_docs: list[str] = block.get("primaryDocument", [])
+    sizes: list[int] = block.get("size", [])
 
     out: list[EdgarFiling] = []
     for i, form in enumerate(forms):
         if form != form_type:
             continue
-        if len(out) >= recent_n:
+        if len(out) >= limit:
             break
         accession = accession_numbers[i]
         primary = _strip_xsl_prefix(
@@ -367,9 +447,10 @@ async def fetch_edgar(
     """
     Fetch the ``recent_n`` most recent ``form_type`` filings for ``symbol``.
 
-    Returns sorted descending by ``filed_at`` (most recent first). Disk
-    cache is checked first; on a hit, the provider is not called for
-    the cached subset. ``include_text=True`` populates
+    Returns sorted descending by ``filed_at`` (most recent first). The
+    provider's last answer is cached for ``INDEX_TTL_SECONDS`` and
+    answers any request for as many filings or fewer; otherwise the
+    provider is asked. ``include_text=True`` populates
     ``EdgarFiling.primary_doc_text`` (much larger response, only ask
     for it when ``parse_filing`` actually needs the text).
 
@@ -411,22 +492,21 @@ async def fetch_edgar(
         cached = _try_cache(
             root, target, form_type, recent_n, require_text=include_text
         )
-        cache_hits = len(cached)
-        provider_filings: list[EdgarFiling] = []
-
-        # Cache satisfied the request entirely → skip the provider.
-        if cache_hits < recent_n:
-            provider_filings = await asyncio.to_thread(
-                fetch, target, form_type, recent_n, include_text, cik
+        if cached is not None:
+            call.record_output(
+                {"filing_count": len(cached), "cache_hits": len(cached)}
             )
-            for f in provider_filings:
-                _write_filing_to_cache(root, f)
+            return cached
 
-        merged = _merge_and_sort(cached, provider_filings, recent_n)
-        call.record_output(
-            {"filing_count": len(merged), "cache_hits": cache_hits}
+        fetched = await asyncio.to_thread(
+            fetch, target, form_type, recent_n, include_text, cik
         )
-        return merged
+        newest = sorted(fetched, key=lambda f: f.filed_at, reverse=True)[:recent_n]
+        for f in newest:
+            _write_filing_to_cache(root, f)
+        _write_index(root, target, form_type, recent_n, newest)
+        call.record_output({"filing_count": len(newest), "cache_hits": 0})
+        return newest
 
 
 def _try_cache(
@@ -436,40 +516,23 @@ def _try_cache(
     recent_n: int,
     *,
     require_text: bool = False,
-) -> list[EdgarFiling]:
-    """Read up to ``recent_n`` cached filings for (symbol, form_type).
+) -> list[EdgarFiling] | None:
+    """The cached answer for the ``recent_n`` newest filings, or None when
+    the provider must be asked: the index is missing or stale, it answered
+    a request for fewer filings, or a filing it lists is not on disk.
 
     When ``require_text=True`` (caller passed ``include_text=True``), a
-    cached entry whose ``primary_doc_text`` is None counts as a miss —
-    the provider must be invoked to fetch the text. Without this gate, a
-    prior metadata-only cache entry silently satisfies a text request
-    and the caller receives a useless empty-text filing.
+    listed filing without ``primary_doc_text`` is a miss too: otherwise a
+    prior metadata-only entry would satisfy a text request and the caller
+    would get a filing with no text.
     """
-    path = _index_path(root, symbol, form_type)
-    if not path.exists() or time.time() - path.stat().st_mtime > INDEX_TTL_SECONDS:
-        return []  # no index, or too old to say what the latest filings are
-    index = _read_cached_index(root, symbol, form_type)
+    index = _read_fresh_index(root, symbol, form_type)
+    if index is None or recent_n > index["recent_n"]:
+        return None
     out: list[EdgarFiling] = []
-    for entry in index:
-        if len(out) >= recent_n:
-            break
+    for entry in index["filings"][:recent_n]:
         cached = _read_cached_filing(root, entry["cik"], entry["accession"])
-        if cached is None:
-            continue
-        if require_text and not cached.primary_doc_text:
-            continue
+        if cached is None or (require_text and not cached.primary_doc_text):
+            return None
         out.append(cached)
     return out
-
-
-def _merge_and_sort(
-    cached: list[EdgarFiling],
-    fresh: list[EdgarFiling],
-    recent_n: int,
-) -> list[EdgarFiling]:
-    """Combine cache + provider results, dedupe by accession, sort newest-first."""
-    seen: dict[str, EdgarFiling] = {}
-    for f in (*cached, *fresh):
-        seen[f.accession] = f  # later entries win (provider freshness > cache)
-    ordered = sorted(seen.values(), key=lambda f: f.filed_at, reverse=True)
-    return ordered[:recent_n]

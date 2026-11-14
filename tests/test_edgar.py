@@ -227,7 +227,7 @@ async def test_include_text_flag_passed_to_provider(
         _cik: str | None = None,
     ) -> list[EdgarFiling]:
         seen.append(include_text)
-        return []
+        return [_mk_filing()]  # no text, so the text request asks again
 
     monkeypatch.setitem(PROVIDERS, "fake", _capture)
 

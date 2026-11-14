@@ -93,3 +93,10 @@ Each entry has three parts:
 **Context:** Telling the owner how to send `FRED_API_KEY` from `.env` to Fly without the value appearing on a command line.
 **Mistake:** Two commands in a row failed for them. First the documented `grep ... | fly secrets import`: PowerShell has no `grep`. Then a PowerShell pipe, `(Select-String ...).Line | fly secrets import`, which I had not run: PowerShell 5.1 puts a byte-order mark in front of text it pipes to a native program, and Fly answered `"\ufeffFRED_API_KEY" is not a valid secret name`. My own shell tool is Git Bash, so neither failure could show up on my side.
 **Rule:** a command for the owner to run must be written for PowerShell 5.1 and tried there with dummy data first (`powershell -NoProfile -Command ...`). When text has to reach a native program byte for byte (a secret, anything parsed as NAME=value), run the pipeline inside `cmd /c "..."`: cmd passes bytes through untouched.
+
+### A number can be a claim and still be on the wrong label
+
+**Date:** 2026-11-14
+**Context:** The Disney Valuation card (workstream B, own-history multiples). The chart and tiles were right; the prose said price-to-free-cash-flow "of 20.39 matches its own median", when 20.39 was the median and today's figure was 24.6, and called a price-to-sales 26% below its median "above".
+**Mistake:** the factuality rubric only asks whether each number exists somewhere in the claims, so it passed. The claims invited the error: the comparison line put the median's number right after the metric's name ("Price-to-free-cash-flow vs its own median of 20.39 …"), today's figure was a separate line far up the list, and the direction was only the sign of a percentage.
+**Rule:** a comparison claim carries both figures, each with its label, and states the direction in words computed by code; the model should be able to copy the whole comparison from one line. When the prose can go wrong while every number checks out, add a rubric check for the words the number is attached to (`score_attribution`), not only for the number.

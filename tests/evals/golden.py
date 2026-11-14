@@ -58,6 +58,10 @@ class GoldenCase:
 # whose SEC history sits under a predecessor registrant since its 2026
 # reorganization and whose peers are the integrated majors; the first
 # check of it found four data problems (tasks/dogfood-2026-11.md).
+#
+# 2026-11-14: DIS added. Its Valuation prose gave the median as today's
+# price-to-free-cash-flow and called a price-to-sales below its median
+# "above"; the attribution check (rubric.score_attribution) guards it.
 GOLDEN_CASES: list[GoldenCase] = [
     GoldenCase(symbol="AAPL", focus="full"),
     GoldenCase(symbol="NVDA", focus="full"),
@@ -65,4 +69,5 @@ GOLDEN_CASES: list[GoldenCase] = [
     GoldenCase(symbol="JPM", focus="full"),
     GoldenCase(symbol="KO", focus="full"),
     GoldenCase(symbol="XOM", focus="full"),
+    GoldenCase(symbol="DIS", focus="full"),
 ]

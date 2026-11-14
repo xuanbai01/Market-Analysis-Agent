@@ -97,6 +97,12 @@ else:
             f"overall={report.overall_confidence.value}, "
             f"factuality={result.factuality.score:.3f}"
         )
+        # The Valuation prose, so a run can be read for which figure each
+        # number is attached to, not only whether it exists.
+        for section in report.sections:
+            if section.title == "Valuation":
+                print(f"   Valuation card: {section.card_narrative}")
+                print(f"   Valuation summary: {section.summary}")
         if result.factuality.score < 0.95:
             _dump_report_for_diagnosis(report, result.factuality.unmatched_numbers)
 

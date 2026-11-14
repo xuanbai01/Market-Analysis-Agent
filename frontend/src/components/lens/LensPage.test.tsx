@@ -60,7 +60,8 @@ describe("LensPage", () => {
   });
 
   it("names an SBC lens's metric in its headings and table, and the companies it left out", async () => {
-    fetchMock.mockResolvedValue({ ...LENS, title: "Megacap SBC", metric: SBC_METRIC, excluded: ["DDD"] });
+    // No narrative: the fixture's facts are worded for capex.
+    fetchMock.mockResolvedValue({ ...LENS, title: "Megacap SBC", metric: SBC_METRIC, excluded: ["DDD"], narrative: null });
     renderPage();
     await screen.findByTestId("lens-distribution");
     expect(screen.getByText("SBC intensity — SBC as a share of revenue")).toBeInTheDocument();

@@ -41,9 +41,9 @@ export function pct(v: number): string {
 export interface CompanyYear {
   ticker: string;
   color: string;
-  capex: number | null;
+  value: number | null;
   intensity: number | null;
-  capexToOcf: number | null;
+  toOcf: number | null;
 }
 
 /** Every company's numbers for one year of the lens, highest intensity
@@ -55,9 +55,9 @@ export function companiesInYear(report: Pick<LensReport, "companies" | "years">,
     return {
       ticker: c.ticker,
       color: companyColor(index),
-      capex: point?.capex ?? null,
-      intensity: point?.capex_intensity ?? null,
-      capexToOcf: point?.capex_to_ocf ?? null,
+      value: point?.value ?? null,
+      intensity: point?.intensity ?? null,
+      toOcf: point?.to_ocf ?? null,
     };
   });
   return rows.sort((a, b) => (b.intensity ?? -Infinity) - (a.intensity ?? -Infinity));
@@ -66,7 +66,7 @@ export function companiesInYear(report: Pick<LensReport, "companies" | "years">,
 /** The first year a company has an intensity value, and that value. */
 export function firstReported(company: LensCompany, years: readonly number[]): { year: number; intensity: number } | null {
   for (let i = 0; i < company.points.length; i++) {
-    const v = company.points[i].capex_intensity;
+    const v = company.points[i].intensity;
     if (v !== null) return { year: years[i], intensity: v };
   }
   return null;

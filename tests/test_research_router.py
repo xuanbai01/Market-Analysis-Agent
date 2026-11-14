@@ -38,6 +38,24 @@ from app.services import research_orchestrator as orch_module
 from app.services.report_version import REPORT_VERSION
 
 
+class _FakeSession:
+    """Stands in for the request's AsyncSession. Like the real one, a
+    query opens a transaction (holding a pooled connection) that lasts
+    until ``rollback()`` or ``commit()``."""
+
+    def __init__(self) -> None:
+        self.in_tx = False
+
+    def in_transaction(self) -> bool:
+        return self.in_tx
+
+    async def rollback(self) -> None:
+        self.in_tx = False
+
+    async def commit(self) -> None:
+        self.in_tx = False
+
+
 @pytest_asyncio.fixture
 async def research_client(
     monkeypatch: pytest.MonkeyPatch,
@@ -60,8 +78,8 @@ async def research_client(
     rather than re-raising into the test runner.
     """
 
-    async def _no_session() -> AsyncIterator[None]:
-        yield None
+    async def _no_session() -> AsyncIterator[_FakeSession]:
+        yield _FakeSession()
 
     async def _miss(*_args: Any, **_kw: Any) -> None:
         return None
@@ -731,3 +749,58 @@ async def test_refresh_still_reports_a_failed_synthesis(
     resp = await research_client.post("/v1/research/AAPL?refresh=true")
 
     assert resp.status_code == 503
+
+
+
+# ── Long builds and the database connection ──────────────────────────
+#
+# Found 2026-11-14: RIVN's report took 5.5 minutes on Fly. The session
+# that served the cache lookup held its connection the whole time, Neon
+# dropped it as idle, and the finished report was lost at the save with
+# a 500 ("the underlying connection is closed").
+
+
+async def test_the_build_holds_no_database_connection(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lookup's transaction ends before the build, so the save starts
+    a new one on a fresh (pre-pinged) pooled connection."""
+    sessions: list[_FakeSession] = []
+    held_during_build: list[bool] = []
+
+    async def _lookup(session: _FakeSession, **_kw: Any) -> None:
+        sessions.append(session)
+        session.in_tx = True  # the SELECT opens a transaction
+        return None
+
+    async def _compose(symbol: str, focus: Any) -> ResearchReport:
+        held_during_build.append(sessions[0].in_transaction())
+        return _stub_report(symbol)
+
+    monkeypatch.setattr(cache_module, "lookup_recent", _lookup)
+    monkeypatch.setattr(orch_module, "compose_research_report", _compose)
+
+    resp = await research_client.post("/v1/research/AAPL")
+
+    assert resp.status_code == 200
+    assert held_during_build == [False]
+
+
+async def test_a_failed_save_still_returns_the_report(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The report is paid for and finished; a database error on the save
+    is logged and the report is served (the next visit rebuilds it)."""
+    from sqlalchemy.exc import InterfaceError
+
+    _patch_orchestrator(monkeypatch, _stub_report("RIVN"))
+
+    async def _closed(*_a: Any, **_kw: Any) -> None:
+        raise InterfaceError("INSERT ...", {}, Exception("the underlying connection is closed"))
+
+    monkeypatch.setattr(cache_module, "upsert", _closed)
+
+    resp = await research_client.post("/v1/research/RIVN")
+
+    assert resp.status_code == 200
+    assert resp.json()["symbol"] == "RIVN"

@@ -63,3 +63,80 @@ def test_latency_reflects_block_duration(caplog: pytest.LogCaptureFixture) -> No
     r = [r for r in caplog.records if r.name == "app.external"][0]
     # Give generous slack for sleep granularity on Windows CI.
     assert r.latency_ms >= 10, f"expected >=10ms, got {r.latency_ms}"
+
+
+# ── Reaching the process log (what `fly logs` shows) ───────────────────
+
+
+def test_an_external_call_reaches_the_log_with_its_fields() -> None:
+    """2026-11-14: nothing set up the app's loggers, so these INFO records
+    (each tool's latency) were dropped, and a RIVN build that took minutes
+    on Fly left no trace of where the time went."""
+    import io
+
+    from app.core.logging import configure_logging
+
+    stream = io.StringIO()
+    configure_logging(stream)
+    try:
+        with log_external_call("sec.ten_k_risks_diff", {"symbol": "RIVN"}) as call:
+            call.record_output({"added_count": 117})
+    finally:
+        configure_logging()
+
+    line = stream.getvalue()
+    assert "INFO app.external: external_call service_id=sec.ten_k_risks_diff" in line
+    assert "outcome=ok latency_ms=" in line
+    assert "input_summary={'symbol': 'RIVN'}" in line
+    assert "output_summary={'added_count': 117}" in line
+
+
+def test_a_failed_external_call_reaches_the_log_with_its_traceback() -> None:
+    import io
+
+    from app.core.logging import configure_logging
+
+    stream = io.StringIO()
+    configure_logging(stream)
+    try:
+        with pytest.raises(RuntimeError):
+            with log_external_call("deepseek.structured_call"):
+                raise RuntimeError("boom")
+    finally:
+        configure_logging()
+
+    text = stream.getvalue()
+    assert "ERROR app.external: external_call service_id=deepseek.structured_call" in text
+    assert "outcome=error" in text and "exception_class=RuntimeError" in text
+    assert "Traceback" in text and "RuntimeError: boom" in text
+
+
+def test_configuring_twice_does_not_print_twice() -> None:
+    import io
+
+    from app.core.logging import configure_logging
+
+    stream = io.StringIO()
+    configure_logging(stream)
+    configure_logging(stream)
+    try:
+        with log_external_call("test.service"):
+            pass
+    finally:
+        configure_logging()
+
+    assert stream.getvalue().count("external_call") == 1
+
+
+def test_the_app_sets_up_its_logs_on_import() -> None:
+    import app.main  # noqa: F401
+
+    assert logging.getLogger("app.external").isEnabledFor(logging.INFO)
+    assert logging.getLogger("app").handlers
+
+
+def test_library_logs_stay_at_warning() -> None:
+    """httpx logs every request URL at INFO, and FRED's carries the API key."""
+    import app.main  # noqa: F401
+
+    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)

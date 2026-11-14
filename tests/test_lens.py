@@ -166,6 +166,34 @@ def test_the_megacap_lenses_share_one_group() -> None:
     assert lens.LENSES["megacap-rnd"].metric is lens.RND
 
 
+async def test_the_narrative_prompt_names_only_the_companies_in_the_lens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The R&D lens leaves Amazon out; told the group still includes it,
+    the model could write about seven companies, or about Amazon."""
+    prompts: list[str] = []
+
+    async def capture(**kw: Any) -> LensDraft:
+        prompts.append(kw["prompt"])
+        return LensDraft(headline="", points=[])
+
+    monkeypatch.setattr(lens.llm, "synth_call", capture)
+    _, companies, stats = built()
+    spec = lens.LensSpec(
+        id="x", title="X", description="", metric=lens.RND,
+        companies=(*SPEC.companies, lens.LensCompanySpec("DDD", "Delta", "4")),
+    )
+    await lens.write_narrative(spec, lens.lens_facts(lens.RND, companies, stats), excluded=["DDD"])
+    assert "Companies: AAA, BBB, CCC\n" in prompts[0]
+    assert "Left out (no R&D figure in their filings): DDD" in prompts[0]
+
+
+def test_the_sbc_lens_reads_one_measure() -> None:
+    """The cash-flow add-back only: the income-statement allocation tag is
+    a different measure, and merging tags year by year would mix them."""
+    assert lens.SBC.tags == ("ShareBasedCompensation",)
+
+
 async def test_the_narrative_prompt_says_what_the_metric_is(monkeypatch: pytest.MonkeyPatch) -> None:
     prompts: list[str] = []
 

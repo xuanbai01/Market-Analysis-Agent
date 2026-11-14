@@ -49,9 +49,9 @@ BeautifulSoup each parse took 7.5 s and ~140 MB, a report parsed its two
 tools separately), all on the event loop, and on 2026-11-14 the 512 MB
 Fly machine was killed in the middle of JPM's report. So each filing is
 parsed once, by lxml (0.6 s, ~95 MB for JPM; identical sections on the
-19 filings compared), into both its text and its paragraphs, on a worker
-thread, one parse at a time, and the result is kept for the next tool
-(``_FLAT_CACHE``).
+19 filings compared), into both its text and its paragraphs, on a thread
+of its own (``_PARSE_EXECUTOR``, so one parse at a time), and the result
+is kept for the next tool (``_FLAT_CACHE``).
 
 ## Why a different output shape from the data tools
 
@@ -75,9 +75,9 @@ from __future__ import annotations
 
 import asyncio
 import re
-import threading
 from collections import OrderedDict
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from itertools import islice
@@ -200,31 +200,35 @@ def _flatten_html_to_paragraphs(html: str) -> list[str]:
 
 # Filings parsed recently, by content. A report reads the latest 10-K from
 # two tools and the prior one from one; four entries cover a report with
-# room for the next, at a few MB each.
+# room for the next. An entry is the text and paragraphs, not the HTML:
+# 5.3 MB for JPM, the largest we've seen.
 _FLAT_CACHE_SIZE = 4
 _FLAT_CACHE: OrderedDict[tuple[int, int], _FlatFiling] = OrderedDict()
-# One parse at a time: two big filings parsed side by side would double
-# the peak memory this exists to bound. Held on the worker thread.
-_PARSE_LOCK = threading.Lock()
+# Parses run on this one thread, so one at a time: two big filings parsed
+# side by side would double the peak memory this exists to bound. A parse
+# waiting its turn waits here, not on a thread of the default pool (five
+# on a one-CPU machine, shared by every ``asyncio.to_thread``). The cache
+# is only touched from this thread.
+_PARSE_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ten-k-parse")
 
 
 def _flat_filing_blocking(html: str) -> _FlatFiling:
     key = (len(html), hash(html))
-    with _PARSE_LOCK:
-        cached = _FLAT_CACHE.get(key)
-        if cached is not None:
-            _FLAT_CACHE.move_to_end(key)
-            return cached
-        flat = _parse_filing_html(html)
-        _FLAT_CACHE[key] = flat
-        if len(_FLAT_CACHE) > _FLAT_CACHE_SIZE:
-            _FLAT_CACHE.popitem(last=False)
-        return flat
+    cached = _FLAT_CACHE.get(key)
+    if cached is not None:
+        _FLAT_CACHE.move_to_end(key)
+        return cached
+    flat = _parse_filing_html(html)
+    _FLAT_CACHE[key] = flat
+    if len(_FLAT_CACHE) > _FLAT_CACHE_SIZE:
+        _FLAT_CACHE.popitem(last=False)
+    return flat
 
 
 async def _flat_filing(html: str) -> _FlatFiling:
     """Parse a 10-K once, off the event loop."""
-    return await asyncio.to_thread(_flat_filing_blocking, html)
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_PARSE_EXECUTOR, _flat_filing_blocking, html)
 
 
 def _check_section_id(section_id: str) -> None:

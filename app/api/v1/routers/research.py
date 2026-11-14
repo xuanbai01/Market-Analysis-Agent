@@ -65,7 +65,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import enforce_research_rate_limit, get_session
@@ -237,8 +237,10 @@ async def research(
             report_date=report_date,
             report=report,
         )
-    except SQLAlchemyError:
-        # The report is built and paid for; serve it. Not cached, so the
-        # next visit builds it again.
+    except (InterfaceError, OperationalError):
+        # The connection was lost. The report is built and paid for; serve
+        # it. Not cached, so the next visit builds it again. A save the
+        # database rejects (IntegrityError, DataError) is not caught: it
+        # would fail on every visit, each paying for a fresh build.
         logger.exception("could not save the %s report; serving it uncached", target)
     return report

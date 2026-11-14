@@ -23,7 +23,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
         anthropic==0.97.0 \
         openai==3.46.0 \
         feedparser==6.0.12 \
-        beautifulsoup4==4.14.3 \
         lxml==5.3.0
 
 # Copy the app code + migrations.

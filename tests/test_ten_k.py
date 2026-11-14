@@ -16,8 +16,11 @@ are deliberately small but exercise the same boundary patterns.
 """
 from __future__ import annotations
 
+import asyncio
+import threading
 from datetime import UTC, date, datetime
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -1088,3 +1091,185 @@ async def test_extract_10k_risks_diff_categorizer_failure_falls_back_empty(
 
     assert result is not None
     assert result.category_deltas == {}
+
+
+# ── One parse per filing, off the event loop ───────────────────────────
+#
+# Found 2026-11-14: JPM's 10-K (12.9M characters, 140K tags) took 7.5 s
+# and ~140 MB per BeautifulSoup parse, a report parsed its two 10-Ks
+# five times, all on the event loop, and the 512 MB Fly machine was
+# killed mid-report. Each filing is now parsed once (the business and
+# risk tools share it) on a worker thread.
+
+
+def _unique_risks_filings() -> tuple[EdgarFiling, EdgarFiling]:
+    """Two 10-Ks whose HTML no other test uses, so a parse cache shared
+    across tests can't hide a parse."""
+    marker = uuid4().hex
+    current = _mk_filing(
+        accession="0000320193-25-000079",
+        filed_at=datetime(2025, 11, 1, tzinfo=UTC),
+        primary_doc_text=_wrap_html(
+            f"""<h1>Item 1. Business</h1><p>{marker} {_LONG_BUSINESS_TEXT}</p>
+                <h1>Item 1A. Risk Factors</h1><p>{marker} {_LONG_RISKS_TEXT}</p>
+                <h1>Item 2. Properties</h1><p>None.</p>"""
+        ),
+    )
+    prior = _mk_filing(
+        accession="0000320193-24-000123",
+        filed_at=datetime(2024, 11, 1, tzinfo=UTC),
+        primary_doc_text=_wrap_html(
+            f"""<h1>Item 1. Business</h1><p>{marker} {_LONG_BUSINESS_TEXT}</p>
+                <h1>Item 1A. Risk Factors</h1><p>{marker} {_LONG_RISKS_TEXT_PRIOR_YEAR}</p>
+                <h1>Item 2. Properties</h1><p>None.</p>"""
+        ),
+    )
+    return current, prior
+
+
+def _record_parses(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Wrap the one HTML parse; returns the thread id of every call."""
+    threads: list[int] = []
+    real_parse = ten_k_module._parse_filing_html
+
+    def _counting(html: str) -> Any:
+        threads.append(threading.get_ident())
+        return real_parse(html)
+
+    monkeypatch.setattr(ten_k_module, "_parse_filing_html", _counting)
+    return threads
+
+
+async def test_a_report_parses_each_10k_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The orchestrator runs the business and risk tools side by side;
+    between them they need Item 1 of the latest 10-K and Item 1A, as
+    text and as paragraphs, of the latest two. Two filings, two parses."""
+    current, prior = _unique_risks_filings()
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+    parses = _record_parses(monkeypatch)
+
+    business, diff = await asyncio.gather(
+        extract_10k_business("AAPL"), extract_10k_risks_diff("AAPL")
+    )
+
+    assert business is not None and diff is not None
+    assert len(parses) == 2
+
+
+async def test_10k_parsing_runs_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A big 10-K takes seconds to parse; on the event loop that froze
+    every other request and failed Fly's health check."""
+    current, prior = _unique_risks_filings()
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+    parses = _record_parses(monkeypatch)
+
+    await extract_10k_risks_diff("AAPL")
+
+    assert parses
+    assert threading.get_ident() not in parses
+
+
+def test_script_text_is_dropped_but_the_text_after_it_kept() -> None:
+    html = _wrap_html("<p>Before<script>var x = 1;</script>after.</p>")
+    assert _flatten_html_to_paragraphs(html) == ["Before after."]
+
+
+def test_an_xml_encoding_declaration_does_not_garble_text() -> None:
+    """Inline-XBRL 10-Ks open with ``<?xml ... encoding="..."?>``; the text
+    is already decoded, so the declaration must not re-decode it."""
+    html = (
+        '<?xml version="1.0" encoding="ASCII"?>'
+        + _wrap_html("<p>Nestlé’s café costs €5.</p>")
+    )
+    assert _flatten_html_to_paragraphs(html) == ["Nestlé’s café costs €5."]
+
+
+async def test_a_whitespace_only_10k_extracts_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_fetch_edgar(monkeypatch, [_mk_filing(primary_doc_text="  \n ")])
+    assert await extract_10k_business("AAPL") is None
+
+
+async def test_the_risk_paragraph_diff_runs_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RIVN's ~550 paragraphs a side take ~15 s to compare; that too
+    must not hold the event loop."""
+    current, prior = _unique_risks_filings()
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+    threads: list[int] = []
+    real_diff = ten_k_module._paragraph_diff
+
+    def _recording(*args: Any, **kwargs: Any) -> Any:
+        threads.append(threading.get_ident())
+        return real_diff(*args, **kwargs)
+
+    monkeypatch.setattr(ten_k_module, "_paragraph_diff", _recording)
+
+    await extract_10k_risks_diff("AAPL")
+
+    assert threads
+    assert threading.get_ident() not in threads
+
+
+async def test_10k_parses_share_one_dedicated_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One parse at a time, on a thread of its own: a parse waiting its
+    turn must not hold a thread of the default pool, which has five on a
+    one-CPU Fly machine and serves every other ``asyncio.to_thread``."""
+    reports = [_unique_risks_filings(), _unique_risks_filings()]
+    by_symbol = {"AAPL": list(reports[0]), "MSFT": list(reports[1])}
+
+    async def _fake_fetch_edgar(symbol: str, **_kw: Any) -> list[EdgarFiling]:
+        return by_symbol[symbol]
+
+    monkeypatch.setattr(ten_k_module, "fetch_edgar", _fake_fetch_edgar)
+    parses = _record_parses(monkeypatch)
+
+    await asyncio.gather(
+        extract_10k_business("AAPL"),
+        extract_10k_risks_diff("AAPL"),
+        extract_10k_business("MSFT"),
+        extract_10k_risks_diff("MSFT"),
+    )
+
+    assert len(parses) == 4
+    assert len(set(parses)) == 1
+    assert threading.get_ident() not in parses
+
+
+async def test_the_risk_paragraph_diff_runs_on_the_10k_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The diff is pure Python, so two never run in parallel anyway (the
+    GIL); on the 10-K thread it waits there instead of holding a thread
+    of the default pool for ~15 s."""
+    current, prior = _unique_risks_filings()
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+    parses = _record_parses(monkeypatch)
+    diffs: list[int] = []
+    real_diff = ten_k_module._paragraph_diff
+
+    def _recording(*args: Any, **kwargs: Any) -> Any:
+        diffs.append(threading.get_ident())
+        return real_diff(*args, **kwargs)
+
+    monkeypatch.setattr(ten_k_module, "_paragraph_diff", _recording)
+
+    await extract_10k_risks_diff("AAPL")
+
+    assert diffs and parses
+    assert set(diffs) == set(parses)
+
+
+def test_script_and_style_with_child_elements_are_emptied_cleanly() -> None:
+    html = _wrap_html(
+        "<p>Before</p><style><div>hidden</div>also hidden</style><p>After</p>"
+    )
+    assert _flatten_html_to_paragraphs(html) == ["Before", "After"]

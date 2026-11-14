@@ -4,10 +4,11 @@
 Real 10-K HTML is messy: XBRL inline tags everywhere, layouts that vary
 by filer, and a Table of Contents at the start that mentions every Item
 header. The strategy here is "best-effort regex extraction over
-BeautifulSoup-flattened text, with graceful None on miss":
+lxml-flattened text, with graceful None on miss":
 
-1. ``BeautifulSoup`` flattens HTML to plain text (forgiving of malformed
-   markup; strips ``<ix:nonNumeric>`` and other XBRL tags).
+1. ``lxml.html`` flattens HTML to plain text and to paragraphs in one
+   parse (libxml2's HTML parser is forgiving of malformed markup;
+   ``<ix:nonNumeric>`` and other XBRL tags give up their text).
 2. Regex anchors find candidate ``(start, end)`` pairs for the section
    we want.
 3. The "longest match" heuristic picks the real section over the TOC —
@@ -36,9 +37,22 @@ follow-up — first we want to measure regex hit-rate on real filings.
   risks" section — anti-hallucination wins over "let the LLM compare
   two ~50KB texts".
 
-All three share ``_extract_section`` for the flat-text anchor pipeline;
-the diff path additionally uses ``_extract_section_paragraphs`` for the
+All three share ``_section_text`` for the flat-text anchor pipeline;
+the diff path additionally uses ``_section_paragraphs`` for the
 paragraph splits the diff operates on.
+
+## One parse per filing, on a worker thread
+
+A large 10-K is big: JPM's runs to 12.9M characters and 140K tags. With
+BeautifulSoup each parse took 7.5 s and ~140 MB, a report parsed its two
+10-Ks five times (text and paragraphs separately, business and risk
+tools separately), all on the event loop, and on 2026-11-14 the 512 MB
+Fly machine was killed in the middle of JPM's report. So each filing is
+parsed once, by lxml (0.6 s, ~95 MB for JPM; identical sections on the
+19 filings compared), into both its text and its paragraphs, on a thread
+of its own (``_TEN_K_EXECUTOR``, which also runs the paragraph diff, one
+piece at a time), and the result is kept for the next tool
+(``_FLAT_CACHE``).
 
 ## Why a different output shape from the data tools
 
@@ -60,12 +74,18 @@ or Risks sections of the report.
 """
 from __future__ import annotations
 
+import asyncio
 import re
-from collections.abc import Iterator
+from collections import OrderedDict
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Any
+from itertools import islice
+from typing import Any, TypeVar
 
-from bs4 import BeautifulSoup
+import lxml.html
+from lxml.etree import ParserError
 
 from app.core.observability import log_external_call
 from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
@@ -83,7 +103,7 @@ _MIN_SECTION_CHARS = 500
 # Anchor patterns. The regex uses ``\bitem\s+1\b`` style with
 # ``re.IGNORECASE`` so headers like "Item 1.", "ITEM 1.", "Item 1 -"
 # all match. Multi-character whitespace and non-breaking spaces are
-# normalized by BeautifulSoup before this layer sees the text.
+# normalized to single spaces before this layer sees the text.
 _SECTION_ANCHORS: dict[str, tuple[re.Pattern[str], list[re.Pattern[str]]]] = {
     "Item 1": (
         re.compile(r"\bitem\s+1\b\.?\s*(?:business|the\s+company)", re.IGNORECASE),
@@ -107,27 +127,6 @@ _SECTION_TITLES: dict[str, str] = {
 }
 
 
-def _flatten_html_to_text(html: str) -> str:
-    """HTML → plain text with whitespace normalized.
-
-    BeautifulSoup tolerates malformed HTML (unclosed tags, missing
-    quotes). We use ``get_text(separator=" ")`` so adjacent inline tags
-    don't smush their text together. XBRL inline tags
-    (``<ix:nonNumeric>`` etc.) carry their text content as children, so
-    they get unwrapped naturally — only the tag *attributes* (which
-    include ``contextRef`` and ``name="dei:..."``) are stripped.
-    """
-    soup = BeautifulSoup(html, "html.parser")
-    # Drop the HTML head/script/style noise — we only want body prose.
-    for tag in soup(["script", "style"]):
-        tag.decompose()
-    text = soup.get_text(separator=" ")
-    # Collapse runs of whitespace into single spaces. Preserves the
-    # text content while making regex anchors match across line breaks
-    # and non-breaking-space splits.
-    return re.sub(r"\s+", " ", text).strip()
-
-
 # Block-level tags whose text content we treat as one paragraph. Used by
 # the paragraph-aware extractor that backs the year-over-year risk diff.
 # Headings count too: in real 10-Ks, "Item 1A. Risk Factors" lives in
@@ -138,31 +137,117 @@ _PARAGRAPH_BLOCK_TAGS = (
     "tr",
 )
 
+_WHITESPACE = re.compile(r"\s+")
+
+_T = TypeVar("_T")
+
+def _html_parser() -> lxml.html.HTMLParser:
+    """A parser per parse (cheap; lxml parsers mustn't be shared across
+    threads). The text is already decoded, so the parser is told it's
+    UTF-8 and the document's own ``<?xml encoding=...?>`` declaration is
+    ignored. ``huge_tree`` lifts libxml2's limits on very large
+    documents."""
+    return lxml.html.HTMLParser(
+        encoding="utf-8", huge_tree=True, remove_comments=True, remove_pis=True
+    )
+
+
+@dataclass(frozen=True)
+class _FlatFiling:
+    """A 10-K reduced to what the extractors read. ``text`` is the whole
+    document with whitespace collapsed; ``paragraphs`` are its leaf block
+    elements in order (a block holding other blocks is skipped, since
+    its children carry the same text)."""
+
+    text: str
+    paragraphs: tuple[str, ...]
+
+
+def _joined_text(element: Any) -> str:
+    """An element's text, adjacent pieces joined by a space so inline
+    tags don't run their words together."""
+    return _WHITESPACE.sub(" ", " ".join(element.itertext())).strip()
+
+
+def _is_leaf_block(block: Any) -> bool:
+    return next(islice(block.iterdescendants(*_PARAGRAPH_BLOCK_TAGS), 1), None) is None
+
+
+def _parse_filing_html(html: str) -> _FlatFiling:
+    """The one parse of a 10-K: HTML → text and paragraphs."""
+    try:
+        root = lxml.html.document_fromstring(html.encode("utf-8"), parser=_html_parser())
+    except ParserError:  # an empty or whitespace-only document
+        return _FlatFiling(text="", paragraphs=())
+    for tag in list(root.iter("script", "style")):
+        # Emptied rather than removed: removing would glue the text after
+        # the tag onto the text before it.
+        tag.text = None
+        for child in list(tag):
+            tag.remove(child)
+
+    paragraphs = tuple(
+        text
+        for block in root.iter(*_PARAGRAPH_BLOCK_TAGS)
+        if _is_leaf_block(block) and (text := _joined_text(block))
+    )
+    return _FlatFiling(text=_joined_text(root), paragraphs=paragraphs)
+
+
+def _flatten_html_to_text(html: str) -> str:
+    """HTML → plain text with whitespace normalized."""
+    return _parse_filing_html(html).text
+
 
 def _flatten_html_to_paragraphs(html: str) -> list[str]:
-    """HTML → ordered list of paragraphs, preserving block boundaries.
+    """HTML → ordered list of paragraphs, preserving block boundaries."""
+    return list(_parse_filing_html(html).paragraphs)
 
-    Twin of ``_flatten_html_to_text`` for the diff path. Walks block
-    tags in document order, collects each block's text content (with
-    internal whitespace normalized to single spaces), drops empties.
-    Block tags that *contain* other block tags (a ``<div>`` wrapping
-    ``<p>`` children) are skipped to avoid double-counting — the
-    children carry the same text and we want one paragraph per leaf.
-    """
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(["script", "style"]):
-        tag.decompose()
 
-    paragraphs: list[str] = []
-    for block in soup.find_all(_PARAGRAPH_BLOCK_TAGS):
-        # Skip block containers that nest other block tags — their text
-        # is already collected from the leaf children.
-        if block.find(_PARAGRAPH_BLOCK_TAGS):
-            continue
-        text = re.sub(r"\s+", " ", block.get_text(separator=" ")).strip()
-        if text:
-            paragraphs.append(text)
-    return paragraphs
+# Filings parsed recently, by content. A report reads the latest 10-K from
+# two tools and the prior one from one; four entries cover a report with
+# room for the next. An entry is the text and paragraphs, not the HTML:
+# 5.3 MB for JPM, the largest we've seen.
+_FLAT_CACHE_SIZE = 4
+_FLAT_CACHE: OrderedDict[tuple[int, int], _FlatFiling] = OrderedDict()
+# The 10-K tools' CPU work (parses and the risk paragraph diff) runs on
+# this one thread, so one piece at a time: two big filings parsed side by
+# side would double the peak memory this exists to bound, and pure-Python
+# work gains nothing from a second thread anyway (the GIL). Work waiting
+# its turn waits here, not on a thread of the default pool (five on a
+# one-CPU machine, shared by every ``asyncio.to_thread``). The cache is
+# only touched from this thread.
+_TEN_K_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ten-k")
+
+
+async def _on_ten_k_thread(fn: Callable[..., _T], *args: Any) -> _T:
+    return await asyncio.get_running_loop().run_in_executor(_TEN_K_EXECUTOR, fn, *args)
+
+
+def _flat_filing_blocking(html: str) -> _FlatFiling:
+    key = (len(html), hash(html))
+    cached = _FLAT_CACHE.get(key)
+    if cached is not None:
+        _FLAT_CACHE.move_to_end(key)
+        return cached
+    flat = _parse_filing_html(html)
+    _FLAT_CACHE[key] = flat
+    if len(_FLAT_CACHE) > _FLAT_CACHE_SIZE:
+        _FLAT_CACHE.popitem(last=False)
+    return flat
+
+
+async def _flat_filing(html: str) -> _FlatFiling:
+    """Parse a 10-K once, off the event loop."""
+    return await _on_ten_k_thread(_flat_filing_blocking, html)
+
+
+def _check_section_id(section_id: str) -> None:
+    if section_id not in _SECTION_ANCHORS:
+        raise ValueError(
+            f"Unsupported section_id {section_id!r}. "
+            f"Supported: {sorted(_SECTION_ANCHORS)}"
+        )
 
 
 def _extract_section(html: str, *, section_id: str) -> str | None:
@@ -173,13 +258,13 @@ def _extract_section(html: str, *, section_id: str) -> str | None:
     - No anchor match found in the flattened text.
     - Longest match is below the 500-char sanity threshold.
     """
-    if section_id not in _SECTION_ANCHORS:
-        raise ValueError(
-            f"Unsupported section_id {section_id!r}. "
-            f"Supported: {sorted(_SECTION_ANCHORS)}"
-        )
+    _check_section_id(section_id)
+    return _section_text(_flatten_html_to_text(html), section_id=section_id)
 
-    text = _flatten_html_to_text(html)
+
+def _section_text(text: str, *, section_id: str) -> str | None:
+    """``_extract_section`` over text that's already flattened."""
+    _check_section_id(section_id)
     if not text:
         return None
 
@@ -224,13 +309,17 @@ def _extract_section_paragraphs(html: str, *, section_id: str) -> list[str] | No
     than the flat text. Returns None on the same conditions: no anchor
     match, or total content below ``_MIN_SECTION_CHARS``.
     """
-    if section_id not in _SECTION_ANCHORS:
-        raise ValueError(
-            f"Unsupported section_id {section_id!r}. "
-            f"Supported: {sorted(_SECTION_ANCHORS)}"
-        )
+    _check_section_id(section_id)
+    return _section_paragraphs(
+        _flatten_html_to_paragraphs(html), section_id=section_id
+    )
 
-    paragraphs = _flatten_html_to_paragraphs(html)
+
+def _section_paragraphs(
+    paragraphs: list[str] | tuple[str, ...], *, section_id: str
+) -> list[str] | None:
+    """``_extract_section_paragraphs`` over paragraphs already split."""
+    _check_section_id(section_id)
     if not paragraphs:
         return None
 
@@ -252,7 +341,7 @@ def _extract_section_paragraphs(html: str, *, section_id: str) -> list[str] | No
         end_idx = min(end_indices)
         # Strip the heading paragraph itself (start_idx) and the next
         # section's heading (end_idx) — keep only content in between.
-        candidate = paragraphs[start_idx + 1 : end_idx]
+        candidate = list(paragraphs[start_idx + 1 : end_idx])
         chars = sum(len(p) for p in candidate)
         if chars > best_chars:
             best = candidate
@@ -411,7 +500,8 @@ async def _extract_from_filing_index(
             call.record_output({"extracted": False, "reason": "no_text"})
             return None
 
-        text = _extract_section(filing.primary_doc_text, section_id=section_id)
+        flat = await _flat_filing(filing.primary_doc_text)
+        text = _section_text(flat.text, section_id=section_id)
         if text is None:
             call.record_output({"extracted": False, "reason": "anchors_not_found"})
             return None
@@ -470,20 +560,15 @@ async def extract_10k_risks(
 
 def _filing_to_section(
     filing: Any,
+    flat: _FlatFiling,
     *,
     section_id: str,
     symbol: str,
 ) -> Extracted10KSection | None:
-    """Pure conversion: ``EdgarFiling`` → ``Extracted10KSection`` or None.
-
-    Returns None when the filing has no ``primary_doc_text`` or when the
-    section anchors don't match in the text. Shared between the diff
-    path (which fetches two filings in one round trip) and any future
-    caller that already has the filing in hand.
-    """
-    if not filing.primary_doc_text:
-        return None
-    text = _extract_section(filing.primary_doc_text, section_id=section_id)
+    """Pure conversion: ``EdgarFiling`` (and its parse) →
+    ``Extracted10KSection``, or None when the section anchors don't
+    match in the text."""
+    text = _section_text(flat.text, section_id=section_id)
     if text is None:
         return None
     return Extracted10KSection(
@@ -537,29 +622,34 @@ async def extract_10k_risks_diff(
             call.record_output({"available": False, "reason": "fewer_than_2_filings"})
             return None
 
+        if not (filings[0].primary_doc_text and filings[1].primary_doc_text):
+            call.record_output({"available": False, "reason": "extraction_failed"})
+            return None
+        current_flat = await _flat_filing(filings[0].primary_doc_text)
+        prior_flat = await _flat_filing(filings[1].primary_doc_text)
+
         current_section = _filing_to_section(
-            filings[0], section_id=section_id, symbol=target
+            filings[0], current_flat, section_id=section_id, symbol=target
         )
         prior_section = _filing_to_section(
-            filings[1], section_id=section_id, symbol=target
+            filings[1], prior_flat, section_id=section_id, symbol=target
         )
         if current_section is None or prior_section is None:
             call.record_output({"available": False, "reason": "extraction_failed"})
             return None
 
         current_paras = (
-            _extract_section_paragraphs(
-                filings[0].primary_doc_text, section_id=section_id
-            )
+            _section_paragraphs(current_flat.paragraphs, section_id=section_id)
             or []
         )
         prior_paras = (
-            _extract_section_paragraphs(
-                filings[1].primary_doc_text, section_id=section_id
-            )
+            _section_paragraphs(prior_flat.paragraphs, section_id=section_id)
             or []
         )
-        added, removed, kept_count = _paragraph_diff(current_paras, prior_paras)
+        # CPU-bound: RIVN's ~550 paragraphs a side take ~15 s.
+        added, removed, kept_count = await _on_ten_k_thread(
+            _paragraph_diff, current_paras, prior_paras
+        )
 
         # Phase 4.3.B — Haiku-categorize each added/removed paragraph
         # into one of 9 RiskCategory buckets. Short-circuits to {}

@@ -50,8 +50,9 @@ tools separately), all on the event loop, and on 2026-11-14 the 512 MB
 Fly machine was killed in the middle of JPM's report. So each filing is
 parsed once, by lxml (0.6 s, ~95 MB for JPM; identical sections on the
 19 filings compared), into both its text and its paragraphs, on a thread
-of its own (``_PARSE_EXECUTOR``, so one parse at a time), and the result
-is kept for the next tool (``_FLAT_CACHE``).
+of its own (``_TEN_K_EXECUTOR``, which also runs the paragraph diff, one
+piece at a time), and the result is kept for the next tool
+(``_FLAT_CACHE``).
 
 ## Why a different output shape from the data tools
 
@@ -76,12 +77,12 @@ from __future__ import annotations
 import asyncio
 import re
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from itertools import islice
-from typing import Any
+from typing import Any, TypeVar
 
 import lxml.html
 from lxml.etree import ParserError
@@ -138,12 +139,17 @@ _PARAGRAPH_BLOCK_TAGS = (
 
 _WHITESPACE = re.compile(r"\s+")
 
-# The text is already decoded, so the parser is told it's UTF-8 and the
-# document's own ``<?xml encoding=...?>`` declaration is ignored.
-# ``huge_tree`` lifts libxml2's limits on very large documents.
-_HTML_PARSER = lxml.html.HTMLParser(
-    encoding="utf-8", huge_tree=True, remove_comments=True, remove_pis=True
-)
+_T = TypeVar("_T")
+
+def _html_parser() -> lxml.html.HTMLParser:
+    """A parser per parse (cheap; lxml parsers mustn't be shared across
+    threads). The text is already decoded, so the parser is told it's
+    UTF-8 and the document's own ``<?xml encoding=...?>`` declaration is
+    ignored. ``huge_tree`` lifts libxml2's limits on very large
+    documents."""
+    return lxml.html.HTMLParser(
+        encoding="utf-8", huge_tree=True, remove_comments=True, remove_pis=True
+    )
 
 
 @dataclass(frozen=True)
@@ -170,10 +176,10 @@ def _is_leaf_block(block: Any) -> bool:
 def _parse_filing_html(html: str) -> _FlatFiling:
     """The one parse of a 10-K: HTML → text and paragraphs."""
     try:
-        root = lxml.html.document_fromstring(html.encode("utf-8"), parser=_HTML_PARSER)
+        root = lxml.html.document_fromstring(html.encode("utf-8"), parser=_html_parser())
     except ParserError:  # an empty or whitespace-only document
         return _FlatFiling(text="", paragraphs=())
-    for tag in root.iter("script", "style"):
+    for tag in list(root.iter("script", "style")):
         # Emptied rather than removed: removing would glue the text after
         # the tag onto the text before it.
         tag.text = None
@@ -204,12 +210,18 @@ def _flatten_html_to_paragraphs(html: str) -> list[str]:
 # 5.3 MB for JPM, the largest we've seen.
 _FLAT_CACHE_SIZE = 4
 _FLAT_CACHE: OrderedDict[tuple[int, int], _FlatFiling] = OrderedDict()
-# Parses run on this one thread, so one at a time: two big filings parsed
-# side by side would double the peak memory this exists to bound. A parse
-# waiting its turn waits here, not on a thread of the default pool (five
-# on a one-CPU machine, shared by every ``asyncio.to_thread``). The cache
-# is only touched from this thread.
-_PARSE_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ten-k-parse")
+# The 10-K tools' CPU work (parses and the risk paragraph diff) runs on
+# this one thread, so one piece at a time: two big filings parsed side by
+# side would double the peak memory this exists to bound, and pure-Python
+# work gains nothing from a second thread anyway (the GIL). Work waiting
+# its turn waits here, not on a thread of the default pool (five on a
+# one-CPU machine, shared by every ``asyncio.to_thread``). The cache is
+# only touched from this thread.
+_TEN_K_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ten-k")
+
+
+async def _on_ten_k_thread(fn: Callable[..., _T], *args: Any) -> _T:
+    return await asyncio.get_running_loop().run_in_executor(_TEN_K_EXECUTOR, fn, *args)
 
 
 def _flat_filing_blocking(html: str) -> _FlatFiling:
@@ -227,8 +239,7 @@ def _flat_filing_blocking(html: str) -> _FlatFiling:
 
 async def _flat_filing(html: str) -> _FlatFiling:
     """Parse a 10-K once, off the event loop."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_PARSE_EXECUTOR, _flat_filing_blocking, html)
+    return await _on_ten_k_thread(_flat_filing_blocking, html)
 
 
 def _check_section_id(section_id: str) -> None:
@@ -636,7 +647,7 @@ async def extract_10k_risks_diff(
             or []
         )
         # CPU-bound: RIVN's ~550 paragraphs a side take ~15 s.
-        added, removed, kept_count = await asyncio.to_thread(
+        added, removed, kept_count = await _on_ten_k_thread(
             _paragraph_diff, current_paras, prior_paras
         )
 

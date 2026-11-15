@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import OrderedDict
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -40,6 +41,8 @@ logger = logging.getLogger(__name__)
 
 CACHE_SECONDS = 10.0
 CHAIN_SECONDS = 600.0  # a chain's strikes change rarely
+MAX_CHAINS = 10  # a chain is big (every expiry's strikes): only the last few are kept
+BUILD_SECONDS = 30.0
 STRIKES_EACH_SIDE = 40
 QUOTE_BATCH = 100
 STANDARD_DELIVERABLE = 100
@@ -62,17 +65,34 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-_chains: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_chains: OrderedDict[str, tuple[float, list[dict[str, Any]]]] = OrderedDict()
 _live: dict[tuple[str, date], tuple[float, LiveChain]] = {}
-_lock = asyncio.Lock()
+# One build at a time per symbol and expiry; others don't wait on it.
+_locks: dict[tuple[str, date], asyncio.Lock] = {}
 
 
 def reset() -> None:
     """Forget what's cached (tests)."""
-    global _lock
     _chains.clear()
     _live.clear()
-    _lock = asyncio.Lock()
+    _locks.clear()
+
+
+def _remember_chain(symbol: str, expirations: list[dict[str, Any]]) -> None:
+    """Keep a chain CHAIN_SECONDS, and only the MAX_CHAINS newest."""
+    now = _clock()
+    for old in [s for s, (at, _) in _chains.items() if now - at >= CHAIN_SECONDS]:
+        del _chains[old]
+    _chains[symbol] = (now, expirations)
+    _chains.move_to_end(symbol)
+    while len(_chains) > MAX_CHAINS:
+        _chains.popitem(last=False)
+
+
+def _forget_old_quotes() -> None:
+    """tastytrade's quotes leave memory once they're past use."""
+    for old in [k for k, (at, _) in _live.items() if _clock() - at >= CACHE_SECONDS]:
+        del _live[old]
 
 
 def _tastytrade_symbol(symbol: str) -> str:
@@ -93,7 +113,7 @@ async def _expirations(symbol: str) -> list[dict[str, Any]]:
             continue
         found = field_of(item, "expirations")
         expirations += [e for e in found if isinstance(e, dict)] if isinstance(found, list) else []
-    _chains[symbol] = (_clock(), expirations)
+    _remember_chain(symbol, expirations)
     return expirations
 
 
@@ -197,15 +217,18 @@ async def live_chain(symbol: str, expiry: date) -> LiveChain:
     if not tt.is_configured():
         raise LiveChainUnavailable("tastytrade isn't set up on the server")
     key = (symbol, expiry)
-    async with _lock:
-        cached = _live.get(key)
-        if cached is not None and _clock() - cached[0] < CACHE_SECONDS:
-            return cached[1]
-        try:
+    _forget_old_quotes()
+    try:
+        async with asyncio.timeout(BUILD_SECONDS), _locks.setdefault(key, asyncio.Lock()):
+            cached = _live.get(key)
+            if cached is not None and _clock() - cached[0] < CACHE_SECONDS:
+                return cached[1]
             built = await _build(symbol, expiry)
-        except (tt.TastytradeUnavailable, tt.TastytradeNotFound) as exc:
-            raise LiveChainUnavailable(failure_reason(exc)) from exc
-        _live[key] = (_clock(), built)
-        for stale in [k for k, (at, _) in _live.items() if _clock() - at >= CACHE_SECONDS]:
-            del _live[stale]  # nothing kept past its use
-        return built
+            _live[key] = (_clock(), built)
+            return built
+    except (tt.TastytradeUnavailable, tt.TastytradeNotFound, TimeoutError) as exc:
+        raise LiveChainUnavailable(failure_reason(exc)) from exc
+    finally:
+        lock = _locks.get(key)
+        if lock is not None and not lock.locked():
+            _locks.pop(key, None)  # no lock left behind per expiry ever asked

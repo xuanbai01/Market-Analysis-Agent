@@ -17,7 +17,9 @@ from app.services.owner_positions import PositionsUnavailable, failure_reason, g
 from app.services.owner_trades import csv_text, list_trades, sync
 
 OWNER_PREFIX = "/owner"
-Symbol = Annotated[str, Path(pattern=r"^[A-Za-z][A-Za-z0-9.\-]{0,9}$", description="a ticker, e.g. NVDA or BRK-B")]
+# Tighter than the options routes': one class separator at most, so the
+# ticker always maps to a path tastytrade's client allows (BRK-B is BRK/B).
+Symbol = Annotated[str, Path(pattern=r"^[A-Za-z][A-Za-z0-9]{0,9}(?:[.\-][A-Za-z0-9]{1,4})?$", description="a ticker, e.g. NVDA or BRK-B")]
 router = APIRouter(prefix=OWNER_PREFIX, dependencies=[Depends(require_owner)], include_in_schema=False)
 
 
@@ -74,14 +76,16 @@ async def owner_trades_csv(session: AsyncSession = Depends(get_session)) -> Resp
 
 @router.get("/options/{symbol}/live/{expiry}", response_model=LiveChain)
 async def owner_live_chain(symbol: Symbol, expiry: date) -> LiveChain:
-    """One expiry's chain at tastytrade's live quotes, at most 10 s old; 404
+    """One expiry's chain at tastytrade's live quotes, at most 10 s old; 422
     when tastytrade lists no such expiry, 503 with the reason otherwise.
     Never stored, never sent to the options read."""
     symbol = symbol.upper()
     try:
         return await live_chain(symbol, expiry)
     except NotListed as exc:
-        raise HTTPException(status_code=404, detail=f"tastytrade lists no {symbol} options expiring {expiry}.") from exc
+        # 422, not 404: the page reads a 404 from an owner route as "no
+        # owner key on the server" and would forget the key.
+        raise HTTPException(status_code=422, detail=f"tastytrade lists no {symbol} options expiring {expiry}.") from exc
     except LiveChainUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

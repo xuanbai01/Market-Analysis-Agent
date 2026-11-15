@@ -3,7 +3,31 @@ import { fireEvent, render, screen } from "@testing-library/react";
 
 import { AmountBars } from "./AmountBars";
 import { DistributionChart } from "./DistributionChart";
+import type { LensReport } from "../../lib/schemas";
 import { LENS, SBC_METRIC } from "./fixture";
+
+/** LENS with every intensity and amount multiplied by `f`. */
+function scaled(f: number): LensReport {
+  return {
+    ...LENS,
+    companies: LENS.companies.map((c) => ({
+      ...c,
+      points: c.points.map((p) => ({
+        ...p,
+        value: p.value === null ? null : p.value * f,
+        intensity: p.intensity === null ? null : p.intensity * f,
+      })),
+    })),
+    stats: LENS.stats.map((s) => ({ ...s, p75: s.p75 * f })),
+  };
+}
+
+function svgTexts(container: HTMLElement, pattern: RegExp): string[] {
+  return Array.from(container.querySelectorAll("text"))
+    .filter((t) => t.getAttribute("data-testid") === null)
+    .map((t) => t.textContent ?? "")
+    .filter((t) => pattern.test(t));
+}
 
 describe("DistributionChart", () => {
   it("draws a dot per reported company-year, the median and the middle-50% band", () => {
@@ -24,6 +48,13 @@ describe("DistributionChart", () => {
     expect(labels).toContain("0%");
   });
 
+  it("labels a 2.5% step exactly instead of rounding it", () => {
+    // Highest intensity 12%: niceTicks steps by 2.5%, and the SBC lens read
+    // "0%, 3%, 5%, 8%, 10%, 13%".
+    const { container } = render(<DistributionChart report={scaled(0.48)} />);
+    expect(svgTexts(container, /%$/)).toEqual(["0.0%", "2.5%", "5.0%", "7.5%", "10.0%", "12.5%"]);
+  });
+
   it("ranks every company on hover, with the median and band", () => {
     render(<DistributionChart report={LENS} />);
     fireEvent.mouseEnter(screen.getAllByTestId("lens-column")[2]);
@@ -39,6 +70,11 @@ describe("AmountBars", () => {
     render(<AmountBars report={LENS} />);
     expect(screen.getAllByTestId("lens-segment")).toHaveLength(8);
     expect(screen.getAllByTestId("lens-bar-total").map((t) => t.textContent)).toEqual(["$22B", "$37B", "$53B"]);
+  });
+
+  it("labels a $2.5B step exactly instead of rounding it", () => {
+    const { container } = render(<AmountBars report={scaled(0.18)} />); // largest year $9.5B
+    expect(svgTexts(container, /^\$/)).toEqual(["$0", "$2.5B", "$5.0B", "$7.5B", "$10.0B"]);
   });
 
   it("lists each company's spend on hover, largest first", () => {

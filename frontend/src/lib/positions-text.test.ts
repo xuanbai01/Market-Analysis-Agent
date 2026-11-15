@@ -19,7 +19,7 @@ const text = (s: Sentence | null) => (s === null ? null : s.map((p) => (typeof p
 
 const call: PositionLeg = {
   account: 1, kind: "call", symbol: "NVDA  261218C00200000", expiry: "2026-12-18", strike: 200, quantity: -2, multiplier: 100,
-  average_open: 4.1, adjusted: false, quote: null,
+  average_open: 4.1, adjusted: false, expires_at: null, quote: null,
 };
 const shares: PositionLeg = { ...call, kind: "stock", symbol: "NVDA", expiry: null, strike: null, quantity: 200, multiplier: 1, average_open: 150 };
 const group: PositionGroup = { underlying: "NVDA", symbol: "NVDA", quote: null, expiries: ["2026-12-18"], legs: [shares, call] };

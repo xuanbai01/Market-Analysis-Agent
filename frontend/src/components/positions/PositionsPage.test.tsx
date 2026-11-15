@@ -204,7 +204,8 @@ describe("PositionsPage", () => {
     const tiles = await screen.findByTestId("positions-totals");
     expect(tiles).toHaveTextContent("+$12"); // NVDA's short call: 0.12 a share a day, 100 shares
     expect(tiles).not.toHaveTextContent("—");
-    expect(tiles).toHaveTextContent(/leaves out SPY/);
+    expect(tiles).toHaveTextContent("leaves out SPY (no live price or delta from tastytrade)");
+    expect(tiles).toHaveTextContent("leaves out SPY (no live theta from tastytrade)");
   });
 
   it("says when the copy is old or cut short", async () => {

@@ -81,6 +81,11 @@ describe("position words", () => {
       "NVDA reports on **Nov 19**, before this position's first expiry: options imply a **±7.1%** move for it; the last 1 moved **6.2%** on average.",
     );
     expect(earningsSentence("NVDA", earnings, "2026-11-18")).toBeNull();
+    // On the expiry day: after the close, the position has expired before the market trades on it.
+    const afterClose = { ...earnings, next_timing: "after_close", reaction_date: "2026-11-20" } as EarningsBlock;
+    expect(earningsSentence("NVDA", afterClose, "2026-11-19")).toBeNull();
+    const beforeOpen = { ...earnings, next_timing: "before_open", reaction_date: "2026-11-19" } as EarningsBlock;
+    expect(earningsSentence("NVDA", beforeOpen, "2026-11-19")).not.toBeNull();
     expect(text(earningsSentence("NVDA", { ...earnings, implied_move: null, refused: "the expiries are too far" }, "2026-12-18"))).toMatch(
       /\(no implied move: the expiries are too far\)/,
     );

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
+from app.services import market_calendar as mc
 from app.services import options_chain as oc
 
 _COLUMNS = [
@@ -91,6 +92,44 @@ def _install(monkeypatch: pytest.MonkeyPatch, ticker: _FakeTicker) -> None:
     fake = MagicMock()
     fake.Ticker.return_value = ticker
     monkeypatch.setitem(sys.modules, "yfinance", fake)
+
+
+# Inside Friday 2026-11-13's session, unless a test says otherwise: the
+# quotes are delayed prints and regularMarketPrice is the spot.
+_IN_SESSION = datetime(2026, 11, 13, 11, 0, tzinfo=mc.ET)
+
+
+@pytest.fixture(autouse=True)
+def _clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(oc, "_now", lambda: _IN_SESSION)
+
+
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        # Saturday: the quotes are Friday's close, and the official close
+        # (the history's, the closing auction) beats the last trade.
+        (datetime(2026, 11, 14, 12, 0, tzinfo=mc.ET), 100.0),
+        # Friday after 16:15: the same.
+        (datetime(2026, 11, 13, 18, 0, tzinfo=mc.ET), 100.0),
+        # Monday in the first 15 minutes: still Friday's close.
+        (datetime(2026, 11, 16, 9, 40, tzinfo=mc.ET), 100.0),
+        # Inside a session: the delayed price.
+        (datetime(2026, 11, 13, 11, 0, tzinfo=mc.ET), 100.25),
+        # Monday's close, but the history has no Monday row yet: the price.
+        (datetime(2026, 11, 16, 17, 0, tzinfo=mc.ET), 100.25),
+    ],
+)
+def test_the_spot_at_a_close_is_the_official_close(
+    monkeypatch: pytest.MonkeyPatch, now: datetime, expected: float
+) -> None:
+    """NVDA's Nov 13 close was $162.92; Yahoo's regularMarketPrice gave
+    $162.85, the last regular-hours trade rather than the closing auction."""
+    monkeypatch.setattr(oc, "_now", lambda: now)
+    _install(monkeypatch, _FakeTicker(["2026-11-16"], _UNDERLYING))
+    fetched = oc.fetch_chain("TEST", lambda listed, _q: list(listed))
+    assert fetched is not None
+    assert fetched.spot == expected
 
 
 def test_reads_the_front_chain_from_the_first_call_and_only_the_picked_others(

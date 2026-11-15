@@ -199,7 +199,7 @@ def _depends_on(route: APIRoute, dependency: object) -> bool:
 
 
 # The owner's routes, pinned: a new one is a decision.
-_OWNER_PATHS = {"/v1/owner/status"}
+_OWNER_PATHS = {"/v1/owner/status", "/v1/owner/positions"}
 
 
 def test_every_owner_route_takes_the_owner_key_and_is_exactly_these() -> None:

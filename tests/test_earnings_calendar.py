@@ -23,6 +23,7 @@ def et(y: int, m: int, d: int, hh: int, mm: int = 0) -> datetime:
         (et(2026, 10, 27, 12), "during"),
         (et(2026, 11, 17, 16), "after_close"),  # NVDA
         (et(2026, 11, 17, 0), "unknown"),  # a date with no time
+        (et(2026, 11, 27, 13, 30), "after_close"),  # a half day closes at 1 pm
     ],
 )
 def test_timing_from_the_et_hour(when: datetime, timing: str) -> None:

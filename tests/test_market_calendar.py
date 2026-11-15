@@ -28,6 +28,29 @@ def test_nyse_holidays(year: int, expected: list[tuple[int, int]]) -> None:
     assert sorted(mc.holidays(year)) == [date(year, m, d) for m, d in expected]
 
 
+@pytest.mark.parametrize(
+    ("year", "expected"),
+    [
+        (2025, [(7, 3), (11, 28), (12, 24)]),
+        # 2026: the Fourth is a Saturday, so the 3rd is the holiday, not a half day.
+        (2026, [(11, 27), (12, 24)]),
+        # 2027: the 3rd is a Saturday; Christmas Eve is the observed holiday.
+        (2027, [(11, 26)]),
+        # 2028: the 3rd is a Monday; Christmas Eve a Sunday.
+        (2028, [(7, 3), (11, 24)]),
+    ],
+)
+def test_nyse_early_closes(year: int, expected: list[tuple[int, int]]) -> None:
+    """1 pm closes: 3 July, the day after Thanksgiving and Christmas Eve,
+    each when it is a session."""
+    assert sorted(mc.early_closes(year)) == [date(year, m, d) for m, d in expected]
+
+
+def test_a_half_day_closes_at_one() -> None:
+    assert mc.session_close(date(2026, 11, 27)) == et(2026, 11, 27, 13)
+    assert mc.session_close(date(2026, 11, 25)) == et(2026, 11, 25, 16)
+
+
 def test_a_saturday_new_year_is_not_moved_to_the_year_before() -> None:
     """1 Jan 2028 is a Saturday; NYSE keeps 31 Dec 2027 open."""
     assert mc.is_session(date(2027, 12, 31))
@@ -59,6 +82,9 @@ def test_previous_and_next_session_skip_weekends_and_holidays() -> None:
         (et(2026, 11, 16, 16, 10), et(2026, 11, 16, 15, 55)),
         (et(2026, 11, 16, 17), et(2026, 11, 16, 16)),
         (et(2026, 11, 26, 12), et(2026, 11, 25, 16)),  # Thanksgiving
+        (et(2026, 11, 27, 12), et(2026, 11, 27, 11, 45)),  # a half day, in session
+        (et(2026, 11, 27, 14), et(2026, 11, 27, 13)),  # after its 1 pm close
+        (et(2026, 11, 28, 12), et(2026, 11, 27, 13)),  # the Saturday after
     ],
 )
 def test_quote_time(now: datetime, expected: datetime) -> None:
@@ -72,6 +98,8 @@ def test_quote_time(now: datetime, expected: datetime) -> None:
         (et(2026, 11, 16, 11), False),  # market hours: a delayed print
         (et(2026, 11, 16, 16, 10), False),  # the session's last prints, still delayed
         (et(2026, 11, 16, 17), True),
+        (et(2026, 11, 27, 14), True),  # a half day's 1 pm close
+        (et(2026, 11, 27, 12), False),
     ],
 )
 def test_a_quote_time_says_whether_it_is_a_close(now: datetime, expected: bool) -> None:
@@ -92,6 +120,8 @@ def test_quote_time_reads_any_timezone() -> None:
         (et(2026, 11, 16, 16, 21), False),
         (et(2026, 11, 14, 12), False),
         (et(2026, 11, 26, 12), False),
+        (et(2026, 11, 27, 13, 19), True),  # a half day: settling after 1 pm
+        (et(2026, 11, 27, 13, 21), False),
     ],
 )
 def test_market_open(now: datetime, is_open: bool) -> None:
@@ -106,6 +136,7 @@ def test_market_open(now: datetime, is_open: bool) -> None:
         (et(2026, 11, 16, 11), date(2026, 11, 13)),
         (et(2026, 11, 14, 12), date(2026, 11, 13)),
         (et(2026, 11, 26, 20), date(2026, 11, 25)),
+        (et(2026, 11, 27, 14), date(2026, 11, 27)),  # a half day is done by 1:20
     ],
 )
 def test_latest_completed_session(now: datetime, expected: date) -> None:
@@ -117,6 +148,11 @@ def test_years_to_expiry_runs_from_the_quote_time_to_the_expiry_close() -> None:
     days long, not 6 (which would inflate its IV by about 8%)."""
     t0 = mc.quote_time(et(2026, 11, 14, 12))
     assert mc.years_to_expiry(t0, date(2026, 11, 20)) == pytest.approx(7 / 365)
+
+
+def test_an_expiry_on_a_half_day_runs_to_one_pm() -> None:
+    t0 = mc.quote_time(et(2026, 11, 21, 12))  # Saturday: Friday the 20th's close
+    assert mc.years_to_expiry(t0, date(2026, 11, 27)) == pytest.approx((7 * 24 - 3) / 24 / 365)
 
 
 def test_et_date_of_an_epoch_timestamp() -> None:

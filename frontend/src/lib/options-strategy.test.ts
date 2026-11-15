@@ -113,6 +113,15 @@ describe("prices", () => {
   });
 });
 
+describe("smileOf", () => {
+  it("merges points at the same moneyness", () => {
+    const point = CHAIN.smile[3];
+    const smile = smileOf({ ...CHAIN, smile: [...CHAIN.smile, { ...point, iv: point.iv + 0.02, side: "call" }] })!;
+    expect(smile.points).toHaveLength(CHAIN.smile.length);
+    expect(smile.points.find(([x]) => x === point.log_moneyness)![1]).toBeCloseTo(point.iv + 0.01);
+  });
+});
+
 describe("a flat smile", () => {
   it("gives N(d2) for the chance of ending above", () => {
     const flat: Smile = { forward: 100, years: 1, points: [[-0.5, 0.2], [0.5, 0.2]] };
@@ -121,6 +130,22 @@ describe("a flat smile", () => {
 });
 
 describe("templates on a real chain (NVDA)", () => {
+  it("starts strikes by the rule: at the money, half a sigma and a sigma out", () => {
+    // NVDA: forward 163.03, ATM IV 60.4%, 28 days: sigma is 16.7%, so half a
+    // sigma out is 149.96 / 177.25 and a full sigma 137.95 / 192.70.
+    const strikes = (t: keyof typeof TEMPLATES) => templateLegs(t, CHAIN)!.map((l) => l.strike);
+    expect(strikes("long_call")).toEqual([165]);
+    expect(strikes("bull_call")).toEqual([165, 175]);
+    expect(strikes("bear_put")).toEqual([165, 150]);
+    expect(strikes("bull_put")).toEqual([150, 140]);
+    expect(strikes("bear_call")).toEqual([175, 190]);
+    expect(strikes("iron_condor")).toEqual([140, 150, 175, 190]);
+  });
+
+  it("takes sigma from the smile when the chain has no ATM IV", () => {
+    expect(templateLegs("bull_put", { ...CHAIN, atm_iv: null })!.map((l) => l.strike)).toEqual([150, 140]);
+  });
+
   it("builds every template from strikes with quotes, in the right order", () => {
     for (const t of Object.keys(TEMPLATES) as (keyof typeof TEMPLATES)[]) {
       const legs = templateLegs(t, CHAIN);

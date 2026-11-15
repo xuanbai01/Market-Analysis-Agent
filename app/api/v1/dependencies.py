@@ -127,33 +127,44 @@ async def enforce_demo_rate_limit(request: Request) -> None:
     )
 
 
-_OPTIONS_BUCKET: TokenBucket | None = None
+# Per-IP hourly buckets for the options routes, one per kind of cost.
+_OPTIONS_BUCKETS: dict[str, TokenBucket] = {}
 
 
-async def enforce_options_rate_limit(request: Request) -> None:
-    """Per-IP limit on options page builds (the route calls it only on a
-    cache miss). 429 with Retry-After on deny; 0 disables it."""
-    global _OPTIONS_BUCKET
-    per_hour = settings.OPTIONS_RATE_LIMIT_PER_HOUR
+async def _enforce_hourly(kind: str, per_hour: int, request: Request, what: str) -> None:
+    """Take one from ``kind``'s bucket for this IP; 429 with Retry-After
+    when it's empty. 0 per hour disables the limit."""
     if per_hour <= 0:
         return
-    if _OPTIONS_BUCKET is None:
-        _OPTIONS_BUCKET = TokenBucket(capacity=per_hour, window_seconds=3600.0)
-    allowed, retry_after = await _OPTIONS_BUCKET.take(_client_ip(request))
+    bucket = _OPTIONS_BUCKETS.get(kind)
+    if bucket is None:
+        bucket = _OPTIONS_BUCKETS[kind] = TokenBucket(capacity=per_hour, window_seconds=3600.0)
+    allowed, retry_after = await bucket.take(_client_ip(request))
     if allowed:
         return
     retry_int = 3600 if math.isinf(retry_after) else max(1, int(math.ceil(retry_after)))
     raise HTTPException(
         status_code=429,
-        detail=f"Too many option lookups: {per_hour}/hour per IP. Retry in ~{retry_int} seconds.",
+        detail=f"Too many {what}: {per_hour}/hour per IP. Retry in ~{retry_int} seconds.",
         headers={"Retry-After": str(retry_int)},
     )
 
 
+async def enforce_options_rate_limit(request: Request) -> None:
+    """Per-IP limit on options page builds (the route calls it only on a
+    cache miss): each is about a dozen Yahoo calls."""
+    await _enforce_hourly("build", settings.OPTIONS_RATE_LIMIT_PER_HOUR, request, "option lookups")
+
+
+async def enforce_options_read_rate_limit(request: Request) -> None:
+    """Per-IP limit on cited reads the model has to write (the route calls
+    it only when no read of the same quotes is cached)."""
+    await _enforce_hourly("read", settings.OPTIONS_READ_RATE_LIMIT_PER_HOUR, request, "option reads")
+
+
 def reset_options_rate_limit_for_tests() -> None:
-    """Drop the options bucket so the next request rebuilds it (tests only)."""
-    global _OPTIONS_BUCKET
-    _OPTIONS_BUCKET = None
+    """Drop the options buckets so the next request rebuilds them (tests only)."""
+    _OPTIONS_BUCKETS.clear()
 
 
 def reset_demo_rate_limit_for_tests() -> None:

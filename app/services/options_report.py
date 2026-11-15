@@ -99,6 +99,12 @@ def is_fresh(symbol: str) -> bool:
     return _fresh(symbol) is not None
 
 
+def fresh_report(symbol: str) -> OptionsReport | None:
+    """The cached report while it is fresh, else None."""
+    entry = _fresh(symbol)
+    return entry.report if entry is not None else None
+
+
 def has_chain(symbol: str, expiry: date) -> bool:
     """Whether ``/chain/{expiry}`` can answer without asking Yahoo."""
     entry = _fresh(symbol)

@@ -119,6 +119,10 @@ class Settings(BaseSettings):
     # about a dozen Yahoo calls, and Yahoo throttling would hit every
     # yfinance tool. Cached reports are free. 0 disables the limit.
     OPTIONS_RATE_LIMIT_PER_HOUR: int = 60
+    # Cited reads of the options page (ADR 0008, PR5) one IP may have
+    # written per hour: each is a model call. A read already written for
+    # the same quotes is free. 0 disables the limit.
+    OPTIONS_READ_RATE_LIMIT_PER_HOUR: int = 20
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

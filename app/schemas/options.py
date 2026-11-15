@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.schemas.research import Claim
+from app.schemas.research import Claim, ThesisDraftPoint, ThesisPoint
 
 
 class FailedTicker(BaseModel):
@@ -175,3 +175,25 @@ class OptionsReport(BaseModel):
     history: IvHistory
     claims: list[Claim]
     generated_at: datetime
+
+
+class OptionsRead(BaseModel):
+    """The cited read of one options report (ADR 0008, PR5). Each point's
+    ``claim_refs`` index into ``claims`` (section "Options"): the report's
+    claims as they stood when the read was written, so the chips match
+    the prose even after the page's report moves on."""
+
+    symbol: str
+    quoted_at: datetime
+    at_close: bool
+    headline: str
+    points: list[ThesisPoint]
+    claims: list[Claim]
+    generated_at: datetime
+
+
+class OptionsReadDraft(BaseModel):
+    """LLM output for the read; loose on purpose, trimmed in code."""
+
+    headline: str = Field(description="One sentence: the main thing the option prices say.")
+    points: list[ThesisDraftPoint] = Field(default_factory=list)

@@ -211,11 +211,26 @@ def _quoted(quotes: Sequence[tuple[float, int]], claim: Claim) -> bool:
     claim_numbers = _claim_numbers(claim)
     if not claim_numbers:
         return True
-    return any(
-        abs(c - value) <= 0.5 * 10**-decimals + 1e-9
-        for value, decimals in quotes
-        for c in claim_numbers
-    )
+    return any(_matches(value, decimals, claim_numbers) for value, decimals in quotes)
+
+
+def _matches(value: float, decimals: int, numbers: Sequence[float]) -> bool:
+    """``value`` is one of ``numbers`` rounded to the quote's precision."""
+    return any(abs(c - value) <= 0.5 * 10**-decimals + 1e-9 for c in numbers)
+
+
+def unbacked_numbers(text: str, claims: Sequence[Claim]) -> list[float]:
+    """Numbers ``text`` quotes that none of ``claims`` shows: not a claim's
+    figure at the quote's precision (as ``_quoted`` matches), nor a number
+    written in a claim's description ("the last 8 reports"). ISO dates and
+    years are labels, not figures. For prose that must hold no number of
+    its own, checked in code rather than only by the offline rubric."""
+    shown = [n for c in claims for n in _claim_numbers(c)]
+    written = {n for c in claims for n in _numbers(c.description)}
+    return [
+        value for value, decimals in _quotes(text)
+        if value not in written and not _matches(value, decimals, shown)
+    ]
 
 
 MAX_TITLE_WORDS = 8

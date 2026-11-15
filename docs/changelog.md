@@ -202,5 +202,11 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **The positions page's reads have query keys of their own.** Under the options page's keys, a visit there within five minutes was served the untracked copy from the browser and never reached the server, so no view was recorded.
     - **The server records a view that waited on the lock** while the untracked build ran. A report with no usable options records none, whoever built it.
     - **The page's test pins the clock,** since its fixtures' expiries pass in December.
+  - **From #128's third AI review:**
+    - **Option context for the first 10 underlyings only,** as the plan said and the page didn't: each cold report or chain read spends one of the IP's 60 options lookups an hour, so a big portfolio could have spent them all in one load. The rest say why they show no context. The held expiry's chain waits for the report, which often read that expiry already, so it costs nothing.
+    - **Each option leg says when its expiry closes** (`expires_at`, from `market_calendar.session_close`): the page had used 21:00 UTC for every expiry, an hour late in summer and three hours late on half days, so a position on the day after Thanksgiving still had time value after the close.
+    - **The normal CDF keeps its digits in the tails** (Numerical Recipes' erfc, error under 1.2e-7 of the value). Its error had been absolute, so the golden check allowed an error larger than a far out-of-the-money price and a tail priced at 0 passed. Black-76 is now held to Python within 1e-5 of each price.
+    - **No bare "Dec 11: "** when a chain has no max pain.
+    - **A view served the old copy** (Yahoo down) is recorded too.
   - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 

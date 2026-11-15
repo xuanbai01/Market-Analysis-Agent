@@ -183,7 +183,8 @@ async def test_an_expiry_that_failed_is_not_fetched_again(world: Any) -> None:
         with pytest.raises(orp.NoUsableQuotes):
             await orp.get_chain(None, "TEST", EXP_FAR, now=NOW)  # type: ignore[arg-type]
     assert yahoo.calls == ["TEST", "TEST"]
-    assert orp.has_chain("TEST", EXP_20) and not orp.has_chain("TEST", EXP_FAR)
+    # Both answer without Yahoo now: EXP_FAR is known to have nothing to price.
+    assert orp.has_chain("TEST", EXP_20) and orp.has_chain("TEST", EXP_FAR)
 
 
 async def test_a_database_failure_still_serves_the_report(world: Any, monkeypatch: pytest.MonkeyPatch) -> None:

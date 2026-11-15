@@ -62,7 +62,7 @@ def test_an_expiry_summary_has_the_one_sigma_range_and_the_straddle() -> None:
     put = next(q for q in chain.puts if q.strike == 100.0)
     assert summary.straddle == pytest.approx(call.mid + put.mid)
     assert summary.days == pytest.approx(20.0)
-    assert summary.sessions == 14  # 16 Nov - 3 Dec, Thanksgiving off
+    assert summary.sessions == 13  # 16-20 Nov, 23-25 and 27 Nov (Thanksgiving off), 30 Nov-3 Dec
     assert summary.includes_earnings is False
 
 

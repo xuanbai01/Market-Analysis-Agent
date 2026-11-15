@@ -212,4 +212,18 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **The CSV** defuses a formula behind leading spaces or a newline.
     - **The page** shows the server's reason when the copy doesn't open, and revokes the download's address a moment later (at once, Safari can cancel the save).
     - **Both key recipes** warn about Windows clipboard history.
+- **Live quotes on the options page (2026-11-15, tastytrade PR B, ADR 0009):** with the owner key, the options page's expiry section has a Live switch.
+  - **The route:** `GET /v1/owner/options/{symbol}/live/{expiry}` (`owner_live_chain`).
+    - **Strikes:** read from tastytrade's nested chain. Only standard deliverables count, and an OCC symbol is checked before it reaches a query. The last 10 chains are kept 10 minutes.
+    - **Quotes:** bids, asks, volume and open interest come from its REST quotes for the 40 strikes either side of the price.
+    - **Everything else** comes from the code that reads Yahoo's chain: the forward, our own IVs from the live mids, the smile, positioning.
+    - **Limits:** 10 s in memory, one build per symbol and expiry, a 30 s deadline. An expiry tastytrade doesn't list is a 422.
+  - **The page:** the switch draws the same smile, open interest, positioning, chain table and strategy builder, priced at live quotes and refreshed every 15 s while the tab shows. It's labelled "Live · tastytrade · quotes Ns old · shown to you only". When live quotes fail, the delayed chain stays, with the reason.
+  - **Never stored, never in a prompt:** the options read stays on Yahoo's chain.
+  - **From the security review:**
+    - **The medium:** an unlisted expiry answered 404, which the page reads as "no owner key", so the owner would have been signed out of every owner page. It's a 422 now.
+    - the ticker pattern only takes what tastytrade's path allowlist does;
+    - the chains kept are capped;
+    - builds lock per symbol and expiry, with a deadline.
+  - **The fake backend** answers a made-up NVDA chain to look at the switch.
 

@@ -6,10 +6,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api";
 import { fetchOptionsChain } from "../../lib/options-api";
 import { OptionsReportSchema } from "../../lib/options-schemas";
+import { clearOwnerKey, getOwnerKey, setOwnerKey } from "../../lib/owner";
+import { fetchLiveChain } from "../../lib/owner-api";
 import { ExpirySection } from "./ExpirySection";
 import { RAW_OPTIONS_REPORT } from "./fixture";
 
 vi.mock("../../lib/options-api", () => ({ fetchOptionsReport: vi.fn(), fetchOptionsChain: vi.fn() }));
+vi.mock("../../lib/owner-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/owner-api")>()),
+  fetchLiveChain: vi.fn(),
+}));
 
 const REPORT = OptionsReportSchema.parse(RAW_OPTIONS_REPORT);
 const CHAIN = REPORT.chain!;
@@ -45,7 +51,11 @@ function renderSection(ui = section()) {
 
 const select = () => screen.getByTestId("options-expiry-select") as HTMLSelectElement;
 
-afterEach(() => vi.mocked(fetchOptionsChain).mockReset());
+afterEach(() => {
+  vi.mocked(fetchOptionsChain).mockReset();
+  vi.mocked(fetchLiveChain).mockReset();
+  clearOwnerKey();
+});
 
 describe("ExpirySection labels", () => {
   it("names each expiry with its days and whether it is the monthly", () => {
@@ -165,3 +175,47 @@ describe("ExpirySection", () => {
     expect(select().value).toBe(CHAIN.expiry);
   });
 });
+
+describe("ExpirySection live quotes", () => {
+  const LIVE = {
+    symbol: "NVDA", expiry: CHAIN.expiry, spot: 163.4, quoted_at: "2026-11-16T15:00:00Z",
+    updated_at: new Date(Date.now() - 3000).toISOString(), source: "tastytrade" as const,
+    chain: { ...CHAIN, forward: 163.9 },
+  };
+  const delayedForward = `forward $${CHAIN.forward.toFixed(2)}`;
+
+  it("offers no live switch without the owner key", () => {
+    renderSection();
+    expect(screen.queryByTestId("options-live-toggle")).toBeNull();
+  });
+
+  it("switches the expiry to tastytrade's live quotes and says how old they are", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue(LIVE);
+    renderSection();
+    expect(fetchLiveChain).not.toHaveBeenCalled(); // delayed until asked
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live · tastytrade · quotes \d+s old/));
+    expect(fetchLiveChain).toHaveBeenCalledWith("k".repeat(40), "NVDA", CHAIN.expiry);
+    expect(screen.getAllByText(/forward \$163\.90/).length).toBeGreaterThan(0); // the live chain is drawn
+  });
+
+  it("keeps the delayed chain and says why when live quotes fail", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 503, title: "tastytrade answered 503" }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live quotes unavailable: tastytrade answered 503/));
+    expect(screen.getAllByText((text) => text.includes(delayedForward)).length).toBeGreaterThan(0);
+  });
+
+  it("forgets a refused owner key", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 403, title: "This needs the owner key." }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(getOwnerKey()).toBeNull());
+    expect(screen.queryByTestId("options-live-toggle")).toBeNull();
+  });
+});
+

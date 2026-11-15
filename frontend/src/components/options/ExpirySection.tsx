@@ -3,11 +3,20 @@
  * and the near-the-money chain, and build a strategy on it. The report
  * carries the expiry nearest 30 days; any other is read on demand
  * (/v1/options/{symbol}/chain/{expiry}).
+ *
+ * With the owner key, a Live switch reads the expiry at tastytrade's live
+ * quotes instead (/v1/owner/options/{symbol}/live/{expiry}, ADR 0009):
+ * the same charts, table and strategy builder, priced live, refreshed every
+ * 15 seconds while the tab shows, labelled with the quotes' age. When live
+ * quotes fail the delayed chain stays, with the reason.
  */
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { ApiError } from "../../lib/api";
 import { fetchOptionsChain } from "../../lib/options-api";
+import { clearOwnerKey, useOwnerKey } from "../../lib/owner";
+import { fetchLiveChain, isOwnerKeyRefused } from "../../lib/owner-api";
 import type { ChainRow, ExpiryChain, Positioning } from "../../lib/options-schemas";
 import {
   GLOSSARY,
@@ -51,6 +60,14 @@ const ask = (v: number) => (v > 0 ? v.toFixed(2) : dash);
 const iv = (v: number | null) => (v === null ? dash : pct(v));
 const delta = (v: number | null) => (v === null ? dash : v.toFixed(2));
 const strike = (k: number) => (Number.isInteger(k) ? k.toFixed(0) : k.toFixed(2));
+const LIVE_REFRESH_MS = 15_000;
+
+/** "3s", "2m": how long ago tastytrade's newest quote was. */
+function quoteAge(updatedAt: string | null): string {
+  if (!updatedAt) return "of unknown age";
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(updatedAt).getTime()) / 1000));
+  return seconds < 90 ? `${seconds}s` : seconds < 5400 ? `${Math.round(seconds / 60)}m` : `${Math.round(seconds / 3600)}h`;
+}
 
 export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 }: Props) {
   // The report's expiry unless the reader picked another that is still
@@ -63,11 +80,30 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
     enabled: expiry !== initial.expiry,
     staleTime: 5 * 60_000,
   });
-  const chain = expiry === initial.expiry ? initial : query.data;
+  const delayed = expiry === initial.expiry ? initial : query.data;
   const unauthorized = useSignOutOn401(query.error);
   // An error belongs to an expiry read on demand; once the report's own
   // chain is that expiry, it no longer applies.
   const failed = expiry !== initial.expiry && !unauthorized ? query.error : null;
+
+  const ownerKey = useOwnerKey();
+  const [live, setLive] = useState(false);
+  const liveOn = live && ownerKey !== null;
+  const liveQuery = useQuery({
+    queryKey: ["owner-live-chain", symbol, expiry],
+    queryFn: () => fetchLiveChain(ownerKey as string, symbol, expiry),
+    enabled: liveOn,
+    refetchInterval: liveOn ? LIVE_REFRESH_MS : false,
+    gcTime: 0, // tastytrade's quotes leave memory with the view
+    retry: false,
+  });
+  const liveRefused = isOwnerKeyRefused(liveQuery.error);
+  useEffect(() => {
+    if (liveRefused) clearOwnerKey();
+  }, [liveRefused]);
+  const liveChain = liveOn ? (liveQuery.data ?? null) : null;
+  const chain = liveChain?.chain ?? delayed;
+  const price = liveChain?.spot ?? spot;
 
   return (
     <>
@@ -88,7 +124,31 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
               ))}
             </select>
             {chain && <span>forward ${chain.forward.toFixed(2)} · {expiryKind(chain.expiry)}</span>}
+            {ownerKey !== null && (
+              <button
+                type="button"
+                data-testid="options-live-toggle"
+                aria-pressed={live}
+                onClick={() => setLive(!live)}
+                className={`ml-auto rounded border px-2 py-0.5 ${live ? "border-strata-highlight text-strata-hi" : "border-strata-border text-strata-dim hover:text-strata-hi"}`}
+              >
+                {live ? "Live ✓" : "Live"}
+              </button>
+            )}
           </label>
+          {liveOn && (
+            <p data-testid="options-live-status" className="mb-2 font-mono text-[11px] text-strata-muted">
+              {liveChain ? (
+                <>Live · tastytrade · quotes {quoteAge(liveChain.updated_at)} old · shown to you only</>
+              ) : liveQuery.error && !liveRefused ? (
+                <span className="text-strata-neg">
+                  Live quotes unavailable: {liveQuery.error instanceof ApiError ? liveQuery.error.title : "tastytrade didn't answer"}. Showing the delayed chain.
+                </span>
+              ) : (
+                "Reading tastytrade's quotes…"
+              )}
+            </p>
+          )}
           {query.isFetching && <p className="font-mono text-[11px] text-strata-muted">Reading {shortDate(expiry, true)}…</p>}
           {failed && <ErrorBanner error={failed} />}
           {chain && (
@@ -97,7 +157,7 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
                 <ChartBlock
                   title="IV by strike"
                   info={GLOSSARY.smile}
-                  sentence={chain.expiry === initial.expiry ? smileSentence(skew25) : null}
+                  sentence={chain.expiry === initial.expiry && !liveChain ? smileSentence(skew25) : null}
                   testId="options-smile-block"
                 >
                   <SmileChart chain={chain} />
@@ -105,13 +165,13 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
                 <ChartBlock
                   title="Open interest by strike"
                   info={GLOSSARY.openInterest}
-                  sentence={chain.positioning ? maxPainSentence(chain.positioning, spot) : openInterestSentence(chain)}
+                  sentence={chain.positioning ? maxPainSentence(chain.positioning, price) : openInterestSentence(chain)}
                   testId="options-oi-block"
                 >
-                  <OpenInterestChart chain={chain} spot={spot} />
+                  <OpenInterestChart chain={chain} spot={price} />
                 </ChartBlock>
               </div>
-              {chain.positioning && <PositioningBlock expiry={chain.expiry} p={chain.positioning} price={spot} />}
+              {chain.positioning && <PositioningBlock expiry={chain.expiry} p={chain.positioning} price={price} />}
               <ChainTable chain={chain} />
             </>
           )}

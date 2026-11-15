@@ -81,6 +81,22 @@ def test_the_smile_keeps_strikes_near_the_money_only() -> None:
     assert len(smile.points) <= metrics.MAX_STRIKES
 
 
+def test_a_dense_chain_spreads_its_strikes_across_the_wings() -> None:
+    """QQQ lists a strike every dollar: the 25 nearest covered only ±1.8%
+    around the money, short of the 25-delta wings, so skew read None
+    (live, 2026-11-14). The cap spreads its strikes over the whole window."""
+    dense = [70 + 0.5 * i for i in range(121)]
+    skewed = lambda k: 0.25 - 0.3 * k  # noqa: E731
+    chain = _chain(EXP_20, skewed, dense)
+    smile = metrics.smile(chain, SPOT, QUOTED_AT, RATE, DIVIDEND)
+    assert smile is not None and len(smile.points) <= metrics.MAX_STRIKES
+    reach = metrics.MONEYNESS_SIGMAS * smile.atm_vol * math.sqrt(smile.years)
+    logs = [math.log(k / smile.forward) for k, _v in smile.points]
+    assert min(logs) <= -0.8 * reach and max(logs) >= 0.8 * reach
+    result = metrics.snapshot_metrics(_fetch({EXP_20: chain}), QUOTED_AT, RATE)
+    assert result.skew25 is not None
+
+
 def test_a_forward_far_from_spot_falls_back_and_says_so() -> None:
     """Quotes whose parity forward is 10% off spot are stale or broken."""
     chain = _chain(EXP_20, _flat(0.25), forward=110.0)

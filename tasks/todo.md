@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Options analysis, PR5 (cited AI read)** in review on `feature/options-read`. PR1 (#109, the daily IV snapshot), PR2 (#110, the report API), PR3 (#111, the page), the half-day closes (#112) and PR4 (#113, the strategy builder) are merged. Plan below.
+- **Options analysis: the plan's five PRs are merged** (#109 snapshot, #110 report API, #111 page, #112 half days, #113 strategy builder, #114 cited read); an edge-case review's fixes are in review on `fix/options-edge-cases`. Follow-ups below.
 
 ## Plan — after Phase 5 (2026-11-13)
 
@@ -79,7 +79,10 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 - [x] **PR3 — the page** *(#111)* `/options/:ticker` (lazy, not in the demo): expected-move cone, term structure by days to expiry, smile, open interest by strike, implied vs past earnings moves, chain table; a link on the symbol page.
 - [x] **Half-day closes** *(#112)*: `market_calendar.early_closes` (3 July, the day after Thanksgiving, Christmas Eve, each when a session) close at 1 pm; quote times, `is_close`, time to expiry and the earnings timing follow. `METHOD_VERSION` 2, so the history ranks from the first version-2 session. Raised by the AI review of #111.
 - [x] **PR4 — strategy builder** *(#113)*: long call/put, verticals, iron condor; payoff, breakevens, max profit/loss, risk-neutral probability of profit at mid and at the natural price. Templates only, never ranked.
-- [x] **PR5 — cited AI read** *(branch `feature/options-read`, in review)* on the page (claims → `synth_call` → `resolve_points(max_refs=None)`), cached per symbol and quote time; no advice, forecasts or strategy suggestions; numbers checked in code; a live eval (`suite=options`).
+- [x] **PR5 — cited AI read** *(#114)* on the page (claims → `synth_call` → `resolve_points(max_refs=None)`), cached per symbol and quote time; no advice, forecasts or strategy suggestions; numbers checked in code; a live eval (`suite=options`).
+- [x] **Edge-case review** *(branch `fix/options-edge-cases`)*: nine bugs fixed (quote time in a session's first 15 minutes, DST in time to expiry, the intraday event move, a failed schedule cached a day, a traded report still flagged, past moves on a live bar, the spot fallback after the smiles, strikes of 0, a noisy smile's probability).
+- [ ] **Options follow-ups (from the review, not bugs):** the snapshot's stored `next_earnings` is the calendar's date, not `earnings_calendar.next_report_date`; fetching one more expiry costs three Yahoo calls where one would do (a chains-only `fetch_chain`); the page computes the snapshot's raw-quote detail and throws it away; `_Built.parts` is an untyped dict. Known limits of the read: a bare number in any fact's name passes as a label, the direction guard can drop a correct point that uses a synonym, a headline's numbers carry no chip, and a report rebuilt with the same quote time keeps the earlier read.
+- [ ] **Owner:** compare IV30 for QQQ/SPY/NVDA with a broker after Monday's close (within about 2 points), and price two strategies in the builder against a broker's analysis tool.
 
 ## Handoff — pickup notes (2026-11-13)
 

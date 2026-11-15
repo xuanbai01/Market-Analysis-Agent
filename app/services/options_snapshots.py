@@ -9,7 +9,12 @@ weekend or holiday run, or the retry after a good run, writes nothing
 (``market_open``): the day's figures aren't settled.
 
 Tickers: ``OPTIONS_SNAPSHOT_SYMBOLS``, then the symbols whose options page
-was opened in the last 60 days, at most 30.
+was opened in the last 60 days, at most 30. After the snapshots, the run
+reads the whole chain of each ``OPTIONS_FULL_CHAIN_SYMBOLS`` ticker (one
+Yahoo call per listed expiry) and stores its total open interest
+(``option_oi_totals``): last, so the slower reads never cost a snapshot,
+under the same time budget and throttle pause. Totals are best-effort:
+the cron fails only on a missing snapshot.
 
 One ticker's failure is its own: the others still run. Yahoo throttling
 pauses the run once for 30 seconds; a second throttle defers the rest to
@@ -44,6 +49,7 @@ MAX_TARGETS = 30
 TRACKED_DAYS = 60
 TIME_BUDGET_SECONDS = 300
 RATE_LIMIT_PAUSE_SECONDS = 30
+TOTALS_HISTORY = "5d"  # fetch_chain reads daily closes too; the totals need none
 _SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 _RATE_LIMIT_ERRORS = frozenset({"YFRateLimitError"})
 
@@ -134,16 +140,46 @@ def snapshot_one(
     }
 
 
-async def _insert(session: AsyncSession, row: dict[str, Any]) -> bool:
+def chain_totals_one(symbol: str, session_date: date, quoted_at: datetime) -> tuple[str, dict[str, Any] | None]:
+    """(status, row) of ``symbol``'s open interest and volume summed over
+    every listed expiry, adjusted contracts included. Blocking."""
+    cpu_started = time.thread_time()
+    with log_external_call("yfinance.options", {"symbol": symbol, "purpose": "chain_totals"}) as call:
+        fetched = options_chain.fetch_chain(
+            symbol, lambda listed, _quote: list(listed), history_period=TOTALS_HISTORY, read_calendar=False
+        )
+        call.record_output({
+            "expiries": len(fetched.chains) if fetched else 0,
+            "listed": len(fetched.expiries) if fetched else 0,
+            "cpu_ms": round((time.thread_time() - cpu_started) * 1000, 1),
+        })
+    if fetched is None or not fetched.chains:
+        return "no_options", None
+    chains = fetched.chains.values()
+    return "ok", {
+        "symbol": symbol,
+        "trade_date": session_date,
+        "as_of": quoted_at,
+        "call_open_interest": sum(q.open_interest for c in chains for q in c.calls),
+        "put_open_interest": sum(q.open_interest for c in chains for q in c.puts),
+        "call_volume": sum(q.volume for c in chains for q in c.calls),
+        "put_volume": sum(q.volume for c in chains for q in c.puts),
+        "expiries": len(fetched.chains),
+        "listed": len(fetched.expiries),
+    }
+
+
+async def _insert(session: AsyncSession, row: dict[str, Any], write: Any = None) -> bool:
     """Insert, retrying once on a connection the database dropped while
     the run was fetching (Neon drops idle ones)."""
+    write = write or store.insert_snapshot
     try:
-        return await store.insert_snapshot(session, row)
+        return await write(session, row)
     except DBAPIError as exc:
         if not exc.connection_invalidated:
             raise
         await session.rollback()
-        return await store.insert_snapshot(session, row)
+        return await write(session, row)
 
 
 async def run_snapshots(session: AsyncSession, *, now: datetime | None = None) -> SnapshotRun:
@@ -155,7 +191,10 @@ async def run_snapshots(session: AsyncSession, *, now: datetime | None = None) -
 
 async def _run(session: AsyncSession, now: datetime) -> SnapshotRun:
     started = _clock()
-    lists: dict[str, list[str]] = {k: [] for k in ("written", "skipped", "no_options", "no_usable_quotes", "deferred")}
+    lists: dict[str, list[str]] = {
+        k: []
+        for k in ("written", "skipped", "no_options", "no_usable_quotes", "deferred", "totals_written", "totals_skipped", "totals_deferred")
+    }
     failed: list[FailedTicker] = []
 
     def finish(status: str, session_date: Any, symbols: list[str]) -> SnapshotRun:
@@ -172,10 +211,14 @@ async def _run(session: AsyncSession, now: datetime) -> SnapshotRun:
     session_date = mc.latest_completed_session(now)
     symbols = await targets(session, now)
     done = await store.stored_symbols(session, session_date)
+    full_chain = parse_symbols(settings.OPTIONS_FULL_CHAIN_SYMBOLS)
+    totals_done = await store.stored_totals(session, session_date) if full_chain else set()
     await session.rollback()  # no connection held while Yahoo is fetched
     lists["skipped"] = [s for s in symbols if s in done]
     pending = [s for s in symbols if s not in done]
-    if not pending:
+    lists["totals_skipped"] = [s for s in full_chain if s in totals_done]
+    totals_pending = [s for s in full_chain if s not in totals_done]
+    if not pending and not totals_pending:
         return finish("no_new_session", session_date, symbols)
 
     quoted_at = mc.quote_time(now)
@@ -211,4 +254,47 @@ async def _run(session: AsyncSession, now: datetime) -> SnapshotRun:
             continue
         lists[status].append(symbol)
         i += 1
+    if not lists["deferred"]:
+        paused = await _run_totals(session, totals_pending, session_date, quoted_at, started, paused, lists, failed)
+    else:
+        lists["totals_deferred"] = totals_pending  # throttled or out of time already: the retry run reads them
     return finish("ok", session_date, symbols)
+
+
+async def _run_totals(
+    session: AsyncSession,
+    pending: list[str],
+    session_date: date,
+    quoted_at: datetime,
+    started: float,
+    paused: bool,
+    lists: dict[str, list[str]],
+    failed: list[FailedTicker],
+) -> bool:
+    """The whole-chain totals, after the snapshots, under the run's budget
+    and its one throttle pause. Returns whether the pause was used."""
+    i = 0
+    while i < len(pending):
+        symbol = pending[i]
+        if _clock() - started > TIME_BUDGET_SECONDS:
+            lists["totals_deferred"] = pending[i:]
+            break
+        try:
+            status, row = await _on_options_thread(chain_totals_one, symbol, session_date, quoted_at)
+            if row is not None and await _insert(session, row, store.insert_totals):
+                lists["totals_written"].append(symbol)
+            elif row is not None:
+                lists["totals_skipped"].append(symbol)
+        except Exception as exc:
+            if is_rate_limit(exc):
+                if paused:
+                    lists["totals_deferred"] = pending[i:]
+                    break
+                paused = True
+                await _sleep(RATE_LIMIT_PAUSE_SECONDS)
+                continue
+            logger.exception("open interest totals failed for %s", symbol)
+            await session.rollback()
+            failed.append(FailedTicker(symbol=symbol, reason=f"totals: {type(exc).__name__}"))
+        i += 1
+    return paused

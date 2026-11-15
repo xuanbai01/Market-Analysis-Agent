@@ -35,6 +35,9 @@ class SnapshotRun(BaseModel):
         ),
     )
     duration_ms: float
+    totals_written: list[str] = Field(default_factory=list, description="whole-chain open interest stored (OPTIONS_FULL_CHAIN_SYMBOLS)")
+    totals_skipped: list[str] = Field(default_factory=list, description="whole-chain totals already stored for this trading day")
+    totals_deferred: list[str] = Field(default_factory=list, description="whole-chain totals not reached: throttled or out of time")
 
 
 # ── The options page (GET /v1/options/{symbol}) ───────────────────────
@@ -180,6 +183,17 @@ class IvHistoryPoint(BaseModel):
     iv30: float
 
 
+class OpenInterestTotal(BaseModel):
+    """One session's open interest summed over every listed expiry
+    (``option_oi_totals``); ``expiries`` of ``listed`` were read."""
+
+    date: date
+    call: int
+    put: int
+    expiries: int
+    listed: int
+
+
 class IvHistory(BaseModel):
     """The daily snapshots (ADR 0008). Percentile from 63 sessions, rank
     from 126; both rank today's live IV30 against the stored ones."""
@@ -215,6 +229,10 @@ class OptionsReport(BaseModel):
     chain: ExpiryChain | None = Field(description="the expiry nearest 30 days; others at /chain/{expiry}")
     earnings: EarningsBlock | None
     history: IvHistory
+    open_interest_history: list[OpenInterestTotal] = Field(
+        default_factory=list,
+        description="whole-chain open interest by session, oldest first; only for OPTIONS_FULL_CHAIN_SYMBOLS",
+    )
     claims: list[Claim]
     generated_at: datetime
 

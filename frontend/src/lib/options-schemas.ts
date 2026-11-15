@@ -131,6 +131,10 @@ export const EarningsBlockSchema = z.object({
 });
 export type EarningsBlock = z.infer<typeof EarningsBlockSchema>;
 
+/** One session's open interest over every listed expiry (option_oi_totals). */
+export const OpenInterestTotalSchema = z.object({ date: z.string(), call: Num, put: Num, expiries: Num, listed: Num });
+export type OpenInterestTotal = z.infer<typeof OpenInterestTotalSchema>;
+
 export const IvHistorySchema = z.object({
   points: z.array(z.object({ date: z.string(), iv30: Num })).default([]),
   sessions: Num,
@@ -164,6 +168,7 @@ export const OptionsReportSchema = z.object({
   chain: ExpiryChainSchema.nullable(),
   earnings: EarningsBlockSchema.nullable(),
   history: IvHistorySchema,
+  open_interest_history: z.array(OpenInterestTotalSchema).default([]),
   claims: z.array(ClaimSchema).default([]),
   generated_at: z.string(),
 });

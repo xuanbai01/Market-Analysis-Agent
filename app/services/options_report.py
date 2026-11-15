@@ -26,7 +26,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.observability import log_external_call
-from app.schemas.options import ExpiryChain, OptionsReport
+from app.schemas.options import ExpiryChain, OpenInterestTotal, OptionsReport
 from app.services import earnings_calendar, options_chain
 from app.services import market_calendar as mc
 from app.services import options_analysis as oa
@@ -205,11 +205,19 @@ async def _assemble(session: AsyncSession, built: _Built, now: datetime) -> Opti
     parts = built.parts
     usable = parts["status"] == "ok"
     points: list[tuple[date, float]] = []
+    totals: list[OpenInterestTotal] = []
     if usable:
         # The build cost a dozen Yahoo calls: a database hiccup costs only
         # the history and the record of the view, not the report.
         try:
             points = await store.iv30_history(session, built.symbol, om.METHOD_VERSION)
+            totals = [
+                OpenInterestTotal(
+                    date=t.trade_date, call=t.call_open_interest, put=t.put_open_interest,
+                    expiries=t.expiries, listed=t.listed,
+                )
+                for t in await store.open_interest_history(session, built.symbol)
+            ]
             await store.touch_tracked(session, built.symbol, now)
         except Exception:
             logger.exception("options history for %s unavailable; serving the report without it", built.symbol)
@@ -221,7 +229,7 @@ async def _assemble(session: AsyncSession, built: _Built, now: datetime) -> Opti
         default=default, put_call_oi=parts["put_call_open_interest"], earnings=parts["earnings"],
         history=history, at=now,
     )
-    return OptionsReport(**parts, history=history, claims=claims, generated_at=now)
+    return OptionsReport(**parts, history=history, open_interest_history=totals, claims=claims, generated_at=now)
 
 
 async def get_report(session: AsyncSession, symbol: str, *, now: datetime | None = None) -> OptionsReport:

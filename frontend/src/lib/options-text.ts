@@ -6,7 +6,7 @@
  *
  * A sentence is a list of segments: plain text, or a figure to set in bold.
  */
-import type { ExpiryChain, ExpirySummary, Positioning, TopContract } from "./options-schemas";
+import type { ExpiryChain, ExpirySummary, OpenInterestTotal, Positioning, TopContract } from "./options-schemas";
 
 export type Segment = string | { strong: string };
 export type Sentence = Segment[];
@@ -265,6 +265,47 @@ export function acrossSentence(expiries: ExpirySummary[]): Sentence | null {
   ];
 }
 
+/** Contract counts in short form: "10.24M", "950K", "820". */
+export function compactCount(v: number): string {
+  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e4) return `${(v / 1e3).toFixed(0)}K`;
+  return count(v);
+}
+
+function change(now: number, then: number): string {
+  const gap = now / then - 1;
+  if (Math.abs(gap) < 0.0005) return "unchanged";
+  return `${gap > 0 ? "up" : "down"} ${pct(Math.abs(gap))}`;
+}
+
+/** The latest whole-chain totals, and how they moved since the first stored. */
+export function openInterestHistorySentence(history: OpenInterestTotal[]): Sentence | null {
+  const last = history[history.length - 1];
+  if (!last) return null;
+  const coverage = last.expiries < last.listed ? ` (${last.expiries} of ${last.listed} expiries read)` : "";
+  const parts: Sentence = [
+    `Across all ${last.listed} expiries${coverage}: `,
+    { strong: `${compactCount(last.call)} calls` },
+    " and ",
+    { strong: `${compactCount(last.put)} puts` },
+    ` open on ${dateLabel(last.date)}`,
+  ];
+  if (last.call > 0) parts.push(" (put/call ", { strong: (last.put / last.call).toFixed(2) }, ")");
+  const first = history[0];
+  if (history.length > 1 && first.call > 0 && first.put > 0) {
+    parts.push(
+      "; calls ",
+      { strong: change(last.call, first.call) },
+      " and puts ",
+      { strong: change(last.put, first.put) },
+      ` since ${dateLabel(first.date)}.`,
+    );
+  } else {
+    parts.push(`. Recorded daily from ${dateLabel(first.date)}.`);
+  }
+  return parts;
+}
+
 /** What each figure on the page means, for the ⓘ beside it. */
 export const GLOSSARY = {
   spot: "The underlying's price the option quotes go with: the last close Yahoo reports outside market hours, the 15-minute-delayed price during them. Feeds can differ by a few cents on a close.",
@@ -285,6 +326,8 @@ export const GLOSSARY = {
     "Gamma exposure: how many dollars dealers' hedges would change for a 1% move in the stock, if dealers are long the calls and short the puts customers hold opposite them (the common assumption; real positions aren't public). Positive: their hedging damps moves; negative: it adds to them. Each bar is the net at a strike. The call and put walls are the strikes with the most call and put gamma exposure; the gamma flip is where the net changes sign as the price moves, each strike's IV held.",
   delta:
     "Delta exposure: the dollar change in the open options' own value for a 1% move in the stock, calls positive and puts negative, with no assumption about who holds them (a dealer's delta is the opposite of whatever side it holds). Some sites quote total dollar delta under this name, 100 times larger.",
+  openInterestHistory:
+    "Open contracts across every listed expiry, calls and puts, recorded after each session's close by our own daily run (from 2026-11-16; for a few tickers only, since it reads every expiry). One line per side; open interest is settled overnight, so each point is that session's.",
   acrossExpiries:
     "Each expiry the page reads: its max pain and how far that is from the price, its net gamma exposure, and its put/call open interest.",
 } as const;

@@ -38,7 +38,7 @@ Phases 1–5 are shipped and deployed. The open plan is in [`tasks/todo.md`](tas
 - **Frontend:** the `/options/:ticker` page (ADR 0008; with a strategy builder and a cited read; linked from the dashboard, not in the demo), the `/symbol/:ticker` dashboard (one card per section, reordered for distressed names), `/compare`, `/lens/:id`, search / watchlist / recent, the market strip, and a public read-only demo at `/demo` (`useDemo()` switches the fetchers and hides what a visitor can't do). Charts are hand-rolled SVG; there is no charting library.
 - **Production:** Vercel + Fly + Neon behind the shared secret, `LLM_PROVIDER=deepseek` ([ADR 0006](docs/adr/0006-pluggable-llm-provider.md); the code default is `anthropic`). `FRED_API_KEY` is set there (since 2026-11-13), so the Macro card renders; `NEWSAPI_KEY` is not, so news comes from Yahoo's feed only. The `TASTYTRADE_*` secrets are not set yet (docs/deployment.md §9).
 
-**Tables today:** `symbols`, `news_items`, `news_symbols`, `candles`, `research_reports`, `option_iv_snapshots`, `options_tracked`. pgvector + `embeddings` columns are not added until/unless `search_history` un-defers.
+**Tables today:** `symbols`, `news_items`, `news_symbols`, `candles`, `research_reports`, `option_iv_snapshots`, `options_tracked`, `option_oi_totals`. pgvector + `embeddings` columns are not added until/unless `search_history` un-defers.
 
 **Rules that came out of shipped work** (the changelog or `tasks/lessons.md` has the story behind each):
 

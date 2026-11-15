@@ -49,7 +49,7 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + per-call LLM b
 │   │   └── models/              # Symbol, NewsItemModel, NewsSymbol, Candle, ResearchReportRow
 │   ├── schemas/                 # Pydantic request/response (research.py is the v2 schema)
 │   └── services/                # tools (fetch_*, parse_*), orchestrator, cache, rate_limit, llm
-├── alembic/versions/            # 0001 baseline, 0002 news_symbols, 0003 research_reports, 0004 option snapshots
+├── alembic/versions/            # 0001 baseline, 0002 news_symbols, 0003 research_reports, 0004 option snapshots, 0005 option OI totals
 ├── frontend/                    # Vite + React 18 + TS dashboard (Phase 4)
 │   ├── src/
 │   │   ├── App.tsx              # Router + auth guard. SymbolDetailPage + ComparePage lazy.
@@ -124,6 +124,7 @@ POST /v1/research/{symbol}
 | `candles` | composite PK `(symbol, ts, interval)`; OHLCV + volume | FK → `symbols`. Indexed `(symbol, interval, ts DESC)`. Append-only. |
 | `option_iv_snapshots` | composite PK `(symbol, trade_date)`; IV30/IV90 (+ extrapolated flags), `skew25`, `rv20`/`rv60`, call/put open interest and volume, `next_earnings`, `method_version`, `detail` (JSONB: each expiry's forward, smile and raw near-money quotes) | Daily IV history (ADR 0008). Insert-only, first good row wins; ~7 KB a row. |
 | `options_tracked` | `symbol` PK, `last_viewed` (timestamptz) | Symbols whose options page was opened; snapshotted for 60 days. |
+| `option_oi_totals` | composite PK `(symbol, trade_date)`; call/put open interest and volume over every listed expiry, `expiries` read of `listed` | Whole-chain totals for `OPTIONS_FULL_CHAIN_SYMBOLS` (QQQ, SPY, NVDA), written by the daily run after its snapshots, insert-only. The snapshot's own open interest covers only its 30/90-day window. |
 | `research_reports` | composite PK `(symbol, focus, report_date)`; `report_json` (JSONB), `generated_at` (timestamptz) | Same-day cache. JSONB stores serialized `ResearchReport`. Lookup is time-windowed via `generated_at` (configurable via `RESEARCH_CACHE_MAX_AGE_HOURS`). |
 
 ## Backend routes (current)

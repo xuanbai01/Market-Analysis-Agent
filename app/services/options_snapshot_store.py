@@ -1,5 +1,6 @@
 """
-Reads and writes for the IV snapshot table (ADR 0008).
+Reads and writes for the IV snapshot table and the whole-chain open
+interest totals (ADR 0008).
 
 Each write commits on its own: the run holds no connection while it
 fetches from Yahoo between writes (CLAUDE.md: a request holds no database
@@ -15,7 +16,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.observability import log_external_call
-from app.db.models.options import OptionIvSnapshot, OptionsTracked
+from app.db.models.options import OptionIvSnapshot, OptionOiTotal, OptionsTracked
 
 
 async def stored_symbols(session: AsyncSession, trade_date: date) -> set[str]:
@@ -75,4 +76,34 @@ async def touch_tracked(session: AsyncSession, symbol: str, at: datetime) -> Non
     stmt = stmt.on_conflict_do_update(index_elements=[OptionsTracked.symbol], set_={"last_viewed": stmt.excluded.last_viewed})
     await session.execute(stmt)
     await session.commit()
+
+
+async def stored_totals(session: AsyncSession, trade_date: date) -> set[str]:
+    """Symbols whose whole-chain totals for ``trade_date`` are stored."""
+    result = await session.execute(select(OptionOiTotal.symbol).where(OptionOiTotal.trade_date == trade_date))
+    return set(result.scalars().all())
+
+
+async def insert_totals(session: AsyncSession, row: dict[str, Any]) -> bool:
+    """Write one session's whole-chain totals; False when they're already
+    stored, in which case the stored row is left as it was."""
+    with log_external_call(
+        "db.option_oi_totals.insert", {"symbol": row["symbol"], "trade_date": row["trade_date"].isoformat()}
+    ) as call:
+        stmt = pg_insert(OptionOiTotal).values(**row).on_conflict_do_nothing(
+            index_elements=[OptionOiTotal.symbol, OptionOiTotal.trade_date]
+        )
+        result = await session.execute(stmt)
+        await session.commit()
+        written = bool(result.rowcount)
+        call.record_output({"written": written})
+    return written
+
+
+async def open_interest_history(session: AsyncSession, symbol: str) -> list[OptionOiTotal]:
+    """``symbol``'s stored whole-chain totals, oldest first."""
+    result = await session.execute(
+        select(OptionOiTotal).where(OptionOiTotal.symbol == symbol).order_by(OptionOiTotal.trade_date)
+    )
+    return list(result.scalars().all())
 

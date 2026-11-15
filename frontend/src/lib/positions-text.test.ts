@@ -49,6 +49,10 @@ describe("position words", () => {
       "Moves like **138 shares**: **+$225** for a 1% rise, which itself changes by **−8 shares** per 1%. A day passing: **+$20**. IV one point higher: **−$50**.",
     );
     expect(greeksSentence({ deltaShares: null, deltaDollars: null, gammaShares: null, thetaDay: null, vegaPoint: null })).toBeNull();
+    // Rounded first, then signed: no "−0".
+    expect(text(greeksSentence({ deltaShares: -0.4, deltaDollars: -0.6, gammaShares: null, thetaDay: null, vegaPoint: null }))).toMatch(/^Moves like \*\*0 shares\*\*/);
+    expect(text(greeksSentence({ deltaShares: -42.6, deltaDollars: -70, gammaShares: null, thetaDay: null, vegaPoint: null }))).toMatch(/^Moves like \*\*−43 shares\*\*/);
+    expect(text(greeksSentence({ deltaShares: 10, deltaDollars: 16, gammaShares: -0.5, thetaDay: null, vegaPoint: null }))).not.toMatch(/changes by/);
   });
 
   it("words a what-if", () => {

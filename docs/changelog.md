@@ -97,3 +97,12 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **One near-money SPY call:** a year of daily candles with IV and open interest on 249 of 250 days.
 
   So tastytrade holds the IV history our own snapshot only began collecting on 2026-11-13. It can be charted live, never stored (ADR 0009). 1746 backend tests.
+- **Options: a clarity pass (2026-11-15):** the owner found the page harder to read than OptionCharts. That page gives every chart a plain title, one sentence with the key numbers, a stats table, the price marked, and expiry labels with days and weekly/monthly. No new data.
+  - **Panels:** each takes a takeaway sentence written in code from the report's figures (`lib/options-text.ts`): the cone's one-sigma move in % and $, the term structure's slope named from the numbers, the skew's side, the largest open interest near the money. Each also gets a stats table (the expected move a week, a month and a quarter out with its range; IV30, IV90 and realized volatility) and a ⓘ explaining the chart.
+  - **Tiles:** each has a ⓘ, and the spot tile says what the price is: "Close · last close" or "Price · 15 min delayed".
+  - **Expiry picker:** reads "Dec 18, 2026 · 35 days · monthly". Monthly is the third Friday, or the Thursday before when that Friday is Good Friday or Juneteenth.
+  - **Open interest chart:** labels its price line and has strike ticks, not only its two ends.
+  - **AI read:** its sentences quote the figures, so each point's chips fold behind "Sources (n)" and no figure shows twice (`CitedPoints collapsed`; the lens keeps open chips).
+  - **No direction read into a figure:** "downside protection costs more" describes prices, and the cone's line speaks of what option prices put a chance on.
+  - **Not done, a change of the spot to Yahoo's "official close":** the page's $162.85 for NVDA's Nov 13 close differs from another vendor's $162.92, but Yahoo's daily history says $162.85 too. There is nothing in Yahoo's data to switch to, and the 0.04% gap doesn't reach the IVs, which use the parity forward. That PR (#120) was closed unmerged.
+  - **Size and tests:** options chunk 15.8 KB gz, main 90.23 KB; 796 frontend tests.

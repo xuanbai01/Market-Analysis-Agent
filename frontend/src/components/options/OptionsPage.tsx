@@ -82,7 +82,7 @@ function Tiles({ report }: { report: OptionsReport }) {
       <Tile
         label={report.at_close ? "Close" : "Price"}
         value={report.spot !== null ? money(report.spot) : "—"}
-        sub={report.at_close ? "official close" : "15 min delayed"}
+        sub={report.at_close ? "last close" : "15 min delayed"}
         info={GLOSSARY.spot}
       />
       <Tile label="IV30" value={report.iv30 !== null ? pct(report.iv30) : "—"} sub={ivSub(report)} info={GLOSSARY.iv30} />

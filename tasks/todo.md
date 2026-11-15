@@ -10,6 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
+- **Options page: clarity and positioning** (plan below), PR 2 on `feature/options-clarity`.
 - **tastytrade, PR A** merged (#116); its review follow-up is on `fix/tastytrade-probe-robustness`. **Owner:** create the OAuth app and set the Fly secrets (deployment.md §9); then the probe runs during a session. Plan below.
 - **Options analysis:** the plan's five PRs and the edge-case review are merged (#109–#115). Follow-ups below.
 
@@ -84,6 +85,19 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 - [x] **Edge-case review** *(branch `fix/options-edge-cases`)*: nine bugs fixed (quote time in a session's first 15 minutes, DST in time to expiry, the intraday event move, a failed schedule cached a day, a traded report still flagged, past moves on a live bar, the spot fallback after the smiles, strikes of 0, a noisy smile's probability).
 - [ ] **Options follow-ups (from the review, not bugs):** the snapshot's stored `next_earnings` is the calendar's date, not `earnings_calendar.next_report_date`; fetching one more expiry costs three Yahoo calls where one would do (a chains-only `fetch_chain`); the page computes the snapshot's raw-quote detail and throws it away; `_Built.parts` is an untyped dict. Known limits of the read: a bare number in any fact's name passes as a label, the direction guard can drop a correct point that uses a synonym, a headline's numbers carry no chip, and a report rebuilt with the same quote time keeps the earlier read. A report released during a session counts as traded from that session's open (the event move and the expiry flags go by the reaction date, not the release time).
 - [ ] **Owner:** compare IV30 for QQQ/SPY/NVDA with a broker after Monday's close (within about 2 points), and price two strategies in the builder against a broker's analysis tool.
+
+## Plan — a clearer options page, and positioning views (2026-11-15)
+
+**Goal:** the owner finds `/options/:ticker` harder to read than OptionCharts, and the gap is mostly presentation. Each OptionCharts chart has a plain title, one sentence with the key numbers, a stats table, the price marked, and expiry labels with days and weekly/monthly. It also has positioning views we lack (largest open interest, max pain, gamma and delta exposure with walls), all computable by our code from Yahoo's chains and our IVs. Rules: code computes every figure, there are no sentiment labels, the GEX/DEX assumption is stated on the page, and the AI read is unchanged for now. One PR each, in order, before tastytrade PR B:
+
+- [x] ~~**PR 1: the official close as the spot**~~ *(#120, closed)*: Yahoo's daily history close equals its price (NVDA Nov 13: both $162.85; another vendor shows $162.92), so there is nothing to switch to.
+- [ ] **PR 2: clarity pass (frontend)** *(branch `feature/options-clarity`)*: each panel's takeaway sentence, stats and ⓘ; the expiry picker's days and weekly/monthly (`expiryKind`); the price labelled on the open interest chart; the AI read showing each figure once (chips folded behind "Sources").
+- [ ] **PR 3: positioning (`options_positioning.py`):**
+  - per expiry: call/put totals, the top 10 open interest contracts, max pain, GEX and DEX by strike, net GEX/DEX, the call and put walls, the gamma flip (`options_math.gamma76`/`delta76`);
+  - max pain and net GEX for every expiry the report reads;
+  - charts and an across-expiries table.
+- [ ] **PR 4: open interest history** from our own snapshots (`open_interest_history`), charted once two sessions exist.
+- [ ] **PR 5 (with tastytrade PR B): every expiry, live.** Open interest by expiry, max pain and GEX across the whole chain from DXLink. Owner only, never stored.
 
 ## Plan — tastytrade, live and personal (2026-11-15, ADR 0009)
 

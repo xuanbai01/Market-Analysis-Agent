@@ -183,7 +183,7 @@ export function earningsSentence(earnings: EarningsBlock): Sentence | null {
 
 /** What each figure on the page means, for the ⓘ beside it. */
 export const GLOSSARY = {
-  spot: "The underlying's price the option quotes go with: the official close outside market hours, the 15-minute-delayed price during them.",
+  spot: "The underlying's price the option quotes go with: the last close Yahoo reports outside market hours, the 15-minute-delayed price during them. Feeds can differ by a few cents on a close.",
   iv30: "Implied volatility 30 days out: the yearly move option prices imply, interpolated between the expiries around 30 days. RV20 is what the stock actually moved over the last 20 sessions, on the same scale.",
   ivHistory: "Where today's IV30 sits among our own daily IV30 records: the percentile needs 63 sessions, which we started collecting on 2026-11-13.",
   expectedMove: "One standard deviation of the price at that expiry, from at-the-money IV: the price ends inside this range about two times in three.",

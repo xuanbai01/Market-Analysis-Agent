@@ -60,9 +60,10 @@ MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 MAX_QUEUE = 4
 MAX_EVENTS = 100_000
 MAX_CANDLES = 20_000
-# tastytrade's DXLink feed. The address comes with the quote token, and
-# nothing else is connected to.
-FEED_HOSTS = frozenset({"tasty-openapi-ws.dxfeed.com"})
+# tastytrade's DXLink feeds. The address comes with the quote token, and
+# nothing else is connected to. The docs name the first; the owner's
+# account was given the second (the probe, 2026-11-15).
+FEED_HOSTS = frozenset({"tasty-openapi-ws.dxfeed.com", "tasty-openapi-dxlink-md-ws.dxfeed.com"})
 _CHANNEL = 3
 _SETUP = {
     "type": "SETUP",

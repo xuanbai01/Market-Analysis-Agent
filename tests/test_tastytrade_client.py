@@ -547,7 +547,7 @@ async def test_a_paused_sign_in_says_so_in_the_logs(
 
 
 @pytest.mark.parametrize(
-    "scope", ["read accounts:5wt12345:owner", "read openid accounts:5wt12345:owner accounts:5wt99999:trade-only"]
+    "scope", ["read accounts:5wt12345:owner", "read openid accounts:5wt12345:owner accounts:5wt99999:read-only"]
 )
 async def test_account_scopes_beside_read_are_accepted(scope: str, fake: FakeTastytrade, clock: FakeClock) -> None:
     fake.token_responses = [httpx.Response(200, json={"access_token": ACCESS_TOKEN, "expires_in": 900, "scope": scope})]
@@ -563,6 +563,9 @@ async def test_account_scopes_beside_read_are_accepted(scope: str, fake: FakeTas
         ("read admin", "doesn't know"),
         ("read accounts:5wt12345", "doesn't know"),
         ("read accounts:../x:owner", "doesn't know"),
+        ("read accounts:5wt12345:trade", "doesn't know"),
+        ("read accounts:5wt12345:trade-only", "doesn't know"),
+        ("read accounts:5wt12345:owner:extra", "doesn't know"),
     ],
 )
 async def test_other_scopes_are_refused_and_named_without_the_account(

@@ -84,7 +84,7 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 - The backend does not make HTTP requests to user-supplied URLs. All external calls go to hardcoded, vetted endpoints (yfinance, Polygon, NewsAPI, Reddit, LLM providers).
 - If that ever changes (e.g. "fetch this user-provided RSS feed"), add an allowlist and block internal IP ranges.
 - **One address comes from a provider's answer:** DXLink's websocket URL arrives with tastytrade's quote token.
-  - `dxlink` connects only to `wss://tasty-openapi-ws.dxfeed.com` on port 443, with no credentials, query or fragment in the address.
+  - `dxlink` connects only to tastytrade's two feed hosts (`dxlink.FEED_HOSTS`) over `wss://` on port 443, with no credentials, query or fragment in the address. A new host is added only after a probe shows the account being given it.
   - It follows no redirect: websockets would follow a cross-host `wss://` one.
   - Messages are capped at 4 MiB with compression off, so there's no decompression bomb, and the events a fetch keeps are capped too.
 

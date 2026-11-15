@@ -177,7 +177,7 @@ The live tastytrade overlay (ADR 0009) reads the owner's own funded account, rea
 
 5. **Check it.** Run `fly ssh console -C "python -m app.services.tastytrade_probe"`. It prints metadata only: what the grant may do, the quote token's level, quote ages, candle depth, field names, and counts for the account. If it says the grant can trade, delete that grant and create one with `read` only.
 
-If the token ever leaks, delete the grant on my.tastytrade.com, create a new one, and import the new refresh token. A grant with the `trade` scope still signs in (the client asks for `read` alone each time), so the probe's grant check is how you find out: it prints "WARNING: the grant can trade".
+If the token ever leaks, delete the grant on my.tastytrade.com, create a new one, and import the new refresh token. A grant with the `trade` scope shows up in the probe's grant check ("WARNING: the grant can trade"). Whether the client then signs in depends on tastytrade narrowing the token to the `read` it asks for, which hasn't been seen: if the answer still says `trade`, the client refuses it.
 
 ## Ongoing operations
 

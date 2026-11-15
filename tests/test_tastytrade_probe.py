@@ -321,8 +321,11 @@ def test_an_expiry_given_as_a_timestamp_reads_as_its_date() -> None:
 
 
 def test_shown_scopes_mask_account_numbers() -> None:
-    shown = probe.shown_scopes(frozenset({"read", "accounts:5wt12345:owner", "accounts:5wt99999:trade-only", "accounts:x"}))
-    assert shown == ["accounts:***", "accounts:***:owner", "accounts:***:trade-only", "read"]
+    shown = probe.shown_scopes(
+        frozenset({"read", "accounts:5wt12345:owner", "accounts:5wt99999:trade-only", "accounts:x", "acct/5wt77777", "Accounts:5WT66666:Owner"})
+    )
+    assert shown == ["<other scope>", "<other scope>", "<other scope>", "accounts:***:owner", "accounts:***:trade-only", "read"]
+    assert not any(n in " ".join(shown).lower() for n in ("12345", "99999", "77777", "66666"))
 
 
 def test_a_quote_time_without_a_zone_is_not_aged() -> None:

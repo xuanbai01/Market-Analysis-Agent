@@ -77,7 +77,7 @@ tastytrade's Open API is free to account holders. We read its docs and its Open 
      - Anything else pauses them for a minute, or for the server's Retry-After.
    - The API address is one of tastytrade's two, so a typo can't send the refresh token anywhere else.
    - If the token leaks, delete the grant on my.tastytrade.com and create a new one.
-5. **DXLink connects only to tastytrade's feed host** (`tasty-openapi-ws.dxfeed.com`), over TLS on port 443.
+5. **DXLink connects only to tastytrade's feed hosts** (`tasty-openapi-ws.dxfeed.com`, named in the docs, and `tasty-openapi-dxlink-md-ws.dxfeed.com`, which the owner's account was given), over TLS on port 443.
    - The address arrives with the quote token. One with credentials, a query or a fragment in it is refused.
    - No redirect is followed.
    - Messages are capped at 4 MiB and not compressed, and a fetch keeps at most 100,000 events and 20,000 candles.

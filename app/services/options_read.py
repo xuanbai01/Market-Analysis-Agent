@@ -5,9 +5,10 @@ An AI-written headline and a few points on what one stock's option
 prices say, written from the report's claims and nothing else: code
 computes every figure and the direction of every comparison (ADR 0007),
 the model only writes. Each point cites the claims it quotes, and any
-point quoting a number none of its cited claims shows is dropped here,
-in code, before anyone sees it, so every number on the card has its
-chip; a headline with a number no claim shows spoils the read.
+point quoting a number none of its cited claims shows, or turning a
+cited comparison round, is dropped here, in code, before anyone sees it,
+so every number in a point has its chip; a headline with a number no
+claim shows spoils the read (its numbers are checked but carry no chip).
 
 Reads are cached per symbol and quote time, so one set of quotes is read
 once: overnight and at weekends one read stands until the next session,
@@ -23,7 +24,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.schemas.options import OptionsRead, OptionsReadDraft, OptionsReport
-from app.schemas.research import ClaimRef, ThesisPoint
+from app.schemas.research import Claim, ClaimRef, ThesisPoint
 from app.services import llm, research_thesis
 from app.services import market_calendar as mc
 from app.services.claim_display import format_claim_line
@@ -121,13 +122,31 @@ def prompt(report: OptionsReport) -> str:
     return "\n".join(lines)
 
 
+# Opposite direction words a comparison claim's description may hold. A
+# point citing the claim that uses only the other word has turned it round.
+_OPPOSITES = (("above", "below"), ("slopes up", "slopes down"), ("more puts", "more calls"))
+
+
+def _turned_round(text: str, claim: Claim) -> bool:
+    said, described = text.lower(), claim.description.lower()
+    for a, b in _OPPOSITES:
+        for this, other in ((a, b), (b, a)):
+            if this in described and other in said and this not in said:
+                return True
+    return False
+
+
 def _backed(points: list[ThesisPoint], report: OptionsReport) -> list[ThesisPoint]:
     """The points whose every figure is one of the claims they cite, so each
-    number on the card has its chip; a label any claim names ("IV30", "the
-    last 8 reports") is fine."""
+    number in a point has its chip (a label any claim names, "IV30" or "the
+    last 8 reports", is fine), and that don't turn a cited comparison round
+    (the opposite direction word alone)."""
     kept = []
     for point in points:
         cited = [report.claims[ref.index] for ref in point.claim_refs]
+        if any(_turned_round(point.text, claim) for claim in cited):
+            logger.warning("options read for %s: dropped a point that turns a comparison round", report.symbol)
+            continue
         stray = research_thesis.unbacked_numbers(point.text, cited, labels=report.claims)
         if stray:
             logger.warning("options read for %s: dropped a point quoting %s, which no fact it cites shows", report.symbol, stray)

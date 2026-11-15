@@ -246,7 +246,7 @@ def _written_numbers(claim: Claim) -> list[float]:
 
 
 # A unit after a number, or a dollar sign before it, makes it a figure.
-_UNIT_AFTER = re.compile(r"\s*(%|pts?\b|points?\b|bps\b|×|x\b)", re.IGNORECASE)
+_UNIT_AFTER = re.compile(r"\s*(%|percent\b|per cent\b|pts?\b|points?\b|bps\b|×|x\b)", re.IGNORECASE)
 
 
 def _quotes_with_units(text: str) -> list[tuple[float, int, bool]]:

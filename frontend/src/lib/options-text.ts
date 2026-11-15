@@ -267,7 +267,7 @@ export function acrossSentence(expiries: ExpirySummary[]): Sentence | null {
 
 /** Contract counts in short form: "10.24M", "950K", "820". */
 export function compactCount(v: number): string {
-  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (v >= 999_500) return `${(v / 1e6).toFixed(2)}M`; // 999,600 is "1.00M", not "1000K"
   if (v >= 1e4) return `${(v / 1e3).toFixed(0)}K`;
   return count(v);
 }

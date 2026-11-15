@@ -127,6 +127,8 @@ describe("a report in the demo", () => {
     expect(screen.queryByRole("button", { name: /regenerate/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /watchlist/i })).toBeNull();
     expect(screen.queryByTestId("analyst-view-missing")).toBeNull();
+    // The options page calls a provider: not in the demo.
+    expect(screen.queryByRole("link", { name: /^options$/i })).toBeNull();
   });
 
   it("names peers without linking to pages the demo can't open", async () => {

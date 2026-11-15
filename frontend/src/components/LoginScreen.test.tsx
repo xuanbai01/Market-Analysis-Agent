@@ -22,5 +22,8 @@ describe("LoginScreen", () => {
     const password = container.querySelector('input[type="password"]');
     expect(password).toHaveAttribute("autocomplete", "current-password");
     expect(password).toHaveAttribute("name", "password");
+    // Named fields would ride in the URL on a stray native submit (one that
+    // skips onSubmit); a POST keeps them out of history and logs.
+    expect(container.querySelector("form")).toHaveAttribute("method", "post");
   });
 });

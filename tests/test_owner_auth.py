@@ -9,23 +9,27 @@ the right key included.
 """
 from __future__ import annotations
 
+import ast
+import asyncio
 import logging
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
 from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from app.api.v1 import dependencies as deps
 from app.api.v1.dependencies import OWNER_HEADER, require_owner
 from app.core import settings as settings_module
+from app.core.settings import Settings
 from app.main import app
 from app.services import tastytrade_client
 
 _SHARED = "the-shared-secret"
-_OWNER = "owner-key-7f3a9c41d2"  # distinctive: checked absent from every log line
+_OWNER = "owner-key-7f3a9c41d2-5b8e60c4aa19f3d7"  # distinctive: checked absent from every log line
 _STATUS = "/v1/owner/status"
 
 
@@ -114,12 +118,74 @@ async def test_the_right_key_uses_up_no_tries(client: AsyncClient, monkeypatch: 
         assert (await client.get(_STATUS, headers=_headers(owner="guess", ip="203.0.113.9"))).status_code == 403
 
 
-async def test_no_owner_key_reaches_a_log_line(client: AsyncClient, caplog: pytest.LogCaptureFixture) -> None:
+async def test_a_burst_of_guesses_gets_no_more_than_the_tries(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each request holds a try while its key is compared, so concurrent
+    guesses can't all slip past one check."""
+    monkeypatch.setattr(settings_module.settings, "OWNER_KEY_FAILURES_PER_HOUR", 3)
+    codes = await asyncio.gather(
+        *(client.get(_STATUS, headers=_headers(owner=f"guess-{i}", ip="203.0.113.5")) for i in range(40))
+    )
+    assert sorted(r.status_code for r in codes) == [403] * 3 + [429] * 37
+
+
+async def test_an_ipv6_caller_is_one_caller_across_its_64(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings_module.settings, "OWNER_KEY_FAILURES_PER_HOUR", 2)
+    for host in ("2001:db8:0:7::1", "2001:db8:0:7::2"):
+        assert (await client.get(_STATUS, headers=_headers(owner="guess", ip=host))).status_code == 403
+    assert (await client.get(_STATUS, headers=_headers(owner="guess", ip="2001:db8:0:7::3"))).status_code == 429
+    assert (await client.get(_STATUS, headers=_headers(ip="2001:db8:0:8::1"))).status_code == 200
+
+
+async def test_refusals_and_lockouts_are_logged_by_an_anonymous_caller_id(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(settings_module.settings, "OWNER_KEY_FAILURES_PER_HOUR", 2)
     caplog.set_level(logging.DEBUG)
-    await client.get(_STATUS, headers=_headers(owner="wrong-key-55e1b0"))
+    for _ in range(3):
+        await client.get(_STATUS, headers=_headers(owner="wrong-key-55e1b0", ip="203.0.113.77"))
     await client.get(_STATUS, headers=_headers())
-    assert "refused" in caplog.text  # the failure is logged...
-    assert _OWNER not in caplog.text and "wrong-key-55e1b0" not in caplog.text  # ...without the key
+    refusals = [r.getMessage() for r in caplog.records if "refused" in r.getMessage()]
+    assert len(refusals) == 2 and len({m.split("caller ")[1] for m in refusals}) == 1  # one caller, named the same way
+    assert any("locked out" in r.getMessage() for r in caplog.records)
+    for secret in (_OWNER, "wrong-key-55e1b0", "203.0.113.77"):
+        assert secret not in caplog.text  # neither key nor address
+
+
+def test_the_owner_routes_are_left_out_of_the_public_schema() -> None:
+    assert not any(path.startswith("/v1/owner") for path in app.openapi()["paths"])
+
+
+def test_only_the_owner_router_reads_tastytrade() -> None:
+    """tastytrade's data and the owner's trades are served from behind the
+    owner key only (ADR 0009)."""
+    routers = Path(__file__).resolve().parents[1] / "app" / "api" / "v1" / "routers"
+    readers = set()
+    for source in routers.glob("*.py"):
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            names = (
+                [a.name for a in node.names] if isinstance(node, ast.Import | ast.ImportFrom) else []
+            ) + ([node.module] if isinstance(node, ast.ImportFrom) and node.module else [])
+            if any(n and ("tastytrade" in n or "dxlink" in n or "owner_" in n) for n in names):
+                readers.add(source.name)
+    assert readers <= {"owner.py"}
+
+
+@pytest.mark.parametrize(
+    ("overrides", "problem"),
+    [
+        ({"OWNER_KEY": "too-short"}, "32"),
+        ({"OWNER_KEY": "k" * 40, "BACKEND_SHARED_SECRET": "k" * 40}, "shared secret"),
+        ({"OWNER_KEY_FAILURES_PER_HOUR": 0}, "OWNER_KEY_FAILURES_PER_HOUR"),
+        ({"OWNER_KEY_FAILURES_PER_HOUR": 1000}, "OWNER_KEY_FAILURES_PER_HOUR"),
+    ],
+)
+def test_a_weak_owner_setup_refuses_to_start(overrides: dict[str, object], problem: str) -> None:
+    with pytest.raises(ValidationError, match=problem):
+        Settings(_env_file=None, **overrides)  # type: ignore[arg-type]
+    Settings(_env_file=None, OWNER_KEY="k" * 40)  # a long, separate key is fine
+    Settings(_env_file=None)  # and so is none
 
 
 def _depends_on(route: APIRoute, dependency: object) -> bool:
@@ -137,8 +203,10 @@ _OWNER_PATHS = {"/v1/owner/status"}
 
 
 def test_every_owner_route_takes_the_owner_key_and_is_exactly_these() -> None:
-    routes = [r for r in app.routes if isinstance(r, APIRoute) and r.path.startswith("/v1/owner")]
+    routes = [r for r in app.routes if getattr(r, "path", "").startswith("/v1/owner")]
+    assert all(isinstance(r, APIRoute) for r in routes)  # no websocket or mount slips past the pin
     assert {r.path for r in routes} == _OWNER_PATHS
     for route in routes:
+        assert isinstance(route, APIRoute)
         assert _depends_on(route, require_owner), route.path
         assert route.methods == {"GET"}, route.path

@@ -224,9 +224,50 @@ async def test_a_drained_bucket_survives_pruning() -> None:
     assert (await bucket.take("drained"))[0] is False
 
 
+async def test_a_token_given_back_can_be_taken_again() -> None:
+    """The owner-key lockout takes a try before comparing a key, and gives
+    it back when the key is right."""
+    clock = _FakeClock()
+    bucket = TokenBucket(capacity=2, window_seconds=3600, time_source=clock)
+    await bucket.take("ip-A")
+    await bucket.take("ip-A")
+    await bucket.give_back("ip-A")
+    assert (await bucket.take("ip-A"))[0] is True
+    assert (await bucket.take("ip-A"))[0] is False
+    await bucket.give_back("ip-A")
+    await bucket.give_back("ip-A")
+    await bucket.give_back("ip-A")  # never past capacity
+    assert bucket._buckets == {}  # full again: nothing stored
+    assert [(await bucket.take("ip-A"))[0] for _ in range(3)] == [True, True, False]
+
+
+async def test_pruning_runs_at_most_every_so_often() -> None:
+    """With more than PRUNE_AT keys none of which has refilled, pruning on
+    every take would scan them all each time (security review, PR 1)."""
+    clock = _FakeClock()
+    bucket = TokenBucket(capacity=1, window_seconds=3600, time_source=clock)
+    for i in range(bucket.PRUNE_AT + 10):
+        await bucket.take(f"k{i}")
+    scans = 0
+    real = bucket._prune
+
+    def counting(now: float) -> None:
+        nonlocal scans
+        scans += 1
+        real(now)
+
+    bucket._prune = counting  # type: ignore[method-assign]
+    for i in range(50):  # the fill just scanned once, at 1,024 keys
+        await bucket.take(f"new{i}")
+    assert scans == 0
+    clock.advance(bucket.PRUNE_EVERY_SECONDS)
+    await bucket.take("later")
+    await bucket.take("later still")
+    assert scans == 1
+
+
 async def test_peek_says_whether_a_take_would_pass_without_taking() -> None:
-    """The owner-key lockout checks before comparing a key, and only a
-    wrong key takes a token."""
+    """The owner-key lockout uses it to log the moment an address runs out."""
     clock = _FakeClock()
     bucket = TokenBucket(capacity=2, window_seconds=3600, time_source=clock)
     assert await bucket.peek("ip-A") == (True, 0.0)

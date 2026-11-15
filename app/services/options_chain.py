@@ -140,7 +140,8 @@ def _fetch_yfinance_chain(
     front = ticker.option_chain()
     if front.calls is None:
         # No listed options, or a symbol Yahoo doesn't know: prices tell them apart.
-        if ticker.history(period="5d", auto_adjust=True)["Close"].dropna().empty:
+        prices = ticker.history(period="5d", auto_adjust=True)
+        if "Close" not in prices or prices["Close"].dropna().empty:
             raise SymbolNotFound(symbol)
         return None
     underlying = front.underlying or {}

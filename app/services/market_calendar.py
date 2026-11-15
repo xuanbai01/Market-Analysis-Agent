@@ -1,0 +1,161 @@
+"""
+NYSE sessions, for option IVs measured to the minute (ADR 0008).
+
+An option's time to expiry runs from the moment its quotes were made to
+16:00 ET on the expiry date. Outside market hours that moment is the last
+close, not the clock: measured from a Saturday, a 7-day option would look
+6 days long and its IV about 8% too high. Sessions (not calendar days)
+count the days that carry variance, for the earnings event move.
+
+Holidays follow NYSE's rules (Rule 7.2): New Year's Day, Martin Luther
+King Jr. Day, Washington's Birthday, Good Friday, Memorial Day,
+Juneteenth, Independence Day, Labor Day, Thanksgiving and Christmas. A
+holiday on a Saturday is observed the Friday before, on a Sunday the
+Monday after, except New Year's Day on a Saturday, which isn't observed.
+Early closes (1 pm) are treated as full sessions; three hours on an
+expiry weeks away moves an IV by a rounding error.
+
+No dependency: the rules are a few lines, and a calendar package would go
+into the Dockerfile pin list for this alone.
+"""
+from __future__ import annotations
+
+from datetime import date, datetime, time, timedelta
+from functools import lru_cache
+from zoneinfo import ZoneInfo
+
+# Production runs with TZ=UTC; the market's timezone is named explicitly.
+ET = ZoneInfo("America/New_York")
+OPEN = time(9, 30)
+CLOSE = time(16, 0)
+# Yahoo's option quotes trail the market by about 15 minutes.
+QUOTE_DELAY = timedelta(minutes=15)
+# After the close, delayed quotes are still arriving until about 16:15.
+SETTLE = timedelta(minutes=20)
+_YEAR = 365 * 24 * 3600
+
+_MONDAY, _THURSDAY, _FRIDAY, _SATURDAY, _SUNDAY = 0, 3, 4, 5, 6
+
+
+def _easter(year: int) -> date:
+    """Gregorian Easter Sunday (the anonymous algorithm)."""
+    a, b, c = year % 19, year // 100, year % 100
+    d, e = b // 4, b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    m = (32 + 2 * e + 2 * i - h - k) % 7
+    n = (a + 11 * h + 22 * m) // 451
+    month = (h + m - 7 * n + 114) // 31
+    day = (h + m - 7 * n + 114) % 31 + 1
+    return date(year, month, day)
+
+
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    first = date(year, month, 1)
+    return first + timedelta(days=(weekday - first.weekday()) % 7 + 7 * (n - 1))
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    last = date(year, month + 1, 1) - timedelta(days=1)
+    return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+
+def _observed(day: date) -> date:
+    if day.weekday() == _SATURDAY:
+        return day - timedelta(days=1)
+    if day.weekday() == _SUNDAY:
+        return day + timedelta(days=1)
+    return day
+
+
+@lru_cache(maxsize=16)
+def holidays(year: int) -> frozenset[date]:
+    new_year = date(year, 1, 1)
+    days = {
+        _nth_weekday(year, 1, _MONDAY, 3),  # Martin Luther King Jr. Day
+        _nth_weekday(year, 2, _MONDAY, 3),  # Washington's Birthday
+        _easter(year) - timedelta(days=2),  # Good Friday
+        _last_weekday(year, 5, _MONDAY),  # Memorial Day
+        _observed(date(year, 6, 19)),  # Juneteenth
+        _observed(date(year, 7, 4)),  # Independence Day
+        _nth_weekday(year, 9, _MONDAY, 1),  # Labor Day
+        _nth_weekday(year, 11, _THURSDAY, 4),  # Thanksgiving
+        _observed(date(year, 12, 25)),  # Christmas
+    }
+    if new_year.weekday() != _SATURDAY:
+        days.add(_observed(new_year))
+    return frozenset(days)
+
+
+def is_session(day: date) -> bool:
+    return day.weekday() < _SATURDAY and day not in holidays(day.year)
+
+
+def previous_session(day: date) -> date:
+    """The last session strictly before ``day``."""
+    day -= timedelta(days=1)
+    while not is_session(day):
+        day -= timedelta(days=1)
+    return day
+
+
+def next_session(day: date) -> date:
+    """The first session strictly after ``day``."""
+    day += timedelta(days=1)
+    while not is_session(day):
+        day += timedelta(days=1)
+    return day
+
+
+def sessions_between(start: date, end: date) -> int:
+    """Sessions after ``start``, up to and including ``end``."""
+    count, day = 0, start
+    while day < end:
+        day += timedelta(days=1)
+        count += is_session(day)
+    return count
+
+
+def session_open(day: date) -> datetime:
+    return datetime.combine(day, OPEN, tzinfo=ET)
+
+
+def session_close(day: date) -> datetime:
+    return datetime.combine(day, CLOSE, tzinfo=ET)
+
+
+def market_open(now: datetime) -> bool:
+    """Whether quotes are still moving: a session between the open and a
+    few minutes after the close."""
+    now_et = now.astimezone(ET)
+    day = now_et.date()
+    return is_session(day) and session_open(day) <= now_et < session_close(day) + SETTLE
+
+
+def latest_completed_session(now: datetime) -> date:
+    now_et = now.astimezone(ET)
+    day = now_et.date()
+    if is_session(day) and now_et >= session_close(day) + SETTLE:
+        return day
+    return previous_session(day)
+
+
+def quote_time(now: datetime) -> datetime:
+    """When the quotes Yahoo serves at ``now`` were made: 15 minutes ago
+    during a session, else the last close."""
+    now_et = now.astimezone(ET)
+    day = now_et.date()
+    if is_session(day) and now_et >= session_open(day):
+        return min(now_et - QUOTE_DELAY, session_close(day))
+    return session_close(previous_session(day))
+
+
+def years_to_expiry(quoted_at: datetime, expiry: date) -> float:
+    """Years (of 365 days) from the quote time to 16:00 ET on ``expiry``."""
+    return (session_close(expiry) - quoted_at).total_seconds() / _YEAR
+
+
+def et_date(epoch_seconds: int | float) -> date:
+    return datetime.fromtimestamp(epoch_seconds, tz=ET).date()

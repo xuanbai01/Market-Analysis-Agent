@@ -3,7 +3,7 @@ the minute from the time the quotes were made, so the calendar has to be
 right on holidays and weekends."""
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -66,7 +66,7 @@ def test_quote_time(now: datetime, expected: datetime) -> None:
 
 
 def test_quote_time_reads_any_timezone() -> None:
-    utc_saturday = datetime(2026, 11, 14, 17, tzinfo=mc.UTC)
+    utc_saturday = datetime(2026, 11, 14, 17, tzinfo=UTC)
     assert mc.quote_time(utc_saturday) == et(2026, 11, 13, 16)
 
 
@@ -108,4 +108,4 @@ def test_years_to_expiry_runs_from_the_quote_time_to_the_expiry_close() -> None:
 
 def test_et_date_of_an_epoch_timestamp() -> None:
     # 2026-11-14 01:00 UTC is still 13 November in New York.
-    assert mc.et_date(int(datetime(2026, 11, 14, 1, tzinfo=mc.UTC).timestamp())) == date(2026, 11, 13)
+    assert mc.et_date(int(datetime(2026, 11, 14, 1, tzinfo=UTC).timestamp())) == date(2026, 11, 13)

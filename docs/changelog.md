@@ -168,4 +168,8 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **The answer:** grouped by underlying, stock legs included, with our dashed ticker for links (BRK/B is BRK-B). It's cached 15 s, so a refresh is free. When tastytrade fails, the last copy is served marked stale, or a 503 with the reason when there's none. `Cache-Control: no-store`.
   - **Never stored, never in a prompt:** accounts are numbered, never named, and a test feeds distinctive account numbers through every path and fails if one reaches the response or a log line. An account number that isn't letters and digits is dropped before it could reach a path.
   - **The probe** now answers whether quote IVs read as fractions (yes or no, with counts), which the page relies on.
+  - **From the security review** (one medium each from two reviewers, both fixed):
+    - the client logged a query's single value as itself, so one held stock or option reached Fly's logs; it now logs counts only;
+    - NaN or infinity from tastytrade would have made the route a 500 and stayed cached; a number must now be finite.
+  - **And the review's lows:** a multiplier must be a positive whole count; a position must say long or short; a stock or underlying must be a ticker; an answer of the wrong shape reads as nothing; an account tastytrade can't find is skipped; at most 10 accounts and 500 positions (`truncated`); a 60 s deadline; no empty account list remembered; the stale copy dropped after 15 minutes; `no-store` on every owner response, errors included; the import guard follows imports transitively.
 

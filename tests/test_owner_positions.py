@@ -241,7 +241,7 @@ async def test_an_account_tastytrade_cannot_find_is_skipped(account: _Tastytrade
 
     monkeypatch.setattr(op.tt, "get", gone)
     result = await op.get_positions()
-    assert result.accounts == 2 and [leg.account for leg in result.groups[0].legs] == [2]
+    assert result.accounts == 1 and [leg.account for leg in result.groups[0].legs] == [2]  # one read; labels keep their place
 
 
 async def test_a_build_that_runs_too_long_is_a_failure(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -578,3 +578,44 @@ async def test_the_route_is_a_503_with_the_reason_when_tastytrade_fails(account:
     assert resp.status_code == 503
     assert "didn't answer" in resp.json()["title"]  # problem+json puts a string detail in the title
     assert resp.headers["Cache-Control"] == "no-store"
+
+
+async def test_a_quote_endpoint_that_is_gone_fails_the_read(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 404 on the quotes call is about the endpoint, not a symbol: the read
+    fails (stale copy, or a 503) rather than showing positions with no quotes
+    anywhere (#127's AI review)."""
+    account.positions[ACCOUNT] = [_position("NVDA", "Equity", "10", "Long")]
+    real = account.get
+
+    async def gone(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        if path == "/market-data/by-type":
+            raise tt.TastytradeNotFound("/market-data/by-type")
+        return await real(path, params, op=op)
+
+    monkeypatch.setattr(op.tt, "get", gone)
+    with pytest.raises(op.PositionsUnavailable):
+        await op.get_positions()
+
+
+async def test_every_symbol_refused_fails_the_read(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    account.positions[ACCOUNT] = [_position("NVDA", "Equity", "10", "Long"), _position("AAPL", "Equity", "10", "Long")]
+    real = account.get
+
+    async def refuses(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        if path == "/market-data/by-type":
+            raise tt.TastytradeUnavailable("tastytrade answered 400", status=400)
+        return await real(path, params, op=op)
+
+    monkeypatch.setattr(op.tt, "get", refuses)
+    with pytest.raises(op.PositionsUnavailable, match="refused every quote"):
+        await op.get_positions()
+
+
+async def test_a_quote_time_without_a_zone_is_utc(account: _Tastytrade) -> None:
+    """Sent without an offset, the browser would read it as local time."""
+    account.positions[ACCOUNT] = [_position("NVDA", "Equity", "10", "Long")]
+    account.quotes = {"NVDA": {**_quote("NVDA", 162.9), "updated-at": "2026-11-16T20:59:58"}}
+    (group,) = (await op.get_positions()).groups
+    assert group.quote is not None and group.quote.updated_at is not None
+    assert group.quote.updated_at.utcoffset() is not None and group.quote.updated_at.utcoffset().total_seconds() == 0
+

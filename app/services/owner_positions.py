@@ -223,6 +223,8 @@ def _live_quote(item: dict[str, Any]) -> LiveQuote:
         updated = datetime.fromisoformat(stamp) if isinstance(stamp, str) else None
     except ValueError:
         updated = None
+    if updated is not None and updated.tzinfo is None:
+        updated = updated.replace(tzinfo=UTC)  # unzoned, the browser would read it as local time
     mark = _number(_field(item, "mark"))
     return LiveQuote(
         bid=_number(_field(item, "bid")),
@@ -243,10 +245,8 @@ _NOT_ABOUT_THE_SYMBOLS = frozenset({401, 429})
 
 def _refused(exc: Exception) -> bool:
     """tastytrade refused the request itself (a 4xx about what was asked):
-    asking for less may work. Anything else (a 401, a 429, a 5xx, no answer)
-    fails the read."""
-    if isinstance(exc, tt.TastytradeNotFound):
-        return True
+    asking for less may work. Anything else (a 404 on the endpoint, a 401, a
+    429, a 5xx, no answer) fails the read."""
     status = exc.status if isinstance(exc, tt.TastytradeUnavailable) else None
     return status is not None and 400 <= status < 500 and status not in _NOT_ABOUT_THE_SYMBOLS
 
@@ -294,6 +294,8 @@ async def _quotes(legs: list[_Leg]) -> dict[str, LiveQuote]:
             refused += len(batch) - len(alone)
     if refused:
         logger.warning("owner positions: %d quotes refused", refused)
+        if not quotes:  # nothing quoted at all: the request, not the symbols
+            raise tt.TastytradeUnavailable("tastytrade refused every quote")
     return quotes
 
 
@@ -324,6 +326,7 @@ async def _build() -> OwnerPositions:
     numbers = numbers[:MAX_ACCOUNTS]
     legs: list[_Leg] = []
     unanalysed: list[UnanalysedPosition] = []
+    read = 0
     for index, number in enumerate(numbers, start=1):
         if len(legs) + len(unanalysed) >= MAX_POSITIONS:
             truncated = True
@@ -332,23 +335,22 @@ async def _build() -> OwnerPositions:
             rows = _items(await tt.get(f"/accounts/{number}/positions", op="positions"), strict=True)
         except tt.TastytradeNotFound:
             continue  # that account has gone; the rest still count
+        read += 1
         for item in rows:
             if len(legs) + len(unanalysed) >= MAX_POSITIONS:
                 truncated = True
                 break
-            read = _read(item, index)
-            if isinstance(read, _Leg):
-                legs.append(read)
-            elif read is not None:
-                unanalysed.append(read)
+            row = _read(item, index)
+            if isinstance(row, _Leg):
+                legs.append(row)
+            elif row is not None:
+                unanalysed.append(row)
     groups = _groups(legs, await _quotes(legs))
     logger.info(
         "owner positions: %d accounts, %d legs, %d underlyings, %d not analysed%s",
-        len(numbers), len(legs), len(groups), len(unanalysed), ", cut off" if truncated else "",
+        read, len(legs), len(groups), len(unanalysed), ", cut off" if truncated else "",
     )
-    return OwnerPositions(
-        as_of=_now(), accounts=len(numbers), groups=groups, unanalysed=unanalysed, truncated=truncated
-    )
+    return OwnerPositions(as_of=_now(), accounts=read, groups=groups, unanalysed=unanalysed, truncated=truncated)
 
 
 async def get_positions() -> OwnerPositions:

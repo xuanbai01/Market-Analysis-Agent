@@ -204,6 +204,8 @@ Real auth and per-user cost caps land only when there are real users.
 
 **Options analysis (2026-11-15; [ADR 0008](docs/adr/0008-options-from-free-snapshots.md)).** The owner trades directional options and spreads. Free yfinance chains, our own IVs, a separate `/options/:ticker` page, and a daily IV snapshot (started first, because history can't be fetched later) for IV percentile and rank. The snapshot (#109), the report API (#110), the `/options/:ticker` page (#111), a strategy builder (#113) and a cited AI read are in: the plan's five PRs. Plan in [tasks/todo.md](tasks/todo.md).
 
+**tastytrade (2026-11-15; [ADR 0009](docs/adr/0009-tastytrade-live-personal.md)).** The owner's funded account as a live, read-only overlay: real-time quotes, market history to view, and their own trades. Never stored, never in a prompt or the demo, per tastytrade's Open API terms. PR A (client, DXLink, probe) first; the probe decides PRs B–D.
+
 **Next:** README screenshots (owner). A compare narrative (4.6.B) waits until Compare gets used.
 
 **Indefinitely deferred.** `search_history` (pgvector RAG), Reddit sentiment, real auth + per-user cost caps + Redis-backed rate limiting.
@@ -230,6 +232,7 @@ Real auth and per-user cost caps land only when there are real users.
 - [ADR 0006](docs/adr/0006-pluggable-llm-provider.md) — Switchable LLM provider (Anthropic / DeepSeek)
 - [ADR 0007](docs/adr/0007-analytical-narratives.md) — Card prose that interprets; derived claims; analyst view; lenses
 - [ADR 0008](docs/adr/0008-options-from-free-snapshots.md) — Options analysis from free chain snapshots, with our own daily IV history
+- [ADR 0009](docs/adr/0009-tastytrade-live-personal.md) — tastytrade as a live, personal, read-only data source
 
 ## Resume framing
 

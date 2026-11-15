@@ -154,6 +154,31 @@ gh secret set BACKEND_SHARED_SECRET   # prompts; paste the same value as the Fly
 
 Typing it at the prompt avoids PowerShell's pipe, which would add a byte-order mark. The tickers it always records are `OPTIONS_SNAPSHOT_SYMBOLS` in `fly.toml`. Check it with `gh workflow run iv-snapshot.yml` and `gh run watch`: the step summary lists what was written. A weekend run reports `no_new_session`, which is a success.
 
+### 9. The owner's tastytrade account (optional, 5 min)
+
+The live tastytrade overlay (ADR 0009) reads the owner's own funded account, read only. Without these secrets it stays off.
+
+1. **Create the app.** On my.tastytrade.com, open Manage → My Profile → API → OAuth Applications and create a personal application. If the form offers scopes, tick `read` only; enable 2FA if it asks.
+2. **Create the grant.** Click Manage next to the app, then Create Grant, and keep the client ID, client secret and refresh token private. The secret is shown once.
+3. **Write a temporary file.** Open it with `notepad $env:TEMP\tt.env`, put three lines in it (Notepad saves UTF-8 without a byte-order mark), and save:
+
+   ```
+   TASTYTRADE_CLIENT_ID=...
+   TASTYTRADE_CLIENT_SECRET=...
+   TASTYTRADE_REFRESH_TOKEN=...
+   ```
+
+4. **Import it into Fly and delete it.** `cmd`'s redirect adds no byte-order mark, where a PowerShell pipe would. The import restarts the machines.
+
+   ```powershell
+   cmd /c "fly secrets import < %TEMP%\tt.env"
+   Remove-Item $env:TEMP\tt.env
+   ```
+
+5. **Check it.** Run `fly ssh console -C "python -m app.services.tastytrade_probe"`. It prints metadata only: what the grant may do, the quote token's level, quote ages, candle depth, field names, and counts for the account. If it says the grant can trade, delete that grant and create one with `read` only.
+
+If the token ever leaks, delete the grant on my.tastytrade.com, create a new one, and import the new refresh token. The client refuses a token that can trade, so a grant with the `trade` scope shows up in the probe as a refused sign-in.
+
 ## Ongoing operations
 
 ### Rolling out a change

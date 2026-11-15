@@ -28,6 +28,9 @@ dependencies = [
   # silently returns empty DataFrames without it.
   "lxml==5.3.0",
   "rapidfuzz==3.14.6",
+  # DXLink, tastytrade's market-data websocket (app/services/dxlink.py, ADR 0009).
+  # uvicorn[standard] already brought it in; pinned here so it stays.
+  "websockets==16.0",
 ]
 
 [tool.uv]

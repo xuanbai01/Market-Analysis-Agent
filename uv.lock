@@ -785,6 +785,7 @@ dependencies = [
     { name = "rapidfuzz" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
     { name = "yfinance" },
 ]
 
@@ -812,6 +813,7 @@ requires-dist = [
     { name = "rapidfuzz", specifier = "==3.14.6" },
     { name = "sqlalchemy", specifier = "==2.0.35" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.30.6" },
+    { name = "websockets", specifier = "==16.0" },
     { name = "yfinance", specifier = "==1.3.0" },
 ]
 

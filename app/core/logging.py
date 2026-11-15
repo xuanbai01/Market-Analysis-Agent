@@ -38,14 +38,18 @@ _EXTERNAL_CALL_FIELDS = (
 )
 # A key passed in a query string: FRED's ``api_key``, NewsAPI's ``apiKey``.
 _KEY_IN_QUERY = re.compile(r"\b(api_?key|access_token|token)=[^&\s'\"]+", re.IGNORECASE)
+# A bearer token quoted in an error: h11 puts an illegal header's value,
+# "Bearer <token>", in its message (tastytrade_client, ADR 0009).
+_BEARER = re.compile(r"\b(Bearer)\s+[^\s'\"]+", re.IGNORECASE)
 
 
 class _AppFormatter(logging.Formatter):
     """The usual line, then an external call's fields as ``name=value``
-    (a traceback, if any, follows), with keys in URLs masked."""
+    (a traceback, if any, follows), with keys in URLs and bearer tokens masked."""
 
     def format(self, record: logging.LogRecord) -> str:
-        return _KEY_IN_QUERY.sub(r"\1=[REDACTED]", super().format(record))
+        text = _KEY_IN_QUERY.sub(r"\1=[REDACTED]", super().format(record))
+        return _BEARER.sub(r"\1 [REDACTED]", text)
 
     def formatMessage(self, record: logging.LogRecord) -> str:
         fields = [

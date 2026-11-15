@@ -81,11 +81,14 @@ def test_constant_maturity_vol_is_flat_under_flat_vol() -> None:
 
 
 def test_constant_maturity_vol_takes_one_side_only_within_reach_and_says_so() -> None:
-    near = om.constant_maturity_vol([(40 / 365, 0.22)], 30 / 365, max_extrapolation=45 / 365)
+    # ``max_extrapolation`` is the distance from the target: for IV30, a lone
+    # expiry stands in only if it is within 15 days of 30.
+    reach = 15 / 365
+    near = om.constant_maturity_vol([(40 / 365, 0.22)], 30 / 365, max_extrapolation=reach)
     assert near == (0.22, True)
-    far = om.constant_maturity_vol([(70 / 365, 0.22)], 30 / 365, max_extrapolation=45 / 365)
+    far = om.constant_maturity_vol([(70 / 365, 0.22)], 30 / 365, max_extrapolation=reach)
     assert far == (None, False)
-    assert om.constant_maturity_vol([], 30 / 365, max_extrapolation=45 / 365) == (None, False)
+    assert om.constant_maturity_vol([], 30 / 365, max_extrapolation=reach) == (None, False)
 
 
 def test_realized_vol_is_annualized_zero_mean_close_to_close() -> None:

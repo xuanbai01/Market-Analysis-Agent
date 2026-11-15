@@ -240,7 +240,11 @@ def resolve_points(
     ids: Mapping[str, ClaimRef],
     limit: int,
     section_claims: Mapping[str, Sequence[Claim]] | None,
+    max_refs: int | None = MAX_REFS_PER_POINT,
 ) -> list[ThesisPoint]:
+    """Draft points onto the report, each keeping the claims it cites
+    (only those it quotes, when it quotes numbers), at most ``max_refs``
+    of them; None keeps them all."""
     out: list[ThesisPoint] = []
     for point in points:
         text = point.text.strip()
@@ -259,7 +263,7 @@ def resolve_points(
             refs.append(ref)
         if text and refs:
             out.append(
-                ThesisPoint(text=text, claim_refs=refs[:MAX_REFS_PER_POINT], title=_clean_title(point.title))
+                ThesisPoint(text=text, claim_refs=refs[:max_refs], title=_clean_title(point.title))
             )
         if len(out) == limit:
             break

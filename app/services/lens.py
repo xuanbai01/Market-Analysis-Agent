@@ -288,8 +288,8 @@ the group is, the trend, or how concentrated the total is.
 Cover how the typical company moved, who sits at each end and how far \
 apart they are, whether the total is concentrated, how the metric grew \
 against revenue, and what the numbers imply for cash flow (the metric \
-against operating cash flow). Each point lists in ``claim_ids`` the 1–3 ids of \
-the facts it quotes, exactly as written in the brackets.
+against operating cash flow). Each point lists in ``claim_ids`` the id of \
+every fact it quotes, exactly as written in the brackets.
 
 Rules (non-negotiable):
 1. Every number in your text must be a value shown in the fact lines, in \
@@ -330,7 +330,11 @@ async def write_narrative(
         return None
     if not isinstance(draft, LensDraft) or not draft.headline.strip():
         return None
-    points = research_thesis.resolve_points(draft.points, ids, MAX_NARRATIVE_POINTS, {LENS_SECTION: list(facts)})
+    # Every quoted number gets its chip: the page says each point cites
+    # the figures, and the analyst view's four-chip limit would drop some.
+    points = research_thesis.resolve_points(
+        draft.points, ids, MAX_NARRATIVE_POINTS, {LENS_SECTION: list(facts)}, max_refs=None
+    )
     if not points:
         return None
     return LensNarrative(headline=draft.headline.strip(), points=points)

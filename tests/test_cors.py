@@ -87,7 +87,7 @@ async def test_preflight_returns_allow_headers_for_configured_origin(
             headers={
                 "Origin": ALLOWED,
                 "Access-Control-Request-Method": "POST",
-                "Access-Control-Request-Headers": "authorization,content-type",
+                "Access-Control-Request-Headers": "authorization,content-type,x-owner-key",
             },
         )
 
@@ -100,6 +100,7 @@ async def test_preflight_returns_allow_headers_for_configured_origin(
     allowed_headers = resp.headers["access-control-allow-headers"].lower()
     assert "authorization" in allowed_headers
     assert "content-type" in allowed_headers
+    assert "x-owner-key" in allowed_headers  # the owner routes' second key
 
 
 async def test_simple_get_includes_allow_origin_for_configured_origin(

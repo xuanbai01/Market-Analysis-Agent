@@ -223,3 +223,20 @@ async def test_a_drained_bucket_survives_pruning() -> None:
     clock[0] = 1.0  # one second: "drained" is still empty
     assert (await bucket.take("drained"))[0] is False
 
+
+async def test_peek_says_whether_a_take_would_pass_without_taking() -> None:
+    """The owner-key lockout checks before comparing a key, and only a
+    wrong key takes a token."""
+    clock = _FakeClock()
+    bucket = TokenBucket(capacity=2, window_seconds=3600, time_source=clock)
+    assert await bucket.peek("ip-A") == (True, 0.0)
+    assert bucket._buckets == {}  # a peek stores nothing
+    await bucket.take("ip-A")
+    await bucket.take("ip-A")
+    allowed, retry = await bucket.peek("ip-A")
+    assert allowed is False and retry == pytest.approx(1800)
+    clock.advance(1800)
+    assert (await bucket.peek("ip-A"))[0] is True
+    assert (await bucket.take("ip-A"))[0] is True  # the peeks took nothing
+    assert (await bucket.take("ip-A"))[0] is False
+

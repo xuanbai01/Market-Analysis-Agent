@@ -63,7 +63,7 @@ describe("OwnerUnlock", () => {
   });
 
   it("keeps the key only once the server accepts it", async () => {
-    const check = vi.spyOn(ownerApi, "fetchOwnerStatus").mockResolvedValue({ tastytrade: true });
+    const check = vi.spyOn(ownerApi, "fetchOwnerStatus").mockResolvedValue({ tastytrade: true, vault: false });
     const unlocked = vi.fn();
     render(<OwnerUnlock onUnlocked={unlocked} />);
     submit("right-key");

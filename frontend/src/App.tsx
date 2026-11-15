@@ -38,6 +38,7 @@ const LensPage = lazyWithReload(() => import("./components/lens/LensPage"));
 const OptionsPage = lazyWithReload(() => import("./components/options/OptionsPage"));
 // The owner's positions (ADR 0009): its own chunk, behind the owner key too.
 const PositionsPage = lazyWithReload(() => import("./components/positions/PositionsPage"));
+const TradesPage = lazyWithReload(() => import("./components/trades/TradesPage"));
 const SymbolDetailPage = lazyWithReload(() => import("./components/SymbolDetailPage"));
 // Public read-only demo: its own chunks, outside the auth guard.
 const DemoShell = lazyWithReload(() => import("./components/demo/DemoShell"));
@@ -152,6 +153,14 @@ export function App() {
             element={
               <Suspense fallback={null}>
                 <PositionsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path={ROUTE_PATHS.trades}
+            element={
+              <Suspense fallback={null}>
+                <TradesPage />
               </Suspense>
             }
           />

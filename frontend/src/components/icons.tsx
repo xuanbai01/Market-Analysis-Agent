@@ -65,6 +65,16 @@ export function IconLens() {
   );
 }
 
+/** A ledger: the owner's trades. */
+export function IconTrades() {
+  return (
+    <Icon>
+      <rect x="3" y="2.5" width="10" height="11" rx="1.5" />
+      <path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" />
+    </Icon>
+  );
+}
+
 /** A case: the owner's positions. */
 export function IconPositions() {
   return (

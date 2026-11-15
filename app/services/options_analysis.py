@@ -296,7 +296,9 @@ def claims(
         (_TERM[_direction(term or 0.0, points)], term, "percentage_points", "IV90 − IV30"),
         (_SKEW[_direction(skew25 or 0.0, points)], skew25, "percentage_points",
          "IV at the 25-delta put strike − IV at the 25-delta call strike"),
-        (_PUT_CALL[_direction((put_call_oi or 1.0) - 1.0, 2)], put_call_oi, "ratio", "Σ put OI ÷ Σ call OI"),
+        # A missing ratio is skipped below; 0.0 is a real one (no puts open).
+        (_PUT_CALL[_direction(0.0 if put_call_oi is None else put_call_oi - 1.0, 2)], put_call_oi, "ratio",
+         "Σ put OI ÷ Σ call OI"),
     ]
     if default is not None:
         rows.append((f"Expected move to {default.expiry.isoformat()} (one standard deviation)",

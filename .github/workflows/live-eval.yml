@@ -120,9 +120,12 @@ jobs:
 
       - name: Summary
         if: always()
+        # Through the environment, not interpolated into the script.
+        env:
+          SUITE: ${{ inputs.suite }}
         run: |
           {
-            echo "### Live eval (${LLM_PROVIDER}, ${{ inputs.suite }})"
+            echo "### Live eval (${LLM_PROVIDER}, ${SUITE})"
             echo '```'
             grep -E "factuality=|PASSED|FAILED|SKIPPED|passed|failed" eval.log || echo "no results in the log"
             echo '```'

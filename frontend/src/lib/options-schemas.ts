@@ -143,10 +143,12 @@ export type OptionsReport = z.infer<typeof OptionsReportSchema>;
 export const OptionsReadSchema = z.object({
   symbol: z.string(),
   quoted_at: z.string(),
-  at_close: z.boolean().default(false),
+  at_close: z.boolean(),
   headline: z.string(),
-  points: z.array(ThesisPointSchema).default([]),
-  claims: z.array(ClaimSchema).default([]),
+  // No defaults: a read that lost its points or claims is an error, not
+  // an uncited headline.
+  points: z.array(ThesisPointSchema),
+  claims: z.array(ClaimSchema),
   generated_at: z.string(),
 });
 export type OptionsRead = z.infer<typeof OptionsReadSchema>;

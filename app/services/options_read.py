@@ -5,8 +5,9 @@ An AI-written headline and a few points on what one stock's option
 prices say, written from the report's claims and nothing else: code
 computes every figure and the direction of every comparison (ADR 0007),
 the model only writes. Each point cites the claims it quotes, and any
-point quoting a number no claim shows is dropped here, in code, before
-anyone sees it; a headline with one spoils the read.
+point quoting a number none of its cited claims shows is dropped here,
+in code, before anyone sees it, so every number on the card has its
+chip; a headline with a number no claim shows spoils the read.
 
 Reads are cached per symbol and quote time, so one set of quotes is read
 once: overnight and at weekends one read stands until the next session,
@@ -120,11 +121,15 @@ def prompt(report: OptionsReport) -> str:
 
 
 def _backed(points: list[ThesisPoint], report: OptionsReport) -> list[ThesisPoint]:
+    """The points whose every figure is one of the claims they cite, so each
+    number on the card has its chip; a label any claim names ("IV30", "the
+    last 8 reports") is fine."""
     kept = []
     for point in points:
-        stray = research_thesis.unbacked_numbers(point.text, report.claims)
+        cited = [report.claims[ref.index] for ref in point.claim_refs]
+        stray = research_thesis.unbacked_numbers(point.text, cited, labels=report.claims)
         if stray:
-            logger.warning("options read for %s: dropped a point quoting %s, which no fact shows", report.symbol, stray)
+            logger.warning("options read for %s: dropped a point quoting %s, which no fact it cites shows", report.symbol, stray)
             continue
         kept.append(point)
     return kept

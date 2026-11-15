@@ -13,10 +13,11 @@
 #
 # Needs the repository variable API_BASE_URL (https://market-analysis-agent.fly.dev)
 # and the secret BACKEND_SHARED_SECRET (the API's shared secret; docs/deployment.md).
-# The job fails when the market was open, or when fewer than half of the
-# tickers due that day were written, for any reason (failed, deferred, or
-# Yahoo returning no usable quotes): a quiet day lost is the failure this
-# table can't afford. The step summary lists what happened.
+# The job fails when the market was open, when there were no tickers at
+# all, or when any configured ticker (OPTIONS_SNAPSHOT_SYMBOLS) still has
+# no row for the session ("missing"): a quiet day lost is the failure this
+# table can't afford. Tickers added from page views are best-effort. The
+# step summary lists what happened.
 
 name: IV Snapshot
 
@@ -79,8 +80,12 @@ jobs:
             echo "::error::The market was open; the run stored nothing."
             exit 1
           fi
-          due=$((targets - skipped))
-          if [ "$status" = "ok" ] && [ "$due" -gt 0 ] && [ $((2 * written)) -lt "$due" ]; then
-            echo "::error::Only $written of the $due tickers due today were written."
+          if [ "$targets" -eq 0 ]; then
+            echo "::error::No tickers to snapshot: is OPTIONS_SNAPSHOT_SYMBOLS set?"
+            exit 1
+          fi
+          missing=$(jq -r '.missing | join(", ")' run.json)
+          if [ -n "$missing" ]; then
+            echo "::error::No row for the session for: $missing"
             exit 1
           fi

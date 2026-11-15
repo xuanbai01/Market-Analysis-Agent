@@ -168,8 +168,11 @@ async def _run(session: AsyncSession, now: datetime) -> SnapshotRun:
     failed: list[FailedTicker] = []
 
     def finish(status: str, session_date: Any, symbols: list[str]) -> SnapshotRun:
+        stored = {*lists["written"], *lists["skipped"]}
+        configured = parse_symbols(settings.OPTIONS_SNAPSHOT_SYMBOLS)
+        missing = [s for s in configured if s not in stored] if session_date else []
         return SnapshotRun(
-            status=status, session_date=session_date, targets=symbols, failed=failed,
+            status=status, session_date=session_date, targets=symbols, failed=failed, missing=missing,
             duration_ms=round((_clock() - started) * 1000, 1), **lists,  # type: ignore[arg-type]
         )
 

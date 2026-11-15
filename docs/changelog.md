@@ -186,5 +186,12 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - max pain and the walls, with the dealer assumption.
     Each is labelled for what it is, not a forecast, and the page says nothing is advice.
   - **Not modelled:** adjusted contracts are listed but not modelled, and futures are listed as not analysed. A leg without an IV gets no curve before expiry rather than a guessed one.
+  - **From the security review** (one medium, fixed):
+    - **The medium:** a forced sign-out on a 401 cleared only the shared secret, so the owner key outlived the sign-in. `clearStoredToken` now clears it too, and a new sign-in starts without one.
+    - **The positions in memory** are dropped (`gcTime: 0`) when the page goes or the key does.
+    - **No redirects:** owner requests don't follow one.
+    - **Blocked storage:** the key lasts the page in memory when storage refuses it.
+    - **No list of holdings:** the options report and chain routes take `track=false`, so the holdings aren't recorded as option-page views.
+    - **The fake backend** can't open real routes, spend a key or reach a database.
   - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 

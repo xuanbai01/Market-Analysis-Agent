@@ -64,15 +64,16 @@ export class ApiError extends Error implements ApiErrorShape {
   }
 }
 
-// ── Internal helpers ─────────────────────────────────────────────────
+// ── Helpers (also used by lib/options-api.ts, which only the lazy options
+// page imports, so its schemas stay out of the main chunk) ──────────────
 
-function authHeaders(): Record<string, string> {
+export function authHeaders(): Record<string, string> {
   const token = getStoredToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 /** Read ``Retry-After`` as integer seconds, or undefined. */
-function parseRetryAfter(headers: Headers): number | undefined {
+export function parseRetryAfter(headers: Headers): number | undefined {
   const raw = headers.get("Retry-After");
   if (!raw) return undefined;
   const n = parseInt(raw, 10);
@@ -80,7 +81,7 @@ function parseRetryAfter(headers: Headers): number | undefined {
 }
 
 /** Pull a useful error message out of an RFC 7807 (or vanilla JSON) body. */
-async function extractErrorTitle(resp: Response): Promise<string> {
+export async function extractErrorTitle(resp: Response): Promise<string> {
   try {
     const body = (await resp.json()) as { title?: string; detail?: unknown };
     if (typeof body.title === "string" && body.title.length > 0) {
@@ -95,7 +96,7 @@ async function extractErrorTitle(resp: Response): Promise<string> {
   return resp.statusText || `HTTP ${resp.status}`;
 }
 
-async function parseJsonAndValidate<S extends z.ZodTypeAny>(
+export async function parseJsonAndValidate<S extends z.ZodTypeAny>(
   resp: Response,
   schema: S,
 ): Promise<z.output<S>> {

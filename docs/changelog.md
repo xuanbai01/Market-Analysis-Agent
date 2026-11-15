@@ -203,4 +203,13 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - `GET /v1/owner/trades.csv` downloads the copy, with formula-like text defused.
   - **The page:** `/trades`, behind the owner key: a table filterable by underlying, the sync's status, Download CSV, in memory only. There's a sidebar link beside Positions.
   - **Setup:** docs/deployment.md §11 makes the key.
+  - **From the security review** (one medium each from two reviewers, both fixed):
+    - **A bad key's start-up error** would have quoted the settings' values, a slice of the tastytrade refresh token included, into Fly's log. Settings now hide their input in errors.
+    - **A first sync over about 5,400 transactions** would have broken Postgres's parameter limit on every visit. Inserts now go 1,000 rows at a time.
+    - **The vault:** the associated data now binds the key version and the estimated-fee flag too, a row under another version is refused, and a damaged row is the vault's error rather than a 500. The unused clear `stored_at` column is gone, and a CHECK holds the nonce's length.
+    - **Syncs:** one at a time, a failed sync spaced like a good one, a 120 s deadline, decryption off the event loop, and a closed account skipped.
+    - **Account numbers in free text** are replaced by "account N" before sealing.
+    - **The CSV** defuses a formula behind leading spaces or a newline.
+    - **The page** shows the server's reason when the copy doesn't open, and revokes the download's address a moment later (at once, Safari can cancel the save).
+    - **Both key recipes** warn about Windows clipboard history.
 

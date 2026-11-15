@@ -193,6 +193,7 @@ The owner's account routes (`/v1/owner`, ADR 0009) need a second key on top of t
    Remove-Item $env:TEMP\owner.env; Set-Clipboard $key; Remove-Variable key, bytes
    ```
 
+   If Windows clipboard history (Win+V) or clipboard sync is on, clearing the clipboard doesn't remove the earlier entry: open Win+V and delete it, or turn history off first.
 2. **Save it in your password manager** right away, as the password of an entry for the dashboard's address with the username `market-agent-owner`. That's a second entry beside the sign-in password, which the manager saves under `market-agent`: two keys, two entries. Then clear the clipboard with `Set-Clipboard -Value ' '`. The manager syncs it to your other PCs; the dashboard's owner pages ask for it once per browser.
 3. **Rotate it** by running step 1 again and updating the entry. Each browser asks for the new key on its next owner request.
 
@@ -212,6 +213,7 @@ The owner's trades are copied into Neon encrypted (ADR 0009, amended): each row 
    Remove-Item $env:TEMP\vault.env; Set-Clipboard $key; Remove-Variable key, bytes
    ```
 
+   If Windows clipboard history (Win+V) or clipboard sync is on, clearing the clipboard doesn't remove the earlier entry: open Win+V and delete it, or turn history off first.
 2. **Save it in your password manager** as its own entry (for example `market-agent trade-copy key`), then clear the clipboard with `Set-Clipboard -Value ' '`. You never type it anywhere; it's kept so the copy can be read again if Fly's secrets are ever lost.
 3. **Open `/trades` once** to fill the copy.
 

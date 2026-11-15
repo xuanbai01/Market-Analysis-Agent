@@ -60,13 +60,14 @@ function normPdf(x: number): number {
 
 // ── Prices ──────────────────────────────────────────────────────────
 
-/** A leg's price per share, or null where the market doesn't give one:
- * no quote at all, or no offer to buy from (or to mark a mid against). A
- * zero bid is a price: selling there gets nothing. */
+/** A leg's price per share, or null where the market doesn't give one.
+ * Mid needs both a bid and an offer. Natural buys at the offer (none, no
+ * price) and sells at the bid, where a zero bid beside an offer is a
+ * price: selling there gets nothing. */
 export function premium(q: Quote, side: Side, basis: Basis): number | null {
-  if (q.ask <= 0) return side === -1 && basis === "natural" && q.bid > 0 ? q.bid : null;
-  if (basis === "mid") return (q.bid + q.ask) / 2;
-  return side === 1 ? q.ask : q.bid;
+  if (basis === "mid") return q.bid > 0 && q.ask > 0 ? (q.bid + q.ask) / 2 : null;
+  if (side === 1) return q.ask > 0 ? q.ask : null;
+  return q.bid > 0 || q.ask > 0 ? q.bid : null;
 }
 
 export function quoteFor(rows: ChainRow[], leg: Leg): Quote | null {
@@ -159,6 +160,7 @@ export function probAbove(smile: Smile, strike: number): number {
   if (strike <= 0) return 1;
   const { forward, years } = smile;
   const { vol, slope } = smileAt(smile.points, Math.log(strike / forward));
+  if (vol <= 0 || years <= 0) return forward > strike ? 1 : 0; // nothing left to vary
   const root = Math.sqrt(years);
   const d2 = (Math.log(forward / strike) - (vol * vol * years) / 2) / (vol * root);
   return Math.min(1, Math.max(0, normCdf(d2) - normPdf(d2) * root * slope));

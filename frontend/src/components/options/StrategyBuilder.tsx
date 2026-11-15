@@ -43,6 +43,7 @@ function unpriced(leg: Leg, rows: ChainRow[]): string | null {
   const q = quoteFor(rows, leg);
   if (!q || (q.bid <= 0 && q.ask <= 0)) return `${legName(leg)}: no quote at this strike.`;
   if (q.ask <= 0) return `${legName(leg)}: no offer at this strike, so no mid${leg.side === 1 ? " and nothing to buy" : "; it can still be sold at the bid"}.`;
+  if (q.bid <= 0) return `${legName(leg)}: no bid at this strike, so no mid${leg.side === 1 ? "; it can still be bought at the offer" : " and nothing to sell for"}.`;
   return null;
 }
 
@@ -84,7 +85,8 @@ export function StrategyBuilder({ chain }: { chain: ExpiryChain }) {
 
       {legs === null ? (
         <p data-testid="strategy-unavailable" className="text-sm text-strata-dim">
-          This expiry has no quoted strikes to build a {TEMPLATES[template].toLowerCase()} from.
+          Not enough quoted strikes at this expiry to build a {TEMPLATES[template].toLowerCase()} by its rule; pick
+          another template or expiry.
         </p>
       ) : (
         <>
@@ -100,7 +102,7 @@ export function StrategyBuilder({ chain }: { chain: ExpiryChain }) {
                 <Summary mid={mid} natural={natural} />
                 {shown.pop === null && (
                   <p data-testid="strategy-no-smile" className="mt-2 font-mono text-[10px] text-strata-muted">
-                    No smile at this expiry, so no probability.
+                    {chain.days <= 0 ? "This expiry has no time left, so no probability." : "No smile at this expiry, so no probability."}
                   </p>
                 )}
               </div>

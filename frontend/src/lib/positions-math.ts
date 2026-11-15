@@ -18,9 +18,12 @@ import type { PositionGroup, PositionLeg } from "./owner-schemas";
 
 const DAY_MS = 24 * 3600 * 1000;
 const YEAR_MS = 365 * DAY_MS;
-// The close for a leg the server sent without one (it sends each option's,
-// from its calendar): 4 pm New York in winter.
-const FALLBACK_CLOSE_UTC = "T21:00:00Z";
+// New York's date and time of day, for sessions and closes.
+const NEW_YORK = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+const OPEN_MINUTE = 9 * 60 + 30; // 9:30 am
+const CLOSE_HOUR = 16;
 const MIN_VOL = 0.01;
 const ONE_PERCENT = 0.01;
 // Price grid for breakevens: log-spaced over a wide range around the spot.
@@ -53,11 +56,24 @@ export const NO_CHANGE: Scenario = { move: 0, ivShift: 0, days: 0 };
 const size = (leg: PositionLeg) => leg.quantity * leg.multiplier;
 const isOption = (leg: PositionLeg) => leg.kind !== "stock";
 
+/** ``at`` in New York: its date (YYYY-MM-DD) and minutes past midnight. */
+function newYork(at: Date): { date: string; minute: number } {
+  const part = (type: string) => NEW_YORK.formatToParts(at).find((p) => p.type === type)?.value ?? "0";
+  return { date: `${part("year")}-${part("month")}-${part("day")}`, minute: Number(part("hour")) * 60 + Number(part("minute")) };
+}
+
+/** 4 pm in New York on ``day``: 20:00 UTC in summer, 21:00 in winter. */
+function fourPm(day: string): Date {
+  const summer = new Date(`${day}T20:00:00Z`);
+  return newYork(summer).minute === CLOSE_HOUR * 60 ? summer : new Date(`${day}T21:00:00Z`);
+}
+
 /** When ``expiry`` closes, as the server gave it for ``legs`` on it: 4 pm
- * New York, 1 pm on a half day (market_calendar.session_close). */
+ * New York, 1 pm on a half day (market_calendar.session_close). A leg sent
+ * without it gets 4 pm, half days aside. */
 export function expiryClose(expiry: string, legs: PositionLeg[]): Date {
   const close = legs.find((leg) => leg.expiry === expiry && leg.expires_at !== null)?.expires_at;
-  return close ? new Date(close) : new Date(`${expiry}${FALLBACK_CLOSE_UTC}`);
+  return close ? new Date(close) : fourPm(expiry);
 }
 
 export function yearsTo(expiry: string, at: Date, legs: PositionLeg[]): number {
@@ -251,14 +267,19 @@ export function profitChance(group: PositionGroup, smile: Smile, market: Market)
   return Math.min(1, Math.max(0, chance));
 }
 
-/** Trading sessions from ``now`` to the expiry's close (weekdays; holidays
- * aside). */
+/** Whole trading sessions from ``now`` to the expiry's close (weekdays;
+ * holidays aside): today's counts while the market hasn't opened. */
 export function sessionsUntil(expiry: string, now: Date, legs: PositionLeg[]): number {
-  const end = expiryClose(expiry, legs).getTime();
+  if (expiryClose(expiry, legs).getTime() <= now.getTime()) return 0;
+  const today = newYork(now);
   let count = 0;
-  for (let t = now.getTime() + DAY_MS; t <= end + DAY_MS / 2; t += DAY_MS) {
-    const day = new Date(t).getUTCDay();
-    if (day !== 0 && day !== 6) count++;
+  for (let t = new Date(`${today.date}T12:00:00Z`).getTime(); ; t += DAY_MS) {
+    const day = new Date(t).toISOString().slice(0, 10);
+    if (day > expiry) break;
+    const weekday = new Date(t).getUTCDay();
+    if (weekday === 0 || weekday === 6) continue;
+    if (day === today.date && today.minute >= OPEN_MINUTE) continue; // under way or over
+    count++;
   }
   return count;
 }

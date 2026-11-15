@@ -12,7 +12,7 @@ import { useEffect } from "react";
 
 import { clearOwnerKey, useOwnerKey } from "../../lib/owner";
 import { fetchOwnerPositions, isOwnerKeyRefused } from "../../lib/owner-api";
-import type { OwnerPositions } from "../../lib/owner-schemas";
+import type { OwnerPositions, PositionGroup } from "../../lib/owner-schemas";
 import { type Greeks, greeks } from "../../lib/positions-math";
 import { signedUsd } from "../../lib/positions-text";
 import { ErrorBanner } from "../ErrorBanner";
@@ -22,26 +22,33 @@ import { MAX_CONTEXT, PositionGroupCard } from "./PositionGroupCard";
 
 const FIFTEEN_SECONDS = 15_000;
 
-function totals(positions: OwnerPositions): Greeks {
-  const sum = (pick: (g: Greeks) => number | null) => {
-    let total = 0;
+/** A total across the holdings, and the ones it leaves out for want of a
+ * live figure (one unquoted holding mustn't blank the rest). */
+interface Total {
+  value: number | null;
+  without: string[];
+}
+
+function totals(positions: OwnerPositions): { delta: Total; theta: Total; vega: Total } {
+  const sum = (pick: (group: PositionGroup) => number | null): Total => {
+    let value = 0;
+    const without: string[] = [];
     for (const group of positions.groups) {
-      const spot = group.quote?.mark;
-      if (spot === null || spot === undefined) return null;
-      const v = pick(greeks(group, spot));
-      if (v === null) return null;
-      total += v;
+      const v = pick(group);
+      if (v === null) without.push(group.underlying);
+      else value += v;
     }
-    return total;
+    return { value: without.length === positions.groups.length ? null : value, without };
   };
+  const of = (group: PositionGroup): Greeks => greeks(group, group.quote?.mark ?? 0); // the price only scales delta
   return {
-    deltaShares: null, // shares of different stocks don't add
-    deltaDollars: sum((g) => g.deltaDollars),
-    gammaShares: null,
-    thetaDay: sum((g) => g.thetaDay),
-    vegaPoint: sum((g) => g.vegaPoint),
+    delta: sum((group) => (group.quote?.mark ? of(group).deltaDollars : null)),
+    theta: sum((group) => of(group).thetaDay),
+    vega: sum((group) => of(group).vegaPoint),
   };
 }
+
+const leftOut = (total: Total) => (total.without.length > 0 ? `; leaves out ${total.without.join(", ")} (no live figure)` : "");
 
 function Tile({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
@@ -97,9 +104,9 @@ function Positions({ ownerKey }: { ownerKey: string }) {
       {query.error && !unauthorized && !refused && <ErrorBanner error={query.error} />}
       {positions && t && positions.groups.length > 0 && (
         <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="positions-totals">
-          <Tile label="For a 1% rise" value={dash(t.deltaDollars)} sub="every position's delta, in dollars" />
-          <Tile label="A day passing" value={dash(t.thetaDay)} sub="theta, nothing else changing" />
-          <Tile label="IV one point higher" value={dash(t.vegaPoint)} sub="vega, every expiry at once" />
+          <Tile label="For a 1% rise" value={dash(t.delta.value)} sub={`every position's delta, in dollars${leftOut(t.delta)}`} />
+          <Tile label="A day passing" value={dash(t.theta.value)} sub={`theta, nothing else changing${leftOut(t.theta)}`} />
+          <Tile label="IV one point higher" value={dash(t.vega.value)} sub={`vega, every expiry at once${leftOut(t.vega)}`} />
         </div>
       )}
       {positions && positions.groups.length === 0 && positions.unanalysed.length === 0 && (

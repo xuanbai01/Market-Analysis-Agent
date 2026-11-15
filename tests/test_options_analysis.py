@@ -97,6 +97,36 @@ def test_the_chain_table_near_the_money() -> None:
     assert table.open_interest and all(p.call == 100 and p.put == 100 for p in table.open_interest)
 
 
+def test_the_chain_carries_its_positioning_for_the_strikes_shown() -> None:
+    chain = _chain(EXP_20, _flat(0.25))
+    table = oa.expiry_chain(chain, _smile(chain), SPOT)
+    p = table.positioning
+    assert p is not None
+    assert [e.strike for e in p.exposure] == [pt.strike for pt in table.open_interest]
+    assert p.max_pain is not None and p.top
+    assert all(float(e.gex).is_integer() for e in p.exposure)  # whole dollars
+
+
+def test_a_summary_carries_max_pain_and_net_gamma() -> None:
+    chain = _chain(EXP_20, _flat(0.25))
+    s = _smile(chain)
+    summary = oa.expiry_summary(chain, s, None, QUOTED_AT)
+    full = oa.expiry_chain(chain, s, SPOT).positioning
+    assert full is not None
+    assert summary.max_pain == full.max_pain
+    assert summary.net_gex == pytest.approx(full.net_gex, rel=1e-9)
+
+
+def test_positioning_stays_small_on_the_wire() -> None:
+    """A wide chain (400 strikes, 281 on the open interest chart, about 21
+    KB already): positioning adds one compact row per strike shown."""
+    strikes = [40 + 0.5 * i for i in range(400)]
+    chain = _chain(EXP_48, _flat(0.6), strikes)
+    p = oa.expiry_chain(chain, _smile(chain), SPOT).positioning
+    assert p is not None and len(p.exposure) > 250
+    assert len(p.model_dump_json()) < 14_000
+
+
 def test_put_call_ratios_over_the_expiries_read() -> None:
     q = lambda oi, vol: Quote(100.0, 1.0, 1.1, vol, oi, True)  # noqa: E731
     chains = [ExpiryQuotes(EXP_20, (q(100, 10),), (q(200, 30),)), ExpiryQuotes(EXP_48, (q(100, 10),), (q(200, 30),))]

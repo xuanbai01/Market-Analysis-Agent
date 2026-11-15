@@ -124,7 +124,12 @@ def prompt(report: OptionsReport) -> str:
 
 # Opposite direction words a comparison claim's description may hold. A
 # point citing the claim that uses only the other word has turned it round.
-_OPPOSITES = (("above", "below"), ("slopes up", "slopes down"), ("more puts", "more calls"))
+_OPPOSITES = (
+    ("above", "below"),
+    ("slopes up", "slopes down"),
+    ("more puts", "more calls"),
+    ("puts carry higher", "calls carry higher"),
+)
 
 
 def _turned_round(text: str, claim: Claim) -> bool:

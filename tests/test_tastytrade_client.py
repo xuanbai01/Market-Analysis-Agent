@@ -1,0 +1,346 @@
+"""The read-only tastytrade client (ADR 0009): sign-in, retries, and what it
+refuses to do. tastytrade is replaced by an httpx MockTransport; nothing
+here touches the network."""
+from __future__ import annotations
+
+import asyncio
+import inspect
+import json
+import logging
+import re
+from collections.abc import Callable
+
+import httpx
+import pytest
+
+from app.core import settings as settings_module
+from app.services import dxlink
+from app.services import tastytrade_client as tt
+
+CLIENT_ID = "0d5f6a8e-test-client"
+CLIENT_SECRET = "cs-test-7f1e2d"
+REFRESH_TOKEN = "rt-test-eyJhbGciOi.refresh"
+ACCESS_TOKEN = "at-test-eyJhbGciOi.access"
+ACCOUNT = "5WT12345"
+
+Handler = Callable[[httpx.Request], httpx.Response]
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 1_000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
+    fake = FakeClock()
+    monkeypatch.setattr(tt, "_clock", fake)
+    return fake
+
+
+@pytest.fixture
+def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(tt, "_sleep", fake_sleep)
+    return slept
+
+
+@pytest.fixture(autouse=True)
+def configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    s = settings_module.settings
+    monkeypatch.setattr(s, "TASTYTRADE_CLIENT_ID", CLIENT_ID)
+    monkeypatch.setattr(s, "TASTYTRADE_CLIENT_SECRET", CLIENT_SECRET)
+    monkeypatch.setattr(s, "TASTYTRADE_REFRESH_TOKEN", REFRESH_TOKEN)
+    monkeypatch.setattr(s, "TASTYTRADE_API_URL", "https://api.tastyworks.test")
+    tt.reset()
+    yield
+    tt.reset()
+
+
+class FakeTastytrade:
+    """Answers the token POST and the GETs, and records every request."""
+
+    def __init__(self) -> None:
+        self.requests: list[httpx.Request] = []
+        self.token_responses: list[httpx.Response] = []
+        self.get_responses: list[httpx.Response] = []
+        self.token_count = 0
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> FakeTastytrade:
+        monkeypatch.setattr(tt, "_transport", httpx.MockTransport(self.handle))
+        return self
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.url.path == "/oauth/token":
+            self.token_count += 1
+            if self.token_responses:
+                return self.token_responses.pop(0)
+            return httpx.Response(
+                200, json={"access_token": f"{ACCESS_TOKEN}-{self.token_count}", "expires_in": 900, "token_type": "Bearer"}
+            )
+        if self.get_responses:
+            return self.get_responses.pop(0)
+        return httpx.Response(200, json={"data": {"items": [{"symbol": "SPY"}]}, "context": request.url.path})
+
+    @property
+    def gets(self) -> list[httpx.Request]:
+        return [r for r in self.requests if r.url.path != "/oauth/token"]
+
+
+@pytest.fixture
+def fake(monkeypatch: pytest.MonkeyPatch) -> FakeTastytrade:
+    return FakeTastytrade().install(monkeypatch)
+
+
+async def test_not_configured_makes_no_request(monkeypatch: pytest.MonkeyPatch, fake: FakeTastytrade) -> None:
+    monkeypatch.setattr(settings_module.settings, "TASTYTRADE_REFRESH_TOKEN", "")
+    assert tt.is_configured() is False
+    with pytest.raises(tt.TastytradeUnavailable):
+        await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert fake.requests == []
+
+
+async def test_signs_in_with_the_read_scope_then_gets(fake: FakeTastytrade, clock: FakeClock) -> None:
+    payload = await tt.get("/market-metrics", {"symbols": "SPY,QQQ"}, op="market_metrics")
+
+    assert payload["data"]["items"] == [{"symbol": "SPY"}]
+    token_request, get_request = fake.requests
+    assert token_request.method == "POST"
+    assert json.loads(token_request.content) == {
+        "grant_type": "refresh_token",
+        "refresh_token": REFRESH_TOKEN,
+        "client_secret": CLIENT_SECRET,
+        "client_id": CLIENT_ID,
+        "scope": "read",
+    }
+    assert get_request.method == "GET"
+    assert get_request.url.path == "/market-metrics"
+    assert get_request.url.params["symbols"] == "SPY,QQQ"
+    assert get_request.headers["Authorization"] == f"Bearer {ACCESS_TOKEN}-1"
+    for request in fake.requests:
+        assert re.fullmatch(r"[\w.-]+/[\w.-]+", request.headers["User-Agent"])
+
+
+async def test_client_id_is_left_out_when_not_set(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeTastytrade, clock: FakeClock
+) -> None:
+    monkeypatch.setattr(settings_module.settings, "TASTYTRADE_CLIENT_ID", "")
+    await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert "client_id" not in json.loads(fake.requests[0].content)
+
+
+async def test_the_access_token_is_reused_until_a_minute_before_it_expires(
+    fake: FakeTastytrade, clock: FakeClock
+) -> None:
+    await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    clock.now += 900 - 61
+    await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert fake.token_count == 1
+    clock.now += 2
+    await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert fake.token_count == 2
+    assert fake.gets[-1].headers["Authorization"] == f"Bearer {ACCESS_TOKEN}-2"
+
+
+async def test_concurrent_calls_share_one_sign_in(fake: FakeTastytrade, clock: FakeClock) -> None:
+    await asyncio.gather(*(tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics") for _ in range(5)))
+    assert fake.token_count == 1
+    assert len(fake.gets) == 5
+
+
+async def test_a_401_signs_in_again_once(fake: FakeTastytrade, clock: FakeClock, sleeps: list[float]) -> None:
+    fake.get_responses = [httpx.Response(401, json={"error": {"code": "token_invalid"}})]
+    payload = await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert payload["data"]["items"]
+    assert fake.token_count == 2
+    assert fake.gets[-1].headers["Authorization"] == f"Bearer {ACCESS_TOKEN}-2"
+
+
+async def test_a_second_401_gives_up(fake: FakeTastytrade, clock: FakeClock, sleeps: list[float]) -> None:
+    fake.get_responses = [httpx.Response(401), httpx.Response(401)]
+    with pytest.raises(tt.TastytradeUnavailable):
+        await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert fake.token_count == 2
+
+
+async def test_a_refused_sign_in_pauses_every_call_for_an_hour(fake: FakeTastytrade, clock: FakeClock) -> None:
+    fake.token_responses = [httpx.Response(401, json={"error": {"code": "invalid_grant"}})]
+    with pytest.raises(tt.TastytradeUnavailable):
+        await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    clock.now += tt.SIGN_IN_PAUSE_SECONDS - 1
+    with pytest.raises(tt.TastytradeUnavailable):
+        await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert fake.token_count == 1  # no second try while paused: repeated failures block the IP
+    clock.now += 2
+    await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert fake.token_count == 2
+
+
+async def test_a_token_that_can_trade_is_refused(fake: FakeTastytrade, clock: FakeClock) -> None:
+    fake.token_responses = [
+        httpx.Response(200, json={"access_token": ACCESS_TOKEN, "expires_in": 900, "scope": "read trade"})
+    ]
+    with pytest.raises(tt.TastytradeUnavailable, match="trade"):
+        await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert fake.gets == []
+
+
+async def test_a_token_that_can_only_read_is_used(fake: FakeTastytrade, clock: FakeClock) -> None:
+    fake.token_responses = [
+        httpx.Response(200, json={"access_token": ACCESS_TOKEN, "expires_in": 900, "scope": "read openid"})
+    ]
+    await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert fake.gets[0].headers["Authorization"] == f"Bearer {ACCESS_TOKEN}"
+
+
+async def test_throttling_backs_off_and_retries(fake: FakeTastytrade, clock: FakeClock, sleeps: list[float]) -> None:
+    fake.get_responses = [httpx.Response(429), httpx.Response(503)]
+    payload = await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert payload["data"]["items"]
+    assert len(fake.gets) == 3
+    assert len(sleeps) == 2
+    assert sleeps[1] > sleeps[0] > 0
+
+
+async def test_three_failures_give_up(fake: FakeTastytrade, clock: FakeClock, sleeps: list[float]) -> None:
+    fake.get_responses = [httpx.Response(503)] * 3
+    with pytest.raises(tt.TastytradeUnavailable):
+        await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert len(fake.gets) == tt.MAX_TRIES == 3
+
+
+async def test_a_network_error_is_retried(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeTastytrade, clock: FakeClock, sleeps: list[float]
+) -> None:
+    calls = {"n": 0}
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/oauth/token":
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise httpx.ConnectError("connection reset", request=request)
+        return fake.handle(request)
+
+    monkeypatch.setattr(tt, "_transport", httpx.MockTransport(flaky))
+    payload = await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert payload["data"]["items"]
+    assert calls["n"] == 2
+
+
+async def test_not_found_is_its_own_error(fake: FakeTastytrade, clock: FakeClock, sleeps: list[float]) -> None:
+    fake.get_responses = [httpx.Response(404, json={"error": {"code": "not_found"}})]
+    with pytest.raises(tt.TastytradeNotFound):
+        await tt.get(f"/option-chains/{tt.symbol_path('ZZZZ')}/nested", op="option_chain")
+    assert sleeps == []
+
+
+async def test_another_client_error_is_not_retried(fake: FakeTastytrade, clock: FakeClock, sleeps: list[float]) -> None:
+    fake.get_responses = [httpx.Response(403, json={"error": {"code": "not_permitted"}})]
+    with pytest.raises(tt.TastytradeUnavailable, match="403"):
+        await tt.get("/market-data/by-type", {"equity": "SPY"}, op="quotes")
+    assert len(fake.gets) == 1
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/orders",
+        f"/accounts/{ACCOUNT}/orders",
+        f"/accounts/{ACCOUNT}/orders/dry-run",
+        f"/accounts/{ACCOUNT}/complex-orders",
+        "/watchlists",
+        "/customers/me",
+        "/option-chains/SPY/nested/../../orders",
+        "https://evil.example/market-metrics",
+    ],
+)
+async def test_a_path_off_the_allowlist_is_refused_before_any_request(path: str, fake: FakeTastytrade) -> None:
+    with pytest.raises(ValueError, match="not allowed"):
+        await tt.get(path, op="anything")
+    assert fake.requests == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/option-chains/SPY/nested",
+        "/option-chains/BRK%2FB/nested",
+        "/market-data/by-type",
+        "/market-metrics",
+        "/market-metrics/historic-corporate-events/earnings-reports/NVDA",
+        "/market-metrics/historic-corporate-events/dividends/KO",
+        "/api-quote-tokens",
+        "/customers/me/accounts",
+        f"/accounts/{ACCOUNT}/transactions",
+        f"/accounts/{ACCOUNT}/positions",
+        f"/accounts/{ACCOUNT}/balance-snapshots",
+    ],
+)
+def test_the_allowlist_holds_every_path_the_plan_reads(path: str) -> None:
+    assert tt.is_allowed(path)
+
+
+def test_symbol_path_matches_tastytrade_symbology() -> None:
+    assert tt.symbol_path("SPY") == "SPY"
+    assert tt.symbol_path("brk-b") == "BRK%2FB"
+    assert tt.symbol_path("BF.B") == "BF%2FB"
+
+
+async def test_logs_hold_no_secret_token_or_account_number(
+    fake: FakeTastytrade, clock: FakeClock, sleeps: list[float], caplog: pytest.LogCaptureFixture
+) -> None:
+    fake.get_responses = [httpx.Response(503), httpx.Response(401)]
+    with caplog.at_level(logging.DEBUG):
+        await tt.get(f"/accounts/{ACCOUNT}/transactions", {"per-page": 1}, op="transactions")
+        fake.token_responses = [httpx.Response(401)]
+        tt.reset()
+        with pytest.raises(tt.TastytradeUnavailable):
+            await tt.get(f"/accounts/{ACCOUNT}/positions", op="positions")
+
+    assert any(getattr(r, "service_id", "").startswith("tastytrade.") for r in caplog.records)
+    # Only app.* prints in production (app/core/logging.py); httpx's own
+    # request lines stay below the root's WARNING.
+    for record in (r for r in caplog.records if r.name.startswith("app")):
+        text = record.getMessage() + " " + " ".join(
+            str(getattr(record, name, "")) for name in ("input_summary", "output_summary")
+        )
+        if record.exc_info:
+            text += " " + logging.Formatter().formatException(record.exc_info)
+        for secret in (CLIENT_SECRET, REFRESH_TOKEN, ACCESS_TOKEN, ACCOUNT):
+            assert secret not in text
+
+
+def test_the_client_writes_nothing_but_the_token_request() -> None:
+    """Placing or changing an order is a write; the only write this code
+    can make is the sign-in."""
+    source = inspect.getsource(tt)
+    assert len(re.findall(r"\.post\(", source)) == 1
+    assert re.search(r"\.post\(\s*TOKEN_PATH", source)
+    assert not re.search(r"\.(put|patch|delete|request|send|stream)\(", source)
+    # DXLink sends only its handshake and subscriptions (tests/test_dxlink.py)
+    # and makes no HTTP call of its own.
+    dxlink_source = inspect.getsource(dxlink)
+    assert "httpx" not in dxlink_source
+    assert not re.search(r"\.(post|put|patch|delete|request|stream)\(", dxlink_source)
+
+
+async def test_every_request_in_a_session_is_a_get_but_the_sign_in(
+    fake: FakeTastytrade, clock: FakeClock, sleeps: list[float]
+) -> None:
+    fake.get_responses = [httpx.Response(401)]
+    for path in ("/market-metrics", f"/accounts/{ACCOUNT}/transactions", "/api-quote-tokens"):
+        await tt.get(path, op="any")
+    methods = {(r.method, r.url.path == "/oauth/token") for r in fake.requests}
+    assert methods == {("POST", True), ("GET", False)}
+
+
+def test_the_scope_asked_for_is_read_only() -> None:
+    assert tt.SCOPE == "read"

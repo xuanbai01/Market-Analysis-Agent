@@ -12,6 +12,7 @@
  */
 import { useState } from "react";
 
+import { fractionPctTick } from "../../lib/chart-format";
 import { companiesInYear, companyColor, pct } from "../../lib/lens";
 import type { LensReport } from "../../lib/schemas";
 import { useMeasuredWidth } from "../../lib/use-measured-width";
@@ -87,7 +88,7 @@ export function DistributionChart({ report, height = 300 }: Props) {
           <g key={t}>
             <line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} stroke="#1f2630" strokeWidth={1} />
             <text x={PAD.left - 8} y={y(t) + 4} textAnchor="end" fontSize={11} fill="#8892a0" fontFamily="JetBrains Mono, monospace">
-              {`${Math.round(t * 100)}%`}
+              {fractionPctTick(t)}
             </text>
           </g>
         ))}

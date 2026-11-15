@@ -25,7 +25,7 @@ import re
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, TypeVar
 
 from sqlalchemy.exc import DBAPIError
@@ -35,9 +35,9 @@ from app.core.observability import log_external_call
 from app.core.settings import settings
 from app.schemas.options import FailedTicker, SnapshotRun
 from app.services import market_calendar as mc
+from app.services import options_chain
 from app.services import options_metrics as om
 from app.services import options_snapshot_store as store
-from app.services.options_chain import fetch_chain, risk_free_rate
 
 logger = logging.getLogger(__name__)
 
@@ -90,12 +90,20 @@ def is_rate_limit(exc: BaseException) -> bool:
     return type(exc).__name__ in _RATE_LIMIT_ERRORS
 
 
-def snapshot_one(symbol: str, quoted_at: datetime, rate: float, rate_assumed: bool) -> tuple[str, dict[str, Any] | None]:
+def snapshot_one(
+    symbol: str, session_date: date, quoted_at: datetime, rate: float, rate_assumed: bool
+) -> tuple[str, dict[str, Any] | None]:
     """(status, row) for one ticker; the row only when status is "ok".
-    Blocking: fetches from Yahoo and computes."""
+    Blocking: fetches from Yahoo and computes.
+
+    The row is keyed on the session the run snapshots, not the
+    underlying's last print: a thin name last traded on Thursday would
+    otherwise be keyed on Thursday on a Friday run, collide with
+    Thursday's row and leave Friday unwritten. The print's own date goes
+    into the detail."""
     cpu_started = time.thread_time()
     with log_external_call("yfinance.options", {"symbol": symbol, "purpose": "snapshot"}) as call:
-        fetched = fetch_chain(symbol, lambda listed: om.snapshot_expiries(listed, quoted_at))
+        fetched = options_chain.fetch_chain(symbol, lambda listed: om.snapshot_expiries(listed, quoted_at))
         metrics = om.snapshot_metrics(fetched, quoted_at, rate, rate_assumed=rate_assumed) if fetched else None
         call.record_output({
             "status": metrics.status if metrics else "no_options",
@@ -106,10 +114,10 @@ def snapshot_one(symbol: str, quoted_at: datetime, rate: float, rate_assumed: bo
         return "no_options", None
     if metrics.status != "ok":
         return metrics.status, None
-    trade_date = mc.et_date(fetched.market_time) if fetched.market_time else quoted_at.astimezone(mc.ET).date()
+    underlying_date = mc.et_date(fetched.market_time).isoformat() if fetched.market_time else None
     return "ok", {
         "symbol": symbol,
-        "trade_date": trade_date,
+        "trade_date": session_date,
         "as_of": quoted_at,
         "method_version": om.METHOD_VERSION,
         "spot": fetched.spot,
@@ -126,7 +134,7 @@ def snapshot_one(symbol: str, quoted_at: datetime, rate: float, rate_assumed: bo
         "call_volume": metrics.call_volume,
         "put_volume": metrics.put_volume,
         "next_earnings": fetched.next_earnings,
-        "detail": metrics.detail,
+        "detail": {**metrics.detail, "underlying_date": underlying_date},
     }
 
 
@@ -172,7 +180,7 @@ async def _run(session: AsyncSession, now: datetime) -> SnapshotRun:
         return finish("no_new_session", session_date, symbols)
 
     quoted_at = mc.quote_time(now)
-    rate, rate_assumed = await _on_options_thread(risk_free_rate)
+    rate, rate_assumed = await _on_options_thread(options_chain.risk_free_rate)
     paused, i = False, 0
     while i < len(pending):
         symbol = pending[i]
@@ -180,7 +188,7 @@ async def _run(session: AsyncSession, now: datetime) -> SnapshotRun:
             lists["deferred"] = pending[i:]
             break
         try:
-            status, row = await _on_options_thread(snapshot_one, symbol, quoted_at, rate, rate_assumed)
+            status, row = await _on_options_thread(snapshot_one, symbol, session_date, quoted_at, rate, rate_assumed)
             if row is not None:
                 status = "written" if await _insert(session, row) else "skipped"
         except Exception as exc:

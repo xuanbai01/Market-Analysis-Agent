@@ -19,7 +19,7 @@ import asyncio
 import logging
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -68,6 +68,7 @@ class _Built:
     fetched: ChainFetch | None
     smiles: dict[date, Smile]
     parts: dict[str, Any]  # OptionsReport fields but history, claims and generated_at
+    unusable: set[date] = field(default_factory=set)  # expiries read with nothing to price
 
 
 @dataclass
@@ -93,6 +94,12 @@ def _fresh(symbol: str) -> _Entry | None:
 
 def is_fresh(symbol: str) -> bool:
     return _fresh(symbol) is not None
+
+
+def has_chain(symbol: str, expiry: date) -> bool:
+    """Whether ``/chain/{expiry}`` can answer without asking Yahoo."""
+    entry = _fresh(symbol)
+    return entry is not None and (expiry in entry.built.smiles or expiry in entry.built.unusable)
 
 
 def _remember(symbol: str, entry: _Entry) -> None:
@@ -145,7 +152,7 @@ def _parts(
         "rv60": metrics.rv60,
         "put_call_open_interest": put_call_oi,
         "put_call_volume": put_call_volume,
-        "expiries": [oa.expiry_summary(fetched.chains[s.expiry], s, reaction) for s in smiles],
+        "expiries": [oa.expiry_summary(fetched.chains[s.expiry], s, reaction, quoted_at) for s in smiles],
         "listed_expiries": list(fetched.expiries),
         "chain": oa.expiry_chain(fetched.chains[default.expiry], default) if default else None,
         "earnings": earnings,
@@ -191,10 +198,16 @@ def build(symbol: str, now: datetime) -> _Built:
 async def _assemble(session: AsyncSession, built: _Built, now: datetime) -> OptionsReport:
     parts = built.parts
     usable = parts["status"] == "ok"
-    points = await store.iv30_history(session, built.symbol, om.METHOD_VERSION) if usable else []
-    history = oa.iv_history(points, parts["iv30"])
+    points: list[tuple[date, float]] = []
     if usable:
-        await store.touch_tracked(session, built.symbol, now)
+        # The build cost a dozen Yahoo calls: a database hiccup costs only
+        # the history and the record of the view, not the report.
+        try:
+            points = await store.iv30_history(session, built.symbol, om.METHOD_VERSION)
+            await store.touch_tracked(session, built.symbol, now)
+        except Exception:
+            logger.exception("options history for %s unavailable; serving the report without it", built.symbol)
+    history = oa.iv_history(points, parts["iv30"])
     chain = parts["chain"]
     default = next((e for e in parts["expiries"] if chain is not None and e.expiry == chain.expiry), None)
     claims = oa.claims(
@@ -210,25 +223,33 @@ async def get_report(session: AsyncSession, symbol: str, *, now: datetime | None
     if entry is not None:
         return entry.report
     lock = _locks.setdefault(symbol, asyncio.Lock())
-    async with lock:
-        entry = _fresh(symbol)
-        if entry is not None:
-            return entry.report
-        now = now or _now()
-        try:
-            built = await options_chain.on_options_thread(build, symbol, now)
-        except SymbolNotFound:
+    try:
+        async with lock:
+            return await _get_report_locked(session, symbol, now)
+    finally:
+        if symbol not in _cache and not lock.locked():
+            _locks.pop(symbol, None)  # a symbol that failed leaves no lock behind
+
+
+async def _get_report_locked(session: AsyncSession, symbol: str, now: datetime | None) -> OptionsReport:
+    entry = _fresh(symbol)
+    if entry is not None:
+        return entry.report
+    now = now or _now()
+    try:
+        built = await options_chain.on_options_thread(build, symbol, now)
+    except SymbolNotFound:
+        raise
+    except Exception:
+        stale = _cache.get(symbol)
+        if stale is None:
             raise
-        except Exception:
-            stale = _cache.get(symbol)
-            if stale is None:
-                raise
-            logger.exception("options for %s failed; serving the copy from before", symbol)
-            return stale.report
-        report = await _assemble(session, built, now)
-        ttl = NO_OPTIONS_TTL_SECONDS if report.status == "no_options" else CACHE_TTL_SECONDS
-        _remember(symbol, _Entry(report, built, _clock() + ttl))
-        return report
+        logger.exception("options for %s failed; serving the copy from before", symbol)
+        return stale.report
+    report = await _assemble(session, built, now)
+    ttl = NO_OPTIONS_TTL_SECONDS if report.status == "no_options" else CACHE_TTL_SECONDS
+    _remember(symbol, _Entry(report, built, _clock() + ttl))
+    return report
 
 
 def _fetch_expiry(symbol: str, expiry: date, built: _Built) -> Smile:
@@ -236,10 +257,12 @@ def _fetch_expiry(symbol: str, expiry: date, built: _Built) -> Smile:
     quoted_at = built.parts["quoted_at"]
     one = options_chain.fetch_chain(symbol, lambda _listed, _quote: [expiry], history_period=_SINGLE_EXPIRY_HISTORY)
     if one is None or expiry not in one.chains or built.fetched is None:
+        built.unusable.add(expiry)  # not asked again while the report is cached
         raise NoUsableQuotes(expiry)
     built.fetched.chains[expiry] = one.chains[expiry]
     s = om.smile(one.chains[expiry], built.fetched.spot, quoted_at, built.parts["rate"], built.fetched.dividend_yield)
     if s is None:
+        built.unusable.add(expiry)
         raise NoUsableQuotes(expiry)
     built.smiles[expiry] = s
     return s
@@ -254,7 +277,7 @@ async def get_chain(
         raise ExpiryNotListed(expiry)
     s = built.smiles.get(expiry)
     if s is None:
-        if expiry in built.fetched.chains:
+        if expiry in built.fetched.chains or expiry in built.unusable:
             raise NoUsableQuotes(expiry)
         s = await options_chain.on_options_thread(_fetch_expiry, symbol, expiry, built)
     return await options_chain.on_options_thread(oa.expiry_chain, built.fetched.chains[expiry], s)

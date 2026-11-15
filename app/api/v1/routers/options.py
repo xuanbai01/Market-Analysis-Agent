@@ -15,6 +15,7 @@ from app.services.options_report import (
     NoUsableQuotes,
     get_chain,
     get_report,
+    has_chain,
     is_fresh,
 )
 from app.services.options_snapshots import SnapshotRunning, run_snapshots
@@ -27,9 +28,11 @@ Symbol = Annotated[str, Path(pattern=r"^[A-Za-z][A-Za-z0-9.\-]{0,9}$", descripti
 _UNAVAILABLE = "Option data is unavailable right now; try again shortly."
 
 
-async def _limit_misses(request: Request, symbol: str) -> None:
-    """Cached reports are free; a build (about a dozen Yahoo calls) counts."""
-    if not is_fresh(symbol):
+async def _limit_misses(request: Request, symbol: str, expiry: date | None = None) -> None:
+    """Cached answers are free; anything that asks Yahoo counts (a build is
+    about a dozen calls, an expiry not read yet three)."""
+    cached = is_fresh(symbol) if expiry is None else has_chain(symbol, expiry)
+    if not cached:
         await enforce_options_rate_limit(request)
 
 
@@ -53,7 +56,7 @@ async def options_chain(
     request: Request, symbol: Symbol, expiry: date, session: AsyncSession = Depends(get_session)
 ) -> ExpiryChain:
     symbol = symbol.upper()
-    await _limit_misses(request, symbol)
+    await _limit_misses(request, symbol, expiry)
     try:
         return await get_chain(session, symbol, expiry)
     except SymbolNotFound as exc:

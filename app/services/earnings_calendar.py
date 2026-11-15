@@ -121,12 +121,13 @@ def next_report_date(calendar: Any, earnings_dates: Any, latest_report_date: str
 
 
 def timing_of(when: datetime) -> Timing:
-    moment = when.astimezone(mc.ET).time()
+    local = when.astimezone(mc.ET)
+    moment = local.time()
     if moment == _MIDNIGHT:
         return "unknown"
     if moment < mc.OPEN:
         return "before_open"
-    if moment >= mc.CLOSE:
+    if local >= mc.session_close(local.date()):  # 1 pm on a half day
         return "after_close"
     return "during"
 

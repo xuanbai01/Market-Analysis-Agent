@@ -31,6 +31,10 @@ The method, which every stored row is tagged with (``METHOD_VERSION``):
 
 The detail keeps the raw near-money quotes, so a later method can be
 recomputed over the whole history.
+
+Versions: 1, from 2026-11-13; 2, from 2026-11-16, measures time to expiry
+to a half day's 1 pm close and quotes taken after it from 1 pm
+(``market_calendar.early_closes``). Version 1 ran every session to 16:00.
 """
 from __future__ import annotations
 
@@ -45,7 +49,7 @@ from app.services import market_calendar as mc
 from app.services import options_math as om
 from app.services.options_chain import ChainFetch, ExpiryQuotes, Quote
 
-METHOD_VERSION = 1
+METHOD_VERSION = 2
 
 MAX_SPREAD_SHARE = 0.25
 MIN_SPREAD = 0.05

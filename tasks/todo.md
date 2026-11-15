@@ -102,7 +102,16 @@ So nothing from tastytrade is stored, sent to a prompt or shown in the demo. The
   - **Market metrics** are all filled, and NVDA has 47 past reports.
   - **The account:** 133 transactions, 2 open positions.
   - **DXLink** was refused over its host (`tasty-openapi-dxlink-md-ws.dxfeed.com`, level `api`, path `/realtime`), allowed on `fix/tastytrade-scope-strictness`.
-  - **Still open:** real-time quote ages (needs a session), candle depth, IV in candles, option candles, and DXLink's Summary and Greeks.
+  - **Third run (#118 deployed), and candle reads fixed on `fix/dxlink-candle-symbols`:**
+    - DXLink works, with Summary (open interest) and Greeks.
+    - **Daily candles:** back to 1995 (8,000 is the per-request cap), with IV on about the last 9 years.
+    - **Intraday:** hourly back to February 2026; 5-minute bars about six weeks back.
+    - **An option contract:** a year of daily candles with IV and open interest.
+  - **Still open:** real-time quote ages, which needs a run during a session (Monday 2026-11-16).
+  - **What this means for the next PRs:**
+    - **B:** REST quotes already carry open interest, IV and Greeks, so live quotes need no DXLink.
+    - **C:** a live chart of about 9 years of daily IV from candles, plus an option contract's price and IV path.
+    - **D:** the journal can show each trade's contract path from candles.
 - [ ] **PR B — live quotes on the options page:** `GET /v1/options/{symbol}/live/{expiry}`, cached 10 s; our IVs from live mids; Yahoo's open interest; a Live/Delayed switch; the builder prices at live bid/ask.
 - [ ] **PR C — market history, live:** `GET /v1/options/{symbol}/history` (market metrics; daily candles, with IV if they carry it); a "History · tastytrade" panel.
 - [ ] **PR D — the owner's trades:** `trade_journal` (orders to strategies, FIFO opens and closes, expirations and assignments, fees); `GET /v1/trades`; a lazy `/trades` page. Fetched on demand, account numbers masked, no advice.

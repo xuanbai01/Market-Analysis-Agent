@@ -197,14 +197,33 @@ async def test_candles_come_back_oldest_first_until_the_snapshot_ends(server: Fa
     assert history.candles[0].imp_volatility is None  # "NaN"
     assert history.candles[0].open_interest is None
     sub = server.subscriptions()
-    assert sub == [{"type": "Candle", "symbol": "SPY{=1d}", "fromTime": int(datetime(2026, 11, 10, tzinfo=UTC).timestamp())}]
+    assert sub == [{"type": "Candle", "symbol": "SPY{=1d}", "fromTime": int(datetime(2026, 11, 10, tzinfo=UTC).timestamp() * 1000)}]
 
 
-async def test_from_time_can_be_sent_in_milliseconds(server: FakeServer) -> None:
+async def test_from_time_is_in_milliseconds(server: FakeServer) -> None:
+    """tastytrade's docs say seconds; DXLink reads milliseconds (the probe, 2026-11-15)."""
     server.on_subscribe = [["Candle", candle_row("SPY{=1d}", "2026-11-13", 600.0, flags=dxlink.SNAPSHOT_END)]]
     start = datetime(2026, 11, 1, tzinfo=UTC)
-    await dxlink.fetch_candles("SPY", "1d", start, time_unit_ms=True)
+    await dxlink.fetch_candles("SPY", "1d", start)
     assert server.subscriptions()[0]["fromTime"] == int(start.timestamp() * 1000)
+
+
+async def test_the_servers_normal_form_of_the_candle_symbol_is_read(server: FakeServer) -> None:
+    """SPY{=1d} is echoed as SPY{=d}; the first run read nothing because of it."""
+    server.on_subscribe = [
+        ["Candle", candle_row("SPY{=d}", "2026-11-13", 603.0, flags=dxlink.SNAPSHOT_BEGIN) + candle_row("SPY{=d}", "2026-11-12", 602.0, flags=dxlink.SNAPSHOT_END)],
+    ]
+    history = await dxlink.fetch_candles("SPY", "1d", datetime(2026, 11, 1, tzinfo=UTC))
+    assert [c.close for c in history.candles] == [602.0, 603.0]
+    assert history.complete is True
+
+
+async def test_another_symbols_candles_are_not_read(server: FakeServer) -> None:
+    server.on_subscribe = [
+        ["Candle", candle_row("SPYG{=d}", "2026-11-13", 70.0) + candle_row("SPY{=d}", "2026-11-12", 602.0, flags=dxlink.SNAPSHOT_END)],
+    ]
+    history = await dxlink.fetch_candles("SPY", "d", datetime(2026, 11, 1, tzinfo=UTC))
+    assert [c.close for c in history.candles] == [602.0]
 
 
 async def test_removed_rows_are_dropped(server: FakeServer) -> None:

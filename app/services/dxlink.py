@@ -13,10 +13,15 @@ machine (tastytrade allows five).
 A candle history arrives newest first, the last row flagged
 ``SNAPSHOT_END``, or ``SNAPSHOT_SNIP`` when the server cut it short (then
 the history is ``snipped`` and not ``complete``); live updates follow and
-are not read. tastytrade documents ``fromTime``
-in seconds and dxFeed's own APIs take milliseconds, so
-``fetch_candles`` sends seconds unless told otherwise; the probe
-(``tastytrade_probe``) checks which one DXLink honours.
+are not read. Two things the probe found that the docs don't say
+(2026-11-15):
+- ``fromTime`` is in milliseconds. tastytrade's docs say seconds, but a
+  value in seconds reads as January 1970 and returns everything.
+- The server echoes the candle symbol in its normal form: ``SPY{=1d}``
+  comes back as ``SPY{=d}``. A session subscribes to one candle symbol, so
+  its events are matched on the symbol and the ``{=`` that follows it.
+A history holds at most 8,000 candles: SPY's daily ones reach back to
+1995, its 5-minute ones about six weeks.
 
 The server is trusted as little as the feed allows:
 - the address, which comes in tastytrade's answer, must be tastytrade's
@@ -375,20 +380,21 @@ def _candle(event: dict[str, Any]) -> Candle | None:
     )
 
 
-async def fetch_candles(symbol: str, period: str, from_time: datetime, *, time_unit_ms: bool = False) -> CandleHistory:
-    """``symbol``'s candles of ``period`` (dxFeed's codes: ``1d``, ``1h``,
+async def fetch_candles(symbol: str, period: str, from_time: datetime) -> CandleHistory:
+    """``symbol``'s candles of ``period`` (dxFeed's codes: ``d``, ``h``,
     ``5m``) from ``from_time``, oldest first, at most ``MAX_CANDLES``.
     ``symbol`` is a streamer symbol (an option's comes from the chain's
     ``streamer-symbol``)."""
     candle_symbol = f"{symbol}{{={period}}}"
-    stamp = from_time.timestamp()
-    from_value = int(stamp * 1000) if time_unit_ms else int(stamp)
+    echoed = f"{symbol}{{="  # the server's normal form differs in the period: SPY{=1d} -> SPY{=d}
+    from_value = int(from_time.timestamp() * 1000)
     by_time: dict[datetime, Candle] = {}
     snipped = False
 
     def on_event(event: dict[str, Any]) -> bool | None:
         nonlocal snipped
-        if event.get("eventSymbol") != candle_symbol:
+        event_symbol = event.get("eventSymbol")
+        if not isinstance(event_symbol, str) or not event_symbol.startswith(echoed):
             return None
         flags = int(event.get("eventFlags") or 0)
         candle = _candle(event)
@@ -401,7 +407,7 @@ async def fetch_candles(symbol: str, period: str, from_time: datetime, *, time_u
             return True
         return False if len(by_time) >= MAX_CANDLES else None
 
-    summary = {"symbol": candle_symbol, "from": from_time.date().isoformat(), "unit": "ms" if time_unit_ms else "s"}
+    summary = {"symbol": candle_symbol, "from": from_time.date().isoformat()}
     with log_external_call("dxlink.candles", summary) as call:
         complete = await _run("Candle", [{"type": "Candle", "symbol": candle_symbol, "fromTime": from_value}], on_event)
         call.record_output({"candles": len(by_time), "complete": complete, "snipped": snipped})

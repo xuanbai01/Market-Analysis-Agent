@@ -12,6 +12,7 @@ import { ErrorBanner } from "../ErrorBanner";
 import { pct, shortDate } from "./chart-kit";
 import { OpenInterestChart } from "./OpenInterestChart";
 import { SmileChart } from "./SmileChart";
+import { useSignOutOn401 } from "./useSignOutOn401";
 
 interface Props {
   symbol: string;
@@ -21,7 +22,8 @@ interface Props {
 }
 
 const dash = "—";
-const price = (v: number) => (v > 0 ? v.toFixed(2) : dash);
+// A zero bid beside an ask is a price; a dash only where neither side quotes.
+const price = (v: number, quoted: boolean) => (quoted ? v.toFixed(2) : dash);
 const iv = (v: number | null) => (v === null ? dash : pct(v));
 const delta = (v: number | null) => (v === null ? dash : v.toFixed(2));
 const strike = (k: number) => (Number.isInteger(k) ? k.toFixed(0) : k.toFixed(2));
@@ -38,6 +40,7 @@ export function ExpirySection({ symbol, listed, initial, spot }: Props) {
     staleTime: 5 * 60_000,
   });
   const chain = expiry === initial.expiry ? initial : query.data;
+  const unauthorized = useSignOutOn401(query.error);
 
   return (
     <div data-testid="options-expiry-section">
@@ -58,7 +61,7 @@ export function ExpirySection({ symbol, listed, initial, spot }: Props) {
         {chain && <span>{Math.round(chain.days)} days · forward ${chain.forward.toFixed(2)}</span>}
       </label>
       {query.isFetching && <p className="font-mono text-[11px] text-strata-muted">Reading {shortDate(expiry, true)}…</p>}
-      {query.error && <ErrorBanner error={query.error} />}
+      {query.error && !unauthorized && <ErrorBanner error={query.error} />}
       {chain && (
         <>
           <div className="grid gap-6 lg:grid-cols-2">
@@ -82,14 +85,16 @@ function ChainTable({ chain }: { chain: ExpiryChain }) {
   const cell = "px-2 py-1 text-right";
   const side = (r: ChainRow, call: boolean) => {
     const usable = call ? r.call_usable : r.put_usable;
+    const quoted = call ? r.call_bid > 0 || r.call_ask > 0 : r.put_bid > 0 || r.put_ask > 0;
     const values = call
-      ? [price(r.call_bid), price(r.call_ask), iv(r.call_iv), delta(r.call_delta), r.call_open_interest.toLocaleString("en-US"), r.call_volume.toLocaleString("en-US")]
-      : [price(r.put_bid), price(r.put_ask), iv(r.put_iv), delta(r.put_delta), r.put_open_interest.toLocaleString("en-US"), r.put_volume.toLocaleString("en-US")];
+      ? [price(r.call_bid, quoted), price(r.call_ask, quoted), iv(r.call_iv), delta(r.call_delta), r.call_open_interest.toLocaleString("en-US"), r.call_volume.toLocaleString("en-US")]
+      : [price(r.put_bid, quoted), price(r.put_ask, quoted), iv(r.put_iv), delta(r.put_delta), r.put_open_interest.toLocaleString("en-US"), r.put_volume.toLocaleString("en-US")];
+    const ids = ["bid", "ask", "iv"];
     return values.map((v, i) => (
       <td
         key={i}
         className={`${cell} ${usable ? "text-strata-fg" : "text-strata-muted"}`}
-        data-testid={i === 2 ? (call ? "options-chain-call-iv" : "options-chain-put-iv") : undefined}
+        data-testid={i < ids.length ? `options-chain-${call ? "call" : "put"}-${ids[i]}` : undefined}
       >
         {v}
       </td>

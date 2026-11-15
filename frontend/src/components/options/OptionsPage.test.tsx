@@ -58,7 +58,7 @@ describe("OptionsPage", () => {
   it("ranks today's IV30 once there's history, and says it's collecting before", async () => {
     vi.mocked(fetchOptionsReport).mockResolvedValue(REPORT);
     const { unmount } = renderPage();
-    expect(await screen.findByTestId("options-tiles")).toHaveTextContent("100th percentile");
+    expect(await screen.findByTestId("options-tiles")).toHaveTextContent("IV history100thpercentile over 70 sessions");
     unmount();
     vi.mocked(fetchOptionsReport).mockResolvedValue({
       ...REPORT,
@@ -66,6 +66,18 @@ describe("OptionsPage", () => {
     });
     renderPage();
     expect(await screen.findByTestId("options-tiles")).toHaveTextContent("Collecting: 1 of 63 sessions");
+  });
+
+  it("says there's nothing to rank when today has no IV30, whatever the history", async () => {
+    vi.mocked(fetchOptionsReport).mockResolvedValue({
+      ...REPORT,
+      iv30: null,
+      history: { ...REPORT.history, sessions: 70, percentile: null, rank: null },
+    });
+    renderPage();
+    const tiles = await screen.findByTestId("options-tiles");
+    expect(tiles).toHaveTextContent("No IV30 today to rank");
+    expect(tiles).not.toHaveTextContent("Collecting");
   });
 
   it("says when the quotes are delayed prints from a session", async () => {

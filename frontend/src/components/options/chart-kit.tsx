@@ -42,7 +42,14 @@ export function sqrtDays(maxDays: number, r0: number, r1: number): (days: number
   return (days) => r0 + (Math.sqrt(Math.max(days, 0)) / root) * (r1 - r0);
 }
 
-export const DAY_TICKS = [7, 30, 90, 180, 365];
+const DAY_TICKS = [7, 30, 90, 180, 365];
+
+/** The standard horizons the expiries reach, or the farthest expiry's
+ * days when every expiry is nearer than a week. */
+export function dayTicks(maxDays: number): number[] {
+  const ticks = DAY_TICKS.filter((d) => d <= maxDays);
+  return ticks.length > 0 ? ticks : [Math.max(1, Math.round(maxDays))];
+}
 
 export function pct(v: number, digits = 1): string {
   return `${(v * 100).toFixed(digits)}%`;

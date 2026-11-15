@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { OptionsReportSchema } from "../../lib/options-schemas";
+import { dayTicks } from "./chart-kit";
 import { EarningsMoves } from "./EarningsMoves";
 import { ExpectedMoveCone } from "./ExpectedMoveCone";
 import { RAW_OPTIONS_REPORT } from "./fixture";
@@ -95,7 +96,9 @@ describe("EarningsMoves", () => {
     render(<EarningsMoves earnings={EARNINGS} />);
     expect(screen.getAllByTestId("options-earnings-bar")).toHaveLength(8);
     expect(screen.getByTestId("options-earnings-band")).toBeInTheDocument();
-    expect(screen.getByTestId("options-earnings-summary")).toHaveTextContent("±7.1%");
+    // The average size of the move, not a one-sigma band like the cone's.
+    expect(screen.getByTestId("options-earnings-summary")).toHaveTextContent("an average move of 7.1%");
+    expect(screen.getByTestId("options-earnings-summary").textContent).not.toContain("±");
     expect(screen.getByTestId("options-earnings-summary")).toHaveTextContent("$11.59");
     expect(screen.getByTestId("options-earnings-summary")).toHaveTextContent("4.0%");
   });
@@ -112,5 +115,15 @@ describe("EarningsMoves", () => {
       <EarningsMoves earnings={{ ...EARNINGS, next_date: null, implied_move: null, past: [], refused: "no earnings date" }} />,
     );
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("dayTicks", () => {
+  it("labels the standard horizons the expiries reach", () => {
+    expect(dayTicks(100)).toEqual([7, 30, 90]);
+  });
+
+  it("labels the farthest expiry when it is nearer than a week", () => {
+    expect(dayTicks(4.6)).toEqual([5]);
   });
 });

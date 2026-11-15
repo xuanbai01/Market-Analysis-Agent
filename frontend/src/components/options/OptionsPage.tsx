@@ -5,11 +5,9 @@
  * open interest, chain). Signed in only; not in the public demo.
  */
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, useEffect } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import type { ReactNode } from "react";
+import { Link, useParams } from "react-router-dom";
 
-import { ApiError } from "../../lib/api";
-import { clearStoredToken } from "../../lib/auth";
 import { fetchOptionsReport } from "../../lib/options-api";
 import type { OptionsReport } from "../../lib/options-schemas";
 import { ROUTES } from "../../lib/routes";
@@ -20,8 +18,12 @@ import { EarningsMoves } from "./EarningsMoves";
 import { ExpectedMoveCone } from "./ExpectedMoveCone";
 import { ExpirySection } from "./ExpirySection";
 import { TermStructureChart } from "./TermStructureChart";
+import { useSignOutOn401 } from "./useSignOutOn401";
 
+// The backend's rules (options_analysis): a percentile from 63 stored
+// sessions, over the last 252.
 const PERCENTILE_SESSIONS = 63;
+const HISTORY_WINDOW = 252;
 
 function ordinal(n: number): string {
   const tens = n % 100;
@@ -68,13 +70,15 @@ function Tiles({ report }: { report: OptionsReport }) {
   const nearest = report.expiries.find((e) => e.expiry === chain?.expiry);
   const ivRank =
     history.percentile !== null
-      ? `${ordinal(Math.round(history.percentile))} percentile over ${Math.min(history.sessions, 252)} sessions`
-      : `Collecting: ${history.sessions} of ${PERCENTILE_SESSIONS} sessions`;
+      ? `percentile over ${Math.min(history.sessions, HISTORY_WINDOW)} sessions`
+      : history.sessions < PERCENTILE_SESSIONS
+        ? `Collecting: ${history.sessions} of ${PERCENTILE_SESSIONS} sessions`
+        : "No IV30 today to rank";
   return (
     <div data-testid="options-tiles" className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
       <Tile label="Spot" value={report.spot !== null ? money(report.spot) : "—"} />
       <Tile label="IV30" value={report.iv30 !== null ? pct(report.iv30) : "—"} sub={report.rv20 !== null ? `RV20 ${pct(report.rv20)}` : undefined} />
-      <Tile label="IV history" value={history.percentile !== null ? `${Math.round(history.percentile)}` : "—"} sub={ivRank} />
+      <Tile label="IV history" value={history.percentile !== null ? ordinal(Math.round(history.percentile)) : "—"} sub={ivRank} />
       <Tile
         label="Expected move"
         value={nearest ? `±${pct(nearest.expected_move)}` : "—"}
@@ -88,7 +92,6 @@ function Tiles({ report }: { report: OptionsReport }) {
 
 export default function OptionsPage() {
   const { ticker } = useParams<{ ticker: string }>();
-  const navigate = useNavigate();
   const symbol = (ticker ?? "").toUpperCase();
   const query = useQuery({
     queryKey: ["options", symbol],
@@ -97,15 +100,8 @@ export default function OptionsPage() {
     staleTime: 5 * 60_000,
   });
 
-  useEffect(() => {
-    if (query.error instanceof ApiError && query.error.status === 401) {
-      clearStoredToken();
-      navigate(ROUTES.login, { replace: true });
-    }
-  }, [query.error, navigate]);
-
   const report = query.data;
-  const unauthorized = query.error instanceof ApiError && query.error.status === 401;
+  const unauthorized = useSignOutOn401(query.error);
   const eventDays =
     report?.earnings?.reaction_date ? daysBetween(report.quoted_at, report.earnings.reaction_date) : null;
   // A panel only for a chart that will draw (each chart's own check).

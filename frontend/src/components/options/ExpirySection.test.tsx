@@ -1,7 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "../../lib/api";
 import { fetchOptionsChain } from "../../lib/options-api";
 import { OptionsReportSchema } from "../../lib/options-schemas";
 import { ExpirySection } from "./ExpirySection";
@@ -16,10 +18,20 @@ function section(initial = CHAIN, listed = REPORT.listed_expiries) {
   return <ExpirySection symbol="NVDA" listed={listed} initial={initial} spot={REPORT.spot} />;
 }
 
-function renderSection() {
+function renderSection(ui = section()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = render(<QueryClientProvider client={client}>{section()}</QueryClientProvider>);
-  return { ...view, rerender: (ui: JSX.Element) => view.rerender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>) };
+  const wrap = (child: JSX.Element) => (
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/options/NVDA"]}>
+        <Routes>
+          <Route path="/options/:ticker" element={child} />
+          <Route path="/login" element={<div>sign-in page</div>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+  const view = render(wrap(ui));
+  return { ...view, rerender: (next: JSX.Element) => view.rerender(wrap(next)) };
 }
 
 const select = () => screen.getByTestId("options-expiry-select") as HTMLSelectElement;
@@ -39,14 +51,27 @@ describe("ExpirySection", () => {
 
   it("dims a side with no usable quote", () => {
     const rows = CHAIN.rows.map((r, i) => (i === 0 ? { ...r, call_usable: false, call_iv: null } : r));
-    const client = new QueryClient();
-    render(
-      <QueryClientProvider client={client}>
-        <ExpirySection symbol="NVDA" listed={REPORT.listed_expiries} initial={{ ...CHAIN, rows }} spot={REPORT.spot} />
-      </QueryClientProvider>,
-    );
+    renderSection(section({ ...CHAIN, rows }));
     const first = screen.getAllByTestId("options-chain-row")[0];
     expect(within(first).getByTestId("options-chain-call-iv")).toHaveTextContent("—");
+  });
+
+  it("prints a zero bid beside a real ask, and a dash only where there is no quote at all", () => {
+    const rows = CHAIN.rows.map((r, i) =>
+      i === 0 ? { ...r, call_bid: 0, call_ask: 0.05 } : i === 1 ? { ...r, call_bid: 0, call_ask: 0 } : r,
+    );
+    renderSection(section({ ...CHAIN, rows }));
+    const [zeroBid, none] = screen.getAllByTestId("options-chain-row");
+    expect(within(zeroBid).getAllByTestId("options-chain-call-bid")[0]).toHaveTextContent("0.00");
+    expect(within(none).getAllByTestId("options-chain-call-bid")[0]).toHaveTextContent("—");
+    expect(within(none).getAllByTestId("options-chain-call-ask")[0]).toHaveTextContent("—");
+  });
+
+  it("sends a stale sign-in back to the sign-in page when an expiry is read", async () => {
+    vi.mocked(fetchOptionsChain).mockRejectedValue(new ApiError({ status: 401, title: "Unauthorized" }));
+    renderSection();
+    fireEvent.change(select(), { target: { value: REPORT.listed_expiries[2] } });
+    expect(await screen.findByText("sign-in page")).toBeInTheDocument();
   });
 
   it("reads another expiry when one is picked", async () => {

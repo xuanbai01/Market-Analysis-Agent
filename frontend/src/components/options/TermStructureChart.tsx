@@ -7,7 +7,7 @@ import { useState } from "react";
 
 import type { ExpirySummary } from "../../lib/options-schemas";
 import { niceTicks } from "../MultiLine";
-import { AxisText, COLOR, DAY_TICKS, FONT, PAD, Tooltip, YGrid, linear, pct, shortDate, sqrtDays, useChartWidth } from "./chart-kit";
+import { AxisText, COLOR, FONT, PAD, Tooltip, YGrid, linear, pct, shortDate, sqrtDays, useChartWidth, dayTicks } from "./chart-kit";
 import { drawsTerm } from "./draws";
 
 const HEIGHT = 240;
@@ -38,7 +38,7 @@ export function TermStructureChart({ expiries, rv20 }: { expiries: ExpirySummary
         onMouseLeave={() => setHover(null)}
       >
         <YGrid ticks={ticks} y={y} x0={PAD.left} x1={W - PAD.right - 60} format={(v) => pct(v, 0)} />
-        {DAY_TICKS.filter((d) => d <= maxDays).map((d) => (
+        {dayTicks(maxDays).map((d) => (
           <AxisText key={d} x={x(d)} y={HEIGHT - 8} anchor="middle">
             {`${d}d`}
           </AxisText>

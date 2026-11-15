@@ -1,7 +1,9 @@
 /**
  * EarningsMoves — the move the options price through the next report,
  * against the moves the last reports made (signed bars). The implied move
- * is a band at ±its size; when it's refused, the reason is said instead.
+ * is the average size of the move (√(2/π)·σ, not one sigma like the
+ * cone's), drawn as a band at that size either way so a bar outside it
+ * moved more than priced; when it's refused, the reason is said instead.
  */
 import { useState } from "react";
 
@@ -43,8 +45,8 @@ export function EarningsMoves({ earnings }: { earnings: EarningsBlock }) {
         )}
         {implied !== null ? (
           <>
-            Options price a move of <span className="text-strata-hi">±{pct(implied)}</span>
-            {earnings.implied_move_usd !== null && <> ({money(earnings.implied_move_usd)})</>} through it.{" "}
+            Options price an average move of <span className="text-strata-hi">{pct(implied)}</span>
+            {earnings.implied_move_usd !== null && <> ({money(earnings.implied_move_usd)})</>} either way through it.{" "}
           </>
         ) : (
           earnings.refused && <>No implied move: {earnings.refused}. </>
@@ -62,14 +64,14 @@ export function EarningsMoves({ earnings }: { earnings: EarningsBlock }) {
           height={HEIGHT}
           viewBox={`0 0 ${W} ${HEIGHT}`}
           role="img"
-          aria-label={`Moves after the last ${past.length} reports${implied !== null ? `, against ±${pct(implied)} priced for the next` : ""}.`}
+          aria-label={`Moves after the last ${past.length} reports${implied !== null ? `, against an average move of ${pct(implied)} priced for the next` : ""}.`}
           onMouseLeave={() => setHover(null)}
         >
           {implied !== null && (
             <g data-testid="options-earnings-band">
               <rect x={PAD.left} y={y(implied)} width={W - PAD.left - PAD.right} height={y(-implied) - y(implied)} fill={COLOR.band} fillOpacity={0.14} />
               {/* At the left end: the newest report's bar is at the right and can be the tallest. */}
-              <AxisText x={PAD.left + 4} y={y(implied) - 4} anchor="start">{`±${pct(implied)} priced`}</AxisText>
+              <AxisText x={PAD.left + 4} y={y(implied) - 4} anchor="start">{`${pct(implied)} average priced`}</AxisText>
             </g>
           )}
           <line x1={PAD.left} x2={W - PAD.right} y1={y(0)} y2={y(0)} stroke={COLOR.grid} />

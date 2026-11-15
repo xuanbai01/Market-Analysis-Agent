@@ -7,7 +7,7 @@ import { useState } from "react";
 
 import type { ExpirySummary } from "../../lib/options-schemas";
 import { niceTicks } from "../MultiLine";
-import { AxisText, COLOR, DAY_TICKS, PAD, Tooltip, YGrid, linear, money, pct, shortDate, sqrtDays, useChartWidth } from "./chart-kit";
+import { AxisText, COLOR, PAD, Tooltip, YGrid, linear, money, pct, shortDate, sqrtDays, useChartWidth, dayTicks } from "./chart-kit";
 import { conePoints, drawsCone } from "./draws";
 
 const HEIGHT = 260;
@@ -51,7 +51,7 @@ export function ExpectedMoveCone({ expiries, spot, eventDays }: Props) {
         onMouseLeave={() => setHover(null)}
       >
         <YGrid ticks={ticks} y={y} x0={PAD.left} x1={W - PAD.right} format={(v) => `$${Math.round(v)}`} />
-        {DAY_TICKS.filter((d) => d <= maxDays).map((d) => (
+        {dayTicks(maxDays).map((d) => (
           <AxisText key={d} x={x(d)} y={HEIGHT - 8} anchor="middle">
             {`${d}d`}
           </AxisText>

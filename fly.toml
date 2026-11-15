@@ -15,6 +15,11 @@ kill_timeout = '10s'            # give in-flight requests time to drain
   APP_ENV = 'prod'
   PORT = '8000'
   TZ = 'UTC'
+  # glibc gives each thread its own heap ("arena", up to 8 on one CPU), so
+  # the yfinance and SEC threads of a report each keep freed memory the
+  # others can't reuse. Two arenas cut a JPM page load's peak by 25-40 MB
+  # on Linux (2026-11-14; the machine has 512 MB). See tasks/lessons.md.
+  MALLOC_ARENA_MAX = '2'
   # The Vercel dashboard's origin — the only one CORS lets the browser
   # call from (exact match, no trailing slash). Public, so it lives here.
   FRONTEND_ORIGIN = 'https://market-analysis-agent-red.vercel.app'
@@ -66,7 +71,11 @@ kill_timeout = '10s'            # give in-flight requests time to drain
     protocol = 'http'
 
 # 512 MB is comfortable for FastAPI + pandas/numpy (yfinance pulls them in).
-# Shared CPU is fine for this workload — the hot path is external I/O.
+# A shared CPU gets 1/16 of a core (5 ms per 80 ms) once its burst balance
+# is spent; a machine boots with 5 s of it. A report's CPU work therefore
+# takes ~16x its desktop time here: RIVN's took 4-5.5 minutes until its
+# risk diff was cut from 20 CPU-seconds to 0.7 (2026-11-14). Keep a build's
+# CPU work small rather than buying a performance CPU.
 # Monthly cost at always-on: ~$1.94. With auto_stop_machines it'll be
 # pennies until real traffic.
 [[vm]]

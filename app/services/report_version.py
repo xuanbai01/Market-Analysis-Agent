@@ -40,7 +40,12 @@ History:
     6  2026-11-13 — Disney, Cigna and Broadcom read their earlier SEC
        registrants too, so their ten-year history has all eleven
        annual points (2015 was missing).
-    7  2026-11-14 — valuation prose names today's multiple and the median
+    7  2026-11-14 — the two latest 10-Ks are the two latest: JPM, BAC,
+       GS and WFC find the one before last in older pages of SEC's
+       filing list, so their reports gain risk changes; a warm cache
+       no longer serves a 10-K a year behind (AAPL's FY2025 in place
+       of FY2026).
+    8  2026-11-14 — valuation prose names today's multiple and the median
        apart: each "vs median" claim (own history and peers) carries
        today's figure and says above or below in words, the median says
        it is not today's figure, and both prompts say to compare a
@@ -50,7 +55,7 @@ from __future__ import annotations
 
 from app.schemas.research import ResearchReport
 
-REPORT_VERSION = 7
+REPORT_VERSION = 8
 
 
 def is_outdated(report: ResearchReport) -> bool:

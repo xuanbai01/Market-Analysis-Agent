@@ -37,6 +37,7 @@ from app.core.auth import require_shared_secret
 from app.main import app
 from app.schemas.lens import LensReport
 from app.schemas.market_overview import MarketOverview
+from app.services.lens_catalog import CAPEX
 
 _SECRET = "the-secret"
 
@@ -91,8 +92,8 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
 
     async def _lens(lens_id: str) -> LensReport:
         return LensReport(
-            id=lens_id, title="t", description="d", tickers=[], method="m", years=[],
-            companies=[], stats=[], facts=[], narrative=None, generated_at=datetime.now(UTC),
+            id=lens_id, title="t", description="d", tickers=[], metric=CAPEX.info(), method="m",
+            years=[], companies=[], stats=[], facts=[], narrative=None, generated_at=datetime.now(UTC),
         )
 
     app.dependency_overrides[get_session] = _session

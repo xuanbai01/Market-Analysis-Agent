@@ -94,6 +94,21 @@ Each entry has three parts:
 **Mistake:** Two commands in a row failed for them. First the documented `grep ... | fly secrets import`: PowerShell has no `grep`. Then a PowerShell pipe, `(Select-String ...).Line | fly secrets import`, which I had not run: PowerShell 5.1 puts a byte-order mark in front of text it pipes to a native program, and Fly answered `"\ufeffFRED_API_KEY" is not a valid secret name`. My own shell tool is Git Bash, so neither failure could show up on my side.
 **Rule:** a command for the owner to run must be written for PowerShell 5.1 and tried there with dummy data first (`powershell -NoProfile -Command ...`). When text has to reach a native program byte for byte (a secret, anything parsed as NAME=value), run the pipeline inside `cmd /c "..."`: cmd passes bytes through untouched.
 
+### Unit tests can't see memory or a blocked event loop; the biggest filer can
+
+**Date:** 2026-11-14
+**Context:** Checking the shipped workstreams on the live dashboard. JPM's report killed the 512 MB Fly machine; the 10-K tools had passed every test since Phase 2.
+**Mistake:** the tests used small HTML fixtures, so nothing measured what a report costs on a real 13M-character 10-K: five full BeautifulSoup parses, all on the event loop. The health-check failure while XOM built was the same problem, unnoticed.
+**Rule:** for work whose cost grows with the input (parsing filings, diffing paragraphs), measure it on the largest real input we serve (JPM's 10-K, RIVN's risk factors) before merging: peak process memory and how long the event loop goes without running. Keep it under half the machine's memory, and run it off the loop.
+**Follow-up (same day):** the first fix (PR 100) was measured on Windows, where the JPM page load peaked near 300 MB; it shipped and JPM was killed again. On Linux (WSL, the same lockfile) the same work peaked at 364–426 MB of anonymous memory, about 100 MB more: glibc's per-thread arenas and libxml2's tree cost more there. **Measure memory on Linux** (`RssAnon` / `VmHWM` in `/proc/self/status`, an empty SEC cache like a fresh Fly machine, a five-thread default pool like its one CPU), and compare with production's kill point (`anon-rss` in `fly logs`), not the machine's nominal size.
+**Follow-up (same day, CPU):** the code said RIVN's risk diff takes "~15 s", a desktop figure; on Fly RIVN's builds took 4–5.5 minutes. A shared Fly CPU runs at 1/16 of a core once its burst balance is spent (5 s at boot), so every CPU-second costs sixteen there. Under that quota in WSL (`systemd-run --user --scope -p CPUQuota=6.25% -p CPUQuotaPeriodSec=80ms`) the RIVN tool fan-out took 347 s, which matched production. **State CPU work as CPU-seconds and measure it under the quota**, not as desktop wall time.
+
+### Read the provider's paging, and check the list against the provider itself
+
+**Date:** 2026-11-14
+**Context:** JPM's dashboard had no risk changes, and AAPL's 10-K list disagreed between two machines.
+**Mistake:** `fetch_edgar` read only `filings.recent` of SEC's submissions JSON, which SEC documents as a year of filings (or 1,000); every test fixture was a small filer, where a year holds two 10-Ks, but JPM files 26,000 a year. Separately, the cached list was appended in the order filings were found and its first entries served, so a new 10-K went to the end and was never served. Both stayed hidden because nobody compared our list with SEC's for the same ticker.
+**Rule:** when a tool reads a list from a provider, read the provider's documentation for paging and test with the largest real case (a bank, for SEC). When a tool's answer looks wrong, check it against the provider's own response before reasoning about caches or machines: AAPL's "empty cache" result on WSL is exactly what the old code returns from the warm Windows cache, with no SEC request, so that run most likely read it through /mnt/c (`EDGAR_CACHE_DIR` is relative).
 ### A number can be a claim and still be on the wrong label
 
 **Date:** 2026-11-14

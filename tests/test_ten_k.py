@@ -16,8 +16,11 @@ are deliberately small but exercise the same boundary patterns.
 """
 from __future__ import annotations
 
+import asyncio
+import threading
 from datetime import UTC, date, datetime
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -755,6 +758,76 @@ def test_paragraph_diff_skips_fuzzy_matching_for_verbatim_paragraphs(
     assert calls["ratio"] == 0
 
 
+def _lcs_length(a: str, b: str) -> int:
+    """Textbook dynamic program for the longest common subsequence."""
+    prev = [0] * (len(b) + 1)
+    for ch in a:
+        cur = [0]
+        for j, bj in enumerate(b):
+            cur.append(prev[j] + 1 if ch == bj else max(prev[j + 1], cur[j]))
+        prev = cur
+    return prev[-1]
+
+
+# Two unrelated risk factors of about the same length. Any two English
+# paragraphs share most of their letters, so quick_ratio() can't tell
+# them apart; their ratio() is 0.02-0.04.
+_SUPPLY_RISK = (
+    "Our vehicles rely on battery cells sourced from a limited number of "
+    "suppliers, and any disruption in their production or delivery, including "
+    "as a result of trade restrictions, could delay deliveries to customers "
+    "and increase our costs materially."
+)
+_RATES_RISK = (
+    "Changes in interest rates and in the availability of consumer credit may "
+    "reduce the demand for automobiles generally, and higher borrowing costs "
+    "for our customers could lead to fewer orders and greater cancellations "
+    "of existing reservations."
+)
+
+
+def test_a_pair_whose_common_subsequence_is_too_short_costs_no_ratio_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RIVN 2026-11: ratio() was 18 of the diff's 20 CPU-seconds (45,895
+    calls), and 81% of those pairs scored under 0.1. The characters
+    ratio() counts form a common subsequence of the two paragraphs, so
+    2·LCS/(len a + len b) bounds it from above; a pair under the threshold
+    on that bound can't match and needn't be compared."""
+    from difflib import SequenceMatcher
+
+    from app.services import ten_k
+
+    for a, b in ((_SUPPLY_RISK, _RATES_RISK), (_RATES_RISK, _SUPPLY_RISK)):
+        today = SequenceMatcher(None, a, b)
+        assert today.real_quick_ratio() >= 0.6 and today.quick_ratio() >= 0.6
+        assert 2 * _lcs_length(a, b) / (len(a) + len(b)) < 0.6
+
+    calls = {"ratio": 0}
+
+    class CountingMatcher(SequenceMatcher):
+        def ratio(self) -> float:
+            calls["ratio"] += 1
+            return super().ratio()
+
+    monkeypatch.setattr(ten_k, "SequenceMatcher", CountingMatcher)
+
+    assert ten_k._paragraph_diff([_SUPPLY_RISK], [_RATES_RISK]) == (
+        [_SUPPLY_RISK],
+        [_RATES_RISK],
+        0,
+    )
+    assert calls["ratio"] == 0
+
+
+def test_a_pair_exactly_at_the_threshold_is_kept() -> None:
+    """ratio() == 0.6 counts as kept; the bound must not round it away."""
+    from difflib import SequenceMatcher
+
+    assert SequenceMatcher(None, "abcde", "abcxy").ratio() == 0.6
+    assert _paragraph_diff(["abcde"], ["abcxy"]) == ([], [], 1)
+
+
 # ── extract_10k_risks_diff (fetch_edgar mocked) ────────────────────────
 
 
@@ -1088,3 +1161,314 @@ async def test_extract_10k_risks_diff_categorizer_failure_falls_back_empty(
 
     assert result is not None
     assert result.category_deltas == {}
+
+
+# ── One parse per filing, off the event loop ───────────────────────────
+#
+# Found 2026-11-14: JPM's 10-K (12.9M characters, 140K tags) took 7.5 s
+# and ~140 MB per BeautifulSoup parse, a report parsed its two 10-Ks
+# five times, all on the event loop, and the 512 MB Fly machine was
+# killed mid-report. Each filing is now parsed once (the business and
+# risk tools share it) on a worker thread.
+
+
+def _unique_risks_filings() -> tuple[EdgarFiling, EdgarFiling]:
+    """Two 10-Ks whose HTML no other test uses, so a parse cache shared
+    across tests can't hide a parse."""
+    marker = uuid4().hex
+    current = _mk_filing(
+        accession="0000320193-25-000079",
+        filed_at=datetime(2025, 11, 1, tzinfo=UTC),
+        primary_doc_text=_wrap_html(
+            f"""<h1>Item 1. Business</h1><p>{marker} {_LONG_BUSINESS_TEXT}</p>
+                <h1>Item 1A. Risk Factors</h1><p>{marker} {_LONG_RISKS_TEXT}</p>
+                <h1>Item 2. Properties</h1><p>None.</p>"""
+        ),
+    )
+    prior = _mk_filing(
+        accession="0000320193-24-000123",
+        filed_at=datetime(2024, 11, 1, tzinfo=UTC),
+        primary_doc_text=_wrap_html(
+            f"""<h1>Item 1. Business</h1><p>{marker} {_LONG_BUSINESS_TEXT}</p>
+                <h1>Item 1A. Risk Factors</h1><p>{marker} {_LONG_RISKS_TEXT_PRIOR_YEAR}</p>
+                <h1>Item 2. Properties</h1><p>None.</p>"""
+        ),
+    )
+    return current, prior
+
+
+def _record_parses(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Wrap the one HTML parse; returns the thread id of every call."""
+    threads: list[int] = []
+    real_parse = ten_k_module._parse_filing_html
+
+    def _counting(html: str) -> Any:
+        threads.append(threading.get_ident())
+        return real_parse(html)
+
+    monkeypatch.setattr(ten_k_module, "_parse_filing_html", _counting)
+    return threads
+
+
+async def test_a_report_parses_each_10k_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The orchestrator runs the business and risk tools side by side;
+    between them they need Item 1 of the latest 10-K and Item 1A, as
+    text and as paragraphs, of the latest two. Two filings, two parses."""
+    current, prior = _unique_risks_filings()
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+    parses = _record_parses(monkeypatch)
+
+    business, diff = await asyncio.gather(
+        extract_10k_business("AAPL"), extract_10k_risks_diff("AAPL")
+    )
+
+    assert business is not None and diff is not None
+    assert len(parses) == 2
+
+
+async def test_10k_parsing_runs_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A big 10-K takes seconds to parse; on the event loop that froze
+    every other request and failed Fly's health check."""
+    current, prior = _unique_risks_filings()
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+    parses = _record_parses(monkeypatch)
+
+    await extract_10k_risks_diff("AAPL")
+
+    assert parses
+    assert threading.get_ident() not in parses
+
+
+def test_script_text_is_dropped_but_the_text_after_it_kept() -> None:
+    html = _wrap_html("<p>Before<script>var x = 1;</script>after.</p>")
+    assert _flatten_html_to_paragraphs(html) == ["Before after."]
+
+
+def test_an_xml_encoding_declaration_does_not_garble_text() -> None:
+    """Inline-XBRL 10-Ks open with ``<?xml ... encoding="..."?>``; the text
+    is already decoded, so the declaration must not re-decode it."""
+    html = (
+        '<?xml version="1.0" encoding="ASCII"?>'
+        + _wrap_html("<p>Nestlé’s café costs €5.</p>")
+    )
+    assert _flatten_html_to_paragraphs(html) == ["Nestlé’s café costs €5."]
+
+
+async def test_a_whitespace_only_10k_extracts_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_fetch_edgar(monkeypatch, [_mk_filing(primary_doc_text="  \n ")])
+    assert await extract_10k_business("AAPL") is None
+
+
+async def test_the_risk_paragraph_diff_runs_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RIVN's ~550 paragraphs a side take ~0.7 CPU-seconds to compare,
+    ~16 s on a throttled Fly CPU; that too must not hold the event loop."""
+    current, prior = _unique_risks_filings()
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+    threads: list[int] = []
+    real_diff = ten_k_module._paragraph_diff
+
+    def _recording(*args: Any, **kwargs: Any) -> Any:
+        threads.append(threading.get_ident())
+        return real_diff(*args, **kwargs)
+
+    monkeypatch.setattr(ten_k_module, "_paragraph_diff", _recording)
+
+    await extract_10k_risks_diff("AAPL")
+
+    assert threads
+    assert threading.get_ident() not in threads
+
+
+async def test_10k_parses_share_one_dedicated_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One parse at a time, on a thread of its own: a parse waiting its
+    turn must not hold a thread of the default pool, which has five on a
+    one-CPU Fly machine and serves every other ``asyncio.to_thread``."""
+    reports = [_unique_risks_filings(), _unique_risks_filings()]
+    by_symbol = {"AAPL": list(reports[0]), "MSFT": list(reports[1])}
+
+    async def _fake_fetch_edgar(symbol: str, **_kw: Any) -> list[EdgarFiling]:
+        return by_symbol[symbol]
+
+    monkeypatch.setattr(ten_k_module, "fetch_edgar", _fake_fetch_edgar)
+    parses = _record_parses(monkeypatch)
+
+    await asyncio.gather(
+        extract_10k_business("AAPL"),
+        extract_10k_risks_diff("AAPL"),
+        extract_10k_business("MSFT"),
+        extract_10k_risks_diff("MSFT"),
+    )
+
+    assert len(parses) == 4
+    assert len(set(parses)) == 1
+    assert threading.get_ident() not in parses
+
+
+async def test_the_risk_paragraph_diff_runs_on_the_10k_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The diff is pure Python, so two never run in parallel anyway (the
+    GIL); on the 10-K thread it waits there instead of holding a thread
+    of the default pool while it runs."""
+    current, prior = _unique_risks_filings()
+    _patch_fetch_edgar(monkeypatch, [current, prior])
+    parses = _record_parses(monkeypatch)
+    diffs: list[int] = []
+    real_diff = ten_k_module._paragraph_diff
+
+    def _recording(*args: Any, **kwargs: Any) -> Any:
+        diffs.append(threading.get_ident())
+        return real_diff(*args, **kwargs)
+
+    monkeypatch.setattr(ten_k_module, "_paragraph_diff", _recording)
+
+    await extract_10k_risks_diff("AAPL")
+
+    assert diffs and parses
+    assert set(diffs) == set(parses)
+
+
+def test_script_and_style_with_child_elements_are_emptied_cleanly() -> None:
+    html = _wrap_html(
+        "<p>Before</p><style><div>hidden</div>also hidden</style><p>After</p>"
+    )
+    assert _flatten_html_to_paragraphs(html) == ["Before", "After"]
+
+
+# ── The streaming parse, exactly ───────────────────────────────────────
+#
+# _parse_filing_html streams (it never builds the whole tree). Its output
+# must equal joining itertext() over the full tree: every text piece, in
+# document order, separated by a space, whitespace collapsed.
+
+_TRICKY_HTML = """<?xml version="1.0" encoding="ASCII"?>
+<html><head><title>JPM 10-K</title><style>p { color: red }</style></head>
+<body>
+  Loose text before any block.
+  <div>Outer <b>bold</b>text<div>Inner one<br/>after break</div> tail of inner
+    <p>Leaf <i>para</i><span>graph</span>.</p>
+  </div>
+  <table><tr><td>Cell A</td><td>Cell <b>B</b></td></tr></table>
+  <ul><li>First</li><li>Second <script>ignored()</script>still second</li></ul>
+  <ix:nonNumeric name="dei:X">Tagged</ix:nonNumeric> after tag.
+</body></html>"""
+
+
+def test_the_parse_gives_exactly_the_text_and_paragraphs_of_the_full_tree() -> None:
+    flat = ten_k_module._parse_filing_html(_TRICKY_HTML)
+
+    assert flat.text == (
+        "JPM 10-K Loose text before any block. Outer bold text Inner one after break "
+        "tail of inner Leaf para graph . Cell A Cell B First Second still second "
+        "Tagged after tag."
+    )
+    assert flat.paragraphs == (
+        "Inner one after break",
+        "Leaf para graph .",
+        "Cell A Cell B",
+        "First",
+        "Second still second",
+    )
+
+
+def test_the_parse_does_not_depend_on_where_the_feed_splits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The document is fed in pieces; a tag, an entity or a word cut at a
+    piece boundary must come out the same."""
+    html = _TRICKY_HTML.replace(
+        "</body>", "<p>Caf&eacute; &amp; Nestlé’s €5</p></body>"
+    )
+    whole = ten_k_module._parse_filing_html(html)
+
+    monkeypatch.setattr(ten_k_module, "_FEED_CHARS", 7)
+
+    assert ten_k_module._parse_filing_html(html) == whole
+    assert whole.paragraphs[-1] == "Café & Nestlé’s €5"
+
+
+def _full_tree_reference(html: str) -> tuple[str, tuple[str, ...]]:
+    """What the streaming parse must equal: the whole tree, then
+    ``itertext()`` (PR 100's method, kept here as the reference)."""
+    import re
+    from itertools import islice
+
+    import lxml.html
+
+    whitespace = re.compile(r"\s+")
+    blocks = ten_k_module._PARAGRAPH_BLOCK_TAGS
+    parser = lxml.html.HTMLParser(
+        encoding="utf-8", huge_tree=True, remove_comments=True, remove_pis=True
+    )
+    root = lxml.html.document_fromstring(html.encode("utf-8"), parser=parser)
+    for tag in list(root.iter("script", "style")):
+        tag.text = None
+        for child in list(tag):
+            tag.remove(child)
+
+    def joined(element: Any) -> str:
+        return whitespace.sub(" ", " ".join(element.itertext())).strip()
+
+    paragraphs = tuple(
+        text
+        for block in root.iter(*blocks)
+        if next(islice(block.iterdescendants(*blocks), 1), None) is None
+        and (text := joined(block))
+    )
+    return joined(root), paragraphs
+
+
+def _random_markup(rng: Any, depth: int = 0) -> str:
+    """Nested markup of every kind the parse treats differently: blocks,
+    inline tags, script/style, void tags, XBRL tags, text and tails."""
+    words = ["risk", "Item", "1A.", "revenue", "&amp;", "café", "  ", "\n", "€5"]
+    tags = ["p", "div", "li", "tr", "td", "span", "b", "ix:nonNumeric", "script", "style", "section"]
+    parts = []
+    for _ in range(rng.randint(1, 4)):
+        if depth < 4 and rng.random() < 0.6:
+            tag = rng.choice(tags)
+            inner = _random_markup(rng, depth + 1)
+            parts.append(f"<{tag}>{inner}</{tag}>")
+        elif rng.random() < 0.2:
+            parts.append("<br/>")
+        if rng.random() < 0.8:
+            parts.append(" ".join(rng.choice(words) for _ in range(rng.randint(1, 3))))
+    return "".join(parts)
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "_TRICKY_HTML",
+        "_html_with_item_1_and_1a",
+        "_html_with_toc_and_main_section",
+        "_html_with_xbrl_inline_tags",
+        "_html_with_all_caps_headers",
+        "_malformed_html_with_section",
+        "_html_item_1a_to_item_2_no_1b",
+    ],
+)
+def test_the_streaming_parse_equals_the_full_tree_on_every_fixture(fixture: str) -> None:
+    value = globals()[fixture]
+    html = value if isinstance(value, str) else value()
+    flat = ten_k_module._parse_filing_html(html)
+    assert (flat.text, flat.paragraphs) == _full_tree_reference(html)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_the_streaming_parse_equals_the_full_tree_on_random_markup(seed: int) -> None:
+    import random
+
+    html = _wrap_html(_random_markup(random.Random(seed)))
+    flat = ten_k_module._parse_filing_html(html)
+    assert (flat.text, flat.paragraphs) == _full_tree_reference(html)

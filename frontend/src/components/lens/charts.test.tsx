@@ -1,9 +1,41 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-import { CapexBars } from "./CapexBars";
+import { AmountBars } from "./AmountBars";
 import { DistributionChart } from "./DistributionChart";
-import { LENS } from "./fixture";
+import type { LensReport } from "../../lib/schemas";
+import { LENS, SBC_METRIC } from "./fixture";
+
+/** LENS with every amount, intensity and stat multiplied by `f`. */
+function scaled(f: number): LensReport {
+  return {
+    ...LENS,
+    companies: LENS.companies.map((c) => ({
+      ...c,
+      points: c.points.map((p) => ({
+        ...p,
+        value: p.value === null ? null : p.value * f,
+        intensity: p.intensity === null ? null : p.intensity * f,
+      })),
+    })),
+    stats: LENS.stats.map((s) => ({
+      ...s,
+      median: s.median * f,
+      p25: s.p25 * f,
+      p75: s.p75 * f,
+      low: s.low * f,
+      high: s.high * f,
+      total: s.total * f,
+    })),
+  };
+}
+
+function svgTexts(container: HTMLElement, pattern: RegExp): string[] {
+  return Array.from(container.querySelectorAll("text"))
+    .filter((t) => t.getAttribute("data-testid") === null)
+    .map((t) => t.textContent ?? "")
+    .filter((t) => pattern.test(t));
+}
 
 describe("DistributionChart", () => {
   it("draws a dot per reported company-year, the median and the middle-50% band", () => {
@@ -24,6 +56,13 @@ describe("DistributionChart", () => {
     expect(labels).toContain("0%");
   });
 
+  it("labels a 2.5% step exactly instead of rounding it", () => {
+    // Highest intensity 12%: niceTicks steps by 2.5%, and the SBC lens read
+    // "0%, 3%, 5%, 8%, 10%, 13%".
+    const { container } = render(<DistributionChart report={scaled(0.48)} />);
+    expect(svgTexts(container, /%$/)).toEqual(["0%", "2.5%", "5%", "7.5%", "10%", "12.5%"]);
+  });
+
   it("ranks every company on hover, with the median and band", () => {
     render(<DistributionChart report={LENS} />);
     fireEvent.mouseEnter(screen.getAllByTestId("lens-column")[2]);
@@ -34,20 +73,40 @@ describe("DistributionChart", () => {
   });
 });
 
-describe("CapexBars", () => {
+describe("AmountBars", () => {
   it("stacks one segment per company-year with spend, totals on top", () => {
-    render(<CapexBars report={LENS} />);
+    render(<AmountBars report={LENS} />);
     expect(screen.getAllByTestId("lens-segment")).toHaveLength(8);
     expect(screen.getAllByTestId("lens-bar-total").map((t) => t.textContent)).toEqual(["$22B", "$37B", "$53B"]);
   });
 
+  it("labels a $2.5B step exactly instead of rounding it", () => {
+    const { container } = render(<AmountBars report={scaled(0.18)} />); // largest year $9.5B
+    expect(svgTexts(container, /^\$/)).toEqual(["$0", "$2.5B", "$5B", "$7.5B", "$10B"]);
+  });
+
   it("lists each company's spend on hover, largest first", () => {
-    render(<CapexBars report={LENS} />);
+    render(<AmountBars report={LENS} />);
     fireEvent.mouseEnter(screen.getAllByTestId("lens-bar-column")[2]);
     const tip = screen.getByTestId("lens-bars-tooltip");
     expect(tip).toHaveTextContent("CY2025");
     expect(tip).toHaveTextContent("$53.0B");
     expect(tip.textContent?.indexOf("AAA")).toBeLessThan(tip.textContent?.indexOf("CCC") ?? 0);
+  });
+});
+
+describe("charts name the lens's metric", () => {
+  it("describes the bars and the distribution in the metric's words", () => {
+    const sbc = { ...LENS, metric: SBC_METRIC };
+    render(
+      <>
+        <DistributionChart report={sbc} />
+        <AmountBars report={sbc} />
+      </>,
+    );
+    const labels = screen.getAllByRole("img").map((svg) => svg.getAttribute("aria-label") ?? "");
+    expect(labels[0]).toMatch(/^SBC intensity by company/);
+    expect(labels[1]).toMatch(/^Total SBC by year/);
   });
 });
 
@@ -69,7 +128,7 @@ describe("narrow containers", () => {
     const { container } = render(
       <>
         <DistributionChart report={LENS} />
-        <CapexBars report={LENS} />
+        <AmountBars report={LENS} />
       </>,
     );
     const widths = Array.from(container.querySelectorAll("rect")).map((r) => Number(r.getAttribute("width")));

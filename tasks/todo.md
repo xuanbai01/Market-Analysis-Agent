@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Insider activity (workstream D)** is in review on `feature/insider-activity`. A, A2, B and C merged (#92–#95); C1 (README screenshots) is the owner's.
+- **More lenses (workstream D)** in review on `feature/more-lenses`. A–D through the older registrants merged (#92–#98); C1 (README screenshots) is the owner's.
 
 ## Plan — after Phase 5 (2026-11-13)
 
@@ -62,7 +62,8 @@ ADR 0004 called "is this expensive versus its own history" the most-cited gap; t
 
 ### D. After those (unordered)
 
-- [ ] **More lenses** — R&D intensity, SBC ÷ revenue, buybacks vs dividends for the megacap group; `lens.py` and `xbrl.py` generalize. A trailing-12-month point for the partial year is the other open idea.
+- [x] **More lenses** *(branch `feature/more-lenses`, in review)* — the lens takes a metric (`lens_catalog.py`), and the megacap group has stock-based compensation and R&D lenses beside capex. Checked against SEC first: SBC is tagged by all seven companies every year 2015–2025; R&D by all but Amazon, which reports technology and infrastructure spending instead, so the R&D lens leaves it out and says so.
+- [ ] **Buybacks vs dividends lens** — not built: Amazon and Tesla tag neither, Alphabet and Meta started dividends recently, and a missing value can't be told apart from a zero. Needs a rule for "no tag means $0" checked company by company. A trailing-12-month point for the partial year is the other open lens idea.
 - [x] **Insider activity** *(branch `feature/insider-activity`, in review)* — `form_4.py` rewritten into `fetch_insider_activity`: officer and director purchases and sales over six months, 10% holders apart, the share sold under 10b5-1 plans, the top traders; an Insider Activity section (`REPORT_VERSION` 5) and a full-width card. `holdings_13f.py` stays unsurfaced: 13F holdings are quarterly and 45 days stale, a weaker signal than Form 4s; decide again if someone asks who the big holders are.
 - [x] **Predecessor registrants for older reorganizations** *(branch `fix/older-registrants`, in review)* — checked against SEC: DIS (← TWDC Enterprises 18, 2019), CI (← Cigna Holding, 2018) and AVGO (← Broadcom Ltd, 2018 ← Avago, 2016) now link back and get their eleventh annual point (2015). The gap was one year, not the whole history: a new registrant's first 10-K carries a few years back. CHTR needed nothing (the ticker resolves to the registrant with 10-Ks back to 2000); LIN neither (the Praxair–Linde share-count jump cuts its history at 2019 whichever registrant holds it).
 - [ ] **Split modules past the 400-line convention when next touched** — `research_orchestrator.py`, `ten_k.py`, `earnings.py`, `fundamentals.py` and `research_derived.py` (the last grew past 500 lines with the own-history claims).

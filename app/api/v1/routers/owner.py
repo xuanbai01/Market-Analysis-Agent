@@ -3,16 +3,21 @@ owner key (``require_owner``); ``tests/test_owner_auth.py`` pins the set.
 They're left out of the public OpenAPI schema, and every response under
 ``/v1/owner``, errors included, says ``Cache-Control: no-store``
 (``app.main``)."""
-from fastapi import APIRouter, Depends, HTTPException, Response
+from datetime import date
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_session, require_owner
-from app.schemas.owner import OwnerPositions, OwnerStatus, OwnerTrades
+from app.schemas.owner import LiveChain, OwnerPositions, OwnerStatus, OwnerTrades
 from app.services import owner_vault, tastytrade_client
+from app.services.owner_live_chain import LiveChainUnavailable, NotListed, live_chain
 from app.services.owner_positions import PositionsUnavailable, failure_reason, get_positions
 from app.services.owner_trades import csv_text, list_trades, sync
 
 OWNER_PREFIX = "/owner"
+Symbol = Annotated[str, Path(pattern=r"^[A-Za-z][A-Za-z0-9.\-]{0,9}$", description="a ticker, e.g. NVDA or BRK-B")]
 router = APIRouter(prefix=OWNER_PREFIX, dependencies=[Depends(require_owner)], include_in_schema=False)
 
 
@@ -65,3 +70,18 @@ async def owner_trades_csv(session: AsyncSession = Depends(get_session)) -> Resp
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="trades.csv"'},
     )
+
+
+@router.get("/options/{symbol}/live/{expiry}", response_model=LiveChain)
+async def owner_live_chain(symbol: Symbol, expiry: date) -> LiveChain:
+    """One expiry's chain at tastytrade's live quotes, at most 10 s old; 404
+    when tastytrade lists no such expiry, 503 with the reason otherwise.
+    Never stored, never sent to the options read."""
+    symbol = symbol.upper()
+    try:
+        return await live_chain(symbol, expiry)
+    except NotListed as exc:
+        raise HTTPException(status_code=404, detail=f"tastytrade lists no {symbol} options expiring {expiry}.") from exc
+    except LiveChainUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+

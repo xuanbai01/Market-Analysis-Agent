@@ -99,6 +99,14 @@ def is_fresh(symbol: str) -> bool:
     return _fresh(symbol) is not None
 
 
+def cached_underlying(symbol: str) -> tuple[float, float] | None:
+    """(price, dividend yield) from the cached build, stale or not, without
+    asking Yahoo; None when nothing is cached. The live chain uses them."""
+    entry = _cache.get(symbol)
+    fetched = entry.built.fetched if entry is not None else None
+    return None if fetched is None else (fetched.spot, fetched.dividend_yield)
+
+
 def has_chain(symbol: str, expiry: date) -> bool:
     """Whether ``/chain/{expiry}`` can answer without asking Yahoo."""
     entry = _fresh(symbol)

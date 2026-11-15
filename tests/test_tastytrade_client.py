@@ -359,6 +359,10 @@ async def test_a_logged_query_counts_its_values_and_never_names_them(
     assert not any("ZZQX" in r.getMessage() or "ZZQX" in s for r, s in zip(ours, summaries, strict=True))
 
 
+def test_a_list_valued_parameter_is_counted_too() -> None:
+    assert tt._summary({"equity": ["AAPL", "NVDA"], "per-page": 1}) == {"equity": "2 values", "per-page": 1}
+
+
 async def test_logs_hold_no_secret_token_or_account_number(
     fake: FakeTastytrade, clock: FakeClock, sleeps: list[float], caplog: pytest.LogCaptureFixture
 ) -> None:

@@ -1,0 +1,204 @@
+{
+  "generated_by": "tests/test_options_strategy_golden.py, from app.services.options_math",
+  "smiles": {
+    "skewed": {
+      "forward": 163.03,
+      "years": 0.07671232876712329,
+      "points": [
+        [
+          -0.3,
+          0.8
+        ],
+        [
+          -0.15,
+          0.66
+        ],
+        [
+          -0.05,
+          0.61
+        ],
+        [
+          0.0,
+          0.6
+        ],
+        [
+          0.05,
+          0.595
+        ],
+        [
+          0.15,
+          0.6
+        ],
+        [
+          0.3,
+          0.68
+        ]
+      ]
+    },
+    "flat": {
+      "forward": 100.0,
+      "years": 1.0,
+      "points": [
+        [
+          -0.5,
+          0.2
+        ],
+        [
+          0.5,
+          0.2
+        ]
+      ]
+    }
+  },
+  "norm_cdf": [
+    {
+      "x": -3.0,
+      "p": 0.0013498980316301035
+    },
+    {
+      "x": -1.5,
+      "p": 0.06680720126885809
+    },
+    {
+      "x": -0.1,
+      "p": 0.460172162722971
+    },
+    {
+      "x": 0.0,
+      "p": 0.5
+    },
+    {
+      "x": 0.25,
+      "p": 0.5987063256829237
+    },
+    {
+      "x": 1.0,
+      "p": 0.8413447460685428
+    },
+    {
+      "x": 2.5,
+      "p": 0.9937903346742238
+    }
+  ],
+  "prob_above": [
+    {
+      "smile": "skewed",
+      "strike": 120.0,
+      "prob": 0.8983534860742726
+    },
+    {
+      "smile": "skewed",
+      "strike": 141.0,
+      "prob": 0.8029713739684552
+    },
+    {
+      "smile": "skewed",
+      "strike": 150.0,
+      "prob": 0.7040353754884685
+    },
+    {
+      "smile": "skewed",
+      "strike": 158.0,
+      "prob": 0.5628723766748425
+    },
+    {
+      "smile": "skewed",
+      "strike": 170.0,
+      "prob": 0.37880270248370723
+    },
+    {
+      "smile": "skewed",
+      "strike": 185.0,
+      "prob": 0.19514321503818288
+    },
+    {
+      "smile": "skewed",
+      "strike": 200.0,
+      "prob": 0.07715084178405812
+    },
+    {
+      "smile": "flat",
+      "strike": 100.0,
+      "prob": 0.4601721676852577
+    },
+    {
+      "smile": "flat",
+      "strike": 120.0,
+      "prob": 0.15586281969994786
+    }
+  ],
+  "pop": [
+    {
+      "smile": "skewed",
+      "legs": [
+        {
+          "kind": "call",
+          "side": 1,
+          "strike": 165.0,
+          "premium": 10.0
+        }
+      ],
+      "pop": 0.29957536999900053
+    },
+    {
+      "smile": "skewed",
+      "legs": [
+        {
+          "kind": "put",
+          "side": -1,
+          "strike": 150.0,
+          "premium": 5.3
+        },
+        {
+          "kind": "put",
+          "side": 1,
+          "strike": 140.0,
+          "premium": 2.8
+        }
+      ],
+      "pop": 0.7340179664501671
+    },
+    {
+      "smile": "skewed",
+      "legs": [
+        {
+          "kind": "put",
+          "side": 1,
+          "strike": 135.0,
+          "premium": 2.0
+        },
+        {
+          "kind": "put",
+          "side": -1,
+          "strike": 145.0,
+          "premium": 3.9
+        },
+        {
+          "kind": "call",
+          "side": -1,
+          "strike": 185.0,
+          "premium": 3.7
+        },
+        {
+          "kind": "call",
+          "side": 1,
+          "strike": 195.0,
+          "premium": 2.1
+        }
+      ],
+      "pop": 0.6323359118712286
+    },
+    {
+      "smile": "flat",
+      "legs": [
+        {
+          "kind": "put",
+          "side": 1,
+          "strike": 100.0,
+          "premium": 7.0
+        }
+      ],
+      "pop": 0.3963317654322772
+    }
+  ]
+}

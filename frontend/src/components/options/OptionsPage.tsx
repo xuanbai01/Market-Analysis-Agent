@@ -1,11 +1,11 @@
 /**
  * OptionsPage — /options/:ticker (ADR 0008). What the option prices say:
  * headline figures, the expected-move cone, the term structure, the next
- * report's implied move against past ones, and one expiry at a time (smile,
- * open interest, chain). Signed in only; not in the public demo.
+ * report's implied move against past ones, one expiry at a time (smile,
+ * open interest, chain) and a strategy builder on that expiry. Signed in
+ * only; not in the public demo.
  */
 import { useQuery } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { fetchOptionsReport } from "../../lib/options-api";
@@ -17,6 +17,7 @@ import { drawsCone, drawsEarnings, drawsTerm } from "./draws";
 import { EarningsMoves } from "./EarningsMoves";
 import { ExpectedMoveCone } from "./ExpectedMoveCone";
 import { ExpirySection } from "./ExpirySection";
+import { Panel } from "./Panel";
 import { TermStructureChart } from "./TermStructureChart";
 import { useSignOutOn401 } from "./useSignOutOn401";
 
@@ -42,17 +43,6 @@ function asOf(report: OptionsReport): string {
 
 function daysBetween(fromIso: string, toIso: string): number {
   return (Date.parse(toIso.slice(0, 10)) - Date.parse(fromIso.slice(0, 10))) / 86_400_000;
-}
-
-function Panel({ title, children, testId }: { title: string; children: ReactNode; testId?: string }) {
-  return (
-    // min-w-0: a grid item otherwise grows to its chart's first (fallback)
-    // width, and the chart then measures that instead of the page.
-    <section data-testid={testId} className="mb-6 min-w-0 rounded-md border border-strata-border bg-strata-surface p-5">
-      <h2 className="mb-3 font-mono text-[10px] uppercase tracking-kicker text-strata-muted">{title}</h2>
-      {children}
-    </section>
-  );
 }
 
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -167,9 +157,7 @@ export default function OptionsPage() {
             </Panel>
           )}
           {report.chain && (
-            <Panel title="One expiry">
-              <ExpirySection symbol={symbol} listed={report.listed_expiries} initial={report.chain} spot={report.spot} />
-            </Panel>
+            <ExpirySection symbol={symbol} listed={report.listed_expiries} initial={report.chain} spot={report.spot} />
           )}
         </>
       )}

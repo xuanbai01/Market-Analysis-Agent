@@ -1,7 +1,8 @@
 /**
  * ExpirySection — pick an expiry; see its smile, open interest by strike
- * and the near-the-money chain. The report carries the expiry nearest 30
- * days; any other is read on demand (/v1/options/{symbol}/chain/{expiry}).
+ * and the near-the-money chain, and build a strategy on it. The report
+ * carries the expiry nearest 30 days; any other is read on demand
+ * (/v1/options/{symbol}/chain/{expiry}).
  */
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -11,7 +12,9 @@ import type { ChainRow, ExpiryChain } from "../../lib/options-schemas";
 import { ErrorBanner } from "../ErrorBanner";
 import { pct, shortDate } from "./chart-kit";
 import { OpenInterestChart } from "./OpenInterestChart";
+import { Panel } from "./Panel";
 import { SmileChart } from "./SmileChart";
+import { StrategyBuilder } from "./StrategyBuilder";
 import { useSignOutOn401 } from "./useSignOutOn401";
 
 interface Props {
@@ -48,39 +51,49 @@ export function ExpirySection({ symbol, listed, initial, spot }: Props) {
   const failed = expiry !== initial.expiry && !unauthorized ? query.error : null;
 
   return (
-    <div data-testid="options-expiry-section">
-      <label className="mb-4 flex items-center gap-2 font-mono text-[11px] text-strata-dim">
-        Expiry
-        <select
-          data-testid="options-expiry-select"
-          value={expiry}
-          onChange={(e) => setPicked(e.target.value)}
-          className="rounded-md border border-strata-border bg-strata-canvas px-2 py-1 text-strata-fg"
-        >
-          {listed.map((d) => (
-            <option key={d} value={d}>
-              {shortDate(d, true)}
-            </option>
-          ))}
-        </select>
-        {chain && <span>{Math.round(chain.days)} days · forward ${chain.forward.toFixed(2)}</span>}
-      </label>
-      {query.isFetching && <p className="font-mono text-[11px] text-strata-muted">Reading {shortDate(expiry, true)}…</p>}
-      {failed && <ErrorBanner error={failed} />}
+    <>
+      <Panel title="One expiry">
+        <div data-testid="options-expiry-section">
+          <label className="mb-4 flex items-center gap-2 font-mono text-[11px] text-strata-dim">
+            Expiry
+            <select
+              data-testid="options-expiry-select"
+              value={expiry}
+              onChange={(e) => setPicked(e.target.value)}
+              className="rounded-md border border-strata-border bg-strata-canvas px-2 py-1 text-strata-fg"
+            >
+              {listed.map((d) => (
+                <option key={d} value={d}>
+                  {shortDate(d, true)}
+                </option>
+              ))}
+            </select>
+            {chain && <span>{Math.round(chain.days)} days · forward ${chain.forward.toFixed(2)}</span>}
+          </label>
+          {query.isFetching && <p className="font-mono text-[11px] text-strata-muted">Reading {shortDate(expiry, true)}…</p>}
+          {failed && <ErrorBanner error={failed} />}
+          {chain && (
+            <>
+              <div className="grid gap-6 lg:grid-cols-2">
+                <div className="min-w-0">
+                  <SmileChart chain={chain} />
+                </div>
+                <div className="min-w-0">
+                  <OpenInterestChart chain={chain} spot={spot} />
+                </div>
+              </div>
+              <ChainTable chain={chain} />
+            </>
+          )}
+        </div>
+      </Panel>
       {chain && (
-        <>
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="min-w-0">
-              <SmileChart chain={chain} />
-            </div>
-            <div className="min-w-0">
-              <OpenInterestChart chain={chain} spot={spot} />
-            </div>
-          </div>
-          <ChainTable chain={chain} />
-        </>
+        <Panel title={`Strategy, ${shortDate(chain.expiry, true)} expiry`} testId="options-strategy-panel">
+          {/* Keyed on the expiry: a new chain starts its template over. */}
+          <StrategyBuilder key={chain.expiry} chain={chain} />
+        </Panel>
       )}
-    </div>
+    </>
   );
 }
 

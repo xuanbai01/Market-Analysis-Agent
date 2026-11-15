@@ -51,12 +51,14 @@ class _World:
         return list(self.tracked)
 
     async def insert_snapshot(self, session: _Session, row: dict[str, Any]) -> bool:
+        # Like the real store: each write commits on its own.
         session.in_tx = True
-        if row["symbol"] in self.stored:
-            return False
-        self.inserted.append(row)
-        self.stored.add(row["symbol"])
-        return True
+        written = row["symbol"] not in self.stored
+        if written:
+            self.inserted.append(row)
+            self.stored.add(row["symbol"])
+        await session.commit()
+        return written
 
     def snapshot_one(self, symbol: str, quoted_at: datetime, rate: float, rate_assumed: bool) -> Any:
         assert not self.session.in_tx, "a database connection was held during the Yahoo fetch"

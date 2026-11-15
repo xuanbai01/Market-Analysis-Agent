@@ -17,6 +17,8 @@ from app.core.settings import settings
 from app.db.models import candles as _candles  # noqa: F401
 from app.db.models import news as _news  # noqa: F401
 from app.db.models import news_symbols as _news_symbols  # noqa: F401
+from app.db.models import options as _options  # noqa: F401
+from app.db.models import research_reports as _research_reports  # noqa: F401
 from app.db.models import symbols as _symbols  # noqa: F401
 from app.db.models.base import Base
 

@@ -143,11 +143,16 @@ def _masked(path: str) -> str:
 
 
 def _summary(params: dict[str, Any] | None) -> dict[str, Any]:
-    """Each parameter, with a comma-separated list shown as its length."""
-    return {
-        key: f"{value.count(',') + 1} values" if isinstance(value, str) and "," in value else value
-        for key, value in (params or {}).items()
-    }
+    """Each parameter, a text one as how many comma-separated values it
+    holds and never the values: a quote request's symbols are the owner's
+    holdings, one symbol included."""
+    def counted(value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        n = value.count(",") + 1
+        return f"{n} value" if n == 1 else f"{n} values"
+
+    return {key: counted(value) for key, value in (params or {}).items()}
 
 
 def _get_lock() -> asyncio.Lock:

@@ -158,3 +158,33 @@ def test_an_expiry_on_a_half_day_runs_to_one_pm() -> None:
 def test_et_date_of_an_epoch_timestamp() -> None:
     # 2026-11-14 01:00 UTC is still 13 November in New York.
     assert mc.et_date(int(datetime(2026, 11, 14, 1, tzinfo=UTC).timestamp())) == date(2026, 11, 13)
+
+
+def test_in_a_sessions_first_quarter_hour_the_quotes_are_still_the_last_close() -> None:
+    """At 09:31 the delayed quotes are the previous close's, not 09:16's
+    (edge-case review: a Monday weekly's IV came out 28% high)."""
+    monday = et(2026, 11, 16, 9, 31)
+    assert mc.quote_time(monday) == et(2026, 11, 13, 16)
+    assert mc.is_close(mc.quote_time(monday))
+    assert mc.quote_time(et(2026, 11, 16, 9, 46)) == et(2026, 11, 16, 9, 31)
+
+
+def test_time_to_expiry_is_elapsed_time_across_a_clock_change() -> None:
+    """2026-11-01 ends daylight time: Friday 16:00 to the next Friday 16:00
+    is 169 hours, not the 168 a wall-clock subtraction gives."""
+    t0 = mc.quote_time(et(2026, 10, 31, 12))  # Saturday: Friday the 30th's close
+    assert mc.years_to_expiry(t0, date(2026, 11, 6)) == pytest.approx(169 / 24 / 365)
+
+
+@pytest.mark.parametrize(
+    ("quoted_at", "left"),
+    [
+        (et(2026, 11, 16, 9, 30), 1.0),
+        (et(2026, 11, 16, 12, 45), 0.5),
+        (et(2026, 11, 16, 16), 0.0),
+        (et(2026, 11, 14, 12), 0.0),  # Saturday
+        (et(2026, 11, 27, 11, 15), 0.5),  # a half day: 9:30 to 1:00
+    ],
+)
+def test_the_share_of_a_session_still_to_trade(quoted_at: datetime, left: float) -> None:
+    assert mc.session_left(quoted_at) == pytest.approx(left)

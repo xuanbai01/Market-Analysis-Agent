@@ -173,7 +173,7 @@ def test_the_other_directions_and_a_level_term_structure() -> None:
     assert "IV90 level with IV30: the term structure is flat" in by_name
     assert "25-delta skew, expiry nearest 30 days: calls carry higher IV than puts" in by_name
     assert "Put/call open interest, expiries read: as many puts open as calls" in by_name
-    assert "Implied earnings move below the average absolute move after the last 1 report" in by_name
+    assert "Implied earnings move below the average absolute move after the last report" in by_name
 
 
 def test_no_put_open_interest_is_more_calls_not_a_tie() -> None:
@@ -211,3 +211,18 @@ def test_the_earnings_block() -> None:
 def test_a_fund_has_no_earnings_block() -> None:
     event = EventMove(None, None, None, None, "no earnings date", ())
     assert oa.earnings_block(None, event, [], 100.0, estimated=False) is None
+
+
+def test_a_report_that_has_traded_is_no_longer_upcoming() -> None:
+    """Edge-case review: with the schedule cached a day, a report already
+    traded kept every later expiry flagged as including it."""
+    reaction = (date(2026, 11, 18), date(2026, 11, 18))
+    assert oa.upcoming(reaction, datetime(2026, 11, 17, 16, tzinfo=mc.ET)) == reaction
+    assert oa.upcoming(reaction, datetime(2026, 11, 18, 10, tzinfo=mc.ET)) is None  # trading on it now
+    assert oa.upcoming(reaction, datetime(2026, 11, 20, 16, tzinfo=mc.ET)) is None
+    assert oa.upcoming(None, datetime(2026, 11, 17, 16, tzinfo=mc.ET)) is None
+
+
+def test_one_report_is_singular() -> None:
+    by_name = _comparisons(earnings=_earnings(0.03, [0.05]))
+    assert "Average absolute move after the last report" in by_name

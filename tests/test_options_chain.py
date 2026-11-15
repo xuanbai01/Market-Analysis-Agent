@@ -254,3 +254,18 @@ def test_a_frame_without_columns_is_not_found_too(monkeypatch: pytest.MonkeyPatc
     with pytest.raises(oc.SymbolNotFound):
         oc.fetch_chain("ZZZZQ", lambda listed, _quote: listed)
 
+
+def test_without_a_price_the_last_close_is_the_spot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Edge-case review: the fallback ran after the smiles were built, so
+    their forward check saw no spot. It is resolved at the source now."""
+    _install(monkeypatch, _FakeTicker(["2026-11-16"], {**_UNDERLYING, "regularMarketPrice": None}))
+    fetched = oc.fetch_chain("TEST", lambda listed, _q: list(listed))
+    assert fetched is not None and fetched.spot == fetched.closes[-1][1] > 0
+
+
+def test_a_row_without_a_strike_is_dropped() -> None:
+    frame = pd.DataFrame(
+        {"strike": [0.0, float("nan"), 100.0], "bid": [1.0, 1.0, 1.0], "ask": [1.1, 1.1, 1.1],
+         "volume": [1, 1, 1], "openInterest": [1, 1, 1], "contractSize": ["REGULAR"] * 3}
+    )
+    assert [q.strike for q in oc._quotes(frame)] == [100.0]

@@ -133,6 +133,23 @@ def test_a_failed_fetch_is_an_empty_schedule_not_an_error(monkeypatch: pytest.Mo
     ec.clear_cache()
 
 
+def test_a_schedule_yahoo_did_not_return_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Edge-case review: get_earnings_dates swallows its failure and returns
+    None, which was cached as an empty schedule for a day."""
+    calls: list[str] = []
+
+    def flaky(symbol: str) -> tuple[None, dict[str, object]]:
+        calls.append(symbol)
+        return None, {"Earnings Date": [date(2026, 11, 17)]}
+
+    ec.clear_cache()
+    monkeypatch.setattr(ec, "fetch_frames", flaky)
+    ec.fetch_schedule("NVDA")
+    ec.fetch_schedule("NVDA")
+    assert calls == ["NVDA", "NVDA"]
+    ec.clear_cache()
+
+
 def test_a_naive_index_is_read_as_new_york_time() -> None:
     """DeepSeek on PR 110: astimezone on a naive time uses the machine's
     zone (UTC on Fly), which would turn a 16:00 report into "during"."""

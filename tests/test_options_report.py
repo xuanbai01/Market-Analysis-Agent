@@ -105,6 +105,17 @@ async def test_a_report_read_for_the_positions_page_records_no_view(world: Any) 
     assert store.touched == ["VIEWED"]
 
 
+async def test_a_view_after_an_untracked_read_is_still_recorded(world: Any) -> None:
+    """The positions page's untracked build is cached; opening the options
+    page inside its 15 minutes must still record the view (#128's AI review)."""
+    _yahoo, store, _clock = world
+    await orp.get_report(None, "HELD", now=NOW, track=False)  # type: ignore[arg-type]
+    assert store.touched == []
+    await orp.get_report(None, "HELD", now=NOW)  # type: ignore[arg-type]
+    await orp.get_report(None, "HELD", now=NOW)  # type: ignore[arg-type]
+    assert store.touched == ["HELD"]  # once, from the cached copy
+
+
 async def test_quotes_in_a_session_are_not_the_close(world: Any) -> None:
     monday_11am_et = datetime(2026, 11, 16, 16, tzinfo=UTC)
     report = await orp.get_report(None, "TEST", now=monday_11am_et)  # type: ignore[arg-type]

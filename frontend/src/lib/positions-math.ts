@@ -118,7 +118,7 @@ export function markValue(group: PositionGroup): number | null {
 }
 
 export function firstExpiry(group: PositionGroup): string | null {
-  return group.expiries[0] ?? null;
+  return [...group.expiries].sort()[0] ?? null;
 }
 
 /** P&L at the first expiry with the stock at ``price`` (legs expiring

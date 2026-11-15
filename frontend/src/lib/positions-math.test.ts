@@ -10,6 +10,7 @@ import {
   breakevens,
   costBasis,
   expiryClose,
+  firstExpiry,
   greeks,
   historicalShare,
   legValue,
@@ -170,6 +171,11 @@ describe("what history shows", () => {
 
   it("says nothing from too few windows", () => {
     expect(historicalShare(group([option("call", 200, 1, 2.5)]), [100, 101, 102], 1, MARKET)).toBeNull();
+  });
+
+  it("takes the first expiry by date, whatever order they came in", () => {
+    const later = { ...group([option("call", 200, 1, 2.5, { expiry: LATER })]), expiries: [LATER, EXPIRY] };
+    expect(firstExpiry(later)).toBe(EXPIRY);
   });
 
   it("counts the sessions left, weekends out", () => {

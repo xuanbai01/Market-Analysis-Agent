@@ -79,6 +79,8 @@ class _Entry:
     report: OptionsReport
     built: _Built
     expires_at: float
+    # Whether the view was recorded: a build for the positions page isn't.
+    tracked: bool = True
 
 
 _cache: OrderedDict[str, _Entry] = OrderedDict()
@@ -233,6 +235,16 @@ async def _assemble(session: AsyncSession, built: _Built, now: datetime, track: 
     return OptionsReport(**parts, history=history, open_interest_history=totals, claims=claims, generated_at=now)
 
 
+async def _record_view(session: AsyncSession, symbol: str, now: datetime, entry: _Entry) -> None:
+    """A view served from a copy the positions page built untracked: recorded
+    now, so that page can't swallow the options page's view."""
+    try:
+        await store.touch_tracked(session, symbol, now)
+        entry.tracked = True
+    except Exception:
+        logger.exception("options view for %s not recorded", symbol)
+
+
 async def get_report(
     session: AsyncSession, symbol: str, *, now: datetime | None = None, track: bool = True
 ) -> OptionsReport:
@@ -242,6 +254,8 @@ async def get_report(
     those would store a list of the holdings."""
     entry = _fresh(symbol)
     if entry is not None:
+        if track and not entry.tracked:
+            await _record_view(session, symbol, now or _now(), entry)
         return entry.report
     lock = _locks.setdefault(symbol, asyncio.Lock())
     try:
@@ -270,7 +284,7 @@ async def _get_report_locked(session: AsyncSession, symbol: str, now: datetime |
         return stale.report
     report = await _assemble(session, built, now, track)
     ttl = NO_OPTIONS_TTL_SECONDS if report.status == "no_options" else CACHE_TTL_SECONDS
-    _remember(symbol, _Entry(report, built, _clock() + ttl))
+    _remember(symbol, _Entry(report, built, _clock() + ttl, tracked=track))
     return report
 
 

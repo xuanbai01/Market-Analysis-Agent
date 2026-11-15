@@ -193,5 +193,9 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Blocked storage:** the key lasts the page in memory when storage refuses it.
     - **No list of holdings:** the options report and chain routes take `track=false`, so the holdings aren't recorded as option-page views.
     - **The fake backend** can't open real routes, spend a key or reach a database.
+  - **From #128's AI review:**
+    - a holding whose option data can't be read says so on its card, instead of dropping the chance of profit and max pain quietly;
+    - an options-page view after the positions page's untracked read is still recorded (the cached copy records it once);
+    - the first expiry is taken by date.
   - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 

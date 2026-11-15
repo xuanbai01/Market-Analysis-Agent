@@ -109,6 +109,15 @@ describe("PositionsPage", () => {
     expect(screen.getByTestId("positions-disclaimer")).toHaveTextContent(/nothing here is advice/);
   });
 
+  it("says when a holding's option context can't be read", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerPositions).mockResolvedValue(POSITIONS);
+    renderPage();
+    const spy = await screen.findAllByTestId("position-group");
+    // The fixture's options routes only know NVDA: SPY's card says so.
+    await waitFor(() => expect(within(spy[1]).getByTestId("position-context-missing")).toHaveTextContent(/SPY.s option data couldn.t be read/));
+  });
+
   it("forgets a key the server refuses and asks again", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchOwnerPositions).mockRejectedValue(new ApiError({ status: 403, title: "This needs the owner key." }));

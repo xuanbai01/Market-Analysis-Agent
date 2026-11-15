@@ -113,6 +113,13 @@ describe("StrategyBuilder", () => {
     expect(screen.getByTestId("strategy-payoff-mid")).toBeInTheDocument();
   });
 
+  it("keeps showing a leg's strike after a refetch drops it from the chain", () => {
+    const { rerender } = render(<StrategyBuilder chain={CHAIN} />);
+    rerender(<StrategyBuilder chain={{ ...CHAIN, rows: CHAIN.rows.filter((r) => r.strike !== 165) }} />);
+    expect(screen.getByTestId("strategy-leg-strike")).toHaveValue("165");
+    expect(screen.getByTestId("strategy-unpriced")).toHaveTextContent(/no quote/i);
+  });
+
   it("says when the chain can't fit a template", () => {
     const rows = CHAIN.rows.map((r) => ({ ...r, put_ask: 0, put_bid: 0 }));
     render(<StrategyBuilder chain={{ ...CHAIN, rows }} />);

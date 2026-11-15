@@ -105,9 +105,9 @@ def snapshot_one(
         return "no_options", None
     if metrics.status != "ok":
         return metrics.status, None
-    # No regularMarketPrice (a halted or new listing): the last completed
-    # close is the spot at the quote time; a $0 spot would be stored forever.
-    spot = fetched.spot if fetched.spot > 0 else next((c for _d, c in reversed(fetched.closes)), 0.0)
+    # fetch_chain falls back to the last close; with neither there is no
+    # spot, and a $0 spot would be stored forever.
+    spot = fetched.spot
     if spot <= 0:
         return "no_usable_quotes", None
     underlying_date = mc.et_date(fetched.market_time).isoformat() if fetched.market_time else None

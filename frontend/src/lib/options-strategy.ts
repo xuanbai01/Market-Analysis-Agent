@@ -7,7 +7,8 @@
  * Held to the Python figures in options-strategy.golden.json (normal CDF
  * and the chance of ending above a strike to 1e-6, the probability of
  * profit to 1e-4), which tests/test_options_strategy_golden.py computes
- * from app/services/options_math by a different route.
+ * from app/services/options_math by a different route. Probabilities use
+ * the smile averaged over half a one-sigma move either side.
  *
  * Imported only by the lazy options page.
  */
@@ -133,33 +134,58 @@ export function extremes(legs: PricedLeg[]): { maxProfit: number | null; maxLoss
 
 // ── Risk-neutral probabilities from the smile ───────────────────────
 
-// A strike is on a smile point when ln(K/F) matches it this closely: the
-// browser's log and the server's can differ in the last bit.
-const ON_POINT = 1e-9;
-
-/** IV and its slope dσ/d ln(K/F) at x: linear between points, flat
- * beyond them; on a point (a leg's own strike), the mean of the slopes
- * either side, which is what −dC/dK gives across the kink. */
-function smileAt(points: [number, number][], x: number): { vol: number; slope: number } {
+/** IV at x = ln(K/F): linear between points, flat beyond them. */
+function volAt(points: [number, number][], x: number): number {
   const n = points.length;
-  const slope = (i: number) => (i < 0 || i >= n - 1 ? 0 : (points[i + 1][1] - points[i][1]) / (points[i + 1][0] - points[i][0]));
-  const on = points.findIndex(([px]) => Math.abs(px - x) < ON_POINT);
-  if (on >= 0) return { vol: points[on][1], slope: (slope(on - 1) + slope(on)) / 2 };
-  if (x < points[0][0]) return { vol: points[0][1], slope: 0 };
-  if (x > points[n - 1][0]) return { vol: points[n - 1][1], slope: 0 };
+  if (x <= points[0][0]) return points[0][1];
+  if (x >= points[n - 1][0]) return points[n - 1][1];
   let i = 0;
   while (points[i + 1][0] < x) i++;
   const [x0, v0] = points[i];
-  return { vol: v0 + slope(i) * (x - x0), slope: slope(i) };
+  const [x1, v1] = points[i + 1];
+  return v0 + ((v1 - v0) * (x - x0)) / (x1 - x0);
+}
+
+/** ∫ σ from the first point to x (negative to its left), for ``volAt``'s σ. */
+function area(points: [number, number][], x: number): number {
+  const [x0, v0] = points[0];
+  if (x <= x0) return v0 * (x - x0);
+  let total = 0;
+  for (let i = 0; i + 1 < points.length; i++) {
+    const [a, va] = points[i];
+    const [b, vb] = points[i + 1];
+    const end = Math.min(x, b);
+    total += ((va + va + ((vb - va) * (end - a)) / (b - a)) / 2) * (end - a);
+    if (x <= b) return total;
+  }
+  const [xn, vn] = points[points.length - 1];
+  return total + vn * (x - xn);
+}
+
+/** The half-width, in ln(K/F), the smile is averaged over for
+ * probabilities: half a one-sigma move, from 2% to 15%. Taking the slope
+ * of the raw piecewise smile let one noisy quote spike the density. */
+function halfWidth(smile: Smile): number {
+  return Math.min(0.15, Math.max(0.02, 0.5 * volAt(smile.points, 0) * Math.sqrt(smile.years)));
+}
+
+/** The averaged smile at x and its slope dσ/d ln K. */
+function smoothedAt(smile: Smile, x: number): { vol: number; slope: number } {
+  const h = halfWidth(smile);
+  const { points } = smile;
+  return {
+    vol: (area(points, x + h) - area(points, x - h)) / (2 * h),
+    slope: (volAt(points, x + h) - volAt(points, x - h)) / (2 * h),
+  };
 }
 
 /** The risk-neutral chance the stock ends above ``strike``: −dC/dK along
- * the smile, N(d2) − φ(d2)·√T·dσ/d ln K. The skew term is why a put-heavy
- * smile makes a fall likelier than a flat vol would. */
+ * the averaged smile, N(d2) − φ(d2)·√T·dσ/d ln K. The skew term is why a
+ * put-heavy smile makes a fall likelier than a flat vol would. */
 export function probAbove(smile: Smile, strike: number): number {
   if (strike <= 0) return 1;
   const { forward, years } = smile;
-  const { vol, slope } = smileAt(smile.points, Math.log(strike / forward));
+  const { vol, slope } = smoothedAt(smile, Math.log(strike / forward));
   if (vol <= 0 || years <= 0) return forward > strike ? 1 : 0; // nothing left to vary
   const root = Math.sqrt(years);
   const d2 = (Math.log(forward / strike) - (vol * vol * years) / 2) / (vol * root);
@@ -174,7 +200,10 @@ export function probProfit(legs: PricedLeg[], smile: Smile): number {
   for (let i = 0; i + 1 < edges.length; i++) {
     const [a, b] = [edges[i], edges[i + 1]];
     const probe = b === Infinity ? a * 2 + 1 : (a + b) / 2;
-    if (payoff(legs, probe) > 0) prob += (a === 0 ? 1 : probAbove(smile, a)) - (b === Infinity ? 0 : probAbove(smile, b));
+    if (payoff(legs, probe) > 0) {
+      // Never a negative mass, whatever the smile's shape.
+      prob += Math.max(0, (a === 0 ? 1 : probAbove(smile, a)) - (b === Infinity ? 0 : probAbove(smile, b)));
+    }
   }
   return Math.min(1, Math.max(0, prob));
 }
@@ -195,7 +224,7 @@ export function smileOf(chain: ExpiryChain): Smile | null {
  * else the smile's IV at the forward; null with neither. */
 export function oneSigma(chain: ExpiryChain): number | null {
   const smile = smileOf(chain);
-  const vol = chain.atm_iv ?? (smile ? smileAt(smile.points, 0).vol : null);
+  const vol = chain.atm_iv ?? (smile ? volAt(smile.points, 0) : null);
   return vol === null || chain.days <= 0 ? null : vol * Math.sqrt(chain.days / 365);
 }
 

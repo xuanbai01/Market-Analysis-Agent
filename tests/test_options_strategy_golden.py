@@ -3,7 +3,10 @@
 
 The builder (``frontend/src/lib/options-strategy.ts``) gets the chance that
 the stock ends above a strike in closed form, skew included, and the
-probability of profit from the breakevens. This file gets the same figures
+probability of profit from the breakevens. Both use the smile averaged
+over ±h in ln(K/F) (half a one-sigma move, from 2% to 15%): taking the slope
+of the raw piecewise smile let one noisy quote put a spike in the density
+(edge-case review). This file gets the same figures
 from ``app.services.options_math`` the long way: the chance of ending
 above K as the slope of Black-76 call prices along the smile (a finite
 difference), and the probability of profit by summing that distribution
@@ -41,8 +44,7 @@ SMILES: dict[str, dict[str, Any]] = {
 NORM_XS = [-3.0, -1.5, -0.1, 0.0, 0.25, 1.0, 2.5]
 
 _SKEWED_KNOTS = [SMILES["skewed"]["forward"] * math.exp(x) for x in (-0.15, -0.05, 0.05)]
-# Between the smile's points, and on them: a real leg's strike is one of
-# them, where the chance above takes the mean of the slopes either side.
+# Between the smile's points and on them (a real leg's strike is one).
 PROB_ABOVE = (
     [("skewed", k) for k in (120.0, 141.0, 150.0, 158.0, 170.0, 185.0, 200.0, *_SKEWED_KNOTS)]
     + [("flat", 100.0), ("flat", 120.0)]
@@ -62,15 +64,29 @@ _GRID = 20_000
 _TAIL_SIGMAS = 10
 
 
-def _vol(smile: dict[str, Any], strike: float) -> float:
+def _raw(smile: dict[str, Any], x: float) -> float:
     """Linear in ln(K/F) between the points, flat beyond them."""
     xs = [p[0] for p in smile["points"]]
     ys = [p[1] for p in smile["points"]]
-    x = math.log(strike / smile["forward"])
     inside = om.interpolate(x, xs, ys)
     if inside is not None:
         return inside
     return ys[0] if x < xs[0] else ys[-1]
+
+
+def _half_width(smile: dict[str, Any]) -> float:
+    return min(0.15, max(0.02, 0.5 * _raw(smile, 0.0) * math.sqrt(smile["years"])))
+
+
+def _vol(smile: dict[str, Any], strike: float) -> float:
+    """The smile's mean over [x − h, x + h]: exact, since it is linear
+    between the cuts (the points inside the window and its two ends)."""
+    h = _half_width(smile)
+    x = math.log(strike / smile["forward"])
+    lo, hi = x - h, x + h
+    cuts = sorted({lo, hi, *(p[0] for p in smile["points"] if lo < p[0] < hi)})
+    area = sum((_raw(smile, a) + _raw(smile, b)) / 2 * (b - a) for a, b in zip(cuts, cuts[1:], strict=False))
+    return area / (2 * h)
 
 
 def _call(smile: dict[str, Any], strike: float) -> float:
@@ -78,9 +94,9 @@ def _call(smile: dict[str, Any], strike: float) -> float:
 
 
 def _prob_above(smile: dict[str, Any], strike: float) -> float:
-    """−dC/dK along the smile: the risk-neutral chance of ending above K.
-    On a smile point the difference straddles the kink, which is the mean
-    of the slopes either side; a small step keeps the error out of sight."""
+    """−dC/dK along the averaged smile: the risk-neutral chance of ending
+    above K. The averaged smile is smooth, so a small central step is exact
+    to well under the tolerance."""
     h = 1e-6 * smile["forward"]
     return -(_call(smile, strike + h) - _call(smile, strike - h)) / (2 * h)
 

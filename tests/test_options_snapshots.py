@@ -278,14 +278,15 @@ async def test_a_failed_insert_does_not_lose_the_rest_of_the_day(world: _World) 
     assert [(f.symbol, f.reason) for f in result.failed] == [("SPY", "ValueError")]
 
 
-def test_a_missing_spot_falls_back_to_the_last_close(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DeepSeek on PR 109: no regularMarketPrice stored a $0 spot forever."""
+def test_a_fetch_with_no_spot_at_all_stores_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DeepSeek on PR 109: no regularMarketPrice stored a $0 spot forever.
+    fetch_chain now falls back to the last close itself
+    (test_options_chain); with no close either, nothing is stored."""
     from app.services import options_metrics as om
     from app.services.options_chain import ChainFetch
 
     fetched = ChainFetch(
-        symbol="NEW", spot=0.0, market_time=0, dividend_yield=0.0, expiries=(), chains={},
-        closes=((date(2026, 11, 12), 41.0), (FRIDAY, 42.5)),
+        symbol="NEW", spot=0.0, market_time=0, dividend_yield=0.0, expiries=(), chains={}, closes=(),
     )
     canned = om.SnapshotMetrics(
         status="ok", iv30=0.4, iv30_extrapolated=False, iv90=None, iv90_extrapolated=False, skew25=None,
@@ -297,7 +298,7 @@ def test_a_missing_spot_falls_back_to_the_last_close(monkeypatch: pytest.MonkeyP
 
     status, row = snaps.snapshot_one("NEW", FRIDAY, mc.session_close(FRIDAY), 0.04, False)
 
-    assert status == "ok" and row is not None and row["spot"] == 42.5
+    assert (status, row) == ("no_usable_quotes", None)
 
 
 async def test_missing_names_the_configured_tickers_without_a_row(world: _World) -> None:

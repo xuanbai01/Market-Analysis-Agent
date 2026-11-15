@@ -22,7 +22,7 @@ into the Dockerfile pin list for this alone.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
@@ -160,8 +160,11 @@ def quote_time(now: datetime) -> datetime:
     during a session, else the last close."""
     now_et = now.astimezone(ET)
     day = now_et.date()
-    if is_session(day) and now_et >= session_open(day):
-        return min(now_et - QUOTE_DELAY, session_close(day))
+    delayed = now_et - QUOTE_DELAY
+    # In a session's first 15 minutes the delayed quotes are still the last
+    # close's: 09:16 is no quote time, and a weekly's T would run short.
+    if is_session(day) and delayed >= session_open(day):
+        return min(delayed, session_close(day))
     return session_close(previous_session(day))
 
 
@@ -172,9 +175,22 @@ def is_close(quoted_at: datetime) -> bool:
     return t == session_close(t.date())
 
 
+def session_left(quoted_at: datetime) -> float:
+    """The share of the quote's session still to trade: 1 at the open, 0 at
+    the close and outside sessions."""
+    t = quoted_at.astimezone(ET)
+    day = t.date()
+    if not is_session(day) or t >= session_close(day):
+        return 0.0
+    start, end = session_open(day), session_close(day)
+    return min(1.0, (end - max(t, start)).total_seconds() / (end - start).total_seconds())
+
+
 def years_to_expiry(quoted_at: datetime, expiry: date) -> float:
-    """Years (of 365 days) from the quote time to the close on ``expiry``."""
-    return (session_close(expiry) - quoted_at).total_seconds() / _YEAR
+    """Years (of 365 days) from the quote time to the close on ``expiry``,
+    in elapsed time: aware datetimes in one zone subtract as wall clocks,
+    which is an hour off across a daylight-saving change."""
+    return (session_close(expiry).astimezone(UTC) - quoted_at.astimezone(UTC)).total_seconds() / _YEAR
 
 
 def et_date(epoch_seconds: int | float) -> date:

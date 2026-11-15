@@ -237,11 +237,12 @@ class SnapshotMetrics:
     detail: dict[str, Any]
 
 
-def _completed_closes(fetched: ChainFetch, quoted_at: datetime) -> list[float]:
-    """Closes of sessions finished by the quote time."""
+def completed_closes(closes: Iterable[tuple[date, float]], quoted_at: datetime) -> list[tuple[date, float]]:
+    """The closes of sessions finished by the quote time: in a session,
+    today's bar is the live price, not a close."""
     today = quoted_at.astimezone(mc.ET).date()
     finished = quoted_at >= mc.session_close(today)
-    return [c for d, c in fetched.closes if d < today or (d == today and finished)]
+    return [(d, c) for d, c in closes if d < today or (d == today and finished)]
 
 
 def _round(value: float) -> float:
@@ -294,7 +295,7 @@ def snapshot_metrics(
         for target, reach in CONSTANT_MATURITIES
     )
     nearest = min(eligible, key=lambda s: abs(s.days - CONSTANT_MATURITIES[0][0]), default=None)
-    closes = _completed_closes(fetched, quoted_at)
+    closes = [c for _d, c in completed_closes(fetched.closes, quoted_at)]
     rv20, rv60 = (om.realized_vol(closes, n) for n in RV_WINDOWS)
     calls = [q for chain in fetched.chains.values() for q in chain.calls]
     puts = [q for chain in fetched.chains.values() for q in chain.puts]

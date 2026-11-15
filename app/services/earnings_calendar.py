@@ -222,6 +222,11 @@ def fetch_schedule(symbol: str) -> Schedule:
     except Exception:
         logger.warning("could not read %s's earnings schedule", symbol, exc_info=True)
         return Schedule(next=None, past=())
+    if frame is None:
+        # The scrape failed quietly (get_earnings_dates returns None): use
+        # what the calendar gave this once, but ask again next time.
+        logger.warning("no earnings dates for %s; not caching the schedule", symbol)
+        return result
     if len(_cache) >= _CACHE_SIZE:
         _cache.pop(min(_cache, key=lambda k: _cache[k][1]))
     _cache[symbol] = (result, now + SCHEDULE_TTL_SECONDS)

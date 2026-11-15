@@ -229,3 +229,12 @@ async def test_after_a_failure_waiting_visits_try_one_at_a_time(fake_llm: _Llm, 
     assert all(isinstance(r, reader.ReadUnavailable) for r in results)
     assert most[0] == 1
     assert reader._locks == {} and reader._waiting == {}
+
+
+async def test_a_dropped_point_makes_room_for_the_next(fake_llm: _Llm) -> None:
+    """Edge-case review: points were capped at five before the checks, so a
+    dropped one was never replaced by a sixth."""
+    stray = ("IV30 is 59.46%, on its way to 70%.", ["O1"])
+    fake_llm.draft = _draft(stray, ABOVE, TERM, ABOVE, TERM, ABOVE)
+    read = await reader.write_read(_report(), NOW)
+    assert read is not None and len(read.points) == reader.MAX_POINTS

@@ -46,7 +46,7 @@ class ExpirySummary(BaseModel):
     """One expiry on the term structure and the expected-move cone."""
 
     expiry: date
-    days: float = Field(description="calendar days from the quote time to 16:00 ET on the expiry")
+    days: float = Field(description="calendar days from the quote time to the expiry's close (16:00 ET, 13:00 on a half day)")
     sessions: int = Field(description="NYSE sessions after the quote's day, up to and including the expiry")
     forward: float
     forward_from_parity: bool

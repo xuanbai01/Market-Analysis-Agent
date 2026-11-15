@@ -182,9 +182,38 @@ function grid(spot: number): number[] {
   return Array.from({ length: GRID_POINTS + 1 }, (_, i) => Math.exp(lo + ((hi - lo) * i) / GRID_POINTS));
 }
 
-/** Where the P&L at the first expiry crosses zero, between a fifth of the
- * spot and four times it. */
+const SAME_POINT = 1e-9;
+
+/** Where the P&L at expiry crosses zero, exactly, for a group whose options
+ * all expire together: its payoff then bends only at 0 and the strikes, so
+ * it's a straight line between them and above the last. Null when a leg
+ * can't be valued. */
+function expiryBreakevens(group: PositionGroup, market: Market): number[] | null {
+  const strikes = group.legs.flatMap((leg) => (leg.strike === null ? [] : [leg.strike]));
+  const knots = [0, ...new Set(strikes)].sort((a, b) => a - b);
+  const last = knots[knots.length - 1];
+  const values = [...knots, last + 1].map((x) => pnlAtExpiry(group, x, market));
+  if (values.some((v) => v === null)) return null;
+  const ys = values as number[];
+  const found: number[] = [];
+  const add = (x: number) => {
+    if (!found.some((f) => Math.abs(f - x) < SAME_POINT)) found.push(x);
+  };
+  for (let i = 0; i + 1 < knots.length; i++) {
+    const [a, b, pa, pb] = [knots[i], knots[i + 1], ys[i], ys[i + 1]];
+    if (pa > 0 !== pb > 0) add(a + ((b - a) * -pa) / (pb - pa));
+  }
+  const pLast = ys[knots.length - 1];
+  const slope = ys[knots.length] - pLast; // per dollar, above the last strike
+  if ((pLast > 0 && slope < 0) || (pLast <= 0 && slope > 0)) add(last - pLast / slope);
+  return found.sort((a, b) => a - b);
+}
+
+/** Where the P&L at the first expiry crosses zero. Exact for options that
+ * expire together (and stock alone); with later legs, valued by Black-76,
+ * searched between a fifth of the spot and four times it. */
 export function breakevens(group: PositionGroup, market: Market): number[] {
+  if (group.expiries.length <= 1) return expiryBreakevens(group, market) ?? [];
   const xs = grid(market.spot);
   const ys = xs.map((x) => pnlAtExpiry(group, x, market));
   const found: number[] = [];
@@ -203,16 +232,20 @@ export function breakevens(group: PositionGroup, market: Market): number[] {
  * position it can't value. */
 export function profitChance(group: PositionGroup, smile: Smile, market: Market): number | null {
   if (group.expiries.length !== 1 || costBasis(group) === null || !modelled(group)) return null;
-  const edges = [0, ...breakevens(group, market), Infinity];
+  const evens = expiryBreakevens(group, market);
+  if (evens === null) return null;
+  const edges = [0, ...evens, Infinity];
   const above = (k: number) => (k === 0 ? 1 : k === Infinity ? 0 : probAbove(smile, k));
   let chance = 0;
   for (let i = 0; i + 1 < edges.length; i++) {
     const [a, b] = [edges[i], edges[i + 1]];
-    const probe = b === Infinity ? a * 1.5 + 1 : (a + b) / 2;
+    // The sign holds between breakevens, so any price inside will do.
+    const probe = b !== Infinity ? (a + b) / 2 : a > 0 ? a * 2 : market.spot;
     const pnl = pnlAtExpiry(group, probe, market);
-    if (pnl !== null && pnl > 0) chance += above(a) - above(b);
+    if (pnl === null) return null;
+    if (pnl > 0) chance += Math.max(0, above(a) - above(b));
   }
-  return chance;
+  return Math.min(1, Math.max(0, chance));
 }
 
 /** Trading sessions from ``now`` to the expiry's close (weekdays; holidays

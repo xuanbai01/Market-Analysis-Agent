@@ -117,18 +117,22 @@ function Line({ sentence, testId }: { sentence: ReturnType<typeof marketSentence
   );
 }
 
+const UNTRACKED = "untracked";
+
 export function PositionGroupCard({ group, now }: { group: PositionGroup; now: Date }) {
   const expiry = firstExpiry(group);
   const hasOptions = expiry !== null;
+  // Keys of its own: under the options page's, a visit there would be
+  // served this untracked copy and never record the view.
   const report = useQuery({
-    queryKey: ["options", group.symbol],
+    queryKey: ["options", group.symbol, UNTRACKED],
     queryFn: () => fetchOptionsReport(group.symbol, { track: false }), // a holding isn't a view
     staleTime: FIVE_MINUTES,
     enabled: hasOptions,
     retry: false,
   });
   const chain = useQuery({
-    queryKey: ["options-chain", group.symbol, expiry],
+    queryKey: ["options-chain", group.symbol, expiry, UNTRACKED],
     queryFn: () => fetchOptionsChain(group.symbol, expiry as string, { track: false }),
     staleTime: FIVE_MINUTES,
     enabled: hasOptions,

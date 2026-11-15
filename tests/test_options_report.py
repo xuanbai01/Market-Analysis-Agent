@@ -25,7 +25,10 @@ class _Yahoo:
         self.skip: set[date] = set()
         self.listed = (EXP_20, EXP_48)
 
-    def fetch_chain(self, symbol: str, pick: Any, *, history_period: str = "6mo", provider: str = "yfinance") -> Any:
+    def fetch_chain(
+        self, symbol: str, pick: Any, *, history_period: str = "6mo", read_calendar: bool = True,
+        provider: str = "yfinance",
+    ) -> Any:
         self.calls.append(symbol)
         if symbol == "ZZZZQ":
             raise SymbolNotFound(symbol)

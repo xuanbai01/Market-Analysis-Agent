@@ -9,10 +9,11 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 
 import { fetchOptionsReport } from "../../lib/options-api";
-import type { OptionsReport } from "../../lib/options-schemas";
+import type { ExpirySummary, OptionsReport } from "../../lib/options-schemas";
+import { GLOSSARY, coneSentence, daysLabel, termSentence } from "../../lib/options-text";
 import { ROUTES } from "../../lib/routes";
 import { ErrorBanner } from "../ErrorBanner";
-import { money, pct, shortDate } from "./chart-kit";
+import { InfoTip, money, pct, shortDate } from "./chart-kit";
 import { drawsCone, drawsEarnings, drawsTerm } from "./draws";
 import { EarningsMoves } from "./EarningsMoves";
 import { ExpectedMoveCone } from "./ExpectedMoveCone";
@@ -46,10 +47,13 @@ function daysBetween(fromIso: string, toIso: string): number {
   return (Date.parse(toIso.slice(0, 10)) - Date.parse(fromIso.slice(0, 10))) / 86_400_000;
 }
 
-function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Tile({ label, value, sub, info }: { label: string; value: string; sub?: string; info: string }) {
   return (
     <div className="rounded-md border border-strata-border bg-strata-surface p-4">
-      <p className="font-mono text-[10px] uppercase tracking-kicker text-strata-muted">{label}</p>
+      <p className="font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
+        {label}
+        <InfoTip label={label} text={info} />
+      </p>
       <p className="mt-1 font-mono text-lg text-strata-hi">{value}</p>
       {sub && <p className="mt-0.5 font-mono text-[11px] text-strata-dim">{sub}</p>}
     </div>
@@ -75,18 +79,67 @@ function Tiles({ report }: { report: OptionsReport }) {
         : "No IV30 today to rank";
   return (
     <div data-testid="options-tiles" className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-      <Tile label="Spot" value={report.spot !== null ? money(report.spot) : "—"} />
-      <Tile label="IV30" value={report.iv30 !== null ? pct(report.iv30) : "—"} sub={ivSub(report)} />
-      <Tile label="IV history" value={history.percentile !== null ? ordinal(Math.round(history.percentile)) : "—"} sub={ivRank} />
+      <Tile
+        label={report.at_close ? "Close" : "Price"}
+        value={report.spot !== null ? money(report.spot) : "—"}
+        sub={report.at_close ? "official close" : "15 min delayed"}
+        info={GLOSSARY.spot}
+      />
+      <Tile label="IV30" value={report.iv30 !== null ? pct(report.iv30) : "—"} sub={ivSub(report)} info={GLOSSARY.iv30} />
+      <Tile
+        label="IV history"
+        value={history.percentile !== null ? ordinal(Math.round(history.percentile)) : "—"}
+        sub={ivRank}
+        info={GLOSSARY.ivHistory}
+      />
       <Tile
         label="Expected move"
         value={nearest ? `±${pct(nearest.expected_move)}` : "—"}
         sub={nearest ? `by ${shortDate(nearest.expiry)}` : undefined}
+        info={GLOSSARY.expectedMove}
       />
-      <Tile label="25Δ skew" value={report.skew25 !== null ? `${(report.skew25 * 100).toFixed(1)} pts` : "—"} sub="put IV − call IV" />
-      <Tile label="Put/call OI" value={report.put_call_open_interest !== null ? report.put_call_open_interest.toFixed(2) : "—"} />
+      <Tile
+        label="25Δ skew"
+        value={report.skew25 !== null ? `${(report.skew25 * 100).toFixed(1)} pts` : "—"}
+        sub="put IV − call IV"
+        info={GLOSSARY.skew}
+      />
+      <Tile
+        label="Put/call OI"
+        value={report.put_call_open_interest !== null ? report.put_call_open_interest.toFixed(2) : "—"}
+        sub="expiries read"
+        info={GLOSSARY.putCall}
+      />
     </div>
   );
+}
+
+/** The expected move at the expiries nearest a week, a month and a quarter. */
+function coneStats(expiries: ExpirySummary[]): { label: string; value: string }[] {
+  const picked = new Map<string, ExpirySummary>();
+  for (const target of [7, 30, 90]) {
+    const best = expiries.reduce<ExpirySummary | undefined>(
+      (b, e) => (b === undefined || Math.abs(e.days - target) < Math.abs(b.days - target) ? e : b),
+      undefined,
+    );
+    if (best) picked.set(best.expiry, best);
+  }
+  return [...picked.values()]
+    .sort((a, b) => a.days - b.days)
+    .map((e) => ({
+      label: `${shortDate(e.expiry)} (${daysLabel(e.days)})`,
+      value: `±${pct(e.expected_move)} · ${money(e.low)}–${money(e.high)}`,
+    }));
+}
+
+function termStats(report: OptionsReport): { label: string; value: string }[] {
+  const rows = [
+    { label: "IV30", value: report.iv30 },
+    { label: "IV90", value: report.iv90 },
+    { label: "Realized, 20 sessions", value: report.rv20 },
+    { label: "Realized, 60 sessions", value: report.rv60 },
+  ];
+  return rows.filter((r) => r.value !== null).map((r) => ({ label: r.label, value: pct(r.value as number) }));
 }
 
 export default function OptionsPage() {
@@ -143,23 +196,42 @@ export default function OptionsPage() {
           <OptionsReadCard symbol={symbol} quotedAt={report.quoted_at} />
           <div className={`grid gap-6 ${cone !== null && term ? "xl:grid-cols-2" : ""}`}>
             {cone !== null && (
-              <Panel title="Expected move, one standard deviation">
+              <Panel
+                title="Expected move, one standard deviation"
+                testId="options-cone-panel"
+                info={GLOSSARY.cone}
+                summary={coneSentence(report.expiries, cone)}
+                stats={coneStats(report.expiries)}
+              >
                 <ExpectedMoveCone expiries={report.expiries} spot={cone} eventDays={eventDays} />
               </Panel>
             )}
             {term && (
-              <Panel title="Term structure: at-the-money IV">
+              <Panel
+                title="Term structure: at-the-money IV"
+                testId="options-term-panel"
+                info={GLOSSARY.term}
+                summary={termSentence(report.expiries)}
+                stats={termStats(report)}
+              >
                 <TermStructureChart expiries={report.expiries} rv20={report.rv20} />
               </Panel>
             )}
           </div>
           {report.earnings && drawsEarnings(report.earnings) && (
-            <Panel title="Earnings">
+            <Panel title="Earnings" info={GLOSSARY.earnings}>
               <EarningsMoves earnings={report.earnings} />
             </Panel>
           )}
           {report.chain && (
-            <ExpirySection symbol={symbol} listed={report.listed_expiries} initial={report.chain} spot={report.spot} />
+            <ExpirySection
+              symbol={symbol}
+              listed={report.listed_expiries}
+              initial={report.chain}
+              spot={report.spot}
+              quotedAt={report.quoted_at}
+              skew25={report.skew25}
+            />
           )}
         </>
       )}

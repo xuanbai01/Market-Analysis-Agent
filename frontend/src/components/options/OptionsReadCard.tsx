@@ -68,11 +68,11 @@ export function OptionsReadCard({ symbol, quotedAt }: { symbol: string; quotedAt
       <header className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
         <p className="font-mono text-[10px] uppercase tracking-kicker text-strata-highlight">What the prices say</p>
         <p className="font-mono text-[10px] text-strata-muted">
-          AI-written from the figures on this page · every point cites them · not advice
+          AI-written from the figures on this page · each point lists its sources · not advice
         </p>
       </header>
       <p className="text-lg font-medium leading-snug text-strata-hi">{read.headline}</p>
-      <CitedPoints points={read.points} facts={read.claims} evidenceTestId="options-read-evidence" />
+      <CitedPoints points={read.points} facts={read.claims} evidenceTestId="options-read-evidence" collapsed />
       {read.quoted_at !== quotedAt && (
         <p data-testid="options-read-stale" className="mt-3 font-mono text-[10px] text-strata-muted">
           Read of the quotes from {quotesOf(read)}.

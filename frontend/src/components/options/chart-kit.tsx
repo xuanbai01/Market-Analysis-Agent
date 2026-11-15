@@ -4,8 +4,9 @@
  * lens palette's first two hues (blue, orange), validated on this surface
  * (#0e1116): colour-blind ΔE 26.8, normal 31.8, contrast over 3:1.
  */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
+import type { Sentence } from "../../lib/options-text";
 import { useMeasuredWidth } from "../../lib/use-measured-width";
 
 export const COLOR = {
@@ -113,6 +114,61 @@ export function Tooltip({ testId, left, width, children }: { testId: string; lef
     >
       {children}
     </div>
+  );
+}
+
+/** A ⓘ that explains a figure: on hover, focus or tap. */
+export function InfoTip({ label, text, testId }: { label: string; text: string; testId?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-block align-middle" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button
+        type="button"
+        data-testid={testId}
+        aria-label={`About ${label}`}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        className="ml-1 rounded-full px-0.5 font-mono text-[10px] leading-none text-strata-muted hover:text-strata-hi focus:text-strata-hi focus:outline-none"
+      >
+        ⓘ
+      </button>
+      {open && (
+        <span
+          role="tooltip"
+          className="absolute left-0 top-5 z-20 w-64 rounded-md border border-strata-border bg-strata-surface p-2.5 text-left font-sans text-[11px] normal-case leading-snug tracking-normal text-strata-fg shadow-lg"
+        >
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** A sentence's text with its figures in bold. */
+export function SentenceText({ sentence }: { sentence: Sentence }) {
+  return (
+    <>
+      {sentence.map((part, i) =>
+        typeof part === "string" ? <span key={i}>{part}</span> : <strong key={i} className="font-semibold text-strata-hi">{part.strong}</strong>,
+      )}
+    </>
+  );
+}
+
+/** Label/value rows under a chart. */
+export function StatsTable({ rows, testId }: { rows: { label: string; value: string }[]; testId?: string }) {
+  if (rows.length === 0) return null;
+  return (
+    <dl data-testid={testId} className="mt-3 grid grid-cols-1 gap-x-6 font-mono text-[11px] sm:grid-cols-2">
+      {rows.map((r) => (
+        <div key={r.label} className="flex justify-between gap-3 border-b border-strata-border/40 py-1">
+          <dt className="text-strata-muted">{r.label}</dt>
+          <dd className="tabular-nums text-strata-fg">{r.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 

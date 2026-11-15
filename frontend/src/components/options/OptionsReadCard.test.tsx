@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -43,6 +43,12 @@ describe("OptionsReadCard", () => {
     const chips = screen.getAllByTestId("options-read-evidence");
     expect(chips).toHaveLength(4);
     expect(chips[0]).toHaveTextContent("59.46%");
+    // The sentence already quotes its figures: the chips fold behind "Sources".
+    const sources = screen.getAllByTestId("options-read-evidence-sources");
+    expect(sources.length).toBe(READ.points.length);
+    expect(sources[0].tagName).toBe("DETAILS");
+    expect(sources[0]).not.toHaveAttribute("open");
+    expect(within(sources[0]).getByText(/^Sources \(\d\)$/)).toBeInTheDocument();
     expect(screen.getByTestId("options-read")).toHaveTextContent(/AI-written/i);
     expect(screen.getByTestId("options-read")).toHaveTextContent(/not advice/i);
   });

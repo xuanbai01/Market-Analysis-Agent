@@ -67,7 +67,8 @@ export function EarningsMoves({ earnings }: { earnings: EarningsBlock }) {
           {implied !== null && (
             <g data-testid="options-earnings-band">
               <rect x={PAD.left} y={y(implied)} width={W - PAD.left - PAD.right} height={y(-implied) - y(implied)} fill={COLOR.band} fillOpacity={0.14} />
-              <AxisText x={W - PAD.right} y={y(implied) - 4}>{`±${pct(implied)} priced`}</AxisText>
+              {/* At the left end: the newest report's bar is at the right and can be the tallest. */}
+              <AxisText x={PAD.left + 4} y={y(implied) - 4} anchor="start">{`±${pct(implied)} priced`}</AxisText>
             </g>
           )}
           <line x1={PAD.left} x2={W - PAD.right} y1={y(0)} y2={y(0)} stroke={COLOR.grid} />

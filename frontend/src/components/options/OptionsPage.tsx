@@ -43,7 +43,9 @@ function daysBetween(fromIso: string, toIso: string): number {
 
 function Panel({ title, children, testId }: { title: string; children: ReactNode; testId?: string }) {
   return (
-    <section data-testid={testId} className="mb-6 rounded-md border border-strata-border bg-strata-surface p-5">
+    // min-w-0: a grid item otherwise grows to its chart's first (fallback)
+    // width, and the chart then measures that instead of the page.
+    <section data-testid={testId} className="mb-6 min-w-0 rounded-md border border-strata-border bg-strata-surface p-5">
       <h2 className="mb-3 font-mono text-[10px] uppercase tracking-kicker text-strata-muted">{title}</h2>
       {children}
     </section>

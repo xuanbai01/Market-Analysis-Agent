@@ -59,8 +59,12 @@ export function ExpirySection({ symbol, listed, initial, spot }: Props) {
       {chain && (
         <>
           <div className="grid gap-6 lg:grid-cols-2">
-            <SmileChart chain={chain} />
-            <OpenInterestChart chain={chain} spot={spot} />
+            <div className="min-w-0">
+              <SmileChart chain={chain} />
+            </div>
+            <div className="min-w-0">
+              <OpenInterestChart chain={chain} spot={spot} />
+            </div>
           </div>
           <ChainTable chain={chain} />
         </>

@@ -327,5 +327,13 @@ def test_dates_are_labels_not_figures() -> None:
     assert rt.unbacked_numbers("The report on 2026-11-17 is priced.", FACTS) == []
 
 
+def test_labels_can_come_from_other_claims_than_the_figures() -> None:
+    """ "IV30" and "8 reports" are labels any claim may name; 59.46% is a
+    figure only the IV30 claim backs."""
+    figures = [FACTS[2]]
+    assert rt.unbacked_numbers("IV30 against the last 8 reports' 4.04%", figures, labels=FACTS) == []
+    assert rt.unbacked_numbers("IV30 is 59.46%", figures, labels=FACTS) == [59.46]
+
+
 def test_a_claim_without_a_number_backs_nothing() -> None:
     assert rt.unbacked_numbers("Up 12%.", [claim("Business description", "Makes chips.")]) == [12.0]

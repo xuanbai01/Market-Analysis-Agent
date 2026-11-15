@@ -140,9 +140,9 @@ def test_claims_carry_units_and_skip_what_is_missing() -> None:
     assert all(c.source.tool == "computed.options" for c in found)
 
 
-def _earnings(implied: float | None, past_moves: list[float]) -> Any:
+def _earnings(implied: float | None, past_moves: list[float], refused: str | None = None) -> Any:
     nxt = Announcement(datetime(2026, 11, 17, 16, tzinfo=mc.ET), "after_close", False)
-    event = EventMove(None, implied, None, "two_after", None, (date(2026, 11, 18), date(2026, 11, 27)))
+    event = EventMove(None, implied, None, "two_after", refused, (date(2026, 11, 18), date(2026, 11, 27)))
     past = [PastMove(announced=date(2026, 8, 26), timing="after_close", move=m) for m in past_moves]
     return oa.earnings_block(Schedule(nxt, ()), event, past, 160.0, estimated=False)
 
@@ -176,6 +176,10 @@ def test_the_other_directions_and_a_level_term_structure() -> None:
     assert "Implied earnings move below the average move after the last 1 report" in by_name
 
 
+def test_no_put_open_interest_is_more_calls_not_a_tie() -> None:
+    assert "Put/call open interest, expiries read: more calls open than puts" in _comparisons(put_call_oi=0.0)
+
+
 def test_no_earnings_comparison_without_a_priced_move() -> None:
     by_name = _comparisons(earnings=_earnings(None, [0.05]))
     assert not any("average move" in d for d in by_name)
@@ -185,8 +189,7 @@ def test_a_refused_earnings_move_is_a_fact_with_its_reason() -> None:
     """KO's live read set the month's one-sigma move against past report
     moves when no earnings move was priced; the reason it isn't priced is
     now a fact the read can quote."""
-    refused = _earnings(None, [0.05])
-    refused.refused = "the first expiry after the report is 98 days out"
+    refused = _earnings(None, [0.05], refused="the first expiry after the report is 98 days out")
     claim = _comparisons(earnings=refused)["Implied earnings move, report on 2026-11-17: not priced"]
     assert claim.value == "the first expiry after the report is 98 days out" and claim.unit == "string"
 

@@ -109,6 +109,13 @@ async def test_a_point_quoting_a_number_no_fact_shows_is_dropped(fake_llm: _Llm)
     assert read is not None and len(read.points) == 1
 
 
+async def test_a_point_quoting_a_figure_it_does_not_cite_is_dropped(fake_llm: _Llm) -> None:
+    """Every number on the card has its chip: 55.00% is IV90 (O2), not cited here."""
+    fake_llm.draft = _draft(ABOVE, ("IV30 is 59.46% and IV90 is 55.00%.", ["O1"]))
+    read = await reader.write_read(_report(), NOW)
+    assert read is not None and len(read.points) == 1
+
+
 async def test_a_headline_with_a_made_up_number_spoils_the_read(fake_llm: _Llm) -> None:
     fake_llm.draft = _draft(ABOVE, TERM, headline="Options price a 70% move.")
     assert await reader.write_read(_report(), NOW) is None

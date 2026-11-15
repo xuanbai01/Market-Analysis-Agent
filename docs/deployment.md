@@ -196,6 +196,8 @@ The owner's account routes (`/v1/owner`, ADR 0009) need a second key on top of t
 2. **Save it in your password manager** right away, as the password of an entry for the dashboard's address with the username `market-agent-owner`. Then clear the clipboard with `Set-Clipboard -Value ' '`. The manager syncs it to your other PCs; the dashboard's owner pages ask for it once per browser.
 3. **Rotate it** by running step 1 again and updating the entry. Each browser asks for the new key on its next owner request.
 
+The app refuses to start with an owner key under 32 characters or equal to the shared secret. Ten wrong keys in an hour lock an address out, the right key included; `fly apps restart` clears it.
+
 ## Ongoing operations
 
 ### Rolling out a change

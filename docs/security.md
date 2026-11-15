@@ -8,9 +8,15 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 - The dashboard asks for the secret at sign-in and keeps it in `localStorage`; a 401 on a report clears it and returns to sign-in.
 - **The owner's account data needs a second key** (ADR 0009, amended 2026-11-15). Routes under `/v1/owner` take `require_owner` ([`app/api/v1/dependencies.py`](../app/api/v1/dependencies.py)): the shared secret, then `X-Owner-Key: <OWNER_KEY>`, compared in constant time on bytes.
   - **Why a second key:** the shared secret is also a GitHub Actions secret, so it alone must not open the owner's account.
-  - **Fail closed:** with `OWNER_KEY` unset the routes answer 404, local dev included. A missing or wrong key is a 403.
-  - **Lockout:** each wrong key takes one of the address's `OWNER_KEY_FAILURES_PER_HOUR` tries (10). With none left every request from it is a 429, the right key included, because the lockout is checked before any key is compared.
-  - **Logging:** a refusal is logged as missing or wrong, never with the key.
+  - **Fail closed:** with `OWNER_KEY` unset the routes answer 404 to a caller past the shared secret, local dev included. A missing or wrong key is a 403.
+  - **A strong key:** set, it must be at least 32 characters and differ from the shared secret, or the app won't start (`Settings._owner_key_is_strong`). Past the shared secret, the key's strength is the real defence.
+  - **Lockout:** every request takes one of the caller's `OWNER_KEY_FAILURES_PER_HOUR` tries (10, from 1 to 100) before its key is compared, and a right key gives it back.
+    - A burst of guesses gets no more than the tries left.
+    - With none left every request is a 429, the right key included.
+    - An IPv6 caller counts by its /64.
+    - The counts are in memory, so they're per machine and a restart clears them. That's also the way out if someone holding the shared secret locks the owner out from a shared address: `fly apps restart`.
+  - **Logging:** a refusal is logged as missing or wrong, and a lockout as one warning. The caller is named by a keyed hash, with a key that's new each boot, never by address, and the owner key never appears.
+  - **Not advertised:** the owner routes are left out of the public OpenAPI schema.
   - [`tests/test_owner_auth.py`](../tests/test_owner_auth.py) pins the owner's routes.
 - **One deliberate exception: the read-only demo.** `GET /v1/demo`, `/v1/demo/research/{symbol}` and `/v1/demo/market/{symbol}/prices` answer without the secret ([`app/services/demo.py`](../app/services/demo.py)). They return only what is already stored (the latest report and the stored prices) for the tickers in `DEMO_SYMBOLS`; they never generate a report, call the LLM or reach a data provider, so a visitor cannot spend money or quota. A ticker off the list is a 404 whether or not anything is stored for it. They are built to be hammered: responses are cached for five minutes as serialized bytes (no per-request validation or serialization of a large report), the cache can only hold keys for listed tickers and the three allowed ranges, responses carry `Cache-Control: public, max-age=300`, and one IP is limited to `DEMO_RATE_LIMIT_PER_MINUTE` requests (120 by default). `DEMO_SYMBOLS` empty turns all three off. `tests/test_route_auth.py` pins the set to exactly these three GET routes; `tests/test_demo.py` fails if any path from them reaches the orchestrator or the price ingest. The reports hold public market data and AI prose about it, nothing about the owner.
 - **When real users arrive:** per-user auth through a dependency that returns `current_user`, and every user-owned query scoped to `current_user.id` unless the route is explicitly cross-user.
@@ -51,7 +57,7 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 ## A07 — Identification and Authentication Failures
 
 - Shared secret only (see A01): validated on every protected request; failures return 401 with `WWW-Authenticate: Bearer` and never log the token. No expiry or rotation beyond replacing the secret, which now lives in three places: the Fly secret, the GitHub Actions secret (the IV snapshot cron) and each browser's sign-in. A narrower token for the cron waits until there are collaborators (ADR 0008).
-- **The owner key** (A01) lives as a Fly secret and in the owner's password manager, which syncs it to their PCs. Both sign-in forms carry a fixed hidden username, so a manager can save the secret under a name. Rotate it by importing a new `OWNER_KEY` (docs/deployment.md §10).
+- **The owner key** (A01) lives as a Fly secret and in the owner's password manager, which syncs it to their PCs. The sign-in form carries a fixed hidden username, so a manager can save the secret under a name, and posts (so a stray native submit can't put it in a URL). The owner pages' unlock form will do the same. Rotate it by importing a new `OWNER_KEY` (docs/deployment.md §10).
 - When per-user auth lands: token expiry enforced (24h default), failed logins return a generic error and are logged with an anonymized identifier.
 - **The owner's tastytrade credential** (ADR 0009) is a personal OAuth app's client ID and secret and its grant's refresh token. The refresh token never expires and opens a brokerage account.
   - **Storage:** they are Fly secrets only (`TASTYTRADE_*`, docs/deployment.md §9), never in GitHub or a browser.

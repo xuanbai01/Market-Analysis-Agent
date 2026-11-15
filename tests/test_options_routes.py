@@ -24,7 +24,7 @@ NOW = datetime(2026, 11, 14, 17, tzinfo=UTC)
 
 def _report(symbol: str) -> OptionsReport:
     return OptionsReport(
-        symbol=symbol, status="no_options", spot=None, quoted_at=NOW, at_close=True, rate=0.04, rate_assumed=False,
+        symbol=symbol, status="ok", spot=None, quoted_at=NOW, at_close=True, rate=0.04, rate_assumed=False,
         iv30=None, iv30_extrapolated=False, iv90=None, skew25=None, rv20=None, rv60=None,
         put_call_open_interest=None, put_call_volume=None, expiries=[], listed_expiries=[], chain=None,
         earnings=None, history=IvHistory(points=[], sessions=0, since=None, percentile=None, rank=None),
@@ -40,15 +40,19 @@ class _Service:
         self.reads: list[str] = []
         self.read_fail: Exception | None = None
         self.read_cached: set[str] = set()
+        self.events: list[str] = []
 
-    async def get_read(self, _session: Any, symbol: str) -> OptionsRead:
-        self.reads.append(symbol)
+    async def get_read(self, report: OptionsReport) -> OptionsRead:
+        self.reads.append(report.symbol)
+        self.events.append("read")
         if self.read_fail:
             raise self.read_fail
-        return OptionsRead(symbol=symbol, quoted_at=NOW, at_close=True, headline="A read.", points=[], claims=[], generated_at=NOW)
+        return OptionsRead(
+            symbol=report.symbol, quoted_at=NOW, at_close=True, headline="A read.", points=[], claims=[], generated_at=NOW
+        )
 
-    def has_read(self, symbol: str) -> bool:
-        return symbol in self.read_cached
+    def has_read(self, report: OptionsReport) -> bool:
+        return report.symbol in self.read_cached
 
     async def get_report(self, _session: Any, symbol: str) -> OptionsReport:
         self.symbols.append(symbol)
@@ -74,8 +78,12 @@ class _Service:
 async def setup(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[tuple[AsyncClient, _Service]]:
     service = _Service()
 
-    async def _session() -> AsyncIterator[None]:
-        yield None
+    class _Session:
+        async def close(self) -> None:
+            service.events.append("close")
+
+    async def _session() -> AsyncIterator[_Session]:
+        yield _Session()
 
     app.dependency_overrides[get_session] = _session
     monkeypatch.setattr(options_router, "get_report", service.get_report)
@@ -170,17 +178,27 @@ async def test_the_read_route(setup: Any) -> None:
 
 @pytest.mark.parametrize(
     ("error", "status"),
-    [
-        (SymbolNotFound("ZZZZQ"), 404),
-        (NothingToRead("BRK-A"), 404),
-        (ReadUnavailable("NVDA"), 503),
-        (RuntimeError("provider down"), 503),
-    ],
+    [(NothingToRead("BRK-A"), 404), (ReadUnavailable("NVDA"), 503), (RuntimeError("provider down"), 503)],
 )
 async def test_read_errors(setup: Any, error: Exception, status: int) -> None:
     client, service = setup
     service.read_fail = error
     assert (await client.get("/v1/options/NVDA/read")).status_code == status
+
+
+@pytest.mark.parametrize(("error", "status"), [(SymbolNotFound("ZZZZQ"), 404), (RuntimeError("yahoo down"), 503)])
+async def test_a_read_whose_report_fails(setup: Any, error: Exception, status: int) -> None:
+    client, service = setup
+    service.fail = error
+    assert (await client.get("/v1/options/ZZZZQ/read")).status_code == status
+    assert service.reads == []
+
+
+async def test_the_session_is_closed_before_the_read_is_written(setup: Any) -> None:
+    """No database connection through a slow model call (CLAUDE.md)."""
+    client, service = setup
+    await client.get("/v1/options/NVDA/read")
+    assert service.events == ["close", "read"]
 
 
 async def test_reads_that_need_the_model_are_rate_limited_and_cached_ones_are_not(setup: Any) -> None:

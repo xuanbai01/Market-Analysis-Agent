@@ -342,5 +342,10 @@ def test_a_number_with_a_unit_is_a_figure_not_a_label() -> None:
     assert rt.unbacked_numbers("IV30 over 30 days", [FACTS[0]], labels=FACTS) == []
 
 
+def test_numbers_in_a_text_claim_are_that_claims_own() -> None:
+    reason = claim("Implied earnings move: not priced", "the first expiry after the report is 98 days out", "string")
+    assert rt.unbacked_numbers("the first expiry is 98 days out", [reason]) == []
+
+
 def test_a_claim_without_a_number_backs_nothing() -> None:
     assert rt.unbacked_numbers("Up 12%.", [claim("Business description", "Makes chips.")]) == [12.0]

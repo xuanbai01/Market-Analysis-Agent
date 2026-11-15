@@ -23,7 +23,7 @@ from app.db.session import SessionLocal
 from app.services import llm, options_read, options_report
 
 SYMBOLS = ("NVDA", "SPY", "KO")
-MIN_POINTS = 2
+MIN_POINTS = 3  # the prompt asks for 3 to 5
 # Advice, valuation calls and forecasts the prompt forbids. Not "expected":
 # "expected move" is one of the facts' own names.
 _FORBIDDEN = re.compile(

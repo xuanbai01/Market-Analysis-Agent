@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from app.schemas.options import OptionsRead, OptionsReadDraft, OptionsReport
-from app.schemas.research import ThesisDraftPoint
+from app.schemas.research import Claim, Source, ThesisDraftPoint
 from app.services import market_calendar as mc
 from app.services import options_analysis as oa
 from app.services import options_read as reader
@@ -62,25 +62,6 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch) -> _Llm:
     monkeypatch.setattr(reader.llm, "synth_call", fake.synth_call)
     reader.clear_cache()
     return fake
-
-
-class _NoDatabase:
-    """A session for reads whose report is stubbed: only ``close`` is used."""
-
-    async def close(self) -> None:
-        return None
-
-
-_NO_DB = _NoDatabase()
-
-
-def _serve(monkeypatch: pytest.MonkeyPatch, *reports: OptionsReport) -> None:
-    queue = list(reports)
-
-    async def get_report(_session: Any, _symbol: str, *, now: datetime | None = None) -> OptionsReport:
-        return queue.pop(0) if len(queue) > 1 else queue[0]
-
-    monkeypatch.setattr(reader.options_report, "get_report", get_report)
 
 
 def test_the_ids_in_the_test_drafts_are_the_ones_meant() -> None:
@@ -138,39 +119,35 @@ async def test_nothing_usable_or_a_model_failure_gives_no_read(fake_llm: _Llm) -
     assert await reader.write_read(_report(), NOW) is None
 
 
-async def test_one_read_per_set_of_quotes(fake_llm: _Llm, monkeypatch: pytest.MonkeyPatch) -> None:
-    _serve(monkeypatch, _report(), _report(), _report(quoted_at=datetime(2026, 11, 16, 10, 45, tzinfo=mc.ET)))
-    first = await reader.get_read(_NO_DB, "NVDA", now=NOW)  # type: ignore[arg-type]
-    again = await reader.get_read(_NO_DB, "NVDA", now=NOW)  # type: ignore[arg-type]
-    later = await reader.get_read(_NO_DB, "NVDA", now=NOW)  # type: ignore[arg-type]
+async def test_one_read_per_set_of_quotes(fake_llm: _Llm) -> None:
+    first = await reader.get_read(_report(), now=NOW)
+    again = await reader.get_read(_report(), now=NOW)
+    later = await reader.get_read(_report(quoted_at=datetime(2026, 11, 16, 10, 45, tzinfo=mc.ET)), now=NOW)
     assert again is first and later is not first
     assert len(fake_llm.prompts) == 2
 
 
-async def test_no_options_means_nothing_to_read(fake_llm: _Llm, monkeypatch: pytest.MonkeyPatch) -> None:
-    _serve(monkeypatch, _report("BRK-A", status="no_options"))
+async def test_no_options_means_nothing_to_read(fake_llm: _Llm) -> None:
     with pytest.raises(reader.NothingToRead):
-        await reader.get_read(_NO_DB, "BRK-A", now=NOW)  # type: ignore[arg-type]
+        await reader.get_read(_report("BRK-A", status="no_options"), now=NOW)
     assert fake_llm.prompts == []
 
 
-async def test_a_failed_read_is_not_cached(fake_llm: _Llm, monkeypatch: pytest.MonkeyPatch) -> None:
-    _serve(monkeypatch, _report())
+async def test_a_failed_read_is_not_cached(fake_llm: _Llm) -> None:
     fake_llm.draft = RuntimeError("provider down")
     with pytest.raises(reader.ReadUnavailable):
-        await reader.get_read(_NO_DB, "NVDA", now=NOW)  # type: ignore[arg-type]
+        await reader.get_read(_report(), now=NOW)
     fake_llm.draft = GOOD
-    assert (await reader.get_read(_NO_DB, "NVDA", now=NOW)).headline  # type: ignore[arg-type]
+    assert (await reader.get_read(_report(), now=NOW)).headline
     assert len(fake_llm.prompts) == 2
 
 
-async def test_has_read_follows_the_cached_report(fake_llm: _Llm, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(reader.options_report, "fresh_report", lambda symbol: _report() if symbol == "NVDA" else None)
-    assert not reader.has_read("NVDA")
-    _serve(monkeypatch, _report())
-    await reader.get_read(_NO_DB, "NVDA", now=NOW)  # type: ignore[arg-type]
-    assert reader.has_read("NVDA")
-    assert not reader.has_read("SPY")
+async def test_has_read_is_about_these_quotes(fake_llm: _Llm) -> None:
+    assert not reader.has_read(_report())
+    await reader.get_read(_report(), now=NOW)
+    assert reader.has_read(_report())
+    assert not reader.has_read(_report(quoted_at=datetime(2026, 11, 16, 10, 45, tzinfo=mc.ET)))
+    assert not reader.has_read(_report("SPY"))
 
 
 def test_a_read_round_trips_as_json() -> None:
@@ -178,11 +155,27 @@ def test_a_read_round_trips_as_json() -> None:
     assert OptionsRead.model_validate_json(read.model_dump_json()) == read
 
 
-async def test_concurrent_visits_share_one_model_call_and_leave_no_lock(fake_llm: _Llm, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_point_can_quote_the_reason_a_move_is_not_priced(fake_llm: _Llm) -> None:
+    """The refusal is a claim whose value is text; the number in it ("98
+    days") is the claim's own, not a stray figure."""
+    refusal = Claim(
+        description="Implied earnings move, report on 2027-02-09: not priced",
+        value="the first expiry after the report is 98 days out",
+        unit="string",
+        source=Source(tool="computed.options", fetched_at=NOW),
+    )
+    report = _report()
+    report = report.model_copy(update={"claims": [*report.claims, refusal]})
+    ref = f"O{len(report.claims)}"
+    fake_llm.draft = _draft(ABOVE, ("No earnings move is priced: the first expiry after the report is 98 days out.", [ref]))
+    read = await reader.write_read(report, NOW)
+    assert read is not None and len(read.points) == 2
+
+
+async def test_concurrent_visits_share_one_model_call_and_leave_no_lock(fake_llm: _Llm) -> None:
     import asyncio
 
-    _serve(monkeypatch, _report())
-    reads = await asyncio.gather(*(reader.get_read(_NO_DB, "NVDA", now=NOW) for _ in range(3)))  # type: ignore[arg-type]
+    reads = await asyncio.gather(*(reader.get_read(_report(), now=NOW) for _ in range(3)))
     assert len(fake_llm.prompts) == 1 and all(r is reads[0] for r in reads)
     assert reader._locks == {} and reader._waiting == {}
 
@@ -192,7 +185,6 @@ async def test_after_a_failure_waiting_visits_try_one_at_a_time(fake_llm: _Llm, 
     others waited, so a new visit could call the model alongside them."""
     import asyncio
 
-    _serve(monkeypatch, _report())
     fake_llm.draft = RuntimeError("provider down")
     running = [0]
     most = [0]
@@ -208,29 +200,7 @@ async def test_after_a_failure_waiting_visits_try_one_at_a_time(fake_llm: _Llm, 
             running[0] -= 1
 
     monkeypatch.setattr(reader.llm, "synth_call", counted)
-    results = await asyncio.gather(*(reader.get_read(_NO_DB, "NVDA", now=NOW) for _ in range(3)), return_exceptions=True)  # type: ignore[arg-type]
+    results = await asyncio.gather(*(reader.get_read(_report(), now=NOW) for _ in range(3)), return_exceptions=True)
     assert all(isinstance(r, reader.ReadUnavailable) for r in results)
     assert most[0] == 1
     assert reader._locks == {} and reader._waiting == {}
-
-
-async def test_the_database_session_is_let_go_before_the_model_call(fake_llm: _Llm, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A request holds no database connection through a slow model call
-    (CLAUDE.md); a failed history read could leave a transaction open."""
-    events: list[str] = []
-
-    class _Session:
-        async def close(self) -> None:
-            events.append("close")
-
-    real = fake_llm.synth_call
-
-    async def logged(**kwargs: Any) -> Any:
-        events.append("model")
-        return await real(**kwargs)
-
-    monkeypatch.setattr(reader.llm, "synth_call", logged)
-    _serve(monkeypatch, _report())
-    await reader.get_read(_Session(), "NVDA", now=NOW)  # type: ignore[arg-type]
-    assert events == ["close", "model"]
-

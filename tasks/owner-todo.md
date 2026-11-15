@@ -7,7 +7,7 @@ These are the steps only you can do. Claude can't do them, because each one invo
 The owner pages answer 404 until this is set.
 
 - [ ] **Run the steps on your PC.** In PowerShell, from the repo, run the five lines in [docs/deployment.md §10](../docs/deployment.md) step 1. They make a random key, import it into Fly (which restarts the app), and copy the key to your clipboard.
-- [ ] **Save the key in your password manager** right away. Make an entry for `https://market-analysis-agent-red.vercel.app` with the username `market-agent-owner` and the clipboard as the password. Then clear the clipboard with `Set-Clipboard -Value ' '`.
+- [ ] **Save the key in your password manager** right away. Make an entry for `https://market-analysis-agent-red.vercel.app` with the username `market-agent-owner` and the clipboard as the password. That's a second entry beside your sign-in password, which is saved under `market-agent`. Then clear the clipboard with `Set-Clipboard -Value ' '`.
 - [ ] **Check that the entry synced** to your other PC's password manager.
 
 ## 2. Unlock the pages on each PC (after PR 3 is deployed)

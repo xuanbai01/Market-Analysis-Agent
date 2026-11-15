@@ -155,6 +155,9 @@ class OptionsReport(BaseModel):
     status: Literal["ok", "no_options", "no_usable_quotes"]
     spot: float | None
     quoted_at: datetime = Field(description="when the quotes were made: 15 minutes ago in a session, else the last close")
+    # No default: the report is built fresh (never read back from storage),
+    # so a build path that forgot it should fail, not say "delayed".
+    at_close: bool = Field(description="the quotes are the last close's, not a delayed print from a session")
     rate: float
     rate_assumed: bool
     iv30: float | None

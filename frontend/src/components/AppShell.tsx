@@ -47,7 +47,8 @@ export function AppShell() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const symbolMatch = useMatch(ROUTE_PATHS.symbol);
-  const currentTicker = symbolMatch?.params.ticker?.toUpperCase() ?? null;
+  const optionsMatch = useMatch(ROUTE_PATHS.options);
+  const currentTicker = (symbolMatch ?? optionsMatch)?.params.ticker?.toUpperCase() ?? null;
 
   const watchlist = useWatchlist();
   const recent = useRecent();

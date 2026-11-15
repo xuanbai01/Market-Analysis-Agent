@@ -12,6 +12,8 @@ export const ROUTES = {
   /** Cross-company lenses (ADR 0007 layer 3). */
   lenses: "/lens",
   lens: (id: string) => `/lens/${encodeURIComponent(id)}`,
+  /** A symbol's options page (ADR 0008); signed in only. */
+  options: (ticker: string) => `/options/${ticker.toUpperCase()}`,
   /** Public read-only demo: no sign-in. */
   demo: "/demo",
   demoSymbol: (ticker: string) => `/demo/${ticker.toUpperCase()}`,
@@ -24,6 +26,7 @@ export const ROUTE_PATHS = {
   compare: "/compare",
   lenses: "/lens",
   lens: "/lens/:id",
+  options: "/options/:ticker",
   demo: "/demo",
   demoSymbol: "/demo/:ticker",
 } as const;

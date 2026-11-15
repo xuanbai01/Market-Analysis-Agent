@@ -23,7 +23,7 @@ NOW = datetime(2026, 11, 14, 17, tzinfo=UTC)
 
 def _report(symbol: str) -> OptionsReport:
     return OptionsReport(
-        symbol=symbol, status="no_options", spot=None, quoted_at=NOW, rate=0.04, rate_assumed=False,
+        symbol=symbol, status="no_options", spot=None, quoted_at=NOW, at_close=True, rate=0.04, rate_assumed=False,
         iv30=None, iv30_extrapolated=False, iv90=None, skew25=None, rv20=None, rv60=None,
         put_call_open_interest=None, put_call_volume=None, expiries=[], listed_expiries=[], chain=None,
         earnings=None, history=IvHistory(points=[], sessions=0, since=None, percentile=None, rank=None),

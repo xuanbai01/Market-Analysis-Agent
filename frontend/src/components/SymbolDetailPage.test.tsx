@@ -90,6 +90,13 @@ describe("SymbolDetailPage", () => {
     expect(screen.getAllByText("AAPL").length).toBeGreaterThan(0);
   });
 
+  it("links to the symbol's options page", async () => {
+    vi.spyOn(api, "fetchResearchReport").mockResolvedValue(fakeReport("AAPL"));
+    renderAt("AAPL");
+    const link = await screen.findByRole("link", { name: /options/i });
+    expect(link).toHaveAttribute("href", "/options/AAPL");
+  });
+
   // Phase 5 — the analyst view sits under the hero; reports without a
   // thesis get a one-line regenerate hint instead.
   it("renders the analyst view with its evidence", async () => {

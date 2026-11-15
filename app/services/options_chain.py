@@ -125,7 +125,7 @@ def _fetch_yfinance_chain(symbol: str, pick: ExpiryPicker) -> ChainFetch | None:
         if expiry not in listed or expiry in chains:
             continue
         chain = front if expiry == listed[0] else ticker.option_chain(expiry.isoformat())
-        if chain.calls is not None:
+        if chain.calls is not None and chain.puts is not None:  # one side missing: drop the expiry
             chains[expiry] = ExpiryQuotes(expiry, _quotes(chain.calls), _quotes(chain.puts))
     history = ticker.history(period=HISTORY_PERIOD, auto_adjust=True)
     closes = tuple(

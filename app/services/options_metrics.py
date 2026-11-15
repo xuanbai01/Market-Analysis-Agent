@@ -22,6 +22,12 @@ The method, which every stored row is tagged with (``METHOD_VERSION``):
   reach either wing or the bracket around it is wider than half an ATM
   standard deviation.
 - **Realized vol:** 20 and 60 sessions, completed sessions only.
+- **A snapshot needs an IV30.** Rows are never updated, so a row without
+  one would be the ticker's permanent figure for the day and the night's
+  retry would skip it; without an IV30 the status is ``no_usable_quotes``
+  and the retry tries again.
+- **Open interest and volume** add up over the expiries read (those
+  around 30 and 90 days), not the whole chain.
 
 The detail keeps the raw near-money quotes, so a later method can be
 recomputed over the whole history.
@@ -212,7 +218,7 @@ def skew_25d(s: Smile) -> float | None:
 
 @dataclass(frozen=True)
 class SnapshotMetrics:
-    status: str  # "ok" or "no_usable_quotes"
+    status: str  # "ok" (an IV30 exists) or "no_usable_quotes"
     iv30: float | None
     iv30_extrapolated: bool
     iv90: float | None
@@ -284,7 +290,7 @@ def snapshot_metrics(
     calls = [q for chain in fetched.chains.values() for q in chain.calls]
     puts = [q for chain in fetched.chains.values() for q in chain.puts]
     return SnapshotMetrics(
-        status="ok" if smiles else "no_usable_quotes",
+        status="ok" if iv30 is not None else "no_usable_quotes",
         iv30=iv30,
         iv30_extrapolated=ex30,
         iv90=iv90,

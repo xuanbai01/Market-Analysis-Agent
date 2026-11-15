@@ -7,7 +7,9 @@ A snapshot row is written once and never updated: the first good row for
 a (symbol, trading day) wins, like the rest of the stored market data
 (docs/security.md A04). ``method_version`` says which method made its
 figures, and ``detail`` keeps the raw near-money quotes they came from, so
-a later method can be recomputed over the whole history.
+a later method can be recomputed over the whole history. Open interest
+and volume add up over the expiries the snapshot reads (around 30 and 90
+days), not the whole chain.
 
 See ``alembic/versions/0004_option_snapshots.py`` for the DDL.
 """

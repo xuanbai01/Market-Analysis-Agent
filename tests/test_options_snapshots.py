@@ -465,7 +465,7 @@ def test_chain_totals_sum_every_expiry_listed(monkeypatch: pytest.MonkeyPatch) -
         chosen = list(pick(listed, {}))
         asked.append(chosen)
         assert kwargs.get("read_calendar") is False
-        chains = {d: ExpiryQuotes(d, quotes(10 * (i + 1), 1), quotes(5 * (i + 1), 2)) for i, d in enumerate(chosen) if i < 2}
+        chains = {d: ExpiryQuotes(d, quotes(10 * (i + 1), 1), quotes(5 * (i + 1), 2)) for i, d in enumerate(chosen)}
         return ChainFetch(symbol=symbol, spot=100.0, market_time=0, dividend_yield=0.0, expiries=listed, chains=chains, closes=())
 
     monkeypatch.setattr(snaps.options_chain, "fetch_chain", fetch)
@@ -473,13 +473,46 @@ def test_chain_totals_sum_every_expiry_listed(monkeypatch: pytest.MonkeyPatch) -
     assert asked == [list(listed)]
     assert status == "ok" and row is not None
     # Two contracts a side in each expiry read, adjusted ones counted too.
-    assert (row["call_open_interest"], row["put_open_interest"]) == (2 * (10 + 20), 2 * (5 + 10))
-    assert (row["call_volume"], row["put_volume"]) == (4, 8)
-    assert (row["expiries"], row["listed"]) == (2, 3)
+    assert (row["call_open_interest"], row["put_open_interest"]) == (2 * (10 + 20 + 30), 2 * (5 + 10 + 15))
+    assert (row["call_volume"], row["put_volume"]) == (6, 12)
+    assert (row["expiries"], row["listed"]) == (3, 3)
     assert row["trade_date"] == FRIDAY
 
 
 def test_chain_totals_of_a_ticker_without_options(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(snaps.options_chain, "fetch_chain", lambda *_a, **_k: None)
     assert snaps.chain_totals_one("BRK-A", FRIDAY, mc.session_close(FRIDAY)) == ("no_options", None)
+
+
+async def test_a_partial_chain_waits_for_the_retry_instead_of_being_stored(full_chain: _World) -> None:
+    """#123 review: a row is never updated, so a chain read with an expiry
+    missing would stand short forever. It's left for the retry run."""
+    full_chain.totals_outcomes["SPY"] = "partial"
+    run = await _run(full_chain)
+    assert run.totals_written == ["NVDA"]
+    assert run.totals_deferred == ["SPY"]
+    assert [r["symbol"] for r in full_chain.totals_inserted] == ["NVDA"]
+
+
+async def test_a_partial_read_stays_deferred_when_the_throttle_stops_the_rest(full_chain: _World) -> None:
+    full_chain.totals_outcomes["SPY"] = "partial"
+    full_chain.totals_outcomes["NVDA"] = [YFRateLimitError(), YFRateLimitError()]
+    run = await _run(full_chain)
+    assert run.totals_deferred == ["SPY", "NVDA"]
+
+
+async def test_a_full_chain_ticker_without_options_is_named(full_chain: _World) -> None:
+    full_chain.totals_outcomes["NVDA"] = "no_options"
+    run = await _run(full_chain)
+    assert [(f.symbol, f.reason) for f in run.failed] == [("NVDA", "totals: no_options")]
+
+
+def test_a_chain_read_missing_an_expiry_is_partial(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services.options_chain import ChainFetch, ExpiryQuotes, Quote
+
+    listed = (date(2026, 11, 16), date(2026, 11, 20))
+    one = ExpiryQuotes(listed[0], (Quote(100.0, 1.0, 1.1, 1, 10, True),), (Quote(100.0, 1.0, 1.1, 1, 5, True),))
+    fetched = ChainFetch(symbol="SPY", spot=100.0, market_time=0, dividend_yield=0.0, expiries=listed, chains={listed[0]: one}, closes=())
+    monkeypatch.setattr(snaps.options_chain, "fetch_chain", lambda *_a, **_k: fetched)
+    assert snaps.chain_totals_one("SPY", FRIDAY, mc.session_close(FRIDAY)) == ("partial", None)
 

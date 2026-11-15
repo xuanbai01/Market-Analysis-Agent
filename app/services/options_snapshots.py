@@ -142,7 +142,9 @@ def snapshot_one(
 
 def chain_totals_one(symbol: str, session_date: date, quoted_at: datetime) -> tuple[str, dict[str, Any] | None]:
     """(status, row) of ``symbol``'s open interest and volume summed over
-    every listed expiry, adjusted contracts included. Blocking."""
+    every listed expiry, adjusted contracts included. "partial" when Yahoo
+    returned an expiry with a side missing: a stored row is never updated,
+    so a short read is left for the retry run rather than kept. Blocking."""
     cpu_started = time.thread_time()
     with log_external_call("yfinance.options", {"symbol": symbol, "purpose": "chain_totals"}) as call:
         fetched = options_chain.fetch_chain(
@@ -155,6 +157,8 @@ def chain_totals_one(symbol: str, session_date: date, quoted_at: datetime) -> tu
         })
     if fetched is None or not fetched.chains:
         return "no_options", None
+    if len(fetched.chains) < len(fetched.expiries):
+        return "partial", None
     chains = fetched.chains.values()
     return "ok", {
         "symbol": symbol,
@@ -255,7 +259,7 @@ async def _run(session: AsyncSession, now: datetime) -> SnapshotRun:
         lists[status].append(symbol)
         i += 1
     if not lists["deferred"]:
-        paused = await _run_totals(session, totals_pending, session_date, quoted_at, started, paused, lists, failed)
+        await _run_totals(session, totals_pending, session_date, quoted_at, started, paused, lists, failed)
     else:
         lists["totals_deferred"] = totals_pending  # throttled or out of time already: the retry run reads them
     return finish("ok", session_date, symbols)
@@ -270,25 +274,29 @@ async def _run_totals(
     paused: bool,
     lists: dict[str, list[str]],
     failed: list[FailedTicker],
-) -> bool:
+) -> None:
     """The whole-chain totals, after the snapshots, under the run's budget
-    and its one throttle pause. Returns whether the pause was used."""
+    and its one throttle pause (``paused``: already used by the snapshots)."""
     i = 0
     while i < len(pending):
         symbol = pending[i]
         if _clock() - started > TIME_BUDGET_SECONDS:
-            lists["totals_deferred"] = pending[i:]
+            lists["totals_deferred"] += pending[i:]
             break
         try:
             status, row = await _on_options_thread(chain_totals_one, symbol, session_date, quoted_at)
-            if row is not None and await _insert(session, row, store.insert_totals):
+            if status == "partial":
+                lists["totals_deferred"].append(symbol)  # the retry run reads it again
+            elif row is None:
+                failed.append(FailedTicker(symbol=symbol, reason=f"totals: {status}"))
+            elif await _insert(session, row, store.insert_totals):
                 lists["totals_written"].append(symbol)
-            elif row is not None:
+            else:
                 lists["totals_skipped"].append(symbol)
         except Exception as exc:
             if is_rate_limit(exc):
                 if paused:
-                    lists["totals_deferred"] = pending[i:]
+                    lists["totals_deferred"] += pending[i:]
                     break
                 paused = True
                 await _sleep(RATE_LIMIT_PAUSE_SECONDS)
@@ -297,4 +305,3 @@ async def _run_totals(
             await session.rollback()
             failed.append(FailedTicker(symbol=symbol, reason=f"totals: {type(exc).__name__}"))
         i += 1
-    return paused

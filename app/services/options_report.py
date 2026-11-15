@@ -167,15 +167,24 @@ def build(symbol: str, now: datetime) -> _Built:
         return oa.report_expiries(listed, quoted_at, found["reaction"])
 
     cpu_started = time.thread_time()
+    not_found = False
     with log_external_call("yfinance.options", {"symbol": symbol, "purpose": "page"}) as call:
-        fetched = options_chain.fetch_chain(symbol, pick, history_period=HISTORY_PERIOD)
-        smiles = om.chain_smiles(fetched, quoted_at, rate) if fetched else []
-        parts = _parts(symbol, fetched, smiles, found["schedule"], found["reaction"], quoted_at, rate, rate_assumed)
-        call.record_output({
-            "status": parts["status"],
-            "expiries": len(fetched.chains) if fetched else 0,
-            "cpu_ms": round((time.thread_time() - cpu_started) * 1000, 1),
-        })
+        try:
+            fetched = options_chain.fetch_chain(symbol, pick, history_period=HISTORY_PERIOD)
+        except SymbolNotFound:
+            # An ordinary 404: logged as an outcome, not an error with a traceback.
+            call.record_output({"status": "not_found"})
+            not_found = True
+        else:
+            smiles = om.chain_smiles(fetched, quoted_at, rate) if fetched else []
+            parts = _parts(symbol, fetched, smiles, found["schedule"], found["reaction"], quoted_at, rate, rate_assumed)
+            call.record_output({
+                "status": parts["status"],
+                "expiries": len(fetched.chains) if fetched else 0,
+                "cpu_ms": round((time.thread_time() - cpu_started) * 1000, 1),
+            })
+    if not_found:
+        raise SymbolNotFound(symbol)
     return _Built(symbol, fetched, {s.expiry: s for s in smiles}, parts)
 
 

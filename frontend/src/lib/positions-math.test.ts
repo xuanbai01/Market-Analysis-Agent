@@ -113,6 +113,11 @@ describe("profit and loss", () => {
     expect(pnlInScenario(call, { ...NO_CHANGE, days: 10 }, MARKET)!).toBeLessThan(now);
   });
 
+  it("falls back to 4 pm in New York for a leg sent without its close, in summer too", () => {
+    expect(expiryClose("2027-06-18", [])).toEqual(new Date("2027-06-18T20:00:00Z"));
+    expect(expiryClose("2026-12-18", [])).toEqual(new Date("2026-12-18T21:00:00Z"));
+  });
+
   it("values a leg to its expiry's close, which is 1 pm on a half day", () => {
     const halfDay = option("call", 200, 1, 2.5, { expiry: "2026-11-27", expires_at: "2026-11-27T18:00:00Z" });
     const after = new Date("2026-11-27T19:00:00Z"); // 2 pm in New York: that session is over
@@ -208,5 +213,12 @@ describe("what history shows", () => {
   it("counts the sessions left, weekends out", () => {
     expect(sessionsUntil("2026-11-20", NOW, [])).toBe(4);
     expect(sessionsUntil("2026-11-23", NOW, [])).toBe(5);
+  });
+
+  it("counts today's session while the market hasn't opened", () => {
+    const preMarket = new Date("2026-11-16T12:00:00Z"); // 7 am in New York, a Monday
+    expect(sessionsUntil("2026-11-20", preMarket, [])).toBe(5);
+    expect(sessionsUntil("2026-11-20", NOW, [])).toBe(4); // 10 am: today's is under way
+    expect(sessionsUntil("2026-11-20", new Date("2026-11-15T23:00:00Z"), [])).toBe(5); // a Sunday evening
   });
 });

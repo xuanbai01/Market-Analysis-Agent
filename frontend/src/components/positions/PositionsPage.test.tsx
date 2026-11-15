@@ -195,6 +195,18 @@ describe("PositionsPage", () => {
     await waitFor(() => expect(client.getQueryData(["owner-positions"])).toBeUndefined());
   });
 
+  it("totals what it can when a holding has no live figure, and names it", async () => {
+    // tastytrade sent no quote for SPY: its delta and Greeks are unknown.
+    const unquoted = { ...POSITIONS.groups[1], quote: null, legs: [{ ...POSITIONS.groups[1].legs[0], quote: null }] };
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerPositions).mockResolvedValue({ ...POSITIONS, groups: [POSITIONS.groups[0], unquoted] });
+    renderPage();
+    const tiles = await screen.findByTestId("positions-totals");
+    expect(tiles).toHaveTextContent("+$12"); // NVDA's short call: 0.12 a share a day, 100 shares
+    expect(tiles).not.toHaveTextContent("—");
+    expect(tiles).toHaveTextContent(/leaves out SPY/);
+  });
+
   it("says when the copy is old or cut short", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchOwnerPositions).mockResolvedValue({ ...POSITIONS, stale: true, truncated: true });

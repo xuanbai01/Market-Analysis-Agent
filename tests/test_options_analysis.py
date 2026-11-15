@@ -34,17 +34,19 @@ def _smile(chain: ExpiryQuotes) -> metrics.Smile:
     return s
 
 
-def test_report_expiries_aim_at_the_targets() -> None:
+def test_report_expiries_aim_at_the_targets_and_include_the_snapshots() -> None:
+    """The snapshot's expiries (around 30 and 90 days: 28, 35, 63, 91) are
+    read too, so today's IV30 is the stored history's IV30."""
     listed = tuple(TODAY + timedelta(days=d) for d in (3, 5, 7, 10, 14, 17, 21, 28, 35, 42, 49, 63, 91, 182, 364, 728))
     picked = oa.report_expiries(listed, QUOTED_AT, None)
-    assert [(d - TODAY).days for d in picked] == [3, 7, 14, 28, 42, 63, 91, 182, 364]
+    assert [(d - TODAY).days for d in picked] == [3, 7, 14, 28, 35, 42, 63, 91, 182, 364]
 
 
 def test_report_expiries_also_bracket_the_report() -> None:
     listed = tuple(TODAY + timedelta(days=d) for d in (3, 5, 7, 10, 14, 17, 21, 28, 35, 42, 49, 63, 91, 182, 364))
     reaction = TODAY + timedelta(days=17)
     picked = oa.report_expiries(listed, QUOTED_AT, (reaction, reaction))
-    assert [(d - TODAY).days for d in picked] == [3, 7, 10, 14, 17, 21, 28, 42, 63, 91, 182, 364]
+    assert [(d - TODAY).days for d in picked] == [3, 7, 10, 14, 17, 21, 28, 35, 42, 63, 91, 182, 364]
 
 
 def test_an_expiry_summary_has_the_one_sigma_range_and_the_straddle() -> None:

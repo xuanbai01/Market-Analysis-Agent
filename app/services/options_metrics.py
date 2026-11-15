@@ -267,17 +267,22 @@ def _detail(smiles: list[Smile], quoted_at: datetime, rate: float, rate_assumed:
     }
 
 
+def chain_smiles(fetched: ChainFetch, quoted_at: datetime, rate: float) -> list[Smile]:
+    """The smile of each fetched expiry that has one, in expiry order."""
+    found = (smile(fetched.chains[d], fetched.spot, quoted_at, rate, fetched.dividend_yield) for d in sorted(fetched.chains))
+    return [s for s in found if s is not None]
+
+
 def snapshot_metrics(
-    fetched: ChainFetch, quoted_at: datetime, rate: float, *, rate_assumed: bool = False
+    fetched: ChainFetch,
+    quoted_at: datetime,
+    rate: float,
+    *,
+    rate_assumed: bool = False,
+    smiles: list[Smile] | None = None,
 ) -> SnapshotMetrics:
-    smiles = [
-        s
-        for s in (
-            smile(fetched.chains[d], fetched.spot, quoted_at, rate, fetched.dividend_yield)
-            for d in sorted(fetched.chains)
-        )
-        if s is not None
-    ]
+    """``smiles`` when the caller already has them (the page); else computed."""
+    smiles = chain_smiles(fetched, quoted_at, rate) if smiles is None else smiles
     eligible = [s for s in smiles if s.days >= MIN_SNAPSHOT_DAYS]
     points = [(s.years, s.atm_vol) for s in eligible]
     (iv30, ex30), (iv90, ex90) = (

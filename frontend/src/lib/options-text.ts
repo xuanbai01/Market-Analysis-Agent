@@ -284,7 +284,7 @@ export const GLOSSARY = {
   gamma:
     "Gamma exposure: how many dollars dealers' hedges would change for a 1% move in the stock, if dealers are long the calls and short the puts customers hold opposite them (the common assumption; real positions aren't public). Positive: their hedging damps moves; negative: it adds to them. Each bar is the net at a strike. The call and put walls are the strikes with the most call and put gamma exposure; the gamma flip is where the net changes sign as the price moves, each strike's IV held.",
   delta:
-    "Delta exposure: the dollar change in the open options' value for a 1% move in the stock, under the same assumption. Some sites quote total dollar delta under this name, 100 times larger.",
+    "Delta exposure: the dollar change in the open options' own value for a 1% move in the stock, calls positive and puts negative, with no assumption about who holds them (a dealer's delta is the opposite of whatever side it holds). Some sites quote total dollar delta under this name, 100 times larger.",
   acrossExpiries:
     "Each expiry the page reads: its max pain and how far that is from the price, its net gamma exposure, and its put/call open interest.",
 } as const;

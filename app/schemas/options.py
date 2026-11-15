@@ -112,10 +112,10 @@ class StrikeExposure(BaseModel):
 
 
 class Positioning(BaseModel):
-    """Where one expiry's open interest sits (options_positioning). The
-    exposures assume dealers hold the other side of customers' calls and
-    puts in the common way (``assumption``), and are in dollars per 1%
-    move of the stock."""
+    """Where one expiry's open interest sits (options_positioning), in
+    dollars per 1% move of the stock. Gamma exposure assumes dealers hold
+    the other side of customers' calls and puts in the common way
+    (``assumption``); delta exposure is the options' own delta."""
 
     call_open_interest: int
     put_open_interest: int

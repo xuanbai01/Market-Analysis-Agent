@@ -10,7 +10,7 @@ import { useState } from "react";
 import type { Positioning } from "../../lib/options-schemas";
 import { compactUsd, strikeLabel } from "../../lib/options-text";
 import { niceTicks } from "../MultiLine";
-import { AxisText, COLOR, PAD, Tooltip, YGrid, linear, money, useChartWidth } from "./chart-kit";
+import { AxisText, COLOR, PAD, Tooltip, YGrid, linear, markerText, money, useChartWidth } from "./chart-kit";
 
 const HEIGHT = 220;
 
@@ -72,7 +72,7 @@ export function ExposureChart({ positioning, field, price, testId }: Props) {
               stroke={COLOR.axis}
               strokeDasharray={m.id === "flip" ? "1 3" : "4 3"}
             />
-            <AxisText x={x(m.at) + 4} y={PAD.top + 10 + i * 12} anchor="start">
+            <AxisText {...markerText(x(m.at), W)} y={PAD.top + 10 + i * 12}>
               {m.label}
             </AxisText>
           </g>

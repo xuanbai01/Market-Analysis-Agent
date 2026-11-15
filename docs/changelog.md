@@ -130,4 +130,8 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **GEX:** agrees in sign but not in size (ours −$17.0M, theirs −$4.6M). A one-day expiry's gamma swings with the price and time used: they take the after-hours $161.02 and a one-day count.
     - **DEX:** their "per 1% move" figures look like total dollar delta, 100 times a per-1% number. The ⓘ says so.
   - **Wording:** the sentences state the GEX sign's meaning only as a conditional on the assumption, and max pain as a description, not a forecast.
-  - Options chunk 18.7 KB gz. 1763 backend / 812 frontend tests.
+  - **From review:**
+    - Delta exposure is the open options' own delta (calls +, puts −, as OptionCharts counts it), not a dealer's, and the stated assumption now says it covers gamma only.
+    - A tip near a phone's right edge opens leftward.
+    - A marker label near the chart's right edge sits left of its line.
+  - Options chunk 18.9 KB gz. 1763 backend / 813 frontend tests.

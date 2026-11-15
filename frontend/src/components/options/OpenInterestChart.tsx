@@ -6,7 +6,7 @@ import { useState } from "react";
 
 import type { ExpiryChain } from "../../lib/options-schemas";
 import { niceTicks } from "../MultiLine";
-import { AxisText, COLOR, Legend, PAD, Tooltip, linear, money, useChartWidth } from "./chart-kit";
+import { AxisText, COLOR, Legend, PAD, Tooltip, linear, markerText, money, useChartWidth } from "./chart-kit";
 
 const HEIGHT = 220;
 
@@ -53,7 +53,7 @@ export function OpenInterestChart({ chain, spot }: { chain: ExpiryChain; spot: n
         {spot !== null && spot >= low && spot <= high && (
           <g data-testid="options-oi-price">
             <line x1={x(spot)} x2={x(spot)} y1={PAD.top} y2={HEIGHT - PAD.bottom} stroke={COLOR.axis} strokeDasharray="4 3" />
-            <AxisText x={x(spot) + 4} y={PAD.top + 10} anchor="start">
+            <AxisText {...markerText(x(spot), W)} y={PAD.top + 10}>
               {`price ${money(spot)}`}
             </AxisText>
           </g>
@@ -61,7 +61,7 @@ export function OpenInterestChart({ chain, spot }: { chain: ExpiryChain; spot: n
         {maxPain !== null && maxPain >= low && maxPain <= high && (
           <g data-testid="options-oi-max-pain">
             <line x1={x(maxPain)} x2={x(maxPain)} y1={PAD.top} y2={HEIGHT - PAD.bottom} stroke={COLOR.neutral} strokeDasharray="1 3" />
-            <AxisText x={x(maxPain) + 4} y={PAD.top + 22} anchor="start">
+            <AxisText {...markerText(x(maxPain), W)} y={PAD.top + 22}>
               {`max pain ${money(maxPain)}`}
             </AxisText>
           </g>

@@ -4,10 +4,12 @@ pain, and gamma and delta exposure by strike with the walls and the gamma
 flip. Computed from Yahoo's open interest and our own IVs (the expiry's
 smile), never Yahoo's IV column.
 
-**The exposures rest on an assumption,** the common one: dealers are long
-the calls and short the puts that customers hold opposite them, so call
-gamma counts plus and put gamma minus. Real positioning isn't public; the
-page states the assumption beside the numbers.
+**Gamma exposure rests on an assumption,** the common one: dealers are
+long the calls and short the puts that customers hold opposite them, so
+call gamma counts plus and put gamma minus. Real positioning isn't public;
+the page states the assumption beside the numbers. **Delta exposure** is
+the open options' own delta (calls plus, puts minus), as OptionCharts
+counts it, with no assumption about who holds them.
 
 Units are dollars per 1% move of the stock. With the forward gamma
 Γ = φ(d1) / (F·σ·√T) and the forward moving with the stock:
@@ -32,8 +34,9 @@ from app.services.options_chain import ExpiryQuotes
 from app.services.options_metrics import Smile
 
 ASSUMPTION = (
-    "Gamma and delta exposure assume dealers are long the calls and short the puts customers hold "
-    "opposite them, the common convention; actual positions aren't public."
+    "Gamma exposure assumes dealers are long the calls and short the puts customers hold opposite them, "
+    "the common convention; actual positions aren't public. Delta exposure is the open options' own delta, "
+    "calls positive and puts negative, with no assumption about who holds them."
 )
 TOP_CONTRACTS = 10
 FLIP_RANGE = 0.25

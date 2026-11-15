@@ -65,7 +65,7 @@ CHAIN_SYMBOL = "SPY"
 EARNINGS_SYMBOL = "NVDA"
 TARGET_DAYS = 30
 NEAR_MONEY_STRIKES = 5
-DAILY_FROM = datetime(2005, 1, 1, tzinfo=UTC)
+DAILY_FROM = datetime(1990, 1, 1, tzinfo=UTC)
 # Our IV30 and tastytrade's agree when this close, in vol points.
 IV30_POINTS = 2.0
 METRIC_FIELDS = (
@@ -330,20 +330,16 @@ async def probe_metrics(say: Say) -> None:
 
 
 async def probe_candles(say: Say, pick: ChainPick | None, now: datetime) -> None:
-    daily = await dxlink.fetch_candles("SPY", "1d", DAILY_FROM)
-    say(f"  SPY daily from {DAILY_FROM.date()}, fromTime in seconds: {describe_candles(daily)}")
-    if daily.candles and daily.candles[0].time < DAILY_FROM - timedelta(days=31):
-        say("  the first candle is older than asked: DXLink may read fromTime as milliseconds")
-    daily_ms = await dxlink.fetch_candles("SPY", "1d", DAILY_FROM, time_unit_ms=True)
-    say(f"  SPY daily from {DAILY_FROM.date()}, fromTime in milliseconds: {describe_candles(daily_ms)}")
-    hourly = await dxlink.fetch_candles("SPY", "1h", now - timedelta(days=730))
+    daily = await dxlink.fetch_candles("SPY", "d", DAILY_FROM)
+    say(f"  SPY daily from {DAILY_FROM.date()}: {describe_candles(daily)}")
+    hourly = await dxlink.fetch_candles("SPY", "h", now - timedelta(days=730))
     say(f"  SPY hourly, two years asked: {describe_candles(hourly)}")
     streamer = None if pick is None else call_streamer(pick)
     if streamer is None:
         say("  no near-money call with a streamer symbol: option candles not asked")
         return
-    option = await dxlink.fetch_candles(streamer, "1d", now - timedelta(days=180))
-    say(f"  a near-money SPY call, daily, 180 days asked: {describe_candles(option)}")
+    option = await dxlink.fetch_candles(streamer, "d", now - timedelta(days=365))
+    say(f"  a near-money SPY call, daily, a year asked: {describe_candles(option)}")
 
 
 def call_streamer(pick: ChainPick) -> str | None:

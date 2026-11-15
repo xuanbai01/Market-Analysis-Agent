@@ -92,11 +92,11 @@ def _history(first: datetime, n: int, iv: float | None) -> dxlink.CandleHistory:
 
 @pytest.fixture
 def run(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    asked: list[tuple[str, str, bool]] = []
+    asked: list[tuple[str, str]] = []
 
-    async def fake_candles(symbol: str, period: str, from_time: datetime, *, time_unit_ms: bool = False) -> dxlink.CandleHistory:
-        asked.append((symbol, period, time_unit_ms))
-        return _history(from_time, 3, 0.4242 if period == "1d" else None)
+    async def fake_candles(symbol: str, period: str, from_time: datetime) -> dxlink.CandleHistory:
+        asked.append((symbol, period))
+        return _history(from_time, 3, 0.4242 if period == "d" else None)
 
     async def fake_once(event_type: str, symbols: list[str]) -> dict[str, dict[str, Any]]:
         return {s: {"eventType": event_type, "eventSymbol": s, "openInterest": 98765.0, "volatility": None} for s in symbols}
@@ -138,7 +138,8 @@ async def test_the_report_answers_the_open_questions(run: list[str]) -> None:
     assert "median 2.5 s" in report
     assert "inside Yahoo's (15-minute-old) bid–ask: 10 of 10" in report
     assert "IV30 within 2 points of our latest snapshot: yes" in report
-    assert "fromTime in milliseconds" in report
+    assert "SPY daily from 1990-01-01: 3 candles" in report
+    assert "a near-money SPY call, daily, a year asked: 3 candles" in report
     assert "with IV 3/3" in report
     assert "fields filled: ['openInterest']" in report
     assert "NVDA: 2 reports since 2015, 2015 to 2026" in report

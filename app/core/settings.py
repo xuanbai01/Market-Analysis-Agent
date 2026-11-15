@@ -111,6 +111,10 @@ class Settings(BaseSettings):
     # crowding out the rest, not about money. A dashboard page makes
     # three. 0 disables the limit.
     DEMO_RATE_LIMIT_PER_MINUTE: int = 120
+    # Tickers the daily IV snapshot run (app/services/options_snapshots.py,
+    # ADR 0008) always records, comma-separated. Symbols whose options page
+    # was opened recently are added to these, up to 30 in all.
+    OPTIONS_SNAPSHOT_SYMBOLS: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

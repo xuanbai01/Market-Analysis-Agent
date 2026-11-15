@@ -32,11 +32,13 @@ from app.api.v1.dependencies import get_session
 from app.api.v1.routers import lens as lens_router
 from app.api.v1.routers import market as market_router
 from app.api.v1.routers import news as news_router
+from app.api.v1.routers import options as options_router
 from app.core import settings as settings_module
 from app.core.auth import require_shared_secret
 from app.main import app
 from app.schemas.lens import LensReport
 from app.schemas.market_overview import MarketOverview
+from app.schemas.options import SnapshotRun
 from app.services.lens_catalog import CAPEX
 
 _SECRET = "the-secret"
@@ -51,6 +53,7 @@ _GATED_CALLS: list[tuple[str, str, dict[str, Any] | None]] = [
     ("POST", "/v1/news/ingest", {"symbol": "AAPL"}),
     ("POST", "/v1/news/ingest", None),
     ("POST", "/v1/symbols", {"symbol": "AAPL", "name": "Apple Inc."}),
+    ("POST", "/v1/options/snapshots", None),
 ]
 
 # Write-method routes deliberately left ungated, each with its reason.
@@ -96,7 +99,14 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
             years=[], companies=[], stats=[], facts=[], narrative=None, generated_at=datetime.now(UTC),
         )
 
+    async def _snapshots(_session: Any) -> SnapshotRun:
+        return SnapshotRun(
+            status="no_new_session", session_date=None, targets=[], written=[], skipped=[],
+            no_options=[], no_usable_quotes=[], failed=[], deferred=[], duration_ms=0.0,
+        )
+
     app.dependency_overrides[get_session] = _session
+    monkeypatch.setattr(options_router, "run_snapshots", _snapshots)
     monkeypatch.setattr(market_router, "get_prices_with_cache", _prices)
     monkeypatch.setattr(market_router, "ingest_market_data", _ingest)
     monkeypatch.setattr(market_router, "get_market_overview", _overview)
@@ -211,7 +221,9 @@ def test_the_demo_routes_are_open_read_only_and_exactly_these() -> None:
 
 
 def test_every_other_report_and_price_route_still_requires_the_secret() -> None:
-    gated_prefixes = ("/v1/research", "/v1/lens", "/v1/market/overview", "/v1/market/{symbol}/prices")
+    gated_prefixes = (
+        "/v1/research", "/v1/lens", "/v1/market/overview", "/v1/market/{symbol}/prices", "/v1/options",
+    )
     for route in app.routes:
         if isinstance(route, APIRoute) and route.path.startswith(gated_prefixes):
             assert _requires_secret(route), route.path

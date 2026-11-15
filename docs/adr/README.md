@@ -29,5 +29,7 @@ You don't need an ADR for "I picked Postgres because it's the default". You do n
 | 0004 | [Visual-First, Delta-Driven Report Shape](0004-visual-first-product-shape.md) | Accepted |
 | 0005 | [Pivot from Generated Report to Symbol-Centric Dashboard](0005-symbol-centric-dashboard.md) | Accepted |
 | 0006 | [Make the LLM provider switchable, and add DeepSeek](0006-pluggable-llm-provider.md) | Accepted |
+| 0007 | [Card prose interprets the data, from comparisons computed in code](0007-analytical-narratives.md) | Accepted |
+| 0008 | [Options analysis from free chain snapshots, with our own daily IV history](0008-options-from-free-snapshots.md) | Accepted |
 
 <!-- Add rows as you add ADRs. -->

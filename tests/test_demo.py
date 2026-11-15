@@ -101,6 +101,9 @@ def _no_spending(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(market_prices, "ingest_market_data", _boom)
     monkeypatch.setattr(llm, "synth_call", _boom)
     monkeypatch.setattr(llm, "triage_call", _boom)
+    from app.services import options_chain
+
+    monkeypatch.setattr(options_chain, "fetch_chain", _boom)
 
 
 # ── Which tickers ────────────────────────────────────────────────────

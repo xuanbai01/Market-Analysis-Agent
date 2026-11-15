@@ -19,7 +19,7 @@ Cost target: **$5–15 / month all-in** (free-tier infra + free data + per-call 
 
 **In:** research dashboards on US-listed equities, generated on demand and cached up to 7 days; two-ticker compare; cross-company lenses from SEC XBRL; a headline-markets strip.
 
-**Out:** real-time feeds, intraday alerts, scheduled news firehose, Discord client, options analytics without IV history, portfolio orchestration, Reddit sentiment, buy/sell recommendations, DCF / fair-value estimates.
+**Out:** real-time feeds, intraday alerts, scheduled news firehose, Discord client, real-time options data or option-chain history from a vendor, portfolio orchestration, Reddit sentiment, buy/sell recommendations, DCF / fair-value estimates.
 
 ## Architecture (current)
 
@@ -54,7 +54,7 @@ Layering: `router → service → repository / external`. Business logic never l
 - **Postgres on Neon** (managed, autosuspend); schema in `alembic/versions/`.
 - **Disk caches** for SEC responses (filings, XBRL company concepts; 24 h for XBRL).
 - **In-memory TTL caches** for the market strip (5 min quotes, 1 h sentiment) and lenses (24 h), each serving the last good value when a refresh fails.
-- **No Redis, no Celery, no scheduled cron.** Re-introduced only if a real workload forces it.
+- **No Redis, no Celery.** One scheduled job: a GitHub Actions cron calls `POST /v1/options/snapshots` after each US close to record option IVs, which no free source keeps ([ADR 0008](docs/adr/0008-options-from-free-snapshots.md)).
 
 ### Hosting
 
@@ -92,6 +92,8 @@ Layering: `router → service → repository / external`. Business logic never l
 | `candles` | `(symbol, ts, interval)` PK; OHLCV; FK on `symbol` | `(symbol, interval, ts DESC)` | Append-only; read-through cache for the price chart. |
 | `news_items` | `id` (`sha256(url)`) PK, `ts`, `title`, `url`, `source` | `ts DESC` | Hash id collapses duplicates across providers. |
 | `news_symbols` | `(news_id, symbol)` composite PK; cascading FKs | `(symbol, news_id)` | Tags articles to symbols. |
+| `option_iv_snapshots` | `(symbol, trade_date)` PK; IV30/IV90, 25-delta skew, RV20/60, open interest and volume, `method_version`, `detail` JSONB (the raw near-money quotes) | — | One row per ticker per trading day, first good row wins; written by the daily cron (ADR 0008). |
+| `options_tracked` | `symbol` PK, `last_viewed` | — | Symbols whose options page was opened; the daily run snapshots them for 60 days. |
 | `research_reports` | `(symbol, focus, report_date)` PK; `report_json` JSONB; `generated_at` | — | Report cache; lookup windowed by `generated_at` (`RESEARCH_CACHE_MAX_AGE_HOURS`). |
 
 **Report shape** (`app/schemas/research.py`): `ResearchReport { symbol, name, sector, sections[Section{title, claims[Claim{description, value, unit, source, history[]}], summary, card_narrative, confidence}], thesis: Thesis | None, layout_signals, overall_confidence, tool_calls_audit, generated_at }`. New fields always default so cached rows round-trip unchanged.
@@ -112,6 +114,7 @@ Tools live in `app/services/`. Each is a focused async function; sync providers 
 | `xbrl.annual_series` | SEC company-concept API (tags merged per year, CY frames) | Lenses |
 | `fetch_annual_history` | SEC XBRL annual facts, split-adjusted with yfinance splits; ten years of closes | Quality (ten-year per-share growth), Valuation (P/E, P/S and P/FCF at each fiscal year-end) |
 | `fetch_insider_activity` | SEC Form 4s, last six months (company's own filings only) | Insider Activity |
+| `options_chain.fetch_chain` + `options_metrics` | yfinance option chains (one call gives the expiries, the front chain and spot), `^IRX` for the rate; our own Black-76 IVs from bid/ask | Daily IV snapshot (`option_iv_snapshots`); the options page (in progress, ADR 0008) |
 | `parse_filing` (13F), `compute_technicals` | Phase 2 parser, RSI/SMA | not on the dashboard today |
 
 **Derived claims** (`app/services/research_derived.py`, ADR 0007) are computed in code and added to sections with source `computed.analytics`: year-over-year margin and per-share changes between named quarters, TTM FCF margin and yield, FCF ÷ net income, payout, shareholder yield, dividend coverage, capex intensity, SBC ÷ FCF, net debt ÷ operating cash flow, premium or discount to the peer median, the median of each year-end multiple and today's premium or discount to it, implied EPS growth, beat streak, latest surprise vs average. Banks skip FCF, capex, gross margin and net debt. These give the model comparisons to argue from without ever computing a number itself.
@@ -146,6 +149,7 @@ Non-negotiable; every PR is held to them.
 | Market | `GET /v1/market/{symbol}/prices?range=`, `GET /v1/market/overview`, `POST /v1/market/ingest` | bearer |
 | Market (Phase 1 reads) | `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | bearer |
 | Lenses | `GET /v1/lens`, `GET /v1/lens/{id}` | bearer |
+| Options | `POST /v1/options/snapshots` (the daily cron's target) | bearer |
 | Demo | `GET /v1/demo`, `/v1/demo/research/{symbol}`, `/v1/demo/market/{symbol}/prices` | **open by design**: stored data for `DEMO_SYMBOLS` only, never generates |
 | Symbols / News | `GET /v1/symbols`, `GET /v1/news`, `GET /v1/news/{id}`, `POST /v1/symbols`, `POST /v1/news/ingest` | bearer |
 
@@ -198,9 +202,11 @@ Real auth and per-user cost caps land only when there are real users.
 
 **Insider activity (done, 2026-11-13).** Officer and director trades from Form 4s, holders apart, on their own card.
 
-**Next (plan in [tasks/todo.md](tasks/todo.md)):** README screenshots; then more lenses. A compare narrative (4.6.B) waits until Compare gets used.
+**Options analysis (in progress, 2026-11-15; [ADR 0008](docs/adr/0008-options-from-free-snapshots.md)).** The owner trades directional options and spreads. Free yfinance chains, our own IVs, a separate `/options/:ticker` page, and a daily IV snapshot (started first, because history can't be fetched later) for IV percentile and rank. Five PRs; plan in [tasks/todo.md](tasks/todo.md).
 
-**Indefinitely deferred.** `search_history` (pgvector RAG), `compute_options`, Reddit sentiment, real auth + per-user cost caps + Redis-backed rate limiting.
+**Next:** README screenshots (owner). A compare narrative (4.6.B) waits until Compare gets used.
+
+**Indefinitely deferred.** `search_history` (pgvector RAG), Reddit sentiment, real auth + per-user cost caps + Redis-backed rate limiting.
 
 ## Risks
 
@@ -223,6 +229,7 @@ Real auth and per-user cost caps land only when there are real users.
 - [ADR 0005](docs/adr/0005-symbol-centric-dashboard.md) — Symbol-centric dashboard with adaptive layouts
 - [ADR 0006](docs/adr/0006-pluggable-llm-provider.md) — Switchable LLM provider (Anthropic / DeepSeek)
 - [ADR 0007](docs/adr/0007-analytical-narratives.md) — Card prose that interprets; derived claims; analyst view; lenses
+- [ADR 0008](docs/adr/0008-options-from-free-snapshots.md) — Options analysis from free chain snapshots, with our own daily IV history
 
 ## Resume framing
 
@@ -236,4 +243,4 @@ What this project demonstrates, with backing in the codebase:
 | Data visualization | Hand-rolled SVG charts with axes, baselines and hover; validated colorblind-safe palette for multi-series lenses; adaptive layouts |
 | Cost-aware engineering | Free data + free-tier infra, cache-before-rate-limit, about a cent per fresh report |
 | Test discipline | TDD on services, mocked providers, about 1,500 tests across backend and frontend, separate eval harness |
-| Tradeoff articulation | ADRs 0001–0007 capture the why behind each pivot; dogfood logs show what changed and why |
+| Tradeoff articulation | ADRs 0001–0008 capture the why behind each pivot; dogfood logs show what changed and why |

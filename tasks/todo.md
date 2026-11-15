@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Follow-ups from the 2026-11-14 live checks** in review on `fix/live-check-follow-ups`: the eval rubric's two attribution gaps, the R&D lens index listing AMZN, lens points citing every fact they quote, an insider share under 0.01%, and a retry when Yahoo's `info` comes back cut short. Workstreams A–D are merged (#92–#106) apart from C1 (README screenshots, the owner's).
+- **Options analysis, PR1 (start collecting)** in review on `feature/options-snapshots`: ADR 0008, the daily IV snapshot (table, `POST /v1/options/snapshots`, GitHub Actions cron) for QQQ, SPY and NVDA. Plan below.
 
 ## Plan — after Phase 5 (2026-11-13)
 
@@ -70,6 +70,16 @@ ADR 0004 called "is this expensive versus its own history" the most-cited gap; t
 
 Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a filing-level XBRL parser), the 4.6.B compare narrative, the Sonnet comparison run of the golden eval.
 
+## Plan — options analysis (2026-11-15, [ADR 0008](../docs/adr/0008-options-from-free-snapshots.md))
+
+**Goal:** serve the owner's options workflow (directional buys, verticals, iron condors) from free yfinance chains, on a separate `/options/:ticker` page. No free source keeps option IV history, so a daily snapshot starts first: every day missed is lost. One PR each, in order; each merged on the owner's go-ahead.
+
+- [ ] **PR1 — start collecting** *(branch `feature/options-snapshots`)*: `market_calendar`, `options_math`, `options_chain`, `options_metrics` (method version 1), migration 0004, `options_snapshots`, `POST /v1/options/snapshots`, `.github/workflows/iv-snapshot.yml`, `OPTIONS_SNAPSHOT_SYMBOLS=QQQ,SPY,NVDA`. Owner: set the `API_BASE_URL` variable and the `BACKEND_SHARED_SECRET` secret on GitHub (docs/deployment.md §8). Done when a manual run writes rows, IV30 is within about 2 points of a broker's, a weekend run reports `no_new_session`, and two scheduled sessions land.
+- [ ] **PR2 — report API**: split `earnings_calendar.py` out of `earnings.py` (announcement times, before/after the open); `options_analysis` (term structure, expected-move cone, earnings event move from bracketing expiries, past earnings moves, open interest by strike, put/call ratios, claims with units); `GET /v1/options/{symbol}` (≤ 30 KB, 15-minute cache, per-symbol lock, rate limit on misses) and `GET /v1/options/{symbol}/chain/{expiry}`; IV percentile from 63 sessions, rank from 126; `options_tracked` written on a successful view.
+- [ ] **PR3 — the page** `/options/:ticker` (lazy, not in the demo): expected-move cone, term structure by days to expiry, smile, open interest by strike, implied vs past earnings moves, chain table; a link on the symbol page.
+- [ ] **PR4 — strategy builder**: long call/put, verticals, iron condor; payoff, breakevens, max profit/loss, risk-neutral probability of profit at mid and at the natural price. Templates only, never ranked.
+- [ ] **PR5 — cited AI read** on the page (claims → `synth_call` → `resolve_points(max_refs=None)`), cached per session; no advice, forecasts or strategy suggestions.
+
 ## Handoff — pickup notes (2026-11-13)
 
 If you're picking this up after a gap:
@@ -118,7 +128,6 @@ These were sketched during Phase 3 but never landed; either Phase 4 absorbs them
 ## Future scope (deliberately deferred — revisit when there's a concrete trigger)
 
 - [ ] **`search_history`** — pgvector RAG over stored news + filings. Was the original "Phase 3" sketch in ADR 0003. Demoted by ADR 0004 because it doesn't address the perceived-shallowness gap. Revisit if a recurring eval query genuinely benefits from semantic search across our corpus.
-- [ ] **`compute_options`** — yfinance options chain → IV percentile, implied move. Was the other half of the original "Phase 3" sketch. Demoted similarly. Revisit if Phase 4's Catalyst section needs implied-move framing.
 - [ ] **LLM-driven section composition** (was 2.2d) — replace the static `SECTION_TO_CLAIM_KEYS` map with LLM triage. No signal yet that the deterministic catalog is too rigid.
 - [ ] **Supervisor mode** (was 2.3) — multi-symbol comparative queries via specialist sub-agents. No signal that it adds factuality / structure benefit over the single-agent default.
 - [ ] **Reddit / r/wallstreetbets sentiment** — narrow signal, high noise. Per ADR 0003 cut from must-have.

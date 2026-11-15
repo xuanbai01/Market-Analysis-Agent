@@ -38,6 +38,9 @@ kill_timeout = '10s'            # give in-flight requests time to drain
   # without the secret. Nothing is generated for a visitor. A ticker
   # appears once a signed-in visit has built its report. Empty = off.
   DEMO_SYMBOLS = 'AAPL,NVDA,KO,JPM,RIVN,XOM'
+  # Tickers the daily IV snapshot always records (ADR 0008); symbols whose
+  # options page was opened are added, up to 30.
+  OPTIONS_SNAPSHOT_SYMBOLS = 'QQQ,SPY,NVDA'
   # Secrets — set via `flyctl secrets set ...`, never hardcoded here:
   #   DATABASE_URL, BACKEND_SHARED_SECRET, DEEPSEEK_API_KEY
   #   (optional: ANTHROPIC_API_KEY, FRED_API_KEY, NEWSAPI_KEY).

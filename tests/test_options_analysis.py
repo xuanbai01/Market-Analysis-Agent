@@ -52,7 +52,7 @@ def test_report_expiries_also_bracket_the_report() -> None:
 def test_an_expiry_summary_has_the_one_sigma_range_and_the_straddle() -> None:
     chain = _chain(EXP_20, _flat(0.25))
     s = _smile(chain)
-    summary = oa.expiry_summary(chain, s, None)
+    summary = oa.expiry_summary(chain, s, None, QUOTED_AT)
     spread = 0.25 * math.sqrt(s.years)
     assert summary.expected_move == pytest.approx(spread, abs=1e-6)
     assert summary.low == pytest.approx(s.forward * math.exp(-spread), rel=1e-6)
@@ -62,13 +62,14 @@ def test_an_expiry_summary_has_the_one_sigma_range_and_the_straddle() -> None:
     put = next(q for q in chain.puts if q.strike == 100.0)
     assert summary.straddle == pytest.approx(call.mid + put.mid)
     assert summary.days == pytest.approx(20.0)
+    assert summary.sessions == 14  # 16 Nov - 3 Dec, Thanksgiving off
     assert summary.includes_earnings is False
 
 
 def test_an_expiry_after_the_reaction_includes_the_report() -> None:
     chain = _chain(EXP_20, _flat(0.25))
     reaction = EXP_20 - timedelta(days=2)
-    assert oa.expiry_summary(chain, _smile(chain), (reaction, reaction)).includes_earnings is True
+    assert oa.expiry_summary(chain, _smile(chain), (reaction, reaction), QUOTED_AT).includes_earnings is True
 
 
 def test_the_default_expiry_is_the_one_nearest_30_days_at_least_a_week_out() -> None:

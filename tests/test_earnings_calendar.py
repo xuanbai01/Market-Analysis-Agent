@@ -130,3 +130,11 @@ def test_a_failed_fetch_is_an_empty_schedule_not_an_error(monkeypatch: pytest.Mo
     monkeypatch.setattr(ec, "fetch_frames", broken)
     assert ec.fetch_schedule("NVDA") == ec.Schedule(next=None, past=())
     ec.clear_cache()
+
+
+def test_a_naive_index_is_read_as_new_york_time() -> None:
+    """DeepSeek on PR 110: astimezone on a naive time uses the machine's
+    zone (UTC on Fly), which would turn a 16:00 report into "during"."""
+    frame = _frame([(datetime(2026, 8, 26, 16), 1.05)])
+    found = ec.announcements(frame)
+    assert found[0].timing == "after_close" and found[0].when.hour == 16

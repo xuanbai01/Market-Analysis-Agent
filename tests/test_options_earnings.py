@@ -131,9 +131,11 @@ def test_a_report_without_its_closes_is_skipped() -> None:
 
 
 def test_only_the_last_eight_reports_are_kept() -> None:
-    days = [date(2024, 1, 2 + i) for i in range(10)]
-    closes = tuple((d, 100.0 + i) for i, d in enumerate(days)) + ((date(2024, 1, 12), 111.0),)
-    reports = [_a(d.year, d.month, d.day, 16) for d in days if mc.is_session(d)]
+    sessions = [date(2024, 1, 2)]
+    while len(sessions) < 12:
+        sessions.append(mc.next_session(sessions[-1]))
+    closes = tuple((d, 100.0 + i) for i, d in enumerate(sessions))
+    reports = [_a(d.year, d.month, d.day, 16) for d in sessions[:10]]  # each reacts the next session
     moves = oe.past_moves(reports, closes)
-    assert len(moves) <= oe.PAST_LIMIT
-    assert moves == sorted(moves, key=lambda m: m.announced)
+    assert len(moves) == oe.PAST_LIMIT
+    assert [m.announced for m in moves] == sessions[2:10]  # the two oldest dropped

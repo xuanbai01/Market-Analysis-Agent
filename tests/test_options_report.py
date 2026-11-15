@@ -171,3 +171,34 @@ async def test_a_listed_expiry_not_read_yet_costs_one_fetch(world: Any) -> None:
     chain = await orp.get_chain(None, "TEST", EXP_FAR, now=NOW)  # type: ignore[arg-type]
     assert chain.expiry == EXP_FAR
     assert yahoo.calls == ["TEST", "TEST"]
+
+
+async def test_an_expiry_that_failed_is_not_fetched_again(world: Any) -> None:
+    """DeepSeek on PR 110: every request for it cost three Yahoo calls."""
+    yahoo, _store, _clock = world
+    yahoo.listed = (EXP_20, EXP_48, EXP_FAR)
+    yahoo.skip = {EXP_FAR}
+    await _report()
+    for _ in range(2):
+        with pytest.raises(orp.NoUsableQuotes):
+            await orp.get_chain(None, "TEST", EXP_FAR, now=NOW)  # type: ignore[arg-type]
+    assert yahoo.calls == ["TEST", "TEST"]
+    assert orp.has_chain("TEST", EXP_20) and not orp.has_chain("TEST", EXP_FAR)
+
+
+async def test_a_database_failure_still_serves_the_report(world: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """DeepSeek on PR 110: a history read failing after a good build threw
+    the build away (a 503). The history is optional; the report isn't."""
+    async def broken(*_a: Any) -> Any:
+        raise ConnectionError("database gone")
+
+    monkeypatch.setattr(orp.store, "iv30_history", broken)
+    monkeypatch.setattr(orp.store, "touch_tracked", broken)
+    report = await _report()
+    assert report.status == "ok" and report.history.sessions == 0
+
+
+async def test_a_symbol_that_fails_leaves_no_lock_behind(world: Any) -> None:
+    with pytest.raises(SymbolNotFound):
+        await _report("ZZZZQ")
+    assert "ZZZZQ" not in orp._locks

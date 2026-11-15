@@ -51,6 +51,11 @@ class _Service:
     def is_fresh(self, symbol: str) -> bool:
         return symbol in self.fresh
 
+    def has_chain(self, symbol: str, expiry: date) -> bool:
+        return symbol in self.fresh and expiry in self.chains
+
+    chains: set[date] = set()
+
 
 @pytest_asyncio.fixture
 async def setup(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[tuple[AsyncClient, _Service]]:
@@ -63,6 +68,7 @@ async def setup(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[tuple[AsyncCli
     monkeypatch.setattr(options_router, "get_report", service.get_report)
     monkeypatch.setattr(options_router, "get_chain", service.get_chain)
     monkeypatch.setattr(options_router, "is_fresh", service.is_fresh)
+    monkeypatch.setattr(options_router, "has_chain", service.has_chain)
     monkeypatch.setattr(settings_module.settings, "BACKEND_SHARED_SECRET", "")
     monkeypatch.setattr(settings_module.settings, "OPTIONS_RATE_LIMIT_PER_HOUR", 2)
     deps.reset_options_rate_limit_for_tests()
@@ -127,3 +133,13 @@ async def test_cache_misses_are_rate_limited_and_cached_reports_are_not(setup: A
     assert statuses == [200, 200, 429]
     service.fresh = {"T0"}
     assert (await client.get("/v1/options/T0")).status_code == 200
+
+
+async def test_an_expiry_that_needs_a_fetch_counts_against_the_limit(setup: Any) -> None:
+    """DeepSeek on PR 110: with the report cached, /chain fetched freely."""
+    client, service = setup
+    service.fresh = {"SPY"}
+    statuses = [(await client.get(f"/v1/options/SPY/chain/2027-0{m}-19")).status_code for m in (1, 2, 3)]
+    assert statuses == [200, 200, 429]
+    service.chains = {date(2027, 1, 19)}
+    assert (await client.get("/v1/options/SPY/chain/2027-01-19")).status_code == 200

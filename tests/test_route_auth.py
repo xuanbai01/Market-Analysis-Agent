@@ -122,6 +122,7 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
     monkeypatch.setattr(options_router, "get_report", _options_report)
     monkeypatch.setattr(options_router, "get_chain", _options_chain)
     monkeypatch.setattr(options_router, "is_fresh", lambda _s: True)
+    monkeypatch.setattr(options_router, "has_chain", lambda _s, _e: True)
     monkeypatch.setattr(market_router, "get_prices_with_cache", _prices)
     monkeypatch.setattr(market_router, "ingest_market_data", _ingest)
     monkeypatch.setattr(market_router, "get_market_overview", _overview)

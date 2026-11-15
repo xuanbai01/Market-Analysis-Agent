@@ -1,8 +1,8 @@
 """The owner's trade copy (ADR 0009, amended 2026-11-15): one row per
 tastytrade transaction, the transaction itself sealed by ``owner_vault``
-(AES-256-GCM). Only the transaction's id and whether its fees were still
-estimated stay outside the ciphertext; no date, symbol, amount or account
-number does.
+(AES-256-GCM). Only the transaction's id, the key version and whether its
+fees were still estimated stay outside the ciphertext, and all three are
+bound to it; no date, symbol, amount or account number is.
 
 A row is written once. The one update allowed: a row stored while its fees
 were estimated is replaced when tastytrade later sends the final figures.
@@ -10,9 +10,7 @@ See ``alembic/versions/0006_owner_transactions.py`` for the DDL.
 """
 from __future__ import annotations
 
-from datetime import datetime
-
-from sqlalchemy import BigInteger, Boolean, DateTime, LargeBinary, SmallInteger
+from sqlalchemy import BigInteger, Boolean, LargeBinary, SmallInteger
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.models.base import Base
@@ -26,4 +24,3 @@ class OwnerTransaction(Base):
     nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     estimated_fee: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    stored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

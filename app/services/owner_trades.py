@@ -13,6 +13,7 @@ listed in KEPT. Nothing here goes to a prompt.
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import logging
@@ -31,8 +32,11 @@ from app.services import tastytrade_client as tt
 
 logger = logging.getLogger(__name__)
 
-# A sync at most this often: the page can be refreshed freely.
+# A sync at most this often, whether the last one worked or not: the page
+# can be refreshed freely, and a failing tastytrade isn't asked again and again.
 SYNC_EVERY_SECONDS = 60.0
+# A sync that runs longer gives up (the next visit starts again from the copy).
+SYNC_SECONDS = 120.0
 # How far before the newest stored transaction a sync reads again.
 OVERLAP_DAYS = 7
 PER_PAGE = 2000  # tastytrade's maximum
@@ -62,12 +66,13 @@ class SyncResult:
 
 
 _synced_at: float | None = None
+_lock = asyncio.Lock()  # one sync at a time
 
 
 def reset() -> None:
     """Forget when the last sync ran (tests)."""
-    global _synced_at
-    _synced_at = None
+    global _synced_at, _lock
+    _synced_at, _lock = None, asyncio.Lock()
 
 
 # Swapped in tests.
@@ -80,14 +85,32 @@ def _id(item: dict[str, Any]) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
-def _sealed(tid: int, item: dict[str, Any], account: int) -> dict[str, Any]:
-    payload = {key: item[key] for key in KEPT if key in item}
+def _scrubbed(value: Any, numbers: dict[str, int]) -> Any:
+    """Free text with any account number in it replaced by "account N"."""
+    if not isinstance(value, str):
+        return value
+    for number, index in numbers.items():
+        value = value.replace(number, f"account {index}")
+    return value
+
+
+def _sealed(tid: int, item: dict[str, Any], account: int, numbers: dict[str, int]) -> dict[str, Any]:
+    payload = {key: _scrubbed(item[key], numbers) for key in KEPT if key in item}
     payload["account"] = account
-    nonce, ciphertext = vault.seal(payload, tid)
+    estimated = item.get("is-estimated-fee") is True
+    nonce, ciphertext = vault.seal(payload, tid, estimated_fee=estimated)
     return {
         "id": tid, "key_version": vault.KEY_VERSION, "nonce": nonce, "ciphertext": ciphertext,
-        "estimated_fee": item.get("is-estimated-fee") is True,
+        "estimated_fee": estimated,
     }
+
+
+def _opened(rows: list[Any]) -> list[tuple[int, dict[str, Any]]]:
+    """Every stored row, opened. CPU work: callers run it off the event loop."""
+    return [
+        (row.id, vault.unseal(row.nonce, row.ciphertext, row.id, key_version=row.key_version, estimated_fee=row.estimated_fee))
+        for row in rows
+    ]
 
 
 def _latest_date(payloads: list[dict[str, Any]]) -> date | None:
@@ -117,38 +140,56 @@ async def _transactions(number: str, start: date | None) -> list[dict[str, Any]]
 
 
 async def sync(session: AsyncSession) -> SyncResult:
-    """Bring the copy up to date (at most every SYNC_EVERY_SECONDS).
+    """Bring the copy up to date: one sync at a time, at most every
+    SYNC_EVERY_SECONDS (a failed one counts), within SYNC_SECONDS.
     ``VaultUnavailable`` without a key: nothing is read or written then."""
-    global _synced_at
     if not vault.is_configured():
         raise vault.VaultUnavailable("the trade copy's key isn't set on the server")
-    if _synced_at is not None and _clock() - _synced_at < SYNC_EVERY_SECONDS:
-        return SyncResult(new=0, replaced=0, skipped=True)
+    async with _lock:
+        if _synced_at is not None and _clock() - _synced_at < SYNC_EVERY_SECONDS:
+            return SyncResult(new=0, replaced=0, skipped=True)
+        try:
+            async with asyncio.timeout(SYNC_SECONDS):
+                return await _sync(session)
+        finally:
+            _stamp()
+
+
+def _stamp() -> None:
+    global _synced_at
+    _synced_at = _clock()
+
+
+async def _sync(session: AsyncSession) -> SyncResult:
     rows = await store.stored(session)
     known = {row.id: row.estimated_fee for row in rows}
-    latest = _latest_date([vault.unseal(row.nonce, row.ciphertext, row.id) for row in rows])
+    latest = _latest_date([payload for _, payload in await asyncio.to_thread(_opened, rows)])
     await session.rollback()  # no connection held while tastytrade is read
     start = latest - timedelta(days=OVERLAP_DAYS) if latest else None
     new: list[dict[str, Any]] = []
     replacements: list[dict[str, Any]] = []
-    numbers = (await owner_positions.account_numbers())[: owner_positions.MAX_ACCOUNTS]
-    for index, number in enumerate(numbers, start=1):
-        for item in await _transactions(number, start):
+    accounts = (await owner_positions.account_numbers())[: owner_positions.MAX_ACCOUNTS]
+    numbers = {number: index for index, number in enumerate(accounts, start=1)}
+    for number, index in numbers.items():
+        try:
+            items = await _transactions(number, start)
+        except tt.TastytradeNotFound:
+            continue  # a closed account; the rest still sync
+        for item in items:
             tid = _id(item)
             if tid is None:
                 continue
             estimated = item.get("is-estimated-fee") is True
             if tid not in known:
-                new.append(_sealed(tid, item, index))
+                new.append(_sealed(tid, item, index, numbers))
                 known[tid] = estimated
             elif known[tid] and not estimated:
-                replacements.append(_sealed(tid, item, index))
+                replacements.append(_sealed(tid, item, index, numbers))
                 known[tid] = False
     written = await store.insert(session, new)
     replaced = 0
     for row in replacements:
         replaced += await store.replace_estimated(session, row)
-    _synced_at = _clock()
     logger.info("owner trades: %d new, %d replaced", written, replaced)
     return SyncResult(new=written, replaced=replaced)
 
@@ -187,7 +228,7 @@ def _trade(tid: int, p: dict[str, Any]) -> OwnerTrade:
 async def list_trades(session: AsyncSession) -> list[OwnerTrade]:
     """Every stored trade, opened, newest first."""
     rows = await store.stored(session)
-    trades = [_trade(row.id, vault.unseal(row.nonce, row.ciphertext, row.id)) for row in rows]
+    trades = [_trade(tid, payload) for tid, payload in await asyncio.to_thread(_opened, rows)]
     return sorted(trades, key=lambda t: (t.executed_at or "", t.id), reverse=True)
 
 
@@ -196,7 +237,8 @@ def csv_cell(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
-        return f"'{value}" if value.startswith(_FORMULA_START) else value
+        # Some importers trim leading spaces and newlines before reading a formula.
+        return f"'{value}" if value.lstrip(" \t\r\n").startswith(_FORMULA_START) or value.startswith(_FORMULA_START) else value
     return str(value)
 
 

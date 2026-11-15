@@ -34,7 +34,7 @@ function saveBlob(blob: Blob, name: string): void {
   link.href = url;
   link.download = name;
   link.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000); // revoked at once, Safari can cancel the save
 }
 
 function Trades({ ownerKey }: { ownerKey: string }) {
@@ -55,7 +55,8 @@ function Trades({ ownerKey }: { ownerKey: string }) {
   const trades = useMemo(() => query.data?.trades ?? [], [query.data]);
   const underlyings = useMemo(() => [...new Set(trades.map((t) => t.underlying).filter((u): u is string => !!u))].sort(), [trades]);
   const shown = underlying === ALL ? trades : trades.filter((t) => t.underlying === underlying);
-  const vaultMissing = query.error instanceof ApiError && query.error.status === 503;
+  const vaultError = query.error instanceof ApiError && query.error.status === 503 ? query.error.title : null;
+  const vaultMissing = vaultError !== null && vaultError.includes("isn't set");
 
   async function download() {
     setDownloading(true);
@@ -99,7 +100,12 @@ function Trades({ ownerKey }: { ownerKey: string }) {
           The trade copy isn&rsquo;t set up on the server yet: its key (OWNER_VAULT_KEY) comes first, in docs/deployment.md §11.
         </p>
       )}
-      {query.error && !unauthorized && !refused && !vaultMissing && <ErrorBanner error={query.error} />}
+      {vaultError !== null && !vaultMissing && (
+        <p data-testid="trades-vault-error" role="alert" className="mt-6 text-sm text-strata-neg">
+          The trade copy can&rsquo;t be read: {vaultError}.
+        </p>
+      )}
+      {query.error && !unauthorized && !refused && vaultError === null && <ErrorBanner error={query.error} />}
       {query.data && trades.length === 0 && <p data-testid="trades-empty" className="mt-6 text-sm text-strata-dim">No trades yet.</p>}
       {underlyings.length > 1 && (
         <label className="mb-3 flex items-center gap-2 font-mono text-[11px] text-strata-dim">

@@ -166,7 +166,10 @@ class Settings(BaseSettings):
         "https://api.tastyworks.com"
     )
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # A setting that fails to validate stops the app before it starts; without
+    # hide_input_in_errors, pydantic's message would quote the settings'
+    # values (a slice of the tastytrade refresh token included) into the log.
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", hide_input_in_errors=True)
 
     @model_validator(mode="after")
     def _owner_key_is_strong(self) -> "Settings":

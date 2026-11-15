@@ -7,8 +7,9 @@ Create Date: 2026-11-15
 ADR 0009 (amended 2026-11-15): the owner's own trades are theirs under
 tastytrade's terms, so a copy may be kept, here, one row per transaction
 sealed with AES-256-GCM under a key that lives only on Fly
-(``app/services/owner_vault.py``). Only the transaction id and whether its
-fees were still estimated are in the clear.
+(``app/services/owner_vault.py``). Only the transaction id, the key
+version and whether its fees were still estimated are in the clear, and the
+ciphertext is bound to all three.
 """
 from collections.abc import Sequence
 
@@ -30,7 +31,7 @@ def upgrade() -> None:
         sa.Column("nonce", sa.LargeBinary(), nullable=False),
         sa.Column("ciphertext", sa.LargeBinary(), nullable=False),
         sa.Column("estimated_fee", sa.Boolean(), nullable=False),
-        sa.Column("stored_at", sa.DateTime(timezone=True), nullable=False),
+        sa.CheckConstraint("octet_length(nonce) = 12", name="owner_transactions_nonce_length"),
     )
 
 

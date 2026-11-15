@@ -3,7 +3,6 @@ Rows arrive sealed: nothing here sees a trade in the clear, and the log
 lines carry counts only."""
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select, update
@@ -20,18 +19,24 @@ async def stored(session: AsyncSession) -> list[OwnerTransaction]:
     return list(result.scalars().all())
 
 
+# Rows per INSERT: Postgres takes at most 32,767 parameters a statement.
+INSERT_CHUNK = 1000
+
+
 async def insert(session: AsyncSession, rows: list[dict[str, Any]]) -> int:
-    """Add sealed rows; one already stored is left as it was. Returns how many were written."""
+    """Add sealed rows, INSERT_CHUNK at a time; one already stored is left as
+    it was. Returns how many were written."""
     if not rows:
         return 0
+    written = 0
     with log_external_call("db.owner_transactions.insert", {"rows": len(rows)}) as call:
-        now = datetime.now(UTC)
-        stmt = pg_insert(OwnerTransaction).values([{**row, "stored_at": now} for row in rows]).on_conflict_do_nothing(
-            index_elements=[OwnerTransaction.id]
-        )
-        result = await session.execute(stmt)
-        await session.commit()
-        written = int(result.rowcount or 0)
+        for start in range(0, len(rows), INSERT_CHUNK):
+            stmt = pg_insert(OwnerTransaction).values(rows[start:start + INSERT_CHUNK]).on_conflict_do_nothing(
+                index_elements=[OwnerTransaction.id]
+            )
+            result = await session.execute(stmt)
+            await session.commit()
+            written += int(result.rowcount or 0)
         call.record_output({"written": written})
     return written
 
@@ -43,7 +48,7 @@ async def replace_estimated(session: AsyncSession, row: dict[str, Any]) -> bool:
         stmt = (
             update(OwnerTransaction)
             .where(OwnerTransaction.id == row["id"], OwnerTransaction.estimated_fee.is_(True))
-            .values(**{k: v for k, v in row.items() if k != "id"}, stored_at=datetime.now(UTC))
+            .values(**{k: v for k, v in row.items() if k != "id"})
         )
         result = await session.execute(stmt)
         await session.commit()

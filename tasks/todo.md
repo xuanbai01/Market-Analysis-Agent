@@ -99,6 +99,15 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 - [ ] **PR 4: whole-chain open interest for QQQ, SPY and NVDA** *(branch `feature/options-oi-history`)*. The owner chose this over charting the snapshot's rolling 30/90-day window, which jumps as expiries roll. It adds `option_oi_totals` (migration 0005) and a second phase of the daily run (`OPTIONS_FULL_CHAIN_SYMBOLS`, best-effort), and the page charts it once two sessions exist.
 - [ ] **PR 5 (with tastytrade PR B): every expiry, live.** Open interest by expiry, max pain and GEX across the whole chain from DXLink. Owner only, never stored.
 
+## Plan — the owner's positions and an encrypted trade copy (2026-11-15, ADR 0009 amended)
+
+**Goal:** a page of the owner's open positions with computed analysis (what the market prices, what history shows; no advice, no prompt), and a copy of their trades both of their PCs can reach. The owner chose an encrypted copy in Neon and a key their password manager syncs.
+
+- [ ] **PR 1 — the owner key** *(branch `feature/owner-key`)*: `require_owner` (`X-Owner-Key` on top of the shared secret, 404 unset, per-IP lockout), `GET /v1/owner/status`, CORS, the sign-in form's hidden username for password managers, deployment §10. **Owner:** make and import `OWNER_KEY`, save it in the password manager.
+- [ ] **PR 2 — `GET /v1/owner/positions`:** accounts and positions from tastytrade, OCC symbols parsed, live REST quotes (mark, IV, Greeks), grouped by underlying, 15 s in memory, never stored, accounts unnumbered.
+- [ ] **PR 3 — the `/positions` page:** the owner unlock form and key storage, then per underlying: legs, Greeks totals, payoff at expiry and today (Black-76 in TS, held to Python), what-ifs, the risk-neutral probability of profit, how often history moved that far, earnings in the holding period, max pain and walls.
+- [ ] **PR 4 — the encrypted trade copy and `/trades`:** `cryptography`, `OWNER_VAULT_KEY`, AES-256-GCM per row with the transaction id as associated data, migration 0006, sync on visit, CSV download.
+
 ## Plan — tastytrade, live and personal (2026-11-15, ADR 0009)
 
 **Goal:** link the owner's funded tastytrade account and use it live: real-time quotes for the options page, market history (IV rank and percentile, years of daily candles), and the owner's own trades. **Within tastytrade's Open API terms:**

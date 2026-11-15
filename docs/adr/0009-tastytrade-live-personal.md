@@ -98,3 +98,21 @@ tastytrade's Open API is free to account holders. We read its docs and its Open 
 - **The tastytrade credential lives on Fly only** (not GitHub, not a browser), and is revoked from tastytrade's grant list. A leak of the shared secret does not expose it: no route returns it.
 - **Verification by Claude stays at the metadata level.** A check that needs tastytrade's values is the owner's to make.
 - **Revisit when:** tastytrade's terms change, the owner wants stored history, or a second user arrives (a personal app serves only its owner's account).
+
+## Amendment, 2026-11-15: an owner key, the owner's positions, and an encrypted copy of the trades
+
+The owner asked for two things: a page of their open positions with analysis, and a copy of their trades that both of their PCs can reach. Decided with the owner:
+
+1. **An owner key.** The owner's account data sits behind routes under `/v1/owner`, which need the shared secret and a second key, `X-Owner-Key` (`OWNER_KEY`, a Fly secret).
+   - **Why:** the shared secret is also a GitHub Actions secret (the IV snapshot cron), so a leak there must not open the account.
+   - **Fail closed:** with no owner key configured those routes don't exist (404), local dev included.
+   - **Lockout:** an address that sends ten wrong keys in an hour is locked out, the right key included, until a try refills.
+   - **Two PCs:** the owner keeps the key in a password manager that syncs it. The sign-in forms carry a fixed username so a manager can save them.
+   - `tests/test_owner_auth.py` pins the owner's routes.
+2. **Positions, live** (planned). Open positions are read when the owner opens the page and are never stored. Their live marks, IVs and Greeks are tastytrade's data, so decision 1 applies to them. The analysis is computed in code, with no prompt.
+3. **Decision 6 changes for the trades (planned).** The owner's transactions are their own (the terms' "Data" excludes them), so they may be kept.
+   - **Where:** Neon, one row per transaction, encrypted (AES-256-GCM) with a key held as a Fly secret. Only the transaction id and an estimated-fee flag stay outside the ciphertext.
+   - **Still never stored:** tastytrade's market data.
+   - **Still out of every prompt:** the trades themselves.
+   - **Claude sessions:** a session checks counts only, never decrypting or printing a trade.
+

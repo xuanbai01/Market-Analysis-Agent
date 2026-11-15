@@ -6,6 +6,12 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 
 - **Today: one shared secret.** [`app/core/auth.py::require_shared_secret`](../app/core/auth.py) checks `Authorization: Bearer <BACKEND_SHARED_SECRET>` (constant-time compare) on **every route except `/`, `/v1/health` and the three demo routes below**. That includes plain reads of stored data (market snapshot and history, news, symbols): until 2026-11 those were open, and each told an anonymous caller which tickers had been researched. Production sets the secret; with it unset (local dev) the dependency is a pass-through. [`tests/test_route_auth.py`](../tests/test_route_auth.py) asserts that the set of ungated routes is exactly that short list, so a new route is gated or the test fails. The daily IV snapshot cron (ADR 0008) calls a gated route with the same secret, stored as the `BACKEND_SHARED_SECRET` GitHub Actions secret; the workflow has no permissions, checks out no code, uses no third-party actions and never prints it.
 - The dashboard asks for the secret at sign-in and keeps it in `localStorage`; a 401 on a report clears it and returns to sign-in.
+- **The owner's account data needs a second key** (ADR 0009, amended 2026-11-15). Routes under `/v1/owner` take `require_owner` ([`app/api/v1/dependencies.py`](../app/api/v1/dependencies.py)): the shared secret, then `X-Owner-Key: <OWNER_KEY>`, compared in constant time on bytes.
+  - **Why a second key:** the shared secret is also a GitHub Actions secret, so it alone must not open the owner's account.
+  - **Fail closed:** with `OWNER_KEY` unset the routes answer 404, local dev included. A missing or wrong key is a 403.
+  - **Lockout:** each wrong key takes one of the address's `OWNER_KEY_FAILURES_PER_HOUR` tries (10). With none left every request from it is a 429, the right key included, because the lockout is checked before any key is compared.
+  - **Logging:** a refusal is logged as missing or wrong, never with the key.
+  - [`tests/test_owner_auth.py`](../tests/test_owner_auth.py) pins the owner's routes.
 - **One deliberate exception: the read-only demo.** `GET /v1/demo`, `/v1/demo/research/{symbol}` and `/v1/demo/market/{symbol}/prices` answer without the secret ([`app/services/demo.py`](../app/services/demo.py)). They return only what is already stored (the latest report and the stored prices) for the tickers in `DEMO_SYMBOLS`; they never generate a report, call the LLM or reach a data provider, so a visitor cannot spend money or quota. A ticker off the list is a 404 whether or not anything is stored for it. They are built to be hammered: responses are cached for five minutes as serialized bytes (no per-request validation or serialization of a large report), the cache can only hold keys for listed tickers and the three allowed ranges, responses carry `Cache-Control: public, max-age=300`, and one IP is limited to `DEMO_RATE_LIMIT_PER_MINUTE` requests (120 by default). `DEMO_SYMBOLS` empty turns all three off. `tests/test_route_auth.py` pins the set to exactly these three GET routes; `tests/test_demo.py` fails if any path from them reaches the orchestrator or the price ingest. The reports hold public market data and AI prose about it, nothing about the owner.
 - **When real users arrive:** per-user auth through a dependency that returns `current_user`, and every user-owned query scoped to `current_user.id` unless the route is explicitly cross-user.
 
@@ -35,7 +41,7 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 
 - All secrets loaded via `app/core/settings.py` from environment variables. The `.env` file is `.gitignored` — never commit real values.
 - `APP_ENV=prod` must disable FastAPI debug / docs routes unless deliberately public (currently `/docs` is always on — revisit before public launch).
-- CORS allows exactly one origin, `FRONTEND_ORIGIN` ([`app/core/cors.py`](../app/core/cors.py)); production sets it to the Vercel dashboard in `fly.toml`. Never `*`.
+- CORS allows exactly one origin, `FRONTEND_ORIGIN` ([`app/core/cors.py`](../app/core/cors.py)); production sets it to the Vercel dashboard in `fly.toml`. Never `*`. Allowed headers: `Authorization`, `Content-Type` and `X-Owner-Key`.
 
 ## A06 — Vulnerable and Outdated Components
 
@@ -45,6 +51,7 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 ## A07 — Identification and Authentication Failures
 
 - Shared secret only (see A01): validated on every protected request; failures return 401 with `WWW-Authenticate: Bearer` and never log the token. No expiry or rotation beyond replacing the secret, which now lives in three places: the Fly secret, the GitHub Actions secret (the IV snapshot cron) and each browser's sign-in. A narrower token for the cron waits until there are collaborators (ADR 0008).
+- **The owner key** (A01) lives as a Fly secret and in the owner's password manager, which syncs it to their PCs. Both sign-in forms carry a fixed hidden username, so a manager can save the secret under a name. Rotate it by importing a new `OWNER_KEY` (docs/deployment.md §10).
 - When per-user auth lands: token expiry enforced (24h default), failed logins return a generic error and are logged with an anonymized identifier.
 - **The owner's tastytrade credential** (ADR 0009) is a personal OAuth app's client ID and secret and its grant's refresh token. The refresh token never expires and opens a brokerage account.
   - **Storage:** they are Fly secrets only (`TASTYTRADE_*`, docs/deployment.md §9), never in GitHub or a browser.

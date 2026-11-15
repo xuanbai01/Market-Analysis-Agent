@@ -179,6 +179,23 @@ The live tastytrade overlay (ADR 0009) reads the owner's own funded account, rea
 
 If the token ever leaks, delete the grant on my.tastytrade.com, create a new one, and import the new refresh token. A grant with the `trade` scope shows up in the probe's grant check ("WARNING: the grant can trade"). Whether the client then signs in depends on tastytrade narrowing the token to the `read` it asks for, which hasn't been seen: if the answer still says `trade`, the client refuses it.
 
+### 10. The owner key (2 min)
+
+The owner's account routes (`/v1/owner`, ADR 0009) need a second key on top of the shared secret. Without it they answer 404.
+
+1. **Make the key and import it into Fly.** This runs in PowerShell: a cryptographic random key, written to a temporary file with no byte-order mark, imported, deleted, and put on the clipboard. The import restarts the machines.
+
+   ```powershell
+   $bytes = New-Object byte[] 32; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+   $key = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+   Set-Content -NoNewline -Encoding ascii "$env:TEMP\owner.env" "OWNER_KEY=$key"
+   cmd /c "fly secrets import < %TEMP%\owner.env"
+   Remove-Item $env:TEMP\owner.env; Set-Clipboard $key; Remove-Variable key, bytes
+   ```
+
+2. **Save it in your password manager** right away, as the password of an entry for the dashboard's address with the username `market-agent-owner`. Then clear the clipboard with `Set-Clipboard -Value ' '`. The manager syncs it to your other PCs; the dashboard's owner pages ask for it once per browser.
+3. **Rotate it** by running step 1 again and updating the entry. Each browser asks for the new key on its next owner request.
+
 ## Ongoing operations
 
 ### Rolling out a change

@@ -43,6 +43,9 @@ CACHE_TTL_SECONDS = 15 * 60
 NO_OPTIONS_TTL_SECONDS = 6 * 3600
 CACHE_SIZE = 30
 HISTORY_PERIOD = "2y"  # past earnings moves
+# After a failed rebuild the stale copy is served this long before Yahoo
+# is asked again, so an outage isn't a dozen calls per request.
+RETRY_AFTER_FAILURE_SECONDS = 120
 _SINGLE_EXPIRY_HISTORY = "5d"
 _EQUITY = "EQUITY"
 
@@ -177,7 +180,7 @@ def build(symbol: str, now: datetime) -> _Built:
     not_found = False
     with log_external_call("yfinance.options", {"symbol": symbol, "purpose": "page"}) as call:
         try:
-            fetched = options_chain.fetch_chain(symbol, pick, history_period=HISTORY_PERIOD)
+            fetched = options_chain.fetch_chain(symbol, pick, history_period=HISTORY_PERIOD, read_calendar=False)
         except SymbolNotFound:
             # An ordinary 404: logged as an outcome, not an error with a traceback.
             call.record_output({"status": "not_found"})
@@ -245,6 +248,7 @@ async def _get_report_locked(session: AsyncSession, symbol: str, now: datetime |
         if stale is None:
             raise
         logger.exception("options for %s failed; serving the copy from before", symbol)
+        stale.expires_at = _clock() + RETRY_AFTER_FAILURE_SECONDS
         return stale.report
     report = await _assemble(session, built, now)
     ttl = NO_OPTIONS_TTL_SECONDS if report.status == "no_options" else CACHE_TTL_SECONDS
@@ -255,7 +259,9 @@ async def _get_report_locked(session: AsyncSession, symbol: str, now: datetime |
 def _fetch_expiry(symbol: str, expiry: date, built: _Built) -> Smile:
     """Read one more listed expiry into the cached build. Blocking."""
     quoted_at = built.parts["quoted_at"]
-    one = options_chain.fetch_chain(symbol, lambda _listed, _quote: [expiry], history_period=_SINGLE_EXPIRY_HISTORY)
+    one = options_chain.fetch_chain(
+        symbol, lambda _listed, _quote: [expiry], history_period=_SINGLE_EXPIRY_HISTORY, read_calendar=False
+    )
     if one is None or expiry not in one.chains or built.fetched is None:
         built.unusable.add(expiry)  # not asked again while the report is cached
         raise NoUsableQuotes(expiry)
@@ -277,7 +283,10 @@ async def get_chain(
         raise ExpiryNotListed(expiry)
     s = built.smiles.get(expiry)
     if s is None:
-        if expiry in built.fetched.chains or expiry in built.unusable:
-            raise NoUsableQuotes(expiry)
-        s = await options_chain.on_options_thread(_fetch_expiry, symbol, expiry, built)
+        async with _locks.setdefault(symbol, asyncio.Lock()):  # one fetch per new expiry
+            s = built.smiles.get(expiry)
+            if s is None:
+                if expiry in built.fetched.chains or expiry in built.unusable:
+                    raise NoUsableQuotes(expiry)
+                s = await options_chain.on_options_thread(_fetch_expiry, symbol, expiry, built)
     return await options_chain.on_options_thread(oa.expiry_chain, built.fetched.chains[expiry], s)

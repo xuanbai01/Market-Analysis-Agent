@@ -131,7 +131,9 @@ def _dividend_yield(underlying: dict[str, Any]) -> float:
     return value / 100 if value > 1 else value
 
 
-def _fetch_yfinance_chain(symbol: str, pick: ExpiryPicker, history_period: str) -> ChainFetch | None:
+def _fetch_yfinance_chain(
+    symbol: str, pick: ExpiryPicker, history_period: str, read_calendar: bool
+) -> ChainFetch | None:
     import yfinance  # noqa: PLC0415  -- lazy: tests swap in a fake module
 
     ticker = yfinance.Ticker(symbol)
@@ -168,24 +170,32 @@ def _fetch_yfinance_chain(symbol: str, pick: ExpiryPicker, history_period: str) 
         expiries=listed,
         chains=chains,
         closes=closes,
-        next_earnings=_next_earnings(ticker, today) if underlying.get("quoteType") == _EQUITY else None,
+        next_earnings=(
+            _next_earnings(ticker, today) if read_calendar and underlying.get("quoteType") == _EQUITY else None
+        ),
         name=underlying.get("longName") or underlying.get("shortName"),
         quote_type=underlying.get("quoteType"),
         earnings_estimated=bool(underlying.get("isEarningsDateEstimate")),
     )
 
 
-ChainProvider = Callable[[str, ExpiryPicker, str], "ChainFetch | None"]
+ChainProvider = Callable[[str, ExpiryPicker, str, bool], "ChainFetch | None"]
 PROVIDERS: dict[str, ChainProvider] = {"yfinance": _fetch_yfinance_chain}
 
 
 def fetch_chain(
-    symbol: str, pick: ExpiryPicker, *, history_period: str = HISTORY_PERIOD, provider: str = "yfinance"
+    symbol: str,
+    pick: ExpiryPicker,
+    *,
+    history_period: str = HISTORY_PERIOD,
+    read_calendar: bool = True,
+    provider: str = "yfinance",
 ) -> ChainFetch | None:
     """The chains of ``symbol`` for the expiries ``pick`` chooses; None
     when the symbol lists no options; ``SymbolNotFound`` when Yahoo knows
-    no such symbol. Blocking."""
-    return PROVIDERS[provider](symbol, pick, history_period)
+    no such symbol. ``read_calendar=False`` skips the earnings-calendar
+    call (the page has the schedule). Blocking."""
+    return PROVIDERS[provider](symbol, pick, history_period, read_calendar)
 
 
 # Every options fetch and computation runs on this one thread: off the

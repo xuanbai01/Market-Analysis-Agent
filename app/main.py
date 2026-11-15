@@ -4,7 +4,11 @@ from app.api.v1.routers import demo, lens, market, news, research, symbol
 from app.api.v1.routers.health import router as health_router
 from app.core.cors import configure_cors
 from app.core.errors import add_problem_handlers
+from app.core.logging import configure_logging
 from app.core.settings import settings
+
+# app.* INFO to stderr, so `fly logs` shows each external call's latency.
+configure_logging()
 
 app = FastAPI(
     title="Market Analysis Agent API",

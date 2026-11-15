@@ -42,6 +42,7 @@ from typing import Any
 
 from app.core.observability import log_external_call
 from app.schemas.research import Claim, ClaimHistoryPoint, ClaimValue, Source
+from app.services import yahoo_info
 from app.services.fundamentals_history import (
     HISTORY_KEYS,
     build_fundamentals_history,
@@ -373,7 +374,7 @@ def _fetch_yfinance_fundamentals(
     import yfinance  # noqa: PLC0415
 
     ticker = yfinance.Ticker(symbol)
-    info: dict[str, Any] = getattr(ticker, "info", {}) or {}
+    info = yahoo_info.read_info(symbol, ticker, lambda: yfinance.Ticker(symbol))
     financials = getattr(ticker, "financials", None)
     cashflow = getattr(ticker, "cashflow", None)
     quarterly_financials = getattr(ticker, "quarterly_financials", None)

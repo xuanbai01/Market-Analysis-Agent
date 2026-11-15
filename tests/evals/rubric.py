@@ -378,7 +378,10 @@ LEVEL_BAND = 0.05
 # median it is measured against (characters).
 _MAX_SUBJECT_GAP = 100
 _MAX_MEDIAN_GAP = 60
-_MEDIAN_RE = re.compile(r"\bmedian\b")
+_MEDIAN_RE = re.compile(r"\bmedians?\b")
+# A peer median named after the word: "the median of its peers",
+# "the median across the peer group".
+_PEERS_AFTER_MEDIAN = re.compile(r"\s+(?:of|among|across|for)\s+(?:(?:its|the|their)\s+)?peer")
 # "median of 20.30", "median P/E of 20.30", "seven-year median (20.4x)".
 # Only a metric's name may sit between "median" and the figure: "median
 # while price-to-sales of 2.08" cites the price-to-sales, not the median.
@@ -462,11 +465,13 @@ def _agrees(direction: str, gap: float) -> bool:
 
 def _measured_against_peers(clause: str, direction_at: int) -> bool | None:
     """Whether the median a direction word refers to is the peer median:
-    the nearest "median" after it (within reach), else the nearest one
-    before. None when the clause names no median."""
+    the nearest "median" after it (within reach; "peer" before it or "of
+    its peers" after it), else the nearest one before. None when the
+    clause names no median."""
     after = next(_MEDIAN_RE.finditer(clause, direction_at), None)
     if after is not None and after.start() - direction_at <= _MAX_MEDIAN_GAP:
-        return "peer" in clause[direction_at : after.end()]
+        named_before = "peer" in clause[direction_at : after.end()]
+        return named_before or _PEERS_AFTER_MEDIAN.match(clause, after.end()) is not None
     before = list(_MEDIAN_RE.finditer(clause, 0, direction_at))
     if before:
         return "peer" in clause[max(0, before[-1].start() - 15) : direction_at]

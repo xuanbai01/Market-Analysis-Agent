@@ -315,3 +315,49 @@ async def test_route_503s_when_the_data_is_unavailable(api: AsyncClient, monkeyp
     monkeypatch.setattr("app.api.v1.routers.lens.get_lens", down)
     resp = await api.get("/v1/lens/megacap-capex")
     assert resp.status_code == 503
+
+
+def test_the_index_lists_only_the_companies_a_lens_draws() -> None:
+    """Amazon tags no R&D (checked against SEC), so the R&D lens draws six
+    companies; its index card listed seven."""
+    summaries = {s.id: s for s in lens.list_lenses()}
+    assert "AMZN" not in summaries["megacap-rnd"].tickers
+    assert len(summaries["megacap-rnd"].tickers) == 6
+    assert len(summaries["megacap-capex"].tickers) == 7
+    assert len(summaries["megacap-sbc"].tickers) == 7
+
+
+async def test_a_narrative_point_cites_every_fact_it_quotes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The analyst view stops at four chips a point; a lens point that
+    quotes five facts kept only four, leaving a quoted number unchipped."""
+    from app.services import research_thesis
+
+    _, companies, stats = built()
+    facts = lens.lens_facts(lens.CAPEX, companies, stats)
+    numbered = [i for i, f in enumerate(facts) if research_thesis._claim_numbers(f)]
+    chosen: list[int] = []
+    seen: set[float] = set()
+    for i in numbered:
+        n = round(research_thesis._claim_numbers(facts[i])[0], 2)
+        if n not in seen:
+            seen.add(n)
+            chosen.append(i)
+        if len(chosen) == 5:
+            break
+    text = "Figures: " + ", ".join(f"{research_thesis._claim_numbers(facts[i])[0]:.2f}" for i in chosen) + "."
+
+    async def fake(**_kw: Any) -> LensDraft:
+        return LensDraft(
+            headline="Spending is uneven.",
+            points=[ThesisDraftPoint(text=text, claim_ids=[f"L{i + 1}" for i in chosen])],
+        )
+
+    monkeypatch.setattr(lens.llm, "synth_call", fake)
+    narrative = await lens.write_narrative(SPEC, facts)
+    assert narrative is not None
+    assert [r.index for r in narrative.points[0].claim_refs] == chosen
+
+
+def test_the_narrative_prompt_asks_for_every_quoted_fact() -> None:
+    assert "1–3 ids" not in lens.LENS_SYSTEM_PROMPT
+    assert "every fact it quotes" in lens.LENS_SYSTEM_PROMPT

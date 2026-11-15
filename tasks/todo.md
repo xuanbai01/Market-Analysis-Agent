@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **More lenses (workstream D)** in review on `feature/more-lenses`. A–D through the older registrants merged (#92–#98); C1 (README screenshots) is the owner's.
+- **Follow-ups from the 2026-11-14 live checks** in review on `fix/live-check-follow-ups`: the eval rubric's two attribution gaps, the R&D lens index listing AMZN, lens points citing every fact they quote, an insider share under 0.01%, and a retry when Yahoo's `info` comes back cut short. Workstreams A–D are merged (#92–#106) apart from C1 (README screenshots, the owner's).
 
 ## Plan — after Phase 5 (2026-11-13)
 
@@ -30,7 +30,7 @@ Owner actions (they need an account or a decision):
 - [x] **`DEEPSEEK_API_KEY` as a GitHub Actions secret** — set 2026-11-13; the Live Eval workflow ran on `main` the same day, 5 of 5 at factuality 1.000.
 - [ ] **`docs/screenshots/`** (the Strata mockups the archive links to) is untracked: commit it or delete it.
 - [ ] **Branch protection on `main`.**
-- [x] **AI PR review on DeepSeek** *(branch `chore/deepseek-review`, in review)* — the Claude Code Action needed an `ANTHROPIC_API_KEY` that was never set, so it passed having reviewed nothing. `scripts/ai_review.py` sends the diff to DeepSeek with the `DEEPSEEK_API_KEY` secret already set for the Live Eval and keeps one PR comment.
+- [x] **AI PR review on DeepSeek** *(#97)* — the Claude Code Action needed an `ANTHROPIC_API_KEY` that was never set, so it passed having reviewed nothing. `scripts/ai_review.py` sends the diff to DeepSeek with the `DEEPSEEK_API_KEY` secret already set for the Live Eval and keeps one PR comment.
 
 ### A2. Fixes from the XOM check ✅ *(#93, merged 2026-11-13)*
 
@@ -58,15 +58,15 @@ ADR 0004 called "is this expensive versus its own history" the most-cited gap; t
 - [ ] **C1 README screenshots** — hero + analyst view, one full dashboard, the capex lens. The browser pane only saves small images, so these need capturing by hand (owner).
 - [x] **C2 Public read-only demo** — `/demo` and `/v1/demo/*`: the latest stored report and stored prices for the tickers in `DEMO_SYMBOLS`, never a generated report or a provider call. Off unless the setting is non-empty; production lists AAPL, NVDA, KO, JPM, RIVN and XOM.
 - [x] **C3 Rate limit** — production `RESEARCH_RATE_LIMIT_PER_HOUR` 30 → 10, not the 3 first planned: generation still needs the secret, and 3 would stop the owner rebuilding more than three tickers an hour after a report-version bump.
-- [ ] **After the merge (owner):** open each demo ticker once while signed in, so its report is built at the current version. The demo shows whatever is stored, and a ticker with nothing stored doesn't appear.
+- [x] **After the merge:** open each demo ticker once while signed in, so its report is built at the current version. The demo shows whatever is stored, and a ticker with nothing stored doesn't appear. Done at `REPORT_VERSION` 8 on 2026-11-15; repeat after each version bump.
 
 ### D. After those (unordered)
 
-- [x] **More lenses** *(branch `feature/more-lenses`, in review)* — the lens takes a metric (`lens_catalog.py`), and the megacap group has stock-based compensation and R&D lenses beside capex. Checked against SEC first: SBC is tagged by all seven companies every year 2015–2025; R&D by all but Amazon, which reports technology and infrastructure spending instead, so the R&D lens leaves it out and says so.
+- [x] **More lenses** *(#103)* — the lens takes a metric (`lens_catalog.py`), and the megacap group has stock-based compensation and R&D lenses beside capex. Checked against SEC first: SBC is tagged by all seven companies every year 2015–2025; R&D by all but Amazon, which reports technology and infrastructure spending instead, so the R&D lens leaves it out and says so.
 - [ ] **Buybacks vs dividends lens** — not built: Amazon and Tesla tag neither, Alphabet and Meta started dividends recently, and a missing value can't be told apart from a zero. Needs a rule for "no tag means $0" checked company by company. A trailing-12-month point for the partial year is the other open lens idea.
-- [x] **Insider activity** *(branch `feature/insider-activity`, in review)* — `form_4.py` rewritten into `fetch_insider_activity`: officer and director purchases and sales over six months, 10% holders apart, the share sold under 10b5-1 plans, the top traders; an Insider Activity section (`REPORT_VERSION` 5) and a full-width card. `holdings_13f.py` stays unsurfaced: 13F holdings are quarterly and 45 days stale, a weaker signal than Form 4s; decide again if someone asks who the big holders are.
-- [x] **Predecessor registrants for older reorganizations** *(branch `fix/older-registrants`, in review)* — checked against SEC: DIS (← TWDC Enterprises 18, 2019), CI (← Cigna Holding, 2018) and AVGO (← Broadcom Ltd, 2018 ← Avago, 2016) now link back and get their eleventh annual point (2015). The gap was one year, not the whole history: a new registrant's first 10-K carries a few years back. CHTR needed nothing (the ticker resolves to the registrant with 10-Ks back to 2000); LIN neither (the Praxair–Linde share-count jump cuts its history at 2019 whichever registrant holds it).
-- [ ] **Split modules past the 400-line convention when next touched** — `research_orchestrator.py`, `ten_k.py`, `earnings.py`, `fundamentals.py` and `research_derived.py` (the last grew past 500 lines with the own-history claims).
+- [x] **Insider activity** *(#96)* — `form_4.py` rewritten into `fetch_insider_activity`: officer and director purchases and sales over six months, 10% holders apart, the share sold under 10b5-1 plans, the top traders; an Insider Activity section (`REPORT_VERSION` 5) and a full-width card. `holdings_13f.py` stays unsurfaced: 13F holdings are quarterly and 45 days stale, a weaker signal than Form 4s; decide again if someone asks who the big holders are.
+- [x] **Predecessor registrants for older reorganizations** *(#98)* — checked against SEC: DIS (← TWDC Enterprises 18, 2019), CI (← Cigna Holding, 2018) and AVGO (← Broadcom Ltd, 2018 ← Avago, 2016) now link back and get their eleventh annual point (2015). The gap was one year, not the whole history: a new registrant's first 10-K carries a few years back. CHTR needed nothing (the ticker resolves to the registrant with 10-Ks back to 2000); LIN neither (the Praxair–Linde share-count jump cuts its history at 2019 whichever registrant holds it).
+- [ ] **Split modules past the 400-line convention when next touched** — `research_orchestrator.py`, `ten_k.py`, `earnings.py`, `fundamentals.py` and `research_derived.py` (the last grew past 500 lines with the own-history claims). The Yahoo retry went into its own `yahoo_info.py` rather than grow `fundamentals.py`; peers still read Yahoo's `info` without it.
 
 Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a filing-level XBRL parser), the 4.6.B compare narrative, the Sonnet comparison run of the golden eval.
 
@@ -83,9 +83,8 @@ If you're picking this up after a gap:
 - **Vite HMR cache misses file mtime in `.claude/worktrees/...`** — see [lessons.md](lessons.md). Workaround: trust unit tests + `vite build`; fix candidate `server.watch.usePolling: true`.
 - **Cancel-on-navigate** (old Bug 8): leaving a ticker page mid-generation doesn't abort the request. Hasn't bitten in dogfood.
 - **Help overlay (`?` shortcut)** — still deferred; ⌘K is the only shortcut.
-- **Yahoo's `info` can come back partial.** One KO fetch on 2026-11-13 had no price-to-sales, EV/EBITDA or gross margin; the report then shows "—" in those cells and "no trailing figure today" on two own-history panels until it is regenerated. A retry, or a fallback from the latest close and trailing per-share figures, would fix it. Not fixed.
 - **Alphabet's annual history starts in 2022.** Before then it tagged share counts per share class, which the SEC company-concept API doesn't return, so GOOGL has four years of per-share figures and multiples. The same limit applies to any company that reports shares only by class.
-- **Left from the 2026-11-13 security review of the demo** (low severity, not fixed): `app/core/logging.py` is never imported, so the `app.external` call log may not be written in production (unverified); two requests arriving as a demo cache entry expires each query the database once; `tool_calls_audit` (tool names and exception class names) is public on demo reports, which was accepted.
+- **Left from the 2026-11-13 security review of the demo** (low severity; the call log, also listed, was fixed by #105): two requests arriving as a demo cache entry expires each query the database once; `tool_calls_audit` (tool names and exception class names) is public on demo reports, which was accepted.
 - **XBRL revenue tags can mix definitions across years.** `xbrl.annual_series` takes the first tag that has a year, and XOM's 2017–2021 revenue comes from a narrower tag than the years around it (about 3% lower). The ends of its ten-year series are on one tag, so the growth rate is unaffected. Found 2026-11-13, not fixed.
 
 **[lessons.md](lessons.md)** — read before non-trivial work to avoid retreading earlier mistakes.

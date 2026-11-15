@@ -19,6 +19,8 @@ const usd = (v: number) => formatClaimValue(v, "usd").replace(/\.00(?=$|[KMBT])/
 function pct(v: number): string {
   const p = v * 100;
   if (p === 0) return "0%";
+  // A real share too small to show at two decimals isn't "0.00%".
+  if (p > 0 && Number(p.toFixed(2)) === 0) return "<0.01%";
   if (p < 0.1) return `${p.toFixed(2)}%`;
   if (p < 10) return `${Math.round(p * 10) / 10}%`.replace(/\.0%$/, "%");
   return `${Math.round(p)}%`;

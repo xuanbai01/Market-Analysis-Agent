@@ -35,7 +35,7 @@ concurrency:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       API_BASE_URL: ${{ vars.API_BASE_URL }}
       BACKEND_SHARED_SECRET: ${{ secrets.BACKEND_SHARED_SECRET }}
@@ -54,7 +54,9 @@ jobs:
 
       - name: Take the snapshots
         run: |
-          curl -fsS --retry 2 --retry-delay 20 --max-time 600 -X POST \
+          # The run stops itself at 300 s; one retry, each attempt capped at
+          # 360 s, fits the job's 20 minutes with time left for the summary.
+          curl -fsS --retry 1 --retry-delay 20 --max-time 360 -X POST \
             -H "Authorization: Bearer $BACKEND_SHARED_SECRET" \
             "$API_BASE_URL/v1/options/snapshots" -o run.json
 

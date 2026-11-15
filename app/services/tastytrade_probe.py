@@ -44,6 +44,10 @@ from app.services import dxlink
 from app.services import market_calendar as mc
 from app.services import tastytrade_client as tt
 
+# The positions page reads a quote's ``volatility`` as a fraction (0.48 =
+# 48%) and drops one at or above this; the probe checks tastytrade's units.
+from app.services.owner_positions import IV_FRACTION_MAX
+
 Say = Callable[[str], None]
 
 
@@ -68,9 +72,6 @@ NEAR_MONEY_STRIKES = 5
 DAILY_FROM = datetime(1990, 1, 1, tzinfo=UTC)
 # Our IV30 and tastytrade's agree when this close, in vol points.
 IV30_POINTS = 2.0
-# The positions page reads a quote's ``volatility`` as a fraction (0.48 =
-# 48%); a value of 3 or more would be percent points.
-IV_FRACTION_MAX = 3.0
 METRIC_FIELDS = (
     "implied-volatility-index",
     "implied-volatility-30-day",

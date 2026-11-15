@@ -53,6 +53,9 @@ MAX_ACCOUNTS = 10
 MAX_POSITIONS = 500
 BUILD_SECONDS = 60.0
 STANDARD_MULTIPLIER = 100
+# A quote's IV is read as a fraction; one this large would be percent
+# points. The probe checks tastytrade's units (tastytrade_probe).
+IV_FRACTION_MAX = 3.0
 _ACCOUNT = re.compile(r"[A-Z0-9]+")
 _TICKER = re.compile(r"[A-Z][A-Z0-9.]{0,9}(?:/[A-Z0-9]{1,4})?")
 # OCC: a 6-character root padded with spaces, YYMMDD, C or P, and the
@@ -130,11 +133,17 @@ def _count(value: Any) -> int | None:
     return int(number) if number is not None and number > 0 and number.is_integer() else None
 
 
-def _items(payload: Any) -> list[dict[str, Any]]:
-    """``data.items`` of an answer, the objects only; anything else is nothing."""
+def _items(payload: Any, *, strict: bool = False) -> list[dict[str, Any]]:
+    """``data.items`` of an answer, the objects only. An answer of another
+    shape is nothing, or, when ``strict`` (accounts and positions, where
+    nothing would read as "no positions"), a failure."""
     data = payload.get("data") if isinstance(payload, dict) else None
     items = data.get("items") if isinstance(data, dict) else None
-    return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+    if not isinstance(items, list):
+        if strict:
+            raise tt.TastytradeUnavailable("tastytrade's answer wasn't readable")
+        return []
+    return [i for i in items if isinstance(i, dict)]
 
 
 async def _account_numbers() -> list[str]:
@@ -146,7 +155,7 @@ async def _account_numbers() -> list[str]:
         return _accounts[1]
     payload = await tt.get("/customers/me/accounts", op="accounts")
     numbers = []
-    for entry in _items(payload):
+    for entry in _items(payload, strict=True):
         account = _field(entry, "account")
         number = _field(account, "account-number") if isinstance(account, dict) else None
         if isinstance(number, str) and _ACCOUNT.fullmatch(number):
@@ -177,10 +186,9 @@ def _read(item: dict[str, Any], account: int) -> _Leg | UnanalysedPosition | Non
     sign = _SIGNS.get(direction) if isinstance(direction, str) else None
     quantity = None if size is None or sign is None else sign * size
     other = UnanalysedPosition(account=account, instrument_type=kind or "Unknown", symbol=symbol, quantity=quantity)
-    stated = _field(item, "multiplier")
-    # A share is one share; an option without a stated multiplier has an
-    # unknown deliverable and isn't modelled.
-    multiplier = 1 if kind == "Equity" and stated is None else _count(stated)
+    # A share is one share, whatever the row says; an option needs a stated
+    # multiplier (without one its deliverable is unknown, and it isn't modelled).
+    multiplier = 1 if kind == "Equity" else _count(_field(item, "multiplier"))
     if quantity is None or multiplier is None or kind not in ("Equity Option", "Equity"):
         return other
     average = _number(_field(item, "average-open-price"))
@@ -203,6 +211,12 @@ def _read(item: dict[str, Any], account: int) -> _Leg | UnanalysedPosition | Non
     ))
 
 
+def _fraction(iv: float | None) -> float | None:
+    """An IV the page can read as a fraction (0.48 = 48%), or none: a value
+    of IV_FRACTION_MAX or more would be percent points (4800% on the page)."""
+    return iv if iv is not None and 0 < iv < IV_FRACTION_MAX else None
+
+
 def _live_quote(item: dict[str, Any]) -> LiveQuote:
     stamp = _field(item, "updated-at")
     try:
@@ -214,7 +228,7 @@ def _live_quote(item: dict[str, Any]) -> LiveQuote:
         bid=_number(_field(item, "bid")),
         ask=_number(_field(item, "ask")),
         mark=mark if mark is not None else _number(_field(item, "mid")),
-        iv=_number(_field(item, "volatility")),
+        iv=_fraction(_number(_field(item, "volatility"))),
         delta=_number(_field(item, "delta")),
         gamma=_number(_field(item, "gamma")),
         theta=_number(_field(item, "theta")),
@@ -223,12 +237,23 @@ def _live_quote(item: dict[str, Any]) -> LiveQuote:
     )
 
 
+def _refused(exc: Exception) -> bool:
+    """tastytrade refused the request itself (a 4xx it won't retry): asking
+    for less may work. Anything else (a 429, a 5xx, no answer) fails the read."""
+    return isinstance(exc, tt.TastytradeNotFound) or (
+        isinstance(exc, tt.TastytradeUnavailable) and exc.status is not None and 400 <= exc.status < 500
+    )
+
+
 async def _quote_batch(kind: str, batch: list[str], quotes: dict[str, LiveQuote]) -> bool:
-    """Ask for one batch; False when tastytrade refuses it."""
+    """Ask for one batch; False when tastytrade refuses it. Any other failure
+    is raised: the read fails, and the last copy stands in."""
     try:
         payload = await tt.get("/market-data/by-type", {kind: ",".join(batch)}, op="quotes")
-    except (tt.TastytradeUnavailable, tt.TastytradeNotFound):
-        return False
+    except (tt.TastytradeUnavailable, tt.TastytradeNotFound) as exc:
+        if _refused(exc):
+            return False
+        raise
     for item in _items(payload):
         symbol = _field(item, "symbol")
         if isinstance(symbol, str) and symbol in batch:
@@ -294,8 +319,11 @@ async def _build() -> OwnerPositions:
     legs: list[_Leg] = []
     unanalysed: list[UnanalysedPosition] = []
     for index, number in enumerate(numbers, start=1):
+        if len(legs) + len(unanalysed) >= MAX_POSITIONS:
+            truncated = True
+            break  # no more accounts asked for than can be shown
         try:
-            rows = _items(await tt.get(f"/accounts/{number}/positions", op="positions"))
+            rows = _items(await tt.get(f"/accounts/{number}/positions", op="positions"), strict=True)
         except tt.TastytradeNotFound:
             continue  # that account has gone; the rest still count
         for item in rows:
@@ -324,24 +352,28 @@ async def get_positions() -> OwnerPositions:
     global _cache
     if not tt.is_configured():
         raise PositionsUnavailable("tastytrade isn't set up on the server")
-    async with _lock:
-        if _cache is not None and _clock() - _cache[0] < CACHE_SECONDS:
-            return _cache[1]
-        try:
-            async with asyncio.timeout(BUILD_SECONDS):
-                built = await _build()
-        except (tt.TastytradeUnavailable, tt.TastytradeNotFound, TimeoutError) as exc:
-            if _cache is not None and _clock() - _cache[0] < STALE_MAX_SECONDS:
-                return _cache[1].model_copy(update={"stale": True})
-            _cache = None
-            raise PositionsUnavailable(_reason(exc)) from exc
-        _cache = (_clock(), built)
-        return built
+    try:
+        # The deadline covers waiting behind another read too.
+        async with asyncio.timeout(BUILD_SECONDS), _lock:
+            if _cache is not None and _clock() - _cache[0] < CACHE_SECONDS:
+                return _cache[1]
+            built = await _build()
+            _cache = (_clock(), built)
+            return built
+    except (tt.TastytradeUnavailable, tt.TastytradeNotFound, TimeoutError) as exc:
+        if _cache is not None and _clock() - _cache[0] < STALE_MAX_SECONDS:
+            return _cache[1].model_copy(update={"stale": True})
+        _cache = None
+        raise PositionsUnavailable(_reason(exc)) from exc
+
+
+_ACCOUNT_PATH = re.compile(r"/accounts/[^/\s]+")
 
 
 def _reason(exc: Exception) -> str:
+    """The 503's reason: the client's own text, any account path masked."""
     if isinstance(exc, TimeoutError):
         return "tastytrade took too long to answer"
     if isinstance(exc, tt.TastytradeUnavailable) and str(exc):
-        return str(exc)  # the client's own fixed reasons
+        return _ACCOUNT_PATH.sub("/accounts/***", str(exc))
     return "tastytrade didn't answer"

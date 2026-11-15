@@ -25,6 +25,7 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + per-call LLM b
 | News | NewsAPI free tier + Yahoo per-ticker RSS | ✅ |
 | Filings | SEC EDGAR (with disk cache + polite-crawl) | ✅ |
 | Macro | FRED API | ✅ |
+| Broker data | tastytrade Open API, the owner's own account: read-only, live only, never stored or sent to an LLM ([ADR 0009](adr/0009-tastytrade-live-personal.md)) | PR A: client, DXLink, probe |
 | Hosting | Fly.io (auto-stop machines) + Neon (Postgres) + Vercel (frontend) | ✅ API https://market-analysis-agent.fly.dev, dashboard https://market-analysis-agent-red.vercel.app |
 | Frontend stack | Vite + React 18 + Tailwind + TanStack Query + Zod | ✅ |
 | Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ counts in [testing.md](testing.md) |
@@ -168,6 +169,7 @@ Errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/
 | SEC EDGAR | Filings (10-K, Form 4, 13F-HR); XBRL company concepts for lenses and the ten-year per-share history | Disk-cached: filing texts forever (filings never change), the list of filings 12 h, XBRL 24 h. SEC lists a big filer's filings older than a year in extra pages (JPM files 26,000 a year); they are read, back three years, when the latest year doesn't hold enough. SEC `User-Agent` mandatory; every request in the process spaced through one lock (8 a second, under SEC's 10). A company that moved to a new registrant is read across both (`sec_registrants.py`). A ticker SEC doesn't know fails the SEC tools only; their cards drop out and the page says so |
 | NewsAPI | News articles | Optional — skipped silently when `NEWSAPI_KEY` empty |
 | FRED | Macro series | Optional — `fetch_macro` emits metadata claims with None values when `FRED_API_KEY` empty |
+| tastytrade | The owner's account (ADR 0009): REST (`tastytrade_client`: chains, quotes, market metrics, the owner's transactions and positions) and DXLink (`dxlink`: candles, Summary, Greeks). A personal OAuth grant, `scope=read`, GET paths on an allowlist; DXLink only to a dxFeed `wss://` host. So far only `python -m app.services.tastytrade_probe` reads it | Optional — off when `TASTYTRADE_CLIENT_SECRET` or `TASTYTRADE_REFRESH_TOKEN` is empty. `TastytradeUnavailable` after three tries (backoff on 429/5xx, one fresh sign-in on 401); a refused sign-in pauses every call for an hour |
 | Anthropic Claude | Synth (Sonnet 4.6) + triage (Haiku 4.5) when `LLM_PROVIDER=anthropic` (default) | `RuntimeError` → 503 problem+json (key not configured / provider API error) |
 | DeepSeek | Synth + triage (`deepseek-flash`, thinking disabled) when `LLM_PROVIDER=deepseek`. OpenAI-format API via the `openai` SDK (`app/services/llm_deepseek.py`) | `RuntimeError` → 503 problem+json (key not configured / provider API error, e.g. 402 out of credit) |
 
@@ -185,3 +187,4 @@ ADRs in [docs/adr/](adr/):
 - [0006](adr/0006-pluggable-llm-provider.md) — LLM provider switchable per `LLM_PROVIDER` (Anthropic default, DeepSeek Flash).
 - [0008](adr/0008-options-from-free-snapshots.md) — Options analysis from free yfinance chains on a separate page, our own IVs (Black-76 on a parity forward), and a daily IV snapshot by GitHub Actions cron.
 - [0007](adr/0007-analytical-narratives.md) — Card prose interprets: derived comparison claims (`research_derived.py`), history in the prompt, sector-aware framing; citation rule unchanged.
+- [0009](adr/0009-tastytrade-live-personal.md) — tastytrade as a live, personal, read-only source: never stored, never in a prompt or the demo, within its Open API terms.

@@ -42,6 +42,7 @@ uv run pytest -m live_llm tests/evals -v -s   # live golden eval on LLM_PROVIDER
 gh workflow run live-eval.yml -f provider=deepseek   # the same eval on GitHub (needs the DEEPSEEK_API_KEY repo secret)
 gh workflow run live-eval.yml -f provider=deepseek -f suite=options   # the options page's cited read, live (NVDA, SPY, KO)
 gh workflow run iv-snapshot.yml                       # the daily IV snapshot, by hand (ADR 0008)
+fly ssh console -C "python -m app.services.tastytrade_probe"   # what the owner's tastytrade account gets (ADR 0009); metadata only
 uv run pytest --cov=app --cov-report=term-missing
 ```
 

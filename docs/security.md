@@ -46,6 +46,11 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 
 - Shared secret only (see A01): validated on every protected request; failures return 401 with `WWW-Authenticate: Bearer` and never log the token. No expiry or rotation beyond replacing the secret, which now lives in three places: the Fly secret, the GitHub Actions secret (the IV snapshot cron) and each browser's sign-in. A narrower token for the cron waits until there are collaborators (ADR 0008).
 - When per-user auth lands: token expiry enforced (24h default), failed logins return a generic error and are logged with an anonymized identifier.
+- **The owner's tastytrade credential** (ADR 0009) is a personal OAuth app's client ID and secret and its grant's refresh token. The refresh token never expires and opens a brokerage account.
+  - **Storage:** they are Fly secrets only (`TASTYTRADE_*`, docs/deployment.md §9), never in GitHub or a browser.
+  - **Read only:** every refresh asks for `scope=read`, and `tastytrade_client` refuses an access token that comes back able to trade. Apart from the sign-in POST it can only GET, and only paths on its allowlist, none of them an order path. `tests/test_tastytrade_client.py` checks the source and every request.
+  - **Failed sign-in:** a refused sign-in pauses all calls for an hour, since repeated failed logins block the server's IP for about 8 hours.
+  - **Revoking:** delete the grant on my.tastytrade.com and create a new one.
 
 ## A08 — Software and Data Integrity Failures
 
@@ -58,12 +63,15 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 - **Every external service invocation is logged:** service id (`polygon.aggregates`, `openai.chat`, `newsapi.everything`), input payload shape, output payload shape (not full body unless needed), latency ms, timestamp. This is what keeps LLM and ingestion systems debuggable.
 - Auth failures (when auth lands) logged with timestamp and anonymized identifier.
 - **Never log** raw passwords, tokens, API keys, or full PII. Redact headers when logging HTTP requests.
+- **tastytrade calls log the path and the status,** with account numbers masked (`/accounts/***/…`), never a header, token, quote token or response body. Tests feed distinctive secrets through every path and fail if one reaches an `app.*` log line.
+- **tastytrade's data is shown to no third party** (its Open API terms §8(4) and §8(6)), and a Claude Code session is one. So `tastytrade_probe` and any check by Claude print metadata only: ages, counts, field names, yes/no comparisons. The owner compares values in tastytrade's own app.
 - **An unhandled error tells the caller nothing about the server.** The 500 body carries a reference id; the exception goes to the log under that id (`app/core/errors.py`). It used to carry `str(exc)`, which on an open route can hand a stranger a SQL fragment or a hostname.
 
 ## A10 — Server-Side Request Forgery (SSRF)
 
 - The backend does not make HTTP requests to user-supplied URLs. All external calls go to hardcoded, vetted endpoints (yfinance, Polygon, NewsAPI, Reddit, LLM providers).
 - If that ever changes (e.g. "fetch this user-provided RSS feed"), add an allowlist and block internal IP ranges.
+- **One address comes from a provider's answer:** DXLink's websocket URL arrives with tastytrade's quote token. `dxlink` connects only to `wss://` on `dxfeed.com` or one of its subdomains, and refuses anything else before connecting.
 
 ## CI Security Gates
 
@@ -87,3 +95,4 @@ See `.github/workflows/ci.yml`:
 - Hardcode secrets, even in "just for dev" code paths.
 - Return SQLAlchemy models directly from route handlers.
 - Skip TDD for auth/authorization code when it lands. This is where mocks lie and regressions hide.
+- Store tastytrade's data, send it to an LLM, show it in the demo, or ask its API for the `trade` scope (ADR 0009).

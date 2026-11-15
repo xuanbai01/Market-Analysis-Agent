@@ -31,5 +31,6 @@ You don't need an ADR for "I picked Postgres because it's the default". You do n
 | 0006 | [Make the LLM provider switchable, and add DeepSeek](0006-pluggable-llm-provider.md) | Accepted |
 | 0007 | [Card prose interprets the data, from comparisons computed in code](0007-analytical-narratives.md) | Accepted |
 | 0008 | [Options analysis from free chain snapshots, with our own daily IV history](0008-options-from-free-snapshots.md) | Accepted |
+| 0009 | [tastytrade as a live, personal, read-only data source](0009-tastytrade-live-personal.md) | Accepted |
 
 <!-- Add rows as you add ADRs. -->

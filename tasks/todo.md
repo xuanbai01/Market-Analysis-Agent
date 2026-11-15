@@ -10,7 +10,8 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Options analysis: the plan's five PRs are merged** (#109 snapshot, #110 report API, #111 page, #112 half days, #113 strategy builder, #114 cited read); an edge-case review's fixes are in review on `fix/options-edge-cases`. Follow-ups below.
+- **tastytrade, PR A (connect and probe)** on `feature/tastytrade-connect`: the read-only client, DXLink, and a probe that reports what the owner's account gets. Plan below.
+- **Options analysis:** the plan's five PRs and the edge-case review are merged (#109–#115). Follow-ups below.
 
 ## Plan — after Phase 5 (2026-11-13)
 
@@ -83,6 +84,21 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 - [x] **Edge-case review** *(branch `fix/options-edge-cases`)*: nine bugs fixed (quote time in a session's first 15 minutes, DST in time to expiry, the intraday event move, a failed schedule cached a day, a traded report still flagged, past moves on a live bar, the spot fallback after the smiles, strikes of 0, a noisy smile's probability).
 - [ ] **Options follow-ups (from the review, not bugs):** the snapshot's stored `next_earnings` is the calendar's date, not `earnings_calendar.next_report_date`; fetching one more expiry costs three Yahoo calls where one would do (a chains-only `fetch_chain`); the page computes the snapshot's raw-quote detail and throws it away; `_Built.parts` is an untyped dict. Known limits of the read: a bare number in any fact's name passes as a label, the direction guard can drop a correct point that uses a synonym, a headline's numbers carry no chip, and a report rebuilt with the same quote time keeps the earlier read. A report released during a session counts as traded from that session's open (the event move and the expiry flags go by the reaction date, not the release time).
 - [ ] **Owner:** compare IV30 for QQQ/SPY/NVDA with a broker after Monday's close (within about 2 points), and price two strategies in the builder against a broker's analysis tool.
+
+## Plan — tastytrade, live and personal (2026-11-15, ADR 0009)
+
+**Goal:** link the owner's funded tastytrade account and use it live: real-time quotes for the options page, market history (IV rank and percentile, years of daily candles), and the owner's own trades. **Within tastytrade's Open API terms:**
+- their data is for trading (§8(3)), and collecting it across the market is not allowed;
+- it is never shown to a third party, including an LLM provider (§8(4) and §8(6));
+- figures that could stand in for theirs stay theirs (§8(10));
+- it is never made public (§8(11)).
+
+So nothing from tastytrade is stored, sent to a prompt or shown in the demo. The client only reads: it requests `scope=read` and makes GET calls only, besides the token POST. The owner's own trades are outside the terms' "Data", but stay out of the database and any prompt too. One PR each, in order.
+
+- [ ] **PR A — connect and probe** *(branch `feature/tastytrade-connect`)*: ADR 0009; `tastytrade_client` (OAuth refresh with `scope=read`, a path allowlist, backoff, an hour's pause after a refused sign-in); `dxlink` (candles, one-shot Summary/Greeks); `tastytrade_probe` (`python -m`, prints what the account gets, stores nothing). **Owner:** create the personal OAuth app and grant, set the three Fly secrets. **Done when** the probe has run on Fly during a session and its answers are recorded here: real-time or not, candle depth, whether candles carry IV, whether options have candles.
+- [ ] **PR B — live quotes on the options page:** `GET /v1/options/{symbol}/live/{expiry}`, cached 10 s; our IVs from live mids; Yahoo's open interest; a Live/Delayed switch; the builder prices at live bid/ask.
+- [ ] **PR C — market history, live:** `GET /v1/options/{symbol}/history` (market metrics; daily candles, with IV if they carry it); a "History · tastytrade" panel.
+- [ ] **PR D — the owner's trades:** `trade_journal` (orders to strategies, FIFO opens and closes, expirations and assignments, fees); `GET /v1/trades`; a lazy `/trades` page. Fetched on demand, account numbers masked, no advice.
 
 ## Handoff — pickup notes (2026-11-13)
 

@@ -109,7 +109,27 @@ describe("prices", () => {
     expect(premium({ bid: 0.4, ask: 0 }, 1, "mid")).toBeNull(); // nobody offers
     expect(premium({ bid: 0.4, ask: 0 }, 1, "natural")).toBeNull();
     expect(premium({ bid: 0, ask: 0 }, -1, "natural")).toBeNull(); // no quote at all
-    expect(premium({ bid: 0, ask: 0.05 }, -1, "natural")).toBe(0); // nobody bids
+    expect(premium({ bid: 0, ask: 0.05 }, -1, "natural")).toBeNull(); // nobody bids: no sale to fill
+    expect(premium({ bid: 0, ask: 0.4 }, 1, "mid")).toBeNull(); // no bid: no mid to mark
+    expect(premium({ bid: 0, ask: 0.4 }, 1, "natural")).toBe(0.4);
+  });
+});
+
+describe("smileOf", () => {
+  it("merges points at the same moneyness", () => {
+    const point = CHAIN.smile[3];
+    const smile = smileOf({ ...CHAIN, smile: [...CHAIN.smile, { ...point, iv: point.iv + 0.02, side: "call" }] })!;
+    expect(smile.points).toHaveLength(CHAIN.smile.length);
+    expect(smile.points.find(([x]) => x === point.log_moneyness)![1]).toBeCloseTo(point.iv + 0.01);
+  });
+});
+
+describe("a smile with no volatility", () => {
+  it("gives a certain answer, not NaN", () => {
+    const dead: Smile = { forward: 100, years: 0.1, points: [[0, 0]] };
+    expect(probAbove(dead, 90)).toBe(1);
+    expect(probAbove(dead, 110)).toBe(0);
+    expect(Number.isNaN(probProfit([{ kind: "call", side: 1, strike: 100, premium: 1 }], dead))).toBe(false);
   });
 });
 
@@ -121,6 +141,27 @@ describe("a flat smile", () => {
 });
 
 describe("templates on a real chain (NVDA)", () => {
+  it("starts strikes by the rule: at the money, half a sigma and a sigma out", () => {
+    // NVDA: forward 163.03, ATM IV 60.4%, 28 days: sigma is 16.7%, so half a
+    // sigma out is 149.96 / 177.25 and a full sigma 137.95 / 192.70.
+    const strikes = (t: keyof typeof TEMPLATES) => templateLegs(t, CHAIN)!.map((l) => l.strike);
+    expect(strikes("long_call")).toEqual([165]);
+    expect(strikes("bull_call")).toEqual([165, 175]);
+    expect(strikes("bear_put")).toEqual([165, 150]);
+    expect(strikes("bull_put")).toEqual([150, 140]);
+    expect(strikes("bear_call")).toEqual([175, 190]);
+    expect(strikes("iron_condor")).toEqual([140, 150, 175, 190]);
+  });
+
+  it("places a short leg on a strike quoted only on the bid", () => {
+    const rows = CHAIN.rows.map((r) => (r.strike === 150 ? { ...r, put_ask: 0 } : r));
+    expect(templateLegs("bull_put", { ...CHAIN, rows })!.map((l) => l.strike)).toEqual([150, 140]);
+  });
+
+  it("takes sigma from the smile when the chain has no ATM IV", () => {
+    expect(templateLegs("bull_put", { ...CHAIN, atm_iv: null })!.map((l) => l.strike)).toEqual([150, 140]);
+  });
+
   it("builds every template from strikes with quotes, in the right order", () => {
     for (const t of Object.keys(TEMPLATES) as (keyof typeof TEMPLATES)[]) {
       const legs = templateLegs(t, CHAIN);

@@ -40,7 +40,13 @@ SMILES: dict[str, dict[str, Any]] = {
 
 NORM_XS = [-3.0, -1.5, -0.1, 0.0, 0.25, 1.0, 2.5]
 
-PROB_ABOVE = [("skewed", k) for k in (120.0, 141.0, 150.0, 158.0, 170.0, 185.0, 200.0)] + [("flat", 100.0), ("flat", 120.0)]
+_SKEWED_KNOTS = [SMILES["skewed"]["forward"] * math.exp(x) for x in (-0.15, -0.05, 0.05)]
+# Between the smile's points, and on them: a real leg's strike is one of
+# them, where the chance above takes the mean of the slopes either side.
+PROB_ABOVE = (
+    [("skewed", k) for k in (120.0, 141.0, 150.0, 158.0, 170.0, 185.0, 200.0, *_SKEWED_KNOTS)]
+    + [("flat", 100.0), ("flat", 120.0)]
+)
 
 POP: list[dict[str, Any]] = [
     {"smile": "skewed", "legs": [("call", 1, 165.0, 10.0)]},
@@ -72,8 +78,10 @@ def _call(smile: dict[str, Any], strike: float) -> float:
 
 
 def _prob_above(smile: dict[str, Any], strike: float) -> float:
-    """−dC/dK along the smile: the risk-neutral chance of ending above K."""
-    h = 1e-4 * smile["forward"]
+    """−dC/dK along the smile: the risk-neutral chance of ending above K.
+    On a smile point the difference straddles the kink, which is the mean
+    of the slopes either side; a small step keeps the error out of sight."""
+    h = 1e-6 * smile["forward"]
     return -(_call(smile, strike + h) - _call(smile, strike - h)) / (2 * h)
 
 

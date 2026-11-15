@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_module
-from app.db.models.options import OptionIvSnapshot, OptionsTracked
+from app.db.models.options import OptionIvSnapshot, OptionOiTotal, OptionsTracked
 from app.services import options_snapshot_store as store
 from app.services import options_snapshots as snaps
 
@@ -101,3 +101,30 @@ async def test_touch_tracked_upserts_the_last_view(db_session: AsyncSession) -> 
     await store.touch_tracked(db_session, "AAPL", later)
     rows = (await db_session.execute(select(OptionsTracked))).scalars().all()
     assert [(r.symbol, r.last_viewed) for r in rows] == [("AAPL", later)]
+
+
+def _totals(symbol: str, trade_date: date = FRIDAY, call: int = 1000, put: int = 800) -> dict[str, Any]:
+    return {
+        "symbol": symbol, "trade_date": trade_date, "as_of": datetime(2026, 11, 13, 21, tzinfo=UTC),
+        "call_open_interest": call, "put_open_interest": put, "call_volume": 50, "put_volume": 40,
+        "expiries": 24, "listed": 24,
+    }
+
+
+async def test_the_first_totals_for_a_session_win(db_session: AsyncSession) -> None:
+    assert await store.insert_totals(db_session, _totals("SPY", call=1000)) is True
+    assert await store.insert_totals(db_session, _totals("SPY", call=9999)) is False
+    stored = (await db_session.execute(select(OptionOiTotal).where(OptionOiTotal.symbol == "SPY"))).scalars().all()
+    assert [r.call_open_interest for r in stored] == [1000]
+    assert await store.stored_totals(db_session, FRIDAY) == {"SPY"}
+
+
+async def test_open_interest_history_is_one_symbols_totals_in_date_order(db_session: AsyncSession) -> None:
+    for d, call in ((date(2026, 11, 13), 300), (date(2026, 11, 11), 100), (date(2026, 11, 12), 200)):
+        await store.insert_totals(db_session, _totals("NVDA", trade_date=d, call=call))
+    await store.insert_totals(db_session, _totals("SPY", trade_date=date(2026, 11, 12), call=7))
+    history = await store.open_interest_history(db_session, "NVDA")
+    assert [(h.trade_date, h.call_open_interest) for h in history] == [
+        (date(2026, 11, 11), 100), (date(2026, 11, 12), 200), (date(2026, 11, 13), 300),
+    ]
+

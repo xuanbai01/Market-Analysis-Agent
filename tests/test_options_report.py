@@ -48,9 +48,13 @@ class _Store:
     def __init__(self) -> None:
         self.points: list[tuple[date, float]] = []
         self.touched: list[str] = []
+        self.totals: list[Any] = []
 
     async def iv30_history(self, _session: Any, symbol: str, _version: int) -> list[tuple[date, float]]:
         return list(self.points)
+
+    async def open_interest_history(self, _session: Any, symbol: str) -> list[Any]:
+        return list(self.totals)
 
     async def touch_tracked(self, _session: Any, symbol: str, _at: datetime) -> None:
         self.touched.append(symbol)
@@ -64,6 +68,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> tuple[_Yahoo, _Store, list[float]]
     monkeypatch.setattr(orp.options_chain, "risk_free_rate", lambda: (0.04, False))
     monkeypatch.setattr(orp.earnings_calendar, "fetch_schedule", lambda _s: Schedule(next=None, past=()))
     monkeypatch.setattr(orp.store, "iv30_history", store.iv30_history)
+    monkeypatch.setattr(orp.store, "open_interest_history", store.open_interest_history)
     monkeypatch.setattr(orp.store, "touch_tracked", store.touch_tracked)
     monkeypatch.setattr(orp, "_clock", lambda: clock[0])
     yield yahoo, store, clock
@@ -205,9 +210,26 @@ async def test_a_database_failure_still_serves_the_report(world: Any, monkeypatc
         raise ConnectionError("database gone")
 
     monkeypatch.setattr(orp.store, "iv30_history", broken)
+    monkeypatch.setattr(orp.store, "open_interest_history", broken)
     monkeypatch.setattr(orp.store, "touch_tracked", broken)
     report = await _report()
     assert report.status == "ok" and report.history.sessions == 0
+    assert report.open_interest_history == []
+
+
+async def test_the_report_carries_the_whole_chain_open_interest_history(world: Any) -> None:
+    from types import SimpleNamespace
+
+    _yahoo, store, _clock = world
+    store.totals = [
+        SimpleNamespace(trade_date=date(2026, 11, 12), call_open_interest=9_270_000, put_open_interest=8_780_000, expiries=24, listed=24),
+        SimpleNamespace(trade_date=date(2026, 11, 13), call_open_interest=10_240_000, put_open_interest=9_020_000, expiries=23, listed=24),
+    ]
+    report = await _report()
+    assert [(t.date, t.call, t.put, t.expiries, t.listed) for t in report.open_interest_history] == [
+        (date(2026, 11, 12), 9_270_000, 8_780_000, 24, 24),
+        (date(2026, 11, 13), 10_240_000, 9_020_000, 23, 24),
+    ]
 
 
 async def test_a_symbol_that_fails_leaves_no_lock_behind(world: Any) -> None:

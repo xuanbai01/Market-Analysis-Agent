@@ -52,6 +52,25 @@ describe("OptionsPage", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent(/30 days out/);
   });
 
+  it("shows whole-chain open interest when the daily run has stored some, and not otherwise", async () => {
+    vi.mocked(fetchOptionsReport).mockResolvedValue({
+      ...REPORT,
+      open_interest_history: [{ date: "2026-11-16", call: 9_270_000, put: 8_780_000, expiries: 24, listed: 24 }],
+    });
+    renderPage();
+    const panel = await screen.findByTestId("options-oi-history-panel");
+    expect(screen.getByTestId("options-oi-history-panel-summary")).toHaveTextContent(/^Across all 24 expiries: 9\.27M calls/);
+    expect(screen.getByTestId("options-oi-history-panel-stats")).toHaveTextContent("Sessions recorded1 since Nov 16");
+    expect(within(panel).queryByTestId("options-oi-history")).toBeNull(); // one session: no line yet
+  });
+
+  it("leaves the open interest history out with nothing stored", async () => {
+    vi.mocked(fetchOptionsReport).mockResolvedValue(REPORT);
+    renderPage();
+    await screen.findByTestId("options-tiles");
+    expect(screen.queryByTestId("options-oi-history-panel")).toBeNull();
+  });
+
   it("calls the price a price, not a close, inside a session", async () => {
     vi.mocked(fetchOptionsReport).mockResolvedValue({ ...REPORT, at_close: false });
     renderPage();

@@ -121,13 +121,32 @@ async def test_the_right_key_uses_up_no_tries(client: AsyncClient, monkeypatch: 
 async def test_a_burst_of_guesses_gets_no_more_than_the_tries(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Each request holds a try while its key is compared, so concurrent
-    guesses can't all slip past one check."""
     monkeypatch.setattr(settings_module.settings, "OWNER_KEY_FAILURES_PER_HOUR", 3)
     codes = await asyncio.gather(
         *(client.get(_STATUS, headers=_headers(owner=f"guess-{i}", ip="203.0.113.5")) for i in range(40))
     )
     assert sorted(r.status_code for r in codes) == [403] * 3 + [429] * 37
+
+
+async def test_a_try_is_held_while_the_key_is_compared(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The burst above passes either way while nothing yields between the
+    check and the compare (#126's AI review); this pins the order itself: when
+    the key is compared, the caller's try is already taken, so a future
+    await there can't let a burst of guesses past one check."""
+    monkeypatch.setattr(settings_module.settings, "OWNER_KEY_FAILURES_PER_HOUR", 1)
+    held_at_compare: list[bool] = []
+    real = deps.hmac.compare_digest
+
+    def watching(a: bytes | str, b: bytes | str) -> bool:
+        if isinstance(a, bytes):  # the owner key's compare (the shared secret's is on str)
+            buckets = deps._owner_failures()._buckets
+            held_at_compare.append("203.0.113.6" in buckets and buckets["203.0.113.6"][0] < 1)
+        return real(a, b)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(deps.hmac, "compare_digest", watching)
+    assert (await client.get(_STATUS, headers=_headers(ip="203.0.113.6"))).status_code == 200
+    assert (await client.get(_STATUS, headers=_headers(owner="guess", ip="203.0.113.6"))).status_code == 403
+    assert held_at_compare == [True, True]
 
 
 async def test_an_ipv6_caller_is_one_caller_across_its_64(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:

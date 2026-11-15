@@ -61,7 +61,7 @@ async def test_both_keys_open_the_status(client: AsyncClient, monkeypatch: pytes
     monkeypatch.setattr(tastytrade_client, "is_configured", lambda: True)
     resp = await client.get(_STATUS, headers=_headers())
     assert resp.status_code == 200
-    assert resp.json() == {"tastytrade": True}
+    assert resp.json() == {"tastytrade": True, "vault": False}
 
 
 async def test_the_owner_key_alone_is_not_enough(client: AsyncClient) -> None:
@@ -249,7 +249,7 @@ def _depends_on(route: APIRoute, dependency: object) -> bool:
 
 
 # The owner's routes, pinned: a new one is a decision.
-_OWNER_PATHS = {"/v1/owner/status", "/v1/owner/positions"}
+_OWNER_PATHS = {"/v1/owner/status", "/v1/owner/positions", "/v1/owner/trades", "/v1/owner/trades.csv"}
 
 
 def test_every_owner_route_takes_the_owner_key_and_is_exactly_these() -> None:

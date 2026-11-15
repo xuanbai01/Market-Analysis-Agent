@@ -118,7 +118,7 @@ def _field(item: dict[str, Any], name: str) -> Any:
     return item.get(head + "".join(part.title() for part in rest))
 
 
-def _number(value: Any) -> float | None:
+def finite_number(value: Any) -> float | None:
     """A finite number, or None: NaN and infinity can't go out as JSON."""
     try:
         number = float(value)
@@ -129,11 +129,11 @@ def _number(value: Any) -> float | None:
 
 def _count(value: Any) -> int | None:
     """A positive whole number (a contract multiplier), or None."""
-    number = _number(value)
+    number = finite_number(value)
     return int(number) if number is not None and number > 0 and number.is_integer() else None
 
 
-def _items(payload: Any, *, strict: bool = False) -> list[dict[str, Any]]:
+def items_of(payload: Any, *, strict: bool = False) -> list[dict[str, Any]]:
     """``data.items`` of an answer, the objects only. An answer of another
     shape is nothing, or, when ``strict`` (accounts and positions, where
     nothing would read as "no positions"), a failure."""
@@ -146,7 +146,7 @@ def _items(payload: Any, *, strict: bool = False) -> list[dict[str, Any]]:
     return [i for i in items if isinstance(i, dict)]
 
 
-async def _account_numbers() -> list[str]:
+async def account_numbers() -> list[str]:
     """The owner's account numbers, read once an hour; more than MAX_ACCOUNTS
     is cut off (the caller says so). One that isn't letters and digits is
     dropped, so it never reaches a path; none at all isn't remembered."""
@@ -155,7 +155,7 @@ async def _account_numbers() -> list[str]:
         return _accounts[1]
     payload = await tt.get("/customers/me/accounts", op="accounts")
     numbers = []
-    for entry in _items(payload, strict=True):
+    for entry in items_of(payload, strict=True):
         account = _field(entry, "account")
         number = _field(account, "account-number") if isinstance(account, dict) else None
         if isinstance(number, str) and _ACCOUNT.fullmatch(number):
@@ -180,7 +180,7 @@ def _read(item: dict[str, Any], account: int) -> _Leg | UnanalysedPosition | Non
     kind = _text(item, "instrument-type")
     symbol = _text(item, "symbol")
     direction = _field(item, "quantity-direction")
-    size = _number(_field(item, "quantity"))
+    size = finite_number(_field(item, "quantity"))
     if direction == "Zero" or size == 0:
         return None
     sign = _SIGNS.get(direction) if isinstance(direction, str) else None
@@ -191,7 +191,7 @@ def _read(item: dict[str, Any], account: int) -> _Leg | UnanalysedPosition | Non
     multiplier = 1 if kind == "Equity" else _count(_field(item, "multiplier"))
     if quantity is None or multiplier is None or kind not in ("Equity Option", "Equity"):
         return other
-    average = _number(_field(item, "average-open-price"))
+    average = finite_number(_field(item, "average-open-price"))
     if kind == "Equity":
         if not _TICKER.fullmatch(symbol):
             return other
@@ -223,16 +223,16 @@ def _live_quote(item: dict[str, Any]) -> LiveQuote:
         updated = datetime.fromisoformat(stamp) if isinstance(stamp, str) else None
     except ValueError:
         updated = None
-    mark = _number(_field(item, "mark"))
+    mark = finite_number(_field(item, "mark"))
     return LiveQuote(
-        bid=_number(_field(item, "bid")),
-        ask=_number(_field(item, "ask")),
-        mark=mark if mark is not None else _number(_field(item, "mid")),
-        iv=_fraction(_number(_field(item, "volatility"))),
-        delta=_number(_field(item, "delta")),
-        gamma=_number(_field(item, "gamma")),
-        theta=_number(_field(item, "theta")),
-        vega=_number(_field(item, "vega")),
+        bid=finite_number(_field(item, "bid")),
+        ask=finite_number(_field(item, "ask")),
+        mark=mark if mark is not None else finite_number(_field(item, "mid")),
+        iv=_fraction(finite_number(_field(item, "volatility"))),
+        delta=finite_number(_field(item, "delta")),
+        gamma=finite_number(_field(item, "gamma")),
+        theta=finite_number(_field(item, "theta")),
+        vega=finite_number(_field(item, "vega")),
         updated_at=updated,
     )
 
@@ -254,7 +254,7 @@ async def _quote_batch(kind: str, batch: list[str], quotes: dict[str, LiveQuote]
         if _refused(exc):
             return False
         raise
-    for item in _items(payload):
+    for item in items_of(payload):
         symbol = _field(item, "symbol")
         if isinstance(symbol, str) and symbol in batch:
             quotes[symbol] = _live_quote(item)
@@ -313,7 +313,7 @@ def _groups(legs: list[_Leg], quotes: dict[str, LiveQuote]) -> list[PositionGrou
 
 
 async def _build() -> OwnerPositions:
-    numbers = await _account_numbers()
+    numbers = await account_numbers()
     truncated = len(numbers) > MAX_ACCOUNTS
     numbers = numbers[:MAX_ACCOUNTS]
     legs: list[_Leg] = []
@@ -323,7 +323,7 @@ async def _build() -> OwnerPositions:
             truncated = True
             break  # no more accounts asked for than can be shown
         try:
-            rows = _items(await tt.get(f"/accounts/{number}/positions", op="positions"), strict=True)
+            rows = items_of(await tt.get(f"/accounts/{number}/positions", op="positions"), strict=True)
         except tt.TastytradeNotFound:
             continue  # that account has gone; the rest still count
         for item in rows:
@@ -364,13 +364,13 @@ async def get_positions() -> OwnerPositions:
         if _cache is not None and _clock() - _cache[0] < STALE_MAX_SECONDS:
             return _cache[1].model_copy(update={"stale": True})
         _cache = None
-        raise PositionsUnavailable(_reason(exc)) from exc
+        raise PositionsUnavailable(failure_reason(exc)) from exc
 
 
 _ACCOUNT_PATH = re.compile(r"/accounts/[^/\s]+")
 
 
-def _reason(exc: Exception) -> str:
+def failure_reason(exc: Exception) -> str:
     """The 503's reason: the client's own text, any account path masked."""
     if isinstance(exc, TimeoutError):
         return "tastytrade took too long to answer"

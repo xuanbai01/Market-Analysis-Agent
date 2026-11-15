@@ -123,6 +123,16 @@ class Settings(BaseSettings):
     # written per hour: each is a model call. A read already written for
     # the same quotes is free. 0 disables the limit.
     OPTIONS_READ_RATE_LIMIT_PER_HOUR: int = 20
+    # The owner's tastytrade account (ADR 0009): a personal OAuth app's
+    # client ID and secret and its grant's refresh token. The client asks
+    # for the read scope only and calls GET endpoints only. An empty secret
+    # or token turns tastytrade off. The refresh token never expires and
+    # opens the owner's brokerage account: never log these, and set them
+    # as Fly secrets only.
+    TASTYTRADE_CLIENT_ID: str = ""
+    TASTYTRADE_CLIENT_SECRET: str = ""
+    TASTYTRADE_REFRESH_TOKEN: str = ""
+    TASTYTRADE_API_URL: str = "https://api.tastyworks.com"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

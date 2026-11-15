@@ -24,7 +24,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
         openai==3.46.0 \
         feedparser==6.0.12 \
         lxml==5.3.0 \
-        rapidfuzz==3.14.6
+        rapidfuzz==3.14.6 \
+        websockets==16.0
 
 # Copy the app code + migrations.
 COPY app ./app

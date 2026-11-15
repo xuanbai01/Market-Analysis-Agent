@@ -36,6 +36,14 @@ describe("InsiderCard", () => {
     );
   });
 
+  it("says a share too small to show is under 0.01%, not 0.00%", () => {
+    // DIS, 2026-11-14: $2.6M of sales against a $200B company read "0.00%".
+    render(<InsiderCard ticker="DIS" insiders={{ ...BASE, soldShareOfMarketCap: 0.000013 }} />);
+    expect(screen.getByTestId("insider-context")).toHaveTextContent(
+      "The sales equal <0.01% of the company's market value.",
+    );
+  });
+
   it("shows bought, sold, plan share and routine filings as tiles", () => {
     render(<InsiderCard ticker="NVDA" insiders={BASE} />);
     const tiles = screen.getAllByTestId("insider-tile").map((t) => t.textContent);

@@ -1080,3 +1080,70 @@ async def test_gross_margin_claims_name_their_basis(monkeypatch: pytest.MonkeyPa
         result["gross_margin_trend_1y"].description
         == "Gross margin change, latest fiscal year vs the one before"
     )
+
+
+def _patch_yfinance_infos(monkeypatch: pytest.MonkeyPatch, infos: list[dict[str, Any]]) -> list[str]:
+    """A fake yfinance whose successive Tickers carry ``infos`` in turn;
+    returns the symbols each Ticker was made for."""
+    import sys
+    from unittest.mock import MagicMock
+
+    made: list[str] = []
+
+    def make(symbol: str) -> MagicMock:
+        ticker = MagicMock()
+        ticker.info = infos[min(len(made), len(infos) - 1)]
+        made.append(symbol)
+        for frame in ("financials", "cashflow", "quarterly_financials", "quarterly_cashflow", "quarterly_balance_sheet"):
+            setattr(ticker, frame, pd.DataFrame())
+        return ticker
+
+    fake_yf = MagicMock()
+    fake_yf.Ticker.side_effect = make
+    monkeypatch.setitem(sys.modules, "yfinance", fake_yf)
+    return made
+
+
+_KO_PARTIAL = {"marketCap": 300_000_000_000, "trailingPE": 25.0, "longName": "The Coca-Cola Company"}
+_KO_FULL = {
+    **_KO_PARTIAL,
+    "priceToSalesTrailing12Months": 6.4,
+    "enterpriseToEbitda": 21.0,
+    "grossMargins": 0.61,
+}
+
+
+def test_a_partial_info_is_read_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """KO, 2026-11-13: Yahoo answered without price-to-sales, EV/EBITDA or
+    gross margin, and the report showed dashes until it was regenerated."""
+    made = _patch_yfinance_infos(monkeypatch, [_KO_PARTIAL, _KO_FULL])
+
+    raw, _ = _fetch_yfinance_fundamentals("KO")
+
+    assert made == ["KO", "KO"]
+    assert raw["p_s"] == 6.4
+    assert raw["ev_ebitda"] == 21.0
+    assert raw["gross_margin_ttm"] == 0.61
+    assert raw["trailing_pe"] == 25.0
+
+
+def test_a_retry_that_is_partial_too_keeps_what_the_first_had(monkeypatch: pytest.MonkeyPatch) -> None:
+    made = _patch_yfinance_infos(monkeypatch, [_KO_PARTIAL, {"marketCap": 300_000_000_000}])
+
+    raw, _ = _fetch_yfinance_fundamentals("KO")
+
+    assert made == ["KO", "KO"]
+    assert raw["trailing_pe"] == 25.0
+    assert raw["p_s"] is None
+
+
+def test_a_complete_info_is_read_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bank has no gross margin or EV/EBITDA and a loss-maker no P/E;
+    only a missing price-to-sales beside a market cap means cut short."""
+    bank = {"marketCap": 700_000_000_000, "priceToSalesTrailing12Months": 4.1, "trailingPE": 13.0}
+    made = _patch_yfinance_infos(monkeypatch, [bank])
+
+    raw, _ = _fetch_yfinance_fundamentals("JPM")
+
+    assert made == ["JPM"]
+    assert raw["gross_margin_ttm"] is None

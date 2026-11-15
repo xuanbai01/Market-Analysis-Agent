@@ -65,6 +65,19 @@ def test_quote_time(now: datetime, expected: datetime) -> None:
     assert mc.quote_time(now) == expected
 
 
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        (et(2026, 11, 14, 12), True),  # Saturday: Friday's close
+        (et(2026, 11, 16, 11), False),  # market hours: a delayed print
+        (et(2026, 11, 16, 16, 10), False),  # the session's last prints, still delayed
+        (et(2026, 11, 16, 17), True),
+    ],
+)
+def test_a_quote_time_says_whether_it_is_a_close(now: datetime, expected: bool) -> None:
+    assert mc.is_close(mc.quote_time(now)) is expected
+
+
 def test_quote_time_reads_any_timezone() -> None:
     utc_saturday = datetime(2026, 11, 14, 17, tzinfo=UTC)
     assert mc.quote_time(utc_saturday) == et(2026, 11, 13, 16)

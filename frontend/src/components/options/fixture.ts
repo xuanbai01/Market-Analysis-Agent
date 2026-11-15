@@ -7,6 +7,7 @@ export const RAW_OPTIONS_REPORT = {
   "status": "ok",
   "spot": 162.85,
   "quoted_at": "2026-11-13T16:00:00-05:00",
+  "at_close": true,
   "rate": 0.04122000217437744,
   "rate_assumed": false,
   "iv30": 0.5945863011548973,
@@ -891,4 +892,31 @@ export const RAW_OPTIONS_REPORT = {
     }
   ],
   "generated_at": "2026-11-15T05:37:50.470486Z"
+} as const;
+
+/** A symbol with no listed options, as the backend builds it (BRK-A). */
+export const RAW_NO_OPTIONS_REPORT = {
+  "symbol": "BRK-A",
+  "name": null,
+  "status": "no_options",
+  "spot": null,
+  "quoted_at": "2026-11-13T16:00:00-05:00",
+  "at_close": true,
+  "rate": 0.0372,
+  "rate_assumed": false,
+  "iv30": null,
+  "iv30_extrapolated": false,
+  "iv90": null,
+  "skew25": null,
+  "rv20": null,
+  "rv60": null,
+  "put_call_open_interest": null,
+  "put_call_volume": null,
+  "expiries": [],
+  "listed_expiries": [],
+  "chain": null,
+  "earnings": null,
+  "history": { "points": [], "sessions": 0, "since": null, "percentile": null, "rank": null },
+  "claims": [],
+  "generated_at": "2026-11-14T17:00:00Z"
 } as const;

@@ -82,8 +82,15 @@ async def test_a_report_from_a_chain(world: Any) -> None:
     assert report.chain is not None and report.chain.expiry == EXP_20
     assert report.listed_expiries == [EXP_20, EXP_48]
     assert report.quoted_at == QUOTED_AT
+    assert report.at_close  # a Saturday: Friday's close
     assert any(c.description.startswith("Implied volatility, 30 days") for c in report.claims)
     assert report.earnings is not None and report.earnings.refused == "no earnings date"
+
+
+async def test_quotes_in_a_session_are_not_the_close(world: Any) -> None:
+    monday_11am_et = datetime(2026, 11, 16, 16, tzinfo=UTC)
+    report = await orp.get_report(None, "TEST", now=monday_11am_et)  # type: ignore[arg-type]
+    assert not report.at_close
 
 
 async def test_the_report_is_cached_for_15_minutes(world: Any) -> None:
@@ -104,6 +111,7 @@ async def test_a_view_is_recorded_only_for_a_usable_report(world: Any) -> None:
     await _report()
     no_options = await _report("BRK-A")
     assert no_options.status == "no_options" and no_options.expiries == []
+    assert no_options.at_close
     assert store.touched == ["TEST"]
 
 

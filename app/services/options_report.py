@@ -127,6 +127,7 @@ def _parts(
 ) -> dict[str, Any]:
     empty: dict[str, Any] = {
         "symbol": symbol, "name": None, "status": "no_options", "spot": None, "quoted_at": quoted_at,
+        "at_close": mc.is_close(quoted_at),
         "rate": rate, "rate_assumed": rate_assumed, "iv30": None, "iv30_extrapolated": False, "iv90": None,
         "skew25": None, "rv20": None, "rv60": None, "put_call_open_interest": None, "put_call_volume": None,
         "expiries": [], "listed_expiries": [], "chain": None, "earnings": None,

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api";
 import { fetchOptionsReport } from "../../lib/options-api";
 import { OptionsReportSchema } from "../../lib/options-schemas";
-import { RAW_OPTIONS_REPORT } from "./fixture";
+import { RAW_NO_OPTIONS_REPORT, RAW_OPTIONS_REPORT } from "./fixture";
 import OptionsPage from "./OptionsPage";
 
 vi.mock("../../lib/options-api", () => ({ fetchOptionsReport: vi.fn(), fetchOptionsChain: vi.fn() }));
@@ -68,8 +68,25 @@ describe("OptionsPage", () => {
     expect(await screen.findByTestId("options-tiles")).toHaveTextContent("Collecting: 1 of 63 sessions");
   });
 
+  it("says when the quotes are delayed prints from a session", async () => {
+    vi.mocked(fetchOptionsReport).mockResolvedValue({ ...REPORT, at_close: false, quoted_at: "2026-11-16T10:45:00-05:00" });
+    renderPage();
+    expect(await screen.findByTestId("options-asof")).toHaveTextContent(/15 minutes delayed/i);
+  });
+
+  it("leaves out a panel whose chart has nothing to draw", async () => {
+    const earnings = { ...REPORT.earnings!, past: [], implied_move: null, implied_move_usd: null, next_date: null, refused: null };
+    vi.mocked(fetchOptionsReport).mockResolvedValue({ ...REPORT, expiries: REPORT.expiries.slice(0, 1), earnings });
+    renderPage();
+    await screen.findByTestId("options-tiles");
+    for (const title of ["Expected move, one standard deviation", "Term structure: at-the-money IV", "Earnings"]) {
+      expect(screen.queryByText(title)).toBeNull();
+    }
+    expect(screen.getByText("One expiry")).toBeInTheDocument();
+  });
+
   it("says when a symbol lists no options", async () => {
-    vi.mocked(fetchOptionsReport).mockResolvedValue({ ...REPORT, status: "no_options", expiries: [], chain: null, earnings: null });
+    vi.mocked(fetchOptionsReport).mockResolvedValue(OptionsReportSchema.parse(RAW_NO_OPTIONS_REPORT));
     renderPage();
     expect(await screen.findByTestId("options-empty")).toHaveTextContent("NVDA lists no options");
     expect(screen.queryByTestId("options-cone")).toBeNull();

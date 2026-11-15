@@ -8,8 +8,8 @@ import { useState } from "react";
 import type { ExpirySummary } from "../../lib/options-schemas";
 import { niceTicks } from "../MultiLine";
 import { AxisText, COLOR, DAY_TICKS, PAD, Tooltip, YGrid, linear, money, pct, shortDate, sqrtDays, useChartWidth } from "./chart-kit";
+import { conePoints, drawsCone } from "./draws";
 
-const MAX_DAYS = 200;
 const HEIGHT = 260;
 
 interface Props {
@@ -21,8 +21,8 @@ interface Props {
 export function ExpectedMoveCone({ expiries, spot, eventDays }: Props) {
   const [ref, W] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
-  const points = expiries.filter((e) => e.days <= MAX_DAYS).sort((a, b) => a.days - b.days);
-  if (points.length < 2) return null;
+  if (!drawsCone(expiries)) return null;
+  const points = conePoints(expiries);
 
   const maxDays = points[points.length - 1].days;
   const x = sqrtDays(maxDays, PAD.left, W - PAD.right);

@@ -8,14 +8,15 @@ import { useState } from "react";
 import type { ExpirySummary } from "../../lib/options-schemas";
 import { niceTicks } from "../MultiLine";
 import { AxisText, COLOR, DAY_TICKS, FONT, PAD, Tooltip, YGrid, linear, pct, shortDate, sqrtDays, useChartWidth } from "./chart-kit";
+import { drawsTerm } from "./draws";
 
 const HEIGHT = 240;
 
 export function TermStructureChart({ expiries, rv20 }: { expiries: ExpirySummary[]; rv20: number | null }) {
   const [ref, W] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
+  if (!drawsTerm(expiries)) return null;
   const points = [...expiries].sort((a, b) => a.days - b.days);
-  if (points.length < 2) return null;
 
   const maxDays = points[points.length - 1].days;
   const x = sqrtDays(maxDays, PAD.left, W - PAD.right - 60);

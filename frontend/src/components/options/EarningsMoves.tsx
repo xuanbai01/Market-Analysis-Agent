@@ -7,6 +7,7 @@ import { useState } from "react";
 
 import type { EarningsBlock, Timing } from "../../lib/options-schemas";
 import { AxisText, COLOR, PAD, Tooltip, linear, money, pct, shortDate, useChartWidth } from "./chart-kit";
+import { drawsEarnings } from "./draws";
 
 const HEIGHT = 200;
 
@@ -21,7 +22,7 @@ export function EarningsMoves({ earnings }: { earnings: EarningsBlock }) {
   const [ref, W] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
   const { past, implied_move: implied } = earnings;
-  if (past.length === 0 && implied === null && earnings.next_date === null) return null;
+  if (!drawsEarnings(earnings)) return null;
 
   const most = Math.max(...past.map((m) => Math.abs(m.move)), implied ?? 0, 0.01) * 1.15;
   const y = linear(-most, most, HEIGHT - PAD.bottom, PAD.top);

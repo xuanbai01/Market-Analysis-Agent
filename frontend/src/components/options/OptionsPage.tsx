@@ -15,6 +15,7 @@ import type { OptionsReport } from "../../lib/options-schemas";
 import { ROUTES } from "../../lib/routes";
 import { ErrorBanner } from "../ErrorBanner";
 import { money, pct, shortDate } from "./chart-kit";
+import { drawsCone, drawsEarnings, drawsTerm } from "./draws";
 import { EarningsMoves } from "./EarningsMoves";
 import { ExpectedMoveCone } from "./ExpectedMoveCone";
 import { ExpirySection } from "./ExpirySection";
@@ -28,12 +29,12 @@ function ordinal(n: number): string {
   return `${n}${suffix}`;
 }
 
-function asOf(quotedAt: string): string {
-  const when = new Date(quotedAt);
+function asOf(report: OptionsReport): string {
+  const when = new Date(report.quoted_at);
   const time = when.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
   const day = when.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" });
-  return time === "4:00 PM"
-    ? `Quotes from the last close (${day}, 4:00 PM ET)`
+  return report.at_close
+    ? `Quotes from the last close (${day}, ${time} ET)`
     : `Quotes about 15 minutes delayed (${day}, ${time} ET)`;
 }
 
@@ -107,6 +108,9 @@ export default function OptionsPage() {
   const unauthorized = query.error instanceof ApiError && query.error.status === 401;
   const eventDays =
     report?.earnings?.reaction_date ? daysBetween(report.quoted_at, report.earnings.reaction_date) : null;
+  // A panel only for a chart that will draw (each chart's own check).
+  const cone = report && report.spot !== null && drawsCone(report.expiries) ? report.spot : null;
+  const term = report !== undefined && drawsTerm(report.expiries);
 
   return (
     <div className="mx-auto w-full max-w-screen-2xl px-6 py-8 lg:px-8 xl:px-10">
@@ -119,7 +123,7 @@ export default function OptionsPage() {
       {report?.name && <p className="text-sm text-strata-dim">{report.name}</p>}
       {report && (
         <p data-testid="options-asof" className="mb-6 font-mono text-[11px] text-strata-muted">
-          {asOf(report.quoted_at)}
+          {asOf(report)}
         </p>
       )}
 
@@ -141,17 +145,19 @@ export default function OptionsPage() {
       {report && report.status === "ok" && (
         <>
           <Tiles report={report} />
-          <div className="grid gap-6 xl:grid-cols-2">
-            {report.spot !== null && (
+          <div className={`grid gap-6 ${cone !== null && term ? "xl:grid-cols-2" : ""}`}>
+            {cone !== null && (
               <Panel title="Expected move, one standard deviation">
-                <ExpectedMoveCone expiries={report.expiries} spot={report.spot} eventDays={eventDays} />
+                <ExpectedMoveCone expiries={report.expiries} spot={cone} eventDays={eventDays} />
               </Panel>
             )}
-            <Panel title="Term structure: at-the-money IV">
-              <TermStructureChart expiries={report.expiries} rv20={report.rv20} />
-            </Panel>
+            {term && (
+              <Panel title="Term structure: at-the-money IV">
+                <TermStructureChart expiries={report.expiries} rv20={report.rv20} />
+              </Panel>
+            )}
           </div>
-          {report.earnings && (
+          {report.earnings && drawsEarnings(report.earnings) && (
             <Panel title="Earnings">
               <EarningsMoves earnings={report.earnings} />
             </Panel>

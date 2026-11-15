@@ -27,7 +27,10 @@ const delta = (v: number | null) => (v === null ? dash : v.toFixed(2));
 const strike = (k: number) => (Number.isInteger(k) ? k.toFixed(0) : k.toFixed(2));
 
 export function ExpirySection({ symbol, listed, initial, spot }: Props) {
-  const [expiry, setExpiry] = useState(initial.expiry);
+  // The report's expiry unless the reader picked another that is still
+  // listed: a refetch that rolls the report's expiry forward is followed.
+  const [picked, setPicked] = useState<string | null>(null);
+  const expiry = picked !== null && listed.includes(picked) ? picked : initial.expiry;
   const query = useQuery({
     queryKey: ["options-chain", symbol, expiry],
     queryFn: () => fetchOptionsChain(symbol, expiry),
@@ -43,7 +46,7 @@ export function ExpirySection({ symbol, listed, initial, spot }: Props) {
         <select
           data-testid="options-expiry-select"
           value={expiry}
-          onChange={(e) => setExpiry(e.target.value)}
+          onChange={(e) => setPicked(e.target.value)}
           className="rounded-md border border-strata-border bg-strata-canvas px-2 py-1 text-strata-fg"
         >
           {listed.map((d) => (

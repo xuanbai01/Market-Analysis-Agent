@@ -152,6 +152,13 @@ def quote_time(now: datetime) -> datetime:
     return session_close(previous_session(day))
 
 
+def is_close(quoted_at: datetime) -> bool:
+    """Whether a quote time (``quote_time``) is a session's close rather
+    than a delayed print from inside one."""
+    t = quoted_at.astimezone(ET)
+    return t == session_close(t.date())
+
+
 def years_to_expiry(quoted_at: datetime, expiry: date) -> float:
     """Years (of 365 days) from the quote time to 16:00 ET on ``expiry``."""
     return (session_close(expiry) - quoted_at).total_seconds() / _YEAR

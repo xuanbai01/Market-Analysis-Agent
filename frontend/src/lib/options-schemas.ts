@@ -115,6 +115,9 @@ export const OptionsReportSchema = z.object({
   status: z.enum(["ok", "no_options", "no_usable_quotes"]),
   spot: MaybeNum,
   quoted_at: z.string(),
+  // The server says whether these are the close's quotes; one that
+  // predates the field is read as a delayed print.
+  at_close: z.boolean().default(false),
   rate: Num,
   rate_assumed: z.boolean(),
   iv30: MaybeNum,

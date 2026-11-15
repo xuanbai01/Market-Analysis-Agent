@@ -92,6 +92,21 @@ describe("StrategyBuilder", () => {
     expect(row("Net")).toHaveTextContent(/Debit \$/); // still bought at the offer
   });
 
+  it("shows the leg's quote by the same rule it is priced by", () => {
+    const rows = CHAIN.rows.map((r) => (r.strike === 165 ? { ...r, call_bid: 0, call_ask: 0.4 } : r));
+    render(<StrategyBuilder chain={{ ...CHAIN, rows }} />);
+    fireEvent.change(screen.getByTestId("strategy-leg-strike"), { target: { value: "165" } });
+    const cells = within(screen.getByTestId("strategy-leg")).getAllByRole("cell");
+    expect(cells.map((c) => c.textContent).slice(2, 5)).toEqual(["0.00", "0.40", "—"]); // bid, ask, no mid
+  });
+
+  it("draws a payoff that is zero everywhere without breaking the scale", () => {
+    render(<StrategyBuilder chain={CHAIN} />);
+    fireEvent.click(screen.getByRole("button", { name: "Bull call spread" }));
+    fireEvent.change(screen.getAllByTestId("strategy-leg-strike")[1], { target: { value: "165" } });
+    expect(screen.getByTestId("strategy-payoff-mid").getAttribute("d")).not.toMatch(/NaN/);
+  });
+
   it("draws no one-sigma band without an IV", () => {
     render(<StrategyBuilder chain={{ ...CHAIN, atm_iv: null, smile: [] }} />);
     expect(screen.queryByTestId("strategy-payoff-band")).toBeNull();

@@ -153,6 +153,11 @@ describe("templates on a real chain (NVDA)", () => {
     expect(strikes("iron_condor")).toEqual([140, 150, 175, 190]);
   });
 
+  it("places a short leg on a strike quoted only on the bid", () => {
+    const rows = CHAIN.rows.map((r) => (r.strike === 150 ? { ...r, put_ask: 0 } : r));
+    expect(templateLegs("bull_put", { ...CHAIN, rows })!.map((l) => l.strike)).toEqual([150, 140]);
+  });
+
   it("takes sigma from the smile when the chain has no ATM IV", () => {
     expect(templateLegs("bull_put", { ...CHAIN, atm_iv: null })!.map((l) => l.strike)).toEqual([150, 140]);
   });

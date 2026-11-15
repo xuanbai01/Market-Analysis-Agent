@@ -76,9 +76,8 @@ jobs:
       APP_ENV: test
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/eval_db
       LLM_PROVIDER: ${{ inputs.provider }}
-      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+      # The API keys are set only on the steps that use them, not here: the
+      # install steps run third-party code (security review, #114).
       # An unset secret is an empty string, which would replace the
       # code default and get every SEC request refused.
       EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT || 'Market Analysis Agent admin@example.com' }}
@@ -91,6 +90,9 @@ jobs:
       # The golden test skips itself when the key is missing, and a
       # skipped run would show green. Fail instead.
       - name: Check the provider key is set
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           if [ "$LLM_PROVIDER" = "deepseek" ] && [ -z "$DEEPSEEK_API_KEY" ]; then
             echo "::error::The DEEPSEEK_API_KEY repo secret is not set."
@@ -108,12 +110,19 @@ jobs:
 
       - name: Golden eval
         if: inputs.suite != 'options'
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: |
           set -o pipefail
           uv run pytest -m live_llm tests/evals/test_golden.py -v -s | tee -a eval.log
 
       - name: Options read eval
         if: inputs.suite != 'research'
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -o pipefail
           uv run pytest -m live_llm tests/evals/test_options_read.py -v -s | tee -a eval.log

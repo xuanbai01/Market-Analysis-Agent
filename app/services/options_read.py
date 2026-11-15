@@ -84,11 +84,15 @@ class ReadUnavailable(Exception):
 
 _cache: OrderedDict[tuple[str, datetime], OptionsRead] = OrderedDict()
 _locks: dict[tuple[str, datetime], asyncio.Lock] = {}
+# Visits holding or waiting for each lock: it goes when the last one does,
+# so a new visit never makes a second lock while others still wait.
+_waiting: dict[tuple[str, datetime], int] = {}
 
 
 def clear_cache() -> None:
     _cache.clear()
     _locks.clear()
+    _waiting.clear()
 
 
 def _remember(key: tuple[str, datetime], read: OptionsRead) -> None:
@@ -147,6 +151,7 @@ async def write_read(report: OptionsReport, now: datetime) -> OptionsRead | None
         logger.exception("options read for %s failed", report.symbol)
         return None
     if not isinstance(draft, OptionsReadDraft) or not draft.headline.strip():
+        logger.warning("options read for %s: the model returned no headline", report.symbol)
         return None
     headline = draft.headline.strip()
     if stray := research_thesis.unbacked_numbers(headline, report.claims):
@@ -157,6 +162,7 @@ async def write_read(report: OptionsReport, now: datetime) -> OptionsRead | None
     )
     points = _backed(points, report)
     if not points:
+        logger.warning("options read for %s: none of %d drafted points survived", report.symbol, len(draft.points))
         return None
     return OptionsRead(
         symbol=report.symbol,
@@ -179,6 +185,7 @@ async def get_read(session: AsyncSession, symbol: str, *, now: datetime | None =
     if key in _cache:
         return _cache[key]
     lock = _locks.setdefault(key, asyncio.Lock())
+    _waiting[key] = _waiting.get(key, 0) + 1
     try:
         async with lock:
             if key in _cache:
@@ -189,5 +196,7 @@ async def get_read(session: AsyncSession, symbol: str, *, now: datetime | None =
             _remember(key, read)
             return read
     finally:
-        if not lock.locked():
+        _waiting[key] -= 1
+        if _waiting[key] == 0:
+            del _waiting[key]
             _locks.pop(key, None)

@@ -15,6 +15,7 @@ bucket without touching the route handler.
 """
 from __future__ import annotations
 
+import ipaddress
 import math
 from collections.abc import AsyncGenerator
 
@@ -52,21 +53,23 @@ def _get_research_bucket() -> TokenBucket | None:
 
 
 def _client_ip(request: Request) -> str:
-    """Resolve the caller's IP, honoring X-Forwarded-For.
+    """The caller's IP, the key for every per-IP limit.
 
-    Behind Fly's proxy (and any reverse proxy / load balancer in
-    general), ``request.client.host`` is the proxy's IP, which would
-    make every user share one bucket. The first entry of
-    ``X-Forwarded-For`` is the originating client; later entries are
-    intermediate hops.
-
-    No spoofing protection here — Fly strips and re-sets XFF before
-    requests reach us, so we trust it. Don't expose this app behind a
-    proxy you don't control without revisiting.
+    Behind Fly's proxy ``request.client.host`` is the proxy, which would
+    put every caller in one bucket. Fly sets ``Fly-Client-IP`` to the
+    address it accepted the connection from, replacing any value a client
+    sends; ``X-Forwarded-For`` it only appends to, keeping whatever the
+    client wrote first, so keying on that let a caller mint a new bucket
+    per request (security review, #114). A value that isn't an IP is
+    ignored, so a key is always a short, real address. Off Fly (local,
+    tests) the socket's peer.
     """
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    fly = request.headers.get("fly-client-ip")
+    if fly:
+        try:
+            return str(ipaddress.ip_address(fly.strip()))
+        except ValueError:
+            pass
     if request.client is not None:
         return request.client.host
     # Local test ASGI transport may not set client; treat as one bucket.

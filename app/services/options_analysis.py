@@ -287,7 +287,7 @@ def claims(
     each), the facts the page's cited read is written from."""
     points = 4  # percentage points show two decimals: a fraction to 4 places
     iv_gap, term = _gap(iv30, rv20), _gap(iv90, iv30)
-    rows: list[tuple[str, float | None, ClaimUnit, str]] = [
+    rows: list[tuple[str, float | str | None, ClaimUnit, str]] = [
         ("Implied volatility, 30 days (IV30)", iv30, "fraction", "total variance between the expiries around 30 days"),
         ("Implied volatility, 90 days (IV90)", iv90, "fraction", "total variance between the expiries around 90 days"),
         ("Realized volatility, 20 sessions", rv20, "fraction", "close-to-close, zero mean, ×252"),
@@ -302,8 +302,13 @@ def claims(
         rows.append((f"Expected move to {default.expiry.isoformat()} (one standard deviation)",
                      default.expected_move, "fraction", "ATM IV × √T"))
     if earnings is not None and earnings.next_date is not None:
-        rows.append((f"Implied earnings move, report on {earnings.next_date.isoformat()} (expected absolute move)",
+        report_on = earnings.next_date.isoformat()
+        rows.append((f"Implied earnings move, report on {report_on} (expected absolute move)",
                      earnings.implied_move, "fraction", "√(2/π) × the report's σ, from the expiries around it"))
+        if earnings.implied_move is None and earnings.refused:
+            # Said, so the read doesn't stand another figure in for it.
+            rows.append((f"Implied earnings move, report on {report_on}: not priced", earnings.refused, "string",
+                         "why the expiries can't separate the report from other days"))
     if earnings is not None and earnings.past:
         n = len(earnings.past)
         rows.append((f"Average absolute move after the last {n} reports",

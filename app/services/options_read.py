@@ -65,6 +65,10 @@ never call options cheap, expensive, rich or a bargain.
 5. No outside facts: no news, products, events or reasons why. Whatever \
 you know about this company from elsewhere stays out.
 6. Plain prose, no markdown.
+7. Set two figures side by side only when a fact states that comparison \
+(its words say above, below or level with). The expected move to an \
+expiry is one standard deviation over all its days, not an earnings move: \
+never compare it with past reports' moves.
 """
 
 

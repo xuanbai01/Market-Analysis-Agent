@@ -4,7 +4,8 @@ smiles (``options_metrics``). Pure functions; the service in
 ``options_report`` fetches and assembles.
 
 - **Expiries read:** the first listed, the ones nearest 7, 14, 30, 45, 60,
-  90, 180 and 365 days, and for a stock with a report coming, the two
+  90, 180 and 365 days, the snapshot's (around 30 and 90 days, so today's
+  IV30 is computed as the stored ones were), and for a stock with a report coming, the two
   before its reaction session and the two after (within 60 days), which
   the implied earnings move needs.
 - **Expected move:** one standard deviation of the log price to each
@@ -40,7 +41,13 @@ from app.services import options_math as om
 from app.services.earnings_calendar import Schedule, reaction_sessions
 from app.services.options_chain import ExpiryQuotes, Quote
 from app.services.options_earnings import MAX_EVENT_DAYS, EventMove
-from app.services.options_metrics import MIN_SNAPSHOT_DAYS, MONEYNESS_SIGMAS, Smile, usable
+from app.services.options_metrics import (
+    MIN_SNAPSHOT_DAYS,
+    MONEYNESS_SIGMAS,
+    Smile,
+    snapshot_expiries,
+    usable,
+)
 
 REPORT_TARGET_DAYS = (7, 14, 30, 45, 60, 90, 180, 365)
 EARNINGS_BRACKET = 2
@@ -63,7 +70,8 @@ def report_expiries(
 ) -> list[date]:
     if not listed:
         return []
-    picked = {listed[0]}
+    # The snapshot's expiries too: today's IV30 is then the history's IV30.
+    picked = {listed[0], *snapshot_expiries(listed, quoted_at)}
     for target in REPORT_TARGET_DAYS:
         picked.add(min(listed, key=lambda d: abs(_days(quoted_at, d) - target)))
     if reaction is not None:

@@ -21,7 +21,7 @@ EXPIRY = (TODAY + timedelta(days=29)).isoformat()
 # Distinctive values: none of them may reach the output.
 SECRET_VALUES = (
     "603.21", "1.2345", "1.4345", "1.3345", "31.4159", "0.27182", "0.9876", "1.2468",
-    "5WT12345", "1234.56", "512.34", "98765", "0.4242",
+    "5WT12345", "1234.56", "512.34", "98765", "0.4242", "0.3141",
 )
 
 
@@ -51,7 +51,7 @@ async def fake_get(path: str, params: dict[str, Any] | None = None, *, op: str) 
         for symbol in filter(None, params.get("equity-option", "").split(",")):
             items.append({
                 "symbol": symbol, "instrument-type": "Equity Option",
-                "bid": "1.2345", "ask": "1.4345", "mid": "1.3345", "updated-at": _stamp(2.5),
+                "bid": "1.2345", "ask": "1.4345", "mid": "1.3345", "volatility": "0.3141", "updated-at": _stamp(2.5),
             })
         return {"data": {"items": items}}
     if path == "/option-chains/SPY/nested":
@@ -137,6 +137,7 @@ async def test_the_report_answers_the_open_questions(run: list[str]) -> None:
     assert "SPY quote age: 0.8 s" in report
     assert "median 2.5 s" in report
     assert "inside Yahoo's (15-minute-old) bid–ask: 10 of 10" in report
+    assert "option IVs read as fractions (over 0, under 3): yes, 10 of 10 sent" in report
     assert "IV30 within 2 points of our latest snapshot: yes" in report
     assert "SPY daily from 1990-01-01: 3 candles" in report
     assert "a near-money SPY call, daily, a year asked: 3 candles" in report

@@ -89,6 +89,10 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
   - An access token must be header-safe before it's used: h11 quotes an illegal header value in its error. As a backstop, the log formatter masks `Bearer <token>`.
   - websockets' frame log, which would print the DXLink AUTH frame, is held at WARNING.
   - Tests feed distinctive secrets through every path and fail if one reaches an `app.*` log line.
+- **The owner's positions** (`owner_positions`) log counts only: accounts, legs, underlyings, rows not analysed. Account numbers never leave the module (accounts are numbered 1, 2, ...), and a tastytrade-supplied account number that isn't letters and digits is dropped before it could reach a path. Every response under `/v1/owner`, errors included, says `Cache-Control: no-store` (a middleware in `app/main.py`), so no browser or proxy keeps a copy.
+  - **Nothing in tastytrade's answer is trusted:** a number that isn't finite is no number (NaN would make the response unserialisable). A ticker that isn't one, a multiplier that isn't a positive whole count, or a position that doesn't say long or short is listed as not analysed. An answer of the wrong shape reads as nothing.
+  - **Bounds:** at most 10 accounts and 500 positions a read (`truncated` says so), and a build gives up after 60 s. The last copy stands in when tastytrade fails, for at most 15 minutes.
+- **The client logs a query's values as counts only** (`tastytrade_client._summary`): a quote request's symbols are the owner's holdings, one symbol included.
 - **tastytrade's data is shown to no third party** (its Open API terms §8(4) and §8(6)), and a Claude Code session is one. So `tastytrade_probe` and any check by Claude print metadata only: ages, counts, field names, yes/no comparisons. The owner compares values in tastytrade's own app.
 - **An unhandled error tells the caller nothing about the server.** The 500 body carries a reference id; the exception goes to the log under that id (`app/core/errors.py`). It used to carry `str(exc)`, which on an open route can hand a stranger a SQL fragment or a hostname.
 

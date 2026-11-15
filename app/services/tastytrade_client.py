@@ -96,7 +96,14 @@ _ACCOUNT_IN_PATH = re.compile(r"(/accounts/)[^/?#]+")
 
 
 class TastytradeUnavailable(Exception):
-    """Not configured, the sign-in was refused, or tastytrade didn't answer."""
+    """Not configured, the sign-in was refused, or tastytrade didn't answer.
+    ``status`` is the HTTP status of an error answer the client gave up on
+    (``tastytrade answered N``); None for everything else, retries that ran
+    out included."""
+
+    def __init__(self, reason: str, *, status: int | None = None) -> None:
+        super().__init__(reason)
+        self.status = status
 
 
 class TastytradeNotFound(Exception):
@@ -143,11 +150,19 @@ def _masked(path: str) -> str:
 
 
 def _summary(params: dict[str, Any] | None) -> dict[str, Any]:
-    """Each parameter, with a comma-separated list shown as its length."""
-    return {
-        key: f"{value.count(',') + 1} values" if isinstance(value, str) and "," in value else value
-        for key, value in (params or {}).items()
-    }
+    """Each parameter, a text one as how many comma-separated values it
+    holds and never the values: a quote request's symbols are the owner's
+    holdings, one symbol included."""
+    def counted(value: Any) -> Any:
+        if isinstance(value, list | tuple):
+            n = len(value)
+        elif isinstance(value, str):
+            n = value.count(",") + 1
+        else:
+            return value  # a number: a page size, an offset
+        return f"{n} value" if n == 1 else f"{n} values"
+
+    return {key: counted(value) for key, value in (params or {}).items()}
 
 
 def _get_lock() -> asyncio.Lock:
@@ -348,7 +363,7 @@ async def get(path: str, params: dict[str, Any] | None = None, *, op: str) -> di
     if response.status_code == 404:
         raise TastytradeNotFound(_masked(path))
     if response.status_code >= 400:
-        raise TastytradeUnavailable(f"tastytrade answered {response.status_code}")
+        raise TastytradeUnavailable(f"tastytrade answered {response.status_code}", status=response.status_code)
     try:
         return response.json()
     except ValueError:

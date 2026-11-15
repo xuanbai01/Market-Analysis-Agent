@@ -208,11 +208,15 @@ def _imported_services(source: Path) -> set[str]:
 def test_only_the_owner_router_reads_tastytrade() -> None:
     """tastytrade's data and the owner's trades are served from behind the
     owner key only (ADR 0009): no other router imports tastytrade, or a
-    service that does (the probe aside, which is never imported)."""
-    readers = {
-        path.stem for path in (_APP / "services").glob("*.py")
-        if _imported_services(path) & _OWNER_SOURCES and path.stem != "tastytrade_probe"
-    } | _OWNER_SOURCES
+    service that reaches it through any chain of imports (the probe aside,
+    which is never imported)."""
+    imports = {path.stem: _imported_services(path) for path in (_APP / "services").glob("*.py")}
+    readers = set(_OWNER_SOURCES)
+    while True:  # every service that reaches tastytrade, however indirectly
+        more = {name for name, used in imports.items() if used & readers and name != "tastytrade_probe"} - readers
+        if not more:
+            break
+        readers |= more
     routers = {path.name: _imported_services(path) & readers for path in (_APP / "api" / "v1" / "routers").glob("*.py")}
     assert routers["owner.py"], "the detector found nothing: it's broken"
     assert {name for name, hits in routers.items() if hits} == {"owner.py"}
@@ -245,7 +249,7 @@ def _depends_on(route: APIRoute, dependency: object) -> bool:
 
 
 # The owner's routes, pinned: a new one is a decision.
-_OWNER_PATHS = {"/v1/owner/status"}
+_OWNER_PATHS = {"/v1/owner/status", "/v1/owner/positions"}
 
 
 def test_every_owner_route_takes_the_owner_key_and_is_exactly_these() -> None:

@@ -109,7 +109,7 @@ The owner asked for two things: a page of their open positions with analysis, an
    - **Lockout:** an address that sends ten wrong keys in an hour is locked out, the right key included, until a try refills.
    - **Two PCs:** the owner keeps the key in a password manager that syncs it. The sign-in forms carry a fixed username so a manager can save them.
    - `tests/test_owner_auth.py` pins the owner's routes.
-2. **Positions, live** (planned). Open positions are read when the owner opens the page and are never stored. Their live marks, IVs and Greeks are tastytrade's data, so decision 1 applies to them. The analysis is computed in code, with no prompt.
+2. **Positions, live.** Open positions are read when the owner opens the page and are never stored: kept in memory 15 s, and when tastytrade fails the last copy stands in, marked stale, for at most 15 minutes. Their live marks, IVs and Greeks are tastytrade's data, so decision 1 applies to them. The analysis is computed in code, with no prompt.
 3. **Decision 6 changes for the trades (planned).** The owner's transactions are their own (the terms' "Data" excludes them), so they may be kept.
    - **Where:** Neon, one row per transaction, encrypted (AES-256-GCM) with a key held as a Fly secret. Only the transaction id and an estimated-fee flag stay outside the ciphertext.
    - **Still never stored:** tastytrade's market data.

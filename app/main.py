@@ -1,4 +1,6 @@
-from fastapi import FastAPI
+from collections.abc import Awaitable, Callable
+
+from fastapi import FastAPI, Request, Response
 
 from app.api.v1.routers import demo, lens, market, news, options, owner, research, symbol
 from app.api.v1.routers.health import router as health_router
@@ -24,6 +26,19 @@ configure_cors(app, origin=settings.FRONTEND_ORIGIN)
 
 # RFC 7807 error responses
 add_problem_handlers(app)
+
+
+# The owner's account data never sits in a browser's or a proxy's cache:
+# every response under /v1/owner says so, its 401/403/429/503s included.
+@app.middleware("http")
+async def owner_responses_are_never_stored(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    response = await call_next(request)
+    if request.url.path.startswith(f"/v1{owner.OWNER_PREFIX}"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
 
 # v1 routers
 app.include_router(health_router, prefix="/v1")

@@ -44,6 +44,10 @@ from app.services import dxlink
 from app.services import market_calendar as mc
 from app.services import tastytrade_client as tt
 
+# The positions page reads a quote's ``volatility`` as a fraction (0.48 =
+# 48%) and drops one at or above this; the probe checks tastytrade's units.
+from app.services.owner_positions import IV_FRACTION_MAX
+
 Say = Callable[[str], None]
 
 
@@ -300,6 +304,9 @@ async def probe_quotes(say: Say, pick: ChainPick, now: datetime) -> None:
         say(f"  option quote ages: min {min(ages):.1f} s, median {statistics.median(ages):.1f} s, max {max(ages):.1f} s")
     known = [x for x in inside if x is not None]
     say(f"  tastytrade's mid inside Yahoo's (15-minute-old) bid–ask: {sum(known)} of {len(known)}")
+    ivs = [v for v in (number(field(by_symbol.get(field(s, side)) or {}, "volatility")) for s, side in legs) if v is not None]
+    fractions = all(0 < v < IV_FRACTION_MAX for v in ivs) if ivs else None
+    say(f"  option IVs read as fractions (over 0, under {IV_FRACTION_MAX:g}): {_answer(fractions)}, {len(ivs)} of {len(legs)} sent")
 
 
 async def _our_iv30(symbol: str) -> float | None:

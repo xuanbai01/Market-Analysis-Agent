@@ -343,6 +343,26 @@ def test_symbol_path_matches_tastytrade_symbology() -> None:
     assert tt.symbol_path("BF.B") == "BF%2FB"
 
 
+async def test_a_logged_query_counts_its_values_and_never_names_them(
+    fake: FakeTastytrade, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A quote request's symbols are the owner's holdings (positions PR 2's
+    security review): one symbol must not be logged as itself either."""
+    fake.get_responses = [httpx.Response(200, json={"data": {"items": []}})]
+    with caplog.at_level(logging.DEBUG):
+        await tt.get("/market-data/by-type", {"equity": "ZZQX", "equity-option": "ZZQX  261218C00600000,ZZQX  261218P00500000"}, op="quotes")
+    # Only app.* prints in production (app/core/logging.py); httpx's own
+    # request line, which has the URL, stays below the root's WARNING.
+    ours = [r for r in caplog.records if r.name.startswith("app")]
+    summaries = [str(getattr(r, "input_summary", "")) for r in ours]
+    assert any("'equity': '1 value'" in s and "'equity-option': '2 values'" in s for s in summaries)
+    assert not any("ZZQX" in r.getMessage() or "ZZQX" in s for r, s in zip(ours, summaries, strict=True))
+
+
+def test_a_list_valued_parameter_is_counted_too() -> None:
+    assert tt._summary({"equity": ["AAPL", "NVDA"], "per-page": 1}) == {"equity": "2 values", "per-page": 1}
+
+
 async def test_logs_hold_no_secret_token_or_account_number(
     fake: FakeTastytrade, clock: FakeClock, sleeps: list[float], caplog: pytest.LogCaptureFixture
 ) -> None:

@@ -66,10 +66,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     # caller gets an id to quote.
     problem_id = str(uuid.uuid4())
     logger.error("unhandled error %s on %s %s", problem_id, request.method, request.url.path, exc_info=exc)
+    # Built outside every middleware, so it says no-store itself: an owner
+    # route's 500 must not sit in a cache either (app.main).
     return _problem_response(
         status=500,
         title="Internal Server Error",
         detail=f"Something went wrong on the server (reference {problem_id}).",
+        headers={"Cache-Control": "no-store"},
     )
 
 

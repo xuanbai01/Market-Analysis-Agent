@@ -2,6 +2,7 @@
 is given, what is kept of what it writes, and the cache."""
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -51,6 +52,7 @@ class _Llm:
 
     async def synth_call(self, *, prompt: str, schema: Any, system: str | None = None, **_: Any) -> Any:
         self.prompts.append(prompt)
+        await asyncio.sleep(0)  # a real call yields: concurrent visits interleave here
         if isinstance(self.draft, Exception):
             raise self.draft
         return self.draft
@@ -105,6 +107,27 @@ async def test_a_point_quoting_a_figure_it_does_not_cite_is_dropped(fake_llm: _L
     fake_llm.draft = _draft(ABOVE, ("IV30 is 59.46% and IV90 is 55.00%.", ["O1"]))
     read = await reader.write_read(_report(), NOW)
     assert read is not None and len(read.points) == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "IV30 is 59.46%, below realized volatility by 2.46 points.",  # the claim says above
+        "IV90 is 55.00%, 4.46 points under IV30: the term structure slopes up.",  # it slopes down
+    ],
+)
+async def test_a_point_that_turns_its_claims_direction_round_is_dropped(fake_llm: _Llm, text: str) -> None:
+    ids = ["O1", "O5"] if "realized" in text else ["O2", "O6"]
+    fake_llm.draft = _draft(ABOVE, (text, ids))
+    read = await reader.write_read(_report(), NOW)
+    assert read is not None and len(read.points) == 1
+
+
+async def test_a_point_may_name_both_directions(fake_llm: _Llm) -> None:
+    both = ("IV30 is 59.46%, above realized volatility by 2.46 points, not below it.", ["O1", "O5"])
+    fake_llm.draft = _draft(ABOVE, both)
+    read = await reader.write_read(_report(), NOW)
+    assert read is not None and len(read.points) == 2
 
 
 async def test_a_headline_with_a_made_up_number_spoils_the_read(fake_llm: _Llm) -> None:

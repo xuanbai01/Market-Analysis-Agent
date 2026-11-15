@@ -109,7 +109,7 @@ describe("prices", () => {
     expect(premium({ bid: 0.4, ask: 0 }, 1, "mid")).toBeNull(); // nobody offers
     expect(premium({ bid: 0.4, ask: 0 }, 1, "natural")).toBeNull();
     expect(premium({ bid: 0, ask: 0 }, -1, "natural")).toBeNull(); // no quote at all
-    expect(premium({ bid: 0, ask: 0.05 }, -1, "natural")).toBe(0); // nobody bids
+    expect(premium({ bid: 0, ask: 0.05 }, -1, "natural")).toBeNull(); // nobody bids: no sale to fill
     expect(premium({ bid: 0, ask: 0.4 }, 1, "mid")).toBeNull(); // no bid: no mid to mark
     expect(premium({ bid: 0, ask: 0.4 }, 1, "natural")).toBe(0.4);
   });

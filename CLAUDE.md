@@ -42,7 +42,7 @@ Phases 1–5 are shipped and deployed. The open plan is in [`tasks/todo.md`](tas
 
 **Rules that came out of shipped work** (the changelog or `tasks/lessons.md` has the story behind each):
 
-- **Bump `REPORT_VERSION`** (`app/services/report_version.py`, now 6) in the same PR as any change to what a fresh report contains; cached reports then rebuild on their next visit (docs/conventions.md).
+- **Bump `REPORT_VERSION`** (`app/services/report_version.py`, now 7) in the same PR as any change to what a fresh report contains; cached reports then rebuild on their next visit (docs/conventions.md).
 - **Code computes, the model writes** ([ADR 0007](docs/adr/0007-analytical-narratives.md)). A comparison the prose should make is a derived claim in `research_derived.py`; the prompt forbids arithmetic and the factuality rubric fails any number no claim holds.
 - **Run the live golden eval before merging a change to report content** (prompts, claims, tools, the thesis): `uv run pytest -m live_llm tests/evals -s`, or the Live Eval workflow on GitHub.
 - **A claim that renders carries a `unit`.** The frontend formats from the unit, never from the size of the number.
@@ -55,6 +55,7 @@ Phases 1–5 are shipped and deployed. The open plan is in [`tasks/todo.md`](tas
 - **A CPU-second costs sixteen on Fly.** The shared CPU runs at 1/16 of a core once its burst balance (5 s at boot) is spent, so a build's wall time there is about 16× its CPU time. RIVN's risk diff (20 CPU-seconds) made its builds take 4–5.5 minutes; it now bounds `difflib.ratio()` by the LCS (`rapidfuzz`) and takes 0.7. Measure CPU work under the quota: `systemd-run --user --scope -p CPUQuota=6.25% -p CPUQuotaPeriodSec=80ms` in WSL. `fly logs` shows each external call's latency (`app/core/logging.py`).
 - **A request holds no database connection while a report builds.** `POST /v1/research` ends the cache lookup's transaction before the build and saves on a fresh connection; a save that loses its connection serves the report uncached. A 5.5-minute RIVN build lost its report when Neon dropped the idle connection.
 - **Every SEC request goes through `edgar._sec_get`**, which spaces all of them in the process (several tools hit SEC from parallel threads; SEC allows 10 a second).
+- **SEC's list of a company's filings is paged.** `filings.recent` holds one year for a big filer (JPM: 26,000 filings); `edgar._recent_filings` reads the older pages for the rest, back three years. Check a change to it against a bank, not just AAPL.
 - **Insider trades are officers' and directors' purchases and sales** of the company's own stock (`form_4.py`): 10% holders apart, other issuers' Form 4s out, grants and withholding counted as routine.
 - **A section needs a card.** `CARD_SECTIONS` in `SymbolDetailPage.tsx` lists the sections with one; any other section falls to the plain `ReportRenderer` table until its card exists.
 - **A card with nothing to draw returns null**, and a row counts only the cards that will render (each card's own empty check), so no row reserves an empty column.

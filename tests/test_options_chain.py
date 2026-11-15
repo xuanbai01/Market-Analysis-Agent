@@ -69,7 +69,12 @@ class _FakeTicker:
         return pd.DataFrame({"Close": [99.0, 100.0]}, index=index)
 
 
-_UNDERLYING = {"regularMarketPrice": 100.25, "regularMarketTime": 1_794_603_600, "trailingAnnualDividendYield": 0.01}
+_UNDERLYING = {
+    "regularMarketPrice": 100.25,
+    "regularMarketTime": 1_794_603_600,
+    "trailingAnnualDividendYield": 0.01,
+    "quoteType": "EQUITY",
+}
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, ticker: _FakeTicker) -> None:
@@ -163,3 +168,12 @@ def test_reads_the_next_earnings_date_from_the_calendar(
     _install(monkeypatch, _FakeTicker(["2026-11-16"], _UNDERLYING, calendar))
     fetched = oc.fetch_chain("AAPL", lambda listed: listed)
     assert fetched is not None and fetched.next_earnings == expected
+
+
+def test_a_fund_has_no_earnings_and_its_calendar_is_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Yahoo answers a fund's calendar with a 404 that yfinance logs as an
+    error (QQQ and SPY, every run)."""
+    etf = {**_UNDERLYING, "quoteType": "ETF"}
+    _install(monkeypatch, _FakeTicker(["2026-11-16"], etf, {"Earnings Date": [date(2027, 1, 28)]}))
+    fetched = oc.fetch_chain("QQQ", lambda listed: listed)
+    assert fetched is not None and fetched.next_earnings is None

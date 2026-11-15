@@ -19,12 +19,15 @@ from app.schemas.research import (
     Thesis,
     ThesisPoint,
 )
+from app.services import research_derived
 from tests.evals.rubric import (
+    _comparisons,
     grade,
     score_attribution,
     score_factuality,
     score_structure,
 )
+from tests.test_research_derived import ANNUAL, FUND, PEERS
 
 
 def _src(tool: str = "yfinance.history") -> Source:
@@ -907,3 +910,35 @@ def test_attribution_reads_only_a_metric_name_between_median_and_its_figure() ->
         "its median of 2.95. The P/E median compares with the rest at 24.38."
     )])
     assert score_attribution(report).errors == []
+
+
+def test_attribution_reads_a_plural_median() -> None:
+    """DeepSeek on PR 99: "medians" skipped the whole sentence. DIS's
+    price-to-sales is 26% below its median."""
+    report = _report([_dis_valuation("Price-to-sales and P/E both sit above their medians.")])
+    errors = score_attribution(report).errors
+    assert len(errors) == 1
+    assert "price-to-sales" in errors[0]
+
+
+def test_attribution_reads_peers_named_after_the_median() -> None:
+    """DeepSeek on PR 99: "the median of its peers" was read as the
+    company's own median. DIS's P/E is 19% below the peer median and 20%
+    above its own."""
+    right = _report([_dis_valuation("The trailing P/E is below the median of its peers.")])
+    assert score_attribution(right).errors == []
+
+    wrong = _report([_dis_valuation("The trailing P/E is above the median of its peer group.")])
+    errors = score_attribution(wrong).errors
+    assert len(errors) == 1
+    assert "peer median" in errors[0]
+
+
+def test_attribution_reads_every_comparison_research_derived_writes() -> None:
+    """The rubric finds comparisons by their formulas; if research_derived
+    rewords one, the check for that multiple would silently stop."""
+    claims = research_derived.valuation_claims(FUND, PEERS) + research_derived.valuation_history_claims(FUND, ANNUAL)
+    own, peer = _comparisons(_report([Section(title="Valuation", claims=claims)]))
+    assert set(own) == {"P/E", "price-to-sales", "price-to-free-cash-flow"}
+    assert set(peer) == {"P/E", "price-to-sales", "EV/EBITDA"}
+

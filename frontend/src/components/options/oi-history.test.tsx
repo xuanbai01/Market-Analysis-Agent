@@ -38,12 +38,34 @@ describe("open interest history words", () => {
     expect(text(openInterestHistorySentence(partial))).toMatch(/^Across all 24 expiries \(23 of 24 expiries read\):/);
     expect(openInterestHistorySentence([])).toBeNull();
   });
+
+  it("gives no change from a short read, which would look like a drop", () => {
+    const shortLast = [TWO[0], { ...TWO[1], expiries: 23 }];
+    expect(text(openInterestHistorySentence(shortLast))).toMatch(
+      /\(put\/call \*\*0\.88\*\*\)\. No change since Nov 16: this session's read was short\.$/,
+    );
+    // A short first session: the change runs from the first whole read.
+    const THREE = [{ ...TWO[0], date: "2026-11-13", expiries: 22 }, ...TWO];
+    expect(text(openInterestHistorySentence(THREE))).toMatch(/calls \*\*up 10\.5%\*\* and puts \*\*up 2\.7%\*\* since Nov 16\.$/);
+  });
 });
 
 describe("OpenInterestHistory", () => {
   it("draws from two sessions on", () => {
     render(<OpenInterestHistory history={TWO} />);
     expect(screen.getByTestId("options-oi-history")).toBeInTheDocument();
+  });
+
+  it("leaves a short session out of the lines, and says so", () => {
+    const three = [...TWO, { ...TWO[1], date: "2026-11-18", call: 4_000_000, expiries: 23 }];
+    render(<OpenInterestHistory history={three} />);
+    expect(screen.getByTestId("options-oi-history")).toHaveTextContent("1 session read short is left out of the lines.");
+    expect(screen.getByRole("img", { name: /2 sessions/ })).toBeInTheDocument();
+  });
+
+  it("draws nothing with fewer than two whole reads", () => {
+    const { container } = render(<OpenInterestHistory history={[TWO[0], { ...TWO[1], expiries: 23 }]} />);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it("draws nothing from one session", () => {

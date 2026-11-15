@@ -42,6 +42,14 @@ function renderSidebar(overrides: Partial<SidebarShellProps> = {}) {
 }
 
 describe("SidebarShell — navigation", () => {
+  it("links the owner's positions only when an owner key is stored", () => {
+    const { unmount } = renderSidebar();
+    expect(screen.queryByRole("link", { name: "Positions" })).toBeNull();
+    unmount();
+    renderSidebar({ owner: true, pathname: "/positions" });
+    expect(screen.getByRole("link", { name: "Positions" })).toHaveAttribute("href", "/positions");
+  });
+
   it("links the brand mark and Home to the landing page", () => {
     renderSidebar();
     expect(

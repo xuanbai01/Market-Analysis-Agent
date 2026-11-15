@@ -36,6 +36,8 @@ const LensIndexPage = lazyWithReload(() => import("./components/lens/LensIndexPa
 const LensPage = lazyWithReload(() => import("./components/lens/LensPage"));
 // A symbol's options page (ADR 0008): its own chunk, signed in only.
 const OptionsPage = lazyWithReload(() => import("./components/options/OptionsPage"));
+// The owner's positions (ADR 0009): its own chunk, behind the owner key too.
+const PositionsPage = lazyWithReload(() => import("./components/positions/PositionsPage"));
 const SymbolDetailPage = lazyWithReload(() => import("./components/SymbolDetailPage"));
 // Public read-only demo: its own chunks, outside the auth guard.
 const DemoShell = lazyWithReload(() => import("./components/demo/DemoShell"));
@@ -142,6 +144,14 @@ export function App() {
             element={
               <Suspense fallback={null}>
                 <OptionsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path={ROUTE_PATHS.positions}
+            element={
+              <Suspense fallback={null}>
+                <PositionsPage />
               </Suspense>
             }
           />

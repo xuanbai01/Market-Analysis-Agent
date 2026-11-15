@@ -38,6 +38,7 @@ import {
   IconExpand,
   IconHome,
   IconLens,
+  IconPositions,
   IconSearch,
   IconSignOut,
   IconStar,
@@ -60,6 +61,8 @@ export interface SidebarShellProps {
   onUnwatch: (ticker: string) => void;
   onClearRecent: () => void;
   onSignOut: () => void;
+  /** An owner key is stored: link the owner's pages. */
+  owner?: boolean;
 }
 
 export function SidebarShell(props: SidebarShellProps) {
@@ -77,6 +80,7 @@ export function SidebarShell(props: SidebarShellProps) {
     onUnwatch,
     onClearRecent,
     onSignOut,
+    owner = false,
   } = props;
   const layout = layoutClasses(collapsed);
   const compareLabel = `${compare.a} vs ${compare.b}`;
@@ -151,6 +155,15 @@ export function SidebarShell(props: SidebarShellProps) {
           active={pathname.startsWith(ROUTES.lenses)}
           collapsed={collapsed}
         />
+        {owner && (
+          <NavItem
+            to={ROUTES.positions}
+            label="Positions"
+            icon={<IconPositions />}
+            active={pathname.startsWith(ROUTES.positions)}
+            collapsed={collapsed}
+          />
+        )}
       </nav>
 
       <div className="mt-5 flex flex-1 flex-col gap-5 overflow-y-auto px-2 pb-4">

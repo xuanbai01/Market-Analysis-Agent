@@ -17,6 +17,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
 
 import { clearStoredToken } from "../lib/auth";
+import { clearOwnerKey, useOwnerKey } from "../lib/owner";
 import { clearRecent, useRecent } from "../lib/recent";
 import { ROUTE_PATHS, ROUTES } from "../lib/routes";
 import {
@@ -55,6 +56,7 @@ export function AppShell() {
 
   const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
   const [searchOpen, setSearchOpen] = useState(false);
+  const ownerKey = useOwnerKey();
 
   // Global ⌘K / Ctrl+K listener.
   useEffect(() => {
@@ -89,6 +91,7 @@ export function AppShell() {
 
   function handleSignOut() {
     clearStoredToken();
+    clearOwnerKey();
     queryClient.clear();
     navigate(ROUTES.login, { replace: true });
   }
@@ -109,6 +112,7 @@ export function AppShell() {
         onUnwatch={removeFromWatchlist}
         onClearRecent={clearRecent}
         onSignOut={handleSignOut}
+        owner={ownerKey !== null}
       />
       <main className="min-w-0 flex-1">
         {/* A crash in the strip or the page stays there: the sidebar

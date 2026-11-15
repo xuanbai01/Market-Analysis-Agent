@@ -11,6 +11,7 @@ import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-route
 import { AppShell } from "./AppShell";
 import { WatchlistButton } from "./WatchlistButton";
 import { getStoredToken, setStoredToken } from "../lib/auth";
+import { getOwnerKey, setOwnerKey } from "../lib/owner";
 import { pushRecent } from "../lib/recent";
 import { readSidebarCollapsed } from "../lib/sidebar";
 import { addToWatchlist, listWatchlist } from "../lib/watchlist";
@@ -137,11 +138,14 @@ describe("AppShell — navigation", () => {
     );
   });
 
-  it("signs out: forgets the token and goes to the login page", () => {
+  it("signs out: forgets the token and the owner key and goes to the login page", () => {
     setStoredToken("secret");
+    setOwnerKey("k".repeat(40));
     renderShell("/");
+    expect(screen.getByRole("link", { name: "Positions" })).toHaveAttribute("href", "/positions");
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
     expect(getStoredToken()).toBeNull();
+    expect(getOwnerKey()).toBeNull();
     expect(screen.getByTestId("login-page")).toBeInTheDocument();
   });
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { RAW_NO_OPTIONS_REPORT, RAW_OPTIONS_REPORT } from "../components/options/fixture";
-import { ExpiryChainSchema, OptionsReportSchema } from "./options-schemas";
+import { RAW_NO_OPTIONS_REPORT, RAW_OPTIONS_READ, RAW_OPTIONS_REPORT } from "../components/options/fixture";
+import { ExpiryChainSchema, OptionsReadSchema, OptionsReportSchema } from "./options-schemas";
 
 describe("OptionsReportSchema", () => {
   it("parses a report the backend built (the contract)", () => {
@@ -42,5 +42,14 @@ describe("OptionsReportSchema", () => {
   it("parses one expiry's chain", () => {
     const chain = ExpiryChainSchema.parse(RAW_OPTIONS_REPORT.chain);
     expect(chain.expiry).toBe(RAW_OPTIONS_REPORT.chain.expiry);
+  });
+});
+
+describe("OptionsReadSchema", () => {
+  it("parses a cited read with its own claims", () => {
+    const read = OptionsReadSchema.parse(RAW_OPTIONS_READ);
+    expect(read.points).toHaveLength(2);
+    expect(read.points[0].claim_refs[1]).toEqual({ section: "Options", index: 2 });
+    expect(read.claims[read.points[1].claim_refs[0].index].unit).toBe("fraction");
   });
 });

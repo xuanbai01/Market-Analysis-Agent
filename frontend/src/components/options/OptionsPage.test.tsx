@@ -1,15 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
-import { fetchOptionsReport } from "../../lib/options-api";
+import { fetchOptionsRead, fetchOptionsReport } from "../../lib/options-api";
 import { OptionsReportSchema } from "../../lib/options-schemas";
 import { RAW_NO_OPTIONS_REPORT, RAW_OPTIONS_REPORT } from "./fixture";
 import OptionsPage from "./OptionsPage";
 
-vi.mock("../../lib/options-api", () => ({ fetchOptionsReport: vi.fn(), fetchOptionsChain: vi.fn() }));
+vi.mock("../../lib/options-api", () => ({ fetchOptionsReport: vi.fn(), fetchOptionsChain: vi.fn(), fetchOptionsRead: vi.fn() }));
 
 const REPORT = OptionsReportSchema.parse(RAW_OPTIONS_REPORT);
 
@@ -27,6 +27,7 @@ function renderPage() {
   );
 }
 
+beforeEach(() => vi.mocked(fetchOptionsRead).mockReturnValue(new Promise(() => {})));
 afterEach(() => vi.mocked(fetchOptionsReport).mockReset());
 
 describe("OptionsPage", () => {
@@ -48,7 +49,7 @@ describe("OptionsPage", () => {
     expect(screen.getByText("NVIDIA Corporation")).toBeInTheDocument();
     expect(screen.getByTestId("options-asof")).toHaveTextContent(/last close/i);
     expect(screen.getByTestId("options-tiles")).toHaveTextContent("59.5%");
-    for (const id of ["options-cone", "options-term", "options-earnings", "options-expiry-section", "options-strategy-panel"]) {
+    for (const id of ["options-read-loading", "options-cone", "options-term", "options-earnings", "options-expiry-section", "options-strategy-panel"]) {
       expect(screen.getByTestId(id)).toBeInTheDocument();
     }
     expect(screen.getByTestId("options-disclaimer")).toHaveTextContent(/not advice/i);

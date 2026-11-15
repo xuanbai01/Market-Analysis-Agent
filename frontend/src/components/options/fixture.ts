@@ -920,3 +920,25 @@ export const RAW_NO_OPTIONS_REPORT = {
   "claims": [],
   "generated_at": "2026-11-14T17:00:00Z"
 } as const;
+
+/** A cited read of the report above, as the backend sends it. */
+export const RAW_OPTIONS_READ = {
+  "symbol": "NVDA",
+  "quoted_at": "2026-11-13T16:00:00-05:00",
+  "at_close": true,
+  "headline": "Options price a little more movement than NVDA has shown, with its report two days out.",
+  "points": [
+    {
+      "title": "Implied above realized",
+      "text": "IV30 is 59.46%, above 20-session realized volatility of 56.95%.",
+      "claim_refs": [{ "section": "Options", "index": 0 }, { "section": "Options", "index": 2 }]
+    },
+    {
+      "title": "The report is priced",
+      "text": "Options price a 7.12% move through the report, above the 4.04% average after the last 8 reports.",
+      "claim_refs": [{ "section": "Options", "index": 8 }, { "section": "Options", "index": 9 }]
+    }
+  ],
+  "claims": RAW_OPTIONS_REPORT.claims,
+  "generated_at": "2026-11-15T05:40:00Z"
+} as const;

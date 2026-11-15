@@ -212,5 +212,11 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Sessions left count today's** while the market hasn't opened, so a check before the open has the right window for the past-moves share.
     - **One holding without a live figure no longer blanks every total.** The tiles add what they can and name what they leave out.
     - **A leg sent without its close** gets 4 pm in New York, daylight time included, rather than 21:00 UTC.
+  - **From #128's fifth AI review:**
+    - **A report on the expiry day after the close** no longer counts as before the expiry. The card uses the report's reaction session, as the options page does.
+    - **The tiles say what's missing:** a live price or delta, theta or vega.
+    - **Not changed:**
+      - The chain route reads any listed expiry on demand, not only those the report read, so a held expiry far from the report's targets still gets its chain.
+      - Recording a view twice is harmless, since it's an upsert.
   - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 

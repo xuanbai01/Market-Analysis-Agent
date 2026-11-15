@@ -48,7 +48,8 @@ function totals(positions: OwnerPositions): { delta: Total; theta: Total; vega: 
   };
 }
 
-const leftOut = (total: Total) => (total.without.length > 0 ? `; leaves out ${total.without.join(", ")} (no live figure)` : "");
+const leftOut = (total: Total, missing: string) =>
+  total.without.length > 0 ? `; leaves out ${total.without.join(", ")} (no ${missing} from tastytrade)` : "";
 
 function Tile({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
@@ -104,9 +105,9 @@ function Positions({ ownerKey }: { ownerKey: string }) {
       {query.error && !unauthorized && !refused && <ErrorBanner error={query.error} />}
       {positions && t && positions.groups.length > 0 && (
         <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="positions-totals">
-          <Tile label="For a 1% rise" value={dash(t.delta.value)} sub={`every position's delta, in dollars${leftOut(t.delta)}`} />
-          <Tile label="A day passing" value={dash(t.theta.value)} sub={`theta, nothing else changing${leftOut(t.theta)}`} />
-          <Tile label="IV one point higher" value={dash(t.vega.value)} sub={`vega, every expiry at once${leftOut(t.vega)}`} />
+          <Tile label="For a 1% rise" value={dash(t.delta.value)} sub={`every position's delta, in dollars${leftOut(t.delta, "live price or delta")}`} />
+          <Tile label="A day passing" value={dash(t.theta.value)} sub={`theta, nothing else changing${leftOut(t.theta, "live theta")}`} />
+          <Tile label="IV one point higher" value={dash(t.vega.value)} sub={`vega, every expiry at once${leftOut(t.vega, "live vega")}`} />
         </div>
       )}
       {positions && positions.groups.length === 0 && positions.unanalysed.length === 0 && (

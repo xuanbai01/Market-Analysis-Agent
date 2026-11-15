@@ -116,7 +116,9 @@ export function historySentence(symbol: string, result: { share: number; windows
 
 /** The next report, when it falls before the position's first expiry. */
 export function earningsSentence(symbol: string, earnings: EarningsBlock | null, firstExpiry: string | null): Sentence | null {
-  if (!earnings?.next_date || firstExpiry === null || earnings.next_date > firstExpiry) return null;
+  // The first session that trades on it: a report after the expiry day's close comes too late.
+  const reacts = earnings?.reaction_date ?? earnings?.next_date;
+  if (!earnings?.next_date || !reacts || firstExpiry === null || reacts > firstExpiry) return null;
   const parts: Sentence = [`${symbol} reports on `, { strong: dateLabel(earnings.next_date) }, ", before this position's first expiry"];
   if (earnings.implied_move !== null) parts.push(": options imply a ", { strong: `±${pct(earnings.implied_move)}` }, " move for it");
   else if (earnings.refused) parts.push(` (no implied move: ${earnings.refused})`);

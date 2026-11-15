@@ -144,7 +144,9 @@ def _fetch_yfinance_chain(symbol: str, pick: ExpiryPicker) -> ChainFetch | None:
         if _number(close) > 0
     )
     market_time = int(_number(underlying.get("regularMarketTime")))
-    today = mc.et_date(market_time) if market_time else datetime.now(mc.ET).date()
+    # Today, not the last print's date: a thin name last traded days ago
+    # would keep an earnings date that has passed.
+    today = datetime.now(mc.ET).date()
     return ChainFetch(
         symbol=symbol,
         spot=_number(underlying.get("regularMarketPrice")),

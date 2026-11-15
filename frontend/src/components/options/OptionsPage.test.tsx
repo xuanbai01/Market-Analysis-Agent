@@ -1,15 +1,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
-import { fetchOptionsRead, fetchOptionsReport } from "../../lib/options-api";
+import { fetchOptionsReport } from "../../lib/options-api";
 import { OptionsReportSchema } from "../../lib/options-schemas";
 import { RAW_NO_OPTIONS_REPORT, RAW_OPTIONS_REPORT } from "./fixture";
 import OptionsPage from "./OptionsPage";
 
-vi.mock("../../lib/options-api", () => ({ fetchOptionsReport: vi.fn(), fetchOptionsChain: vi.fn(), fetchOptionsRead: vi.fn() }));
+// The read stays on its way: the page shows the card writing it.
+vi.mock("../../lib/options-api", () => ({
+  fetchOptionsReport: vi.fn(),
+  fetchOptionsChain: vi.fn(),
+  fetchOptionsRead: vi.fn(() => new Promise(() => {})),
+}));
 
 const REPORT = OptionsReportSchema.parse(RAW_OPTIONS_REPORT);
 
@@ -27,7 +32,6 @@ function renderPage() {
   );
 }
 
-beforeEach(() => vi.mocked(fetchOptionsRead).mockReturnValue(new Promise(() => {})));
 afterEach(() => vi.mocked(fetchOptionsReport).mockReset());
 
 describe("OptionsPage", () => {

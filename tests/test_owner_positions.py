@@ -619,3 +619,16 @@ async def test_a_quote_time_without_a_zone_is_utc(account: _Tastytrade) -> None:
     assert group.quote is not None and group.quote.updated_at is not None
     assert group.quote.updated_at.utcoffset() is not None and group.quote.updated_at.utcoffset().total_seconds() == 0
 
+
+
+async def test_a_quotes_answer_of_the_wrong_shape_fails_the_read(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read as "no quotes" it would blank every price without a word (#127's AI review)."""
+    account.positions[ACCOUNT] = [_position("NVDA", "Equity", "10", "Long")]
+    real = account.get
+
+    async def odd(path: str, params: dict[str, Any] | None = None, *, op: str) -> object:
+        return {"data": {"quotes": []}} if path == "/market-data/by-type" else await real(path, params, op=op)
+
+    monkeypatch.setattr(op.tt, "get", odd)
+    with pytest.raises(op.PositionsUnavailable, match="readable"):
+        await op.get_positions()

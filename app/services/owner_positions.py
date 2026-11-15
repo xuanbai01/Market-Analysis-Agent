@@ -260,7 +260,7 @@ async def _quote_batch(kind: str, batch: list[str], quotes: dict[str, LiveQuote]
         if _refused(exc):
             return False
         raise
-    for item in _items(payload):
+    for item in _items(payload, strict=True):  # a wrong shape fails the read, not "no quotes"
         symbol = _field(item, "symbol")
         if isinstance(symbol, str) and symbol in batch:
             quotes[symbol] = _live_quote(item)

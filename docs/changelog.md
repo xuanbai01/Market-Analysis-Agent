@@ -173,4 +173,18 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - NaN or infinity from tastytrade would have made the route a 500 and stayed cached; a number must now be finite.
   - **And the review's lows:** a multiplier must be a positive whole count; a position must say long or short; a stock or underlying must be a ticker; an answer of the wrong shape reads as nothing; an account tastytrade can't find is skipped; at most 10 accounts and 500 positions (`truncated`); a 60 s deadline; no empty account list remembered; the stale copy dropped after 15 minutes; `no-store` on every owner response, errors included; the import guard follows imports transitively.
   - **From #127's AI review:** underlyings and options are quoted in separate calls, and a refused batch is asked for again a symbol at a time (up to 25), so one symbol tastytrade won't quote (an index like SPX, as an equity) costs only its own quote; a stock row without a multiplier is still a stock; more than 10 accounts sets `truncated`; a list-valued query parameter is logged as a count too; every 500 says `no-store` (it's built outside the middleware). A test value Gitleaks read as a key is now plainly fake, and its old commit is in `.gitleaksignore`.
+- **The `/positions` page (2026-11-15, ADR 0009 amended):** the owner's positions with analysis computed in code, behind the owner key.
+  - **Unlocking:** a form with a fixed hidden username (`market-agent-owner`), so a password manager saves the key and syncs it to the owner's other PC. It posts, and it checks the key with `/v1/owner/status` before keeping it. It says why a key was refused: wrong, none set on the server, too many tries, or the sign-in expired. A refused key is forgotten, and sign out forgets it too.
+  - **A card per underlying:**
+    - the legs at tastytrade's marks, each quote's age, P&L against the open, and IV;
+    - the Greeks as P&L: per 1% move (and how delta itself moves), per day, per IV point;
+    - the payoff at the first expiry and in a what-if (price ±30%, IV ±20 points, days to expiry). Legs expiring later are valued by Black-76 on a forward drifting at the chain's own carry, discounted at the report's rate. `lib/options-pricing.ts` is held to `options_math.black76` by the golden file.
+  - **What our data says around it:**
+    - the risk-neutral chance of profit at expiry from that expiry's smile, for any single-expiry position, stock included. It's integrated over the breakevens with the strategy builder's `probAbove`, and agrees with `probProfit` on plain options.
+    - how often five years of moves over the sessions left would have left it in profit;
+    - a report before expiry, with its implied move and the last 8 moves;
+    - max pain and the walls, with the dealer assumption.
+    Each is labelled for what it is, not a forecast, and the page says nothing is advice.
+  - **Not modelled:** adjusted contracts are listed but not modelled, and futures are listed as not analysed. A leg without an IV gets no curve before expiry rather than a guessed one.
+  - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 

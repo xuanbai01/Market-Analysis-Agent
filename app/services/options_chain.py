@@ -103,12 +103,22 @@ def _next_earnings(ticker: Any, today: date) -> date | None:
     JSON calendar, not the scraped earnings page). Never fails the chain."""
     try:
         calendar = ticker.calendar
+        raw = calendar.get("Earnings Date") if isinstance(calendar, dict) else None
+        values = raw if isinstance(raw, list | tuple) else [raw]
+        days = [d.date() if isinstance(d, datetime) else d for d in values if isinstance(d, date)]
+        return min((d for d in days if d >= today), default=None)
     except Exception:
         logger.warning("could not read the earnings calendar", exc_info=True)
         return None
-    raw = calendar.get("Earnings Date") if isinstance(calendar, dict) else None
-    days = [d.date() if isinstance(d, datetime) else d for d in raw or [] if isinstance(d, date)]
-    return min((d for d in days if d >= today), default=None)
+
+
+def _dividend_yield(underlying: dict[str, Any]) -> float:
+    """``trailingAnnualDividendYield`` is a fraction (KO 0.0216) beside
+    ``dividendYield`` in percent (2.14); a value above 1 is read as a percent,
+    since a percent taken as a fraction would make the fallback forward
+    100 times wrong."""
+    value = _number(underlying.get("trailingAnnualDividendYield"))
+    return value / 100 if value > 1 else value
 
 
 def _fetch_yfinance_chain(symbol: str, pick: ExpiryPicker) -> ChainFetch | None:
@@ -139,7 +149,7 @@ def _fetch_yfinance_chain(symbol: str, pick: ExpiryPicker) -> ChainFetch | None:
         symbol=symbol,
         spot=_number(underlying.get("regularMarketPrice")),
         market_time=market_time,
-        dividend_yield=_number(underlying.get("trailingAnnualDividendYield")),
+        dividend_yield=_dividend_yield(underlying),
         expiries=listed,
         chains=chains,
         closes=closes,

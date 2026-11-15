@@ -68,6 +68,9 @@ NEAR_MONEY_STRIKES = 5
 DAILY_FROM = datetime(1990, 1, 1, tzinfo=UTC)
 # Our IV30 and tastytrade's agree when this close, in vol points.
 IV30_POINTS = 2.0
+# The positions page reads a quote's ``volatility`` as a fraction (0.48 =
+# 48%); a value of 3 or more would be percent points.
+IV_FRACTION_MAX = 3.0
 METRIC_FIELDS = (
     "implied-volatility-index",
     "implied-volatility-30-day",
@@ -300,6 +303,9 @@ async def probe_quotes(say: Say, pick: ChainPick, now: datetime) -> None:
         say(f"  option quote ages: min {min(ages):.1f} s, median {statistics.median(ages):.1f} s, max {max(ages):.1f} s")
     known = [x for x in inside if x is not None]
     say(f"  tastytrade's mid inside Yahoo's (15-minute-old) bid–ask: {sum(known)} of {len(known)}")
+    ivs = [v for v in (number(field(by_symbol.get(field(s, side)) or {}, "volatility")) for s, side in legs) if v is not None]
+    fractions = all(0 < v < IV_FRACTION_MAX for v in ivs) if ivs else None
+    say(f"  option IVs read as fractions (over 0, under {IV_FRACTION_MAX:g}): {_answer(fractions)}, {len(ivs)} of {len(legs)} sent")
 
 
 async def _our_iv30(symbol: str) -> float | None:

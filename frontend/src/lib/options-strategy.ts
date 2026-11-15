@@ -48,11 +48,16 @@ const SQRT_2PI = Math.sqrt(2 * Math.PI);
 
 /** Abramowitz & Stegun 7.1.26 for erf: absolute error under 1.5e-7. */
 export function normCdf(x: number): number {
+  // erfc by Chebyshev fit (Numerical Recipes' erfcc): its error is under
+  // 1.2e-7 of the value everywhere, so a far tail, and a far out-of-the-money
+  // price, keeps its digits. An absolute error swamped those.
   const z = Math.abs(x) / Math.SQRT2;
-  const t = 1 / (1 + 0.3275911 * z);
-  const poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
-  const erf = 1 - poly * Math.exp(-z * z);
-  return x >= 0 ? (1 + erf) / 2 : (1 - erf) / 2;
+  const t = 1 / (1 + 0.5 * z);
+  const fit =
+    1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 +
+    t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))));
+  const erfc = t * Math.exp(-z * z - 1.26551223 + t * fit);
+  return x >= 0 ? 1 - erfc / 2 : erfc / 2;
 }
 
 function normPdf(x: number): number {

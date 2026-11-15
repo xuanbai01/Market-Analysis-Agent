@@ -36,6 +36,9 @@ export const PositionLegSchema = z.object({
   multiplier: z.number(),
   average_open: MaybeNum,
   adjusted: z.boolean().default(false),
+  /** When an option's expiry closes, from the server's calendar: 4 pm New
+   * York, 1 pm on NYSE's half days. Null for stock. */
+  expires_at: z.string().nullable().default(null),
   quote: LiveQuoteSchema.nullable().default(null),
 });
 export type PositionLeg = z.infer<typeof PositionLegSchema>;

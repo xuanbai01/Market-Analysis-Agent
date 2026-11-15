@@ -45,6 +45,9 @@ class PositionLeg(BaseModel):
     # A contract whose deliverable isn't 100 plain shares (after a split or a
     # merger): listed, but its payoff isn't modelled.
     adjusted: bool = False
+    # When an option's expiry closes, from our calendar: 4 pm New York, 1 pm
+    # on NYSE's half days (market_calendar.session_close). None for stock.
+    expires_at: datetime | None = None
     quote: LiveQuote | None = None
 
 

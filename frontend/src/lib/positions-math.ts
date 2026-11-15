@@ -18,9 +18,9 @@ import type { PositionGroup, PositionLeg } from "./owner-schemas";
 
 const DAY_MS = 24 * 3600 * 1000;
 const YEAR_MS = 365 * DAY_MS;
-// Options settle at the 4 pm New York close: 21:00 UTC in winter, 20:00 in
-// summer. An hour off is noise for these figures.
-const CLOSE_UTC = "T21:00:00Z";
+// The close for a leg the server sent without one (it sends each option's,
+// from its calendar): 4 pm New York in winter.
+const FALLBACK_CLOSE_UTC = "T21:00:00Z";
 const MIN_VOL = 0.01;
 const ONE_PERCENT = 0.01;
 // Price grid for breakevens: log-spaced over a wide range around the spot.
@@ -53,12 +53,15 @@ export const NO_CHANGE: Scenario = { move: 0, ivShift: 0, days: 0 };
 const size = (leg: PositionLeg) => leg.quantity * leg.multiplier;
 const isOption = (leg: PositionLeg) => leg.kind !== "stock";
 
-export function expiryClose(expiry: string): Date {
-  return new Date(`${expiry}${CLOSE_UTC}`);
+/** When ``expiry`` closes, as the server gave it for ``legs`` on it: 4 pm
+ * New York, 1 pm on a half day (market_calendar.session_close). */
+export function expiryClose(expiry: string, legs: PositionLeg[]): Date {
+  const close = legs.find((leg) => leg.expiry === expiry && leg.expires_at !== null)?.expires_at;
+  return close ? new Date(close) : new Date(`${expiry}${FALLBACK_CLOSE_UTC}`);
 }
 
-export function yearsTo(expiry: string, at: Date): number {
-  return Math.max(0, (expiryClose(expiry).getTime() - at.getTime()) / YEAR_MS);
+export function yearsTo(expiry: string, at: Date, legs: PositionLeg[]): number {
+  return Math.max(0, (expiryClose(expiry, legs).getTime() - at.getTime()) / YEAR_MS);
 }
 
 /** Every leg can be valued: none is an adjusted contract. */
@@ -76,7 +79,7 @@ function intrinsic(leg: PositionLeg, price: number): number {
 export function legValue(leg: PositionLeg, price: number, at: Date, ivShift: number, market: Market): number | null {
   if (leg.kind === "stock") return price;
   if (leg.expiry === null || leg.strike === null) return null;
-  const years = yearsTo(leg.expiry, at);
+  const years = yearsTo(leg.expiry, at, [leg]);
   if (years <= 0) return intrinsic(leg, price);
   const iv = leg.quote?.iv;
   if (iv === null || iv === undefined) return null;
@@ -125,7 +128,7 @@ export function firstExpiry(group: PositionGroup): string | null {
  * later are valued then); with no options, P&L now. */
 export function pnlAtExpiry(group: PositionGroup, price: number, market: Market): number | null {
   const first = firstExpiry(group);
-  const value = valueAt(group, price, first ? expiryClose(first) : market.now, 0, market);
+  const value = valueAt(group, price, first ? expiryClose(first, group.legs) : market.now, 0, market);
   const cost = costBasis(group);
   return value === null || cost === null ? null : value - cost;
 }
@@ -250,8 +253,8 @@ export function profitChance(group: PositionGroup, smile: Smile, market: Market)
 
 /** Trading sessions from ``now`` to the expiry's close (weekdays; holidays
  * aside). */
-export function sessionsUntil(expiry: string, now: Date): number {
-  const end = expiryClose(expiry).getTime();
+export function sessionsUntil(expiry: string, now: Date, legs: PositionLeg[]): number {
+  const end = expiryClose(expiry, legs).getTime();
   let count = 0;
   for (let t = now.getTime() + DAY_MS; t <= end + DAY_MS / 2; t += DAY_MS) {
     const day = new Date(t).getUTCDay();

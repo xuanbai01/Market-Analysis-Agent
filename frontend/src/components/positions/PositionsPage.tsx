@@ -18,7 +18,7 @@ import { signedUsd } from "../../lib/positions-text";
 import { ErrorBanner } from "../ErrorBanner";
 import { useSignOutOn401 } from "../options/useSignOutOn401";
 import { OwnerUnlock } from "../owner/OwnerUnlock";
-import { PositionGroupCard } from "./PositionGroupCard";
+import { MAX_CONTEXT, PositionGroupCard } from "./PositionGroupCard";
 
 const FIFTEEN_SECONDS = 15_000;
 
@@ -105,7 +105,9 @@ function Positions({ ownerKey }: { ownerKey: string }) {
       {positions && positions.groups.length === 0 && positions.unanalysed.length === 0 && (
         <p data-testid="positions-empty" className="mt-6 text-sm text-strata-dim">No open positions.</p>
       )}
-      {positions?.groups.map((group) => <PositionGroupCard key={group.underlying} group={group} now={now} />)}
+      {positions?.groups.map((group, i) => (
+        <PositionGroupCard key={group.underlying} group={group} now={now} withContext={i < MAX_CONTEXT} />
+      ))}
       {positions && positions.unanalysed.length > 0 && (
         <section data-testid="positions-unanalysed" className="mb-6 rounded-md border border-strata-border bg-strata-surface p-5">
           <h2 className="mb-2 font-mono text-[10px] uppercase tracking-kicker text-strata-muted">Listed, not analysed</h2>

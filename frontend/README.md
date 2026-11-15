@@ -10,7 +10,7 @@ React 18 + Vite + TypeScript dashboard for the [Market Analysis Agent](../) back
 | `/` | Search + past reports. |
 | `/symbol/:ticker` | The dashboard: section nav, hero, analyst view, Quality / Earnings / Valuation / Per-share growth, Cash & capital · Capital returns · Risk · Macro, Business + News. Adapts to distressed names (pills, hero metric swap, survival cards first). |
 | `/compare?a=X&b=Y` | Two tickers side by side. |
-| `/lens`, `/lens/:id` | Cross-company lenses (megacap tech capex). |
+| `/lens`, `/lens/:id` | Cross-company lenses (megacap capex, stock-based compensation, R&D). |
 
 Every signed-in page has the sidebar (Search ⌘K, Home, Compare, Lenses, Watchlist, Recent) and the market strip.
 
@@ -60,7 +60,7 @@ src/
 │   ├── LineChart / MultiLine / EpsChart / PeerScatterV2 / Sparkline
 │   │                       # hand-rolled SVG primitives
 │   ├── compare/            # ComparePage (lazy) and its rows
-│   ├── lens/               # LensPage, LensIndexPage, DistributionChart, CapexBars (lazy)
+│   ├── lens/               # LensPage, LensIndexPage, DistributionChart, AmountBars (lazy)
 │   └── search/             # SearchModal (lazy)
 └── lib/
     ├── api.ts              # the only fetch caller — typed ApiError, Zod validation

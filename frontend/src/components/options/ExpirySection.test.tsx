@@ -67,6 +67,14 @@ describe("ExpirySection", () => {
     expect(within(none).getAllByTestId("options-chain-call-ask")[0]).toHaveTextContent("—");
   });
 
+  it("prints no ask where nobody offers, beside a real bid", () => {
+    const rows = CHAIN.rows.map((r, i) => (i === 0 ? { ...r, put_bid: 0.05, put_ask: 0 } : r));
+    renderSection(section({ ...CHAIN, rows }));
+    const first = screen.getAllByTestId("options-chain-row")[0];
+    expect(within(first).getByTestId("options-chain-put-bid")).toHaveTextContent("0.05");
+    expect(within(first).getByTestId("options-chain-put-ask")).toHaveTextContent("—");
+  });
+
   it("sends a stale sign-in back to the sign-in page when an expiry is read", async () => {
     vi.mocked(fetchOptionsChain).mockRejectedValue(new ApiError({ status: 401, title: "Unauthorized" }));
     renderSection();

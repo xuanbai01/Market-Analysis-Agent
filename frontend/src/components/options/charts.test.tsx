@@ -23,6 +23,11 @@ describe("ExpectedMoveCone", () => {
     expect(screen.getByRole("img")).toHaveAttribute("aria-label", expect.stringMatching(/^Expected move by expiry/));
   });
 
+  it("marks the report only while its reaction is still ahead", () => {
+    render(<ExpectedMoveCone expiries={REPORT.expiries} spot={REPORT.spot!} eventDays={0} />);
+    expect(screen.queryByTestId("options-cone-event")).toBeNull();
+  });
+
   it("tells the range of an expiry on hover", () => {
     render(<ExpectedMoveCone expiries={REPORT.expiries} spot={REPORT.spot!} eventDays={null} />);
     fireEvent.mouseEnter(screen.getAllByTestId("options-cone-hit")[4]);

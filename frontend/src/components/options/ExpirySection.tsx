@@ -22,8 +22,10 @@ interface Props {
 }
 
 const dash = "—";
-// A zero bid beside an ask is a price; a dash only where neither side quotes.
-const price = (v: number, quoted: boolean) => (quoted ? v.toFixed(2) : dash);
+// A zero bid beside an offer is a price (nobody bids); a zero ask is no
+// offer at all, so a dash, as is a bid where neither side quotes.
+const bid = (v: number, ask: number) => (v > 0 || ask > 0 ? v.toFixed(2) : dash);
+const ask = (v: number) => (v > 0 ? v.toFixed(2) : dash);
 const iv = (v: number | null) => (v === null ? dash : pct(v));
 const delta = (v: number | null) => (v === null ? dash : v.toFixed(2));
 const strike = (k: number) => (Number.isInteger(k) ? k.toFixed(0) : k.toFixed(2));
@@ -85,10 +87,9 @@ function ChainTable({ chain }: { chain: ExpiryChain }) {
   const cell = "px-2 py-1 text-right";
   const side = (r: ChainRow, call: boolean) => {
     const usable = call ? r.call_usable : r.put_usable;
-    const quoted = call ? r.call_bid > 0 || r.call_ask > 0 : r.put_bid > 0 || r.put_ask > 0;
     const values = call
-      ? [price(r.call_bid, quoted), price(r.call_ask, quoted), iv(r.call_iv), delta(r.call_delta), r.call_open_interest.toLocaleString("en-US"), r.call_volume.toLocaleString("en-US")]
-      : [price(r.put_bid, quoted), price(r.put_ask, quoted), iv(r.put_iv), delta(r.put_delta), r.put_open_interest.toLocaleString("en-US"), r.put_volume.toLocaleString("en-US")];
+      ? [bid(r.call_bid, r.call_ask), ask(r.call_ask), iv(r.call_iv), delta(r.call_delta), r.call_open_interest.toLocaleString("en-US"), r.call_volume.toLocaleString("en-US")]
+      : [bid(r.put_bid, r.put_ask), ask(r.put_ask), iv(r.put_iv), delta(r.put_delta), r.put_open_interest.toLocaleString("en-US"), r.put_volume.toLocaleString("en-US")];
     const ids = ["bid", "ask", "iv"];
     return values.map((v, i) => (
       <td

@@ -58,7 +58,7 @@ export function ExpectedMoveCone({ expiries, spot, eventDays }: Props) {
         ))}
         <path data-testid="options-cone-band" d={band} fill={COLOR.band} fillOpacity={0.16} stroke={COLOR.band} strokeOpacity={0.5} strokeWidth={1} />
         <path d={centre} fill="none" stroke={COLOR.hi} strokeWidth={1.5} />
-        {eventDays !== null && eventDays <= maxDays && (
+        {eventDays !== null && eventDays > 0 && eventDays <= maxDays && (
           <g data-testid="options-cone-event">
             <line x1={x(eventDays)} x2={x(eventDays)} y1={PAD.top} y2={HEIGHT - PAD.bottom} stroke={COLOR.axis} strokeDasharray="4 3" />
             <AxisText x={x(eventDays) + 4} y={PAD.top + 10} anchor="start">

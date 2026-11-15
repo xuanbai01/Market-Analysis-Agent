@@ -5,6 +5,7 @@
 import { useState } from "react";
 
 import type { ExpiryChain } from "../../lib/options-schemas";
+import { niceTicks } from "../MultiLine";
 import { AxisText, COLOR, Legend, PAD, Tooltip, linear, money, useChartWidth } from "./chart-kit";
 
 const HEIGHT = 220;
@@ -26,6 +27,7 @@ export function OpenInterestChart({ chain, spot }: { chain: ExpiryChain; spot: n
   const most = Math.max(...points.map((p) => Math.max(p.call, p.put)), 1);
   const mid = (HEIGHT - PAD.bottom + PAD.top) / 2;
   const h = linear(0, most, 0, mid - PAD.top);
+  const xTicks = niceTicks(low, high, 6).filter((t) => t >= low && t <= high);
   const shown = hover === null ? null : points[hover];
 
   return (
@@ -42,13 +44,18 @@ export function OpenInterestChart({ chain, spot }: { chain: ExpiryChain; spot: n
         <line x1={PAD.left} x2={W - PAD.right} y1={mid} y2={mid} stroke={COLOR.grid} />
         <AxisText x={PAD.left - 8} y={PAD.top + 10}>{count(most)}</AxisText>
         <AxisText x={PAD.left - 8} y={HEIGHT - PAD.bottom}>{count(most)}</AxisText>
-        {[low, high].map((t) => (
+        {xTicks.map((t) => (
           <AxisText key={t} x={x(t)} y={HEIGHT - 8} anchor="middle">
             {`$${t}`}
           </AxisText>
         ))}
         {spot !== null && spot >= low && spot <= high && (
-          <line x1={x(spot)} x2={x(spot)} y1={PAD.top} y2={HEIGHT - PAD.bottom} stroke={COLOR.axis} strokeDasharray="4 3" />
+          <g data-testid="options-oi-price">
+            <line x1={x(spot)} x2={x(spot)} y1={PAD.top} y2={HEIGHT - PAD.bottom} stroke={COLOR.axis} strokeDasharray="4 3" />
+            <AxisText x={x(spot) + 4} y={PAD.top + 10} anchor="start">
+              {`price ${money(spot)}`}
+            </AxisText>
+          </g>
         )}
         {points.map((p, i) => (
           <g key={p.strike} opacity={hover === null || hover === i ? 1 : 0.5}>

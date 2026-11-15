@@ -15,7 +15,16 @@ const REPORT = OptionsReportSchema.parse(RAW_OPTIONS_REPORT);
 const CHAIN = REPORT.chain!;
 
 function section(initial = CHAIN, listed = REPORT.listed_expiries) {
-  return <ExpirySection symbol="NVDA" listed={listed} initial={initial} spot={REPORT.spot} />;
+  return (
+    <ExpirySection
+      symbol="NVDA"
+      listed={listed}
+      initial={initial}
+      spot={REPORT.spot}
+      quotedAt={REPORT.quoted_at}
+      skew25={REPORT.skew25}
+    />
+  );
 }
 
 function renderSection(ui = section()) {
@@ -37,6 +46,28 @@ function renderSection(ui = section()) {
 const select = () => screen.getByTestId("options-expiry-select") as HTMLSelectElement;
 
 afterEach(() => vi.mocked(fetchOptionsChain).mockReset());
+
+describe("ExpirySection labels", () => {
+  it("names each expiry with its days and whether it is the monthly", () => {
+    renderSection();
+    const labels = Array.from(select().options).map((o) => o.textContent ?? "");
+    expect(labels.every((l) => / · \d+ days? · (monthly|weekly)$/.test(l))).toBe(true);
+    expect(labels).toContain("Dec 18, 2026 · 35 days · monthly");
+  });
+
+  it("gives open interest a sentence, and the skew only for the report's own expiry", async () => {
+    vi.mocked(fetchOptionsChain).mockResolvedValue({ ...CHAIN, expiry: "2026-12-18" });
+    renderSection();
+    expect(screen.getByTestId("options-oi-block-summary")).toHaveTextContent(/^Most open near the money/);
+    expect(screen.getByTestId("options-smile-block-summary")).toHaveTextContent(/25Δ puts are priced/);
+    fireEvent.change(select(), { target: { value: "2026-12-18" } });
+    await vi.waitFor(() => expect(fetchOptionsChain).toHaveBeenCalledWith("NVDA", "2026-12-18"));
+    // The new chain draws with its open interest sentence, but no skew: the
+    // report's skew is for its own expiry.
+    expect(await screen.findByTestId("options-oi-block-summary")).toBeInTheDocument();
+    expect(screen.queryByTestId("options-smile-block-summary")).toBeNull();
+  });
+});
 
 describe("ExpirySection", () => {
   it("shows the default expiry's chain with the at-the-money row marked", () => {

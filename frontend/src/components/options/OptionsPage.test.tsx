@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -35,6 +35,31 @@ function renderPage() {
 afterEach(() => vi.mocked(fetchOptionsReport).mockReset());
 
 describe("OptionsPage", () => {
+  it("explains each figure: the close named as such, a sentence and stats per chart, a tip on tap", async () => {
+    vi.mocked(fetchOptionsReport).mockResolvedValue(REPORT);
+    renderPage();
+    const tiles = await screen.findByTestId("options-tiles");
+    expect(tiles).toHaveTextContent("Close");
+    expect(tiles).toHaveTextContent("last close");
+    expect(tiles).not.toHaveTextContent("Spot");
+    expect(screen.getByTestId("options-cone-panel-summary")).toHaveTextContent(/^Options price a ±\d+\.\d% \(\$\d+\.\d\d\) move by/);
+    expect(screen.getByTestId("options-cone-panel-stats")).toHaveTextContent(/±\d+\.\d% · \$/);
+    expect(screen.getByTestId("options-term-panel-summary")).toHaveTextContent(/At-the-money IV runs from/);
+    expect(screen.getByTestId("options-term-panel-stats")).toHaveTextContent("IV30");
+    // A tip is closed until asked for.
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.click(within(tiles).getByRole("button", { name: "About IV30" }));
+    expect(screen.getByRole("tooltip")).toHaveTextContent(/30 days out/);
+  });
+
+  it("calls the price a price, not a close, inside a session", async () => {
+    vi.mocked(fetchOptionsReport).mockResolvedValue({ ...REPORT, at_close: false });
+    renderPage();
+    const tiles = await screen.findByTestId("options-tiles");
+    expect(tiles).toHaveTextContent("Price");
+    expect(tiles).toHaveTextContent("15 min delayed");
+  });
+
   it("shows a loading state while the chains are read", async () => {
     let release: (r: typeof REPORT) => void = () => {};
     vi.mocked(fetchOptionsReport).mockReturnValue(new Promise((resolve) => (release = resolve)));
@@ -63,7 +88,7 @@ describe("OptionsPage", () => {
   it("ranks today's IV30 once there's history, and says it's collecting before", async () => {
     vi.mocked(fetchOptionsReport).mockResolvedValue(REPORT);
     const { unmount } = renderPage();
-    expect(await screen.findByTestId("options-tiles")).toHaveTextContent("IV history100thpercentile over 70 sessions");
+    expect(await screen.findByTestId("options-tiles")).toHaveTextContent("IV historyⓘ100thpercentile over 70 sessions");
     unmount();
     vi.mocked(fetchOptionsReport).mockResolvedValue({
       ...REPORT,

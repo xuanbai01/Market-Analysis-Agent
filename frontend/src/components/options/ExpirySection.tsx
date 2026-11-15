@@ -9,8 +9,9 @@ import { useState } from "react";
 
 import { fetchOptionsChain } from "../../lib/options-api";
 import type { ChainRow, ExpiryChain } from "../../lib/options-schemas";
+import { GLOSSARY, daysUntil, expiryKind, expiryLabel, openInterestSentence, smileSentence } from "../../lib/options-text";
 import { ErrorBanner } from "../ErrorBanner";
-import { pct, shortDate } from "./chart-kit";
+import { InfoTip, SentenceText, pct, shortDate } from "./chart-kit";
 import { OpenInterestChart } from "./OpenInterestChart";
 import { Panel } from "./Panel";
 import { SmileChart } from "./SmileChart";
@@ -22,6 +23,9 @@ interface Props {
   listed: string[];
   initial: ExpiryChain;
   spot: number | null;
+  quotedAt: string;
+  // The 25-delta skew of the report's own expiry (the one nearest 30 days).
+  skew25: number | null;
 }
 
 const dash = "—";
@@ -33,7 +37,7 @@ const iv = (v: number | null) => (v === null ? dash : pct(v));
 const delta = (v: number | null) => (v === null ? dash : v.toFixed(2));
 const strike = (k: number) => (Number.isInteger(k) ? k.toFixed(0) : k.toFixed(2));
 
-export function ExpirySection({ symbol, listed, initial, spot }: Props) {
+export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 }: Props) {
   // The report's expiry unless the reader picked another that is still
   // listed: a refetch that rolls the report's expiry forward is followed.
   const [picked, setPicked] = useState<string | null>(null);
@@ -52,7 +56,7 @@ export function ExpirySection({ symbol, listed, initial, spot }: Props) {
 
   return (
     <>
-      <Panel title="One expiry">
+      <Panel title="One expiry" info="Pick an expiry to see its smile, its open interest by strike and the chain near the money.">
         <div data-testid="options-expiry-section">
           <label className="mb-4 flex items-center gap-2 font-mono text-[11px] text-strata-dim">
             Expiry
@@ -64,23 +68,33 @@ export function ExpirySection({ symbol, listed, initial, spot }: Props) {
             >
               {listed.map((d) => (
                 <option key={d} value={d}>
-                  {shortDate(d, true)}
+                  {expiryLabel(d, daysUntil(quotedAt, d))}
                 </option>
               ))}
             </select>
-            {chain && <span>{Math.round(chain.days)} days · forward ${chain.forward.toFixed(2)}</span>}
+            {chain && <span>forward ${chain.forward.toFixed(2)} · {expiryKind(chain.expiry)}</span>}
           </label>
           {query.isFetching && <p className="font-mono text-[11px] text-strata-muted">Reading {shortDate(expiry, true)}…</p>}
           {failed && <ErrorBanner error={failed} />}
           {chain && (
             <>
               <div className="grid gap-6 lg:grid-cols-2">
-                <div className="min-w-0">
+                <ChartBlock
+                  title="IV by strike"
+                  info={GLOSSARY.smile}
+                  sentence={chain.expiry === initial.expiry ? smileSentence(skew25) : null}
+                  testId="options-smile-block"
+                >
                   <SmileChart chain={chain} />
-                </div>
-                <div className="min-w-0">
+                </ChartBlock>
+                <ChartBlock
+                  title="Open interest by strike"
+                  info={GLOSSARY.openInterest}
+                  sentence={openInterestSentence(chain)}
+                  testId="options-oi-block"
+                >
                   <OpenInterestChart chain={chain} spot={spot} />
-                </div>
+                </ChartBlock>
               </div>
               <ChainTable chain={chain} />
             </>
@@ -94,6 +108,26 @@ export function ExpirySection({ symbol, listed, initial, spot }: Props) {
         </Panel>
       )}
     </>
+  );
+}
+
+/** A chart inside the expiry panel, with its own small title, ⓘ and takeaway. */
+function ChartBlock({
+  title, info, sentence, testId, children,
+}: { title: string; info: string; sentence: ReturnType<typeof smileSentence>; testId: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0" data-testid={testId}>
+      <h3 className="mb-1 font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
+        {title}
+        <InfoTip label={title} text={info} />
+      </h3>
+      {sentence && (
+        <p data-testid={`${testId}-summary`} className="mb-2 text-sm leading-relaxed text-strata-fg">
+          <SentenceText sentence={sentence} />
+        </p>
+      )}
+      {children}
+    </div>
   );
 }
 

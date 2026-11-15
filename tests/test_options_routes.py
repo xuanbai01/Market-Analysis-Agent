@@ -1,4 +1,4 @@
-"""GET /v1/options/{symbol} and /chain/{expiry} (ADR 0008), service stubbed."""
+"""GET /v1/options/{symbol}, /chain/{expiry} and /read (ADR 0008), service stubbed."""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -14,8 +14,9 @@ from app.api.v1.dependencies import get_session
 from app.api.v1.routers import options as options_router
 from app.core import settings as settings_module
 from app.main import app
-from app.schemas.options import ExpiryChain, IvHistory, OptionsReport
+from app.schemas.options import ExpiryChain, IvHistory, OptionsRead, OptionsReport
 from app.services.options_chain import SymbolNotFound
+from app.services.options_read import NothingToRead, ReadUnavailable
 from app.services.options_report import ExpiryNotListed, NoUsableQuotes
 
 NOW = datetime(2026, 11, 14, 17, tzinfo=UTC)
@@ -36,6 +37,18 @@ class _Service:
         self.symbols: list[str] = []
         self.fail: Exception | None = None
         self.fresh: set[str] = set()
+        self.reads: list[str] = []
+        self.read_fail: Exception | None = None
+        self.read_cached: set[str] = set()
+
+    async def get_read(self, _session: Any, symbol: str) -> OptionsRead:
+        self.reads.append(symbol)
+        if self.read_fail:
+            raise self.read_fail
+        return OptionsRead(symbol=symbol, quoted_at=NOW, at_close=True, headline="A read.", points=[], claims=[], generated_at=NOW)
+
+    def has_read(self, symbol: str) -> bool:
+        return symbol in self.read_cached
 
     async def get_report(self, _session: Any, symbol: str) -> OptionsReport:
         self.symbols.append(symbol)
@@ -69,6 +82,9 @@ async def setup(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[tuple[AsyncCli
     monkeypatch.setattr(options_router, "get_chain", service.get_chain)
     monkeypatch.setattr(options_router, "is_fresh", service.is_fresh)
     monkeypatch.setattr(options_router, "has_chain", service.has_chain)
+    monkeypatch.setattr(options_router, "get_read", service.get_read)
+    monkeypatch.setattr(options_router, "has_read", service.has_read)
+    monkeypatch.setattr(settings_module.settings, "OPTIONS_READ_RATE_LIMIT_PER_HOUR", 2)
     monkeypatch.setattr(settings_module.settings, "BACKEND_SHARED_SECRET", "")
     monkeypatch.setattr(settings_module.settings, "OPTIONS_RATE_LIMIT_PER_HOUR", 2)
     deps.reset_options_rate_limit_for_tests()
@@ -143,3 +159,41 @@ async def test_an_expiry_that_needs_a_fetch_counts_against_the_limit(setup: Any)
     assert statuses == [200, 200, 429]
     service.chains = {date(2027, 1, 19)}
     assert (await client.get("/v1/options/SPY/chain/2027-01-19")).status_code == 200
+
+
+async def test_the_read_route(setup: Any) -> None:
+    client, service = setup
+    response = await client.get("/v1/options/nvda/read")
+    assert response.status_code == 200
+    assert response.json()["headline"] == "A read." and service.reads == ["NVDA"]
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [
+        (SymbolNotFound("ZZZZQ"), 404),
+        (NothingToRead("BRK-A"), 404),
+        (ReadUnavailable("NVDA"), 503),
+        (RuntimeError("provider down"), 503),
+    ],
+)
+async def test_read_errors(setup: Any, error: Exception, status: int) -> None:
+    client, service = setup
+    service.read_fail = error
+    assert (await client.get("/v1/options/NVDA/read")).status_code == status
+
+
+async def test_reads_that_need_the_model_are_rate_limited_and_cached_ones_are_not(setup: Any) -> None:
+    client, service = setup
+    service.fresh = {"T0", "T1", "T2"}  # reports cached: only the read limit applies
+    statuses = [(await client.get(f"/v1/options/T{i}/read")).status_code for i in range(3)]
+    assert statuses == [200, 200, 429]
+    service.read_cached = {"T0"}
+    assert (await client.get("/v1/options/T0/read")).status_code == 200
+
+
+async def test_a_read_whose_report_needs_building_counts_as_a_lookup(setup: Any) -> None:
+    client, service = setup
+    service.read_cached = {"T0", "T1", "T2"}
+    statuses = [(await client.get(f"/v1/options/T{i}/read")).status_code for i in range(3)]
+    assert statuses == [200, 200, 429]  # the options build limit (2)

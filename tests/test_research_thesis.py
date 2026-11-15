@@ -301,3 +301,31 @@ def test_cached_points_without_titles_still_parse() -> None:
 def test_insider_claims_can_be_cited_in_the_analyst_view() -> None:
     assert rt.SECTION_CODES["Insider Activity"] == "I"
     assert len(set(rt.SECTION_CODES.values())) == len(rt.SECTION_CODES)
+
+
+# ── unbacked_numbers (the options read's guard) ──────────────────────
+
+
+FACTS = [
+    claim("Implied volatility, 30 days (IV30)", 0.5946, "fraction"),
+    claim("IV30 above realized volatility (20 sessions): options price more movement", 0.0246, "percentage_points"),
+    claim("Average absolute move after the last 8 reports", 0.0404, "fraction"),
+]
+
+
+def test_numbers_the_facts_show_are_backed() -> None:
+    text = "IV30 sits at 59.46%, 2.46 points above realized volatility; the last 8 reports moved 4.04% on average."
+    assert rt.unbacked_numbers(text, FACTS) == []
+
+
+def test_a_rounded_figure_is_backed_and_a_made_up_one_is_not() -> None:
+    assert rt.unbacked_numbers("IV30 near 59.5%", FACTS) == []
+    assert rt.unbacked_numbers("IV30 near 61%", FACTS) == [61.0]
+
+
+def test_dates_are_labels_not_figures() -> None:
+    assert rt.unbacked_numbers("The report on 2026-11-17 is priced.", FACTS) == []
+
+
+def test_a_claim_without_a_number_backs_nothing() -> None:
+    assert rt.unbacked_numbers("Up 12%.", [claim("Business description", "Makes chips.")]) == [12.0]

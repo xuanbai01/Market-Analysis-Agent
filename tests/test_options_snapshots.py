@@ -299,3 +299,29 @@ def test_a_missing_spot_falls_back_to_the_last_close(monkeypatch: pytest.MonkeyP
 
     assert status == "ok" and row is not None and row["spot"] == 42.5
 
+
+async def test_missing_names_the_configured_tickers_without_a_row(world: _World) -> None:
+    """The cron fails on these: a configured ticker with no row for the
+    session is a day lost (or a ticker that should not be configured)."""
+    world.outcomes = {"SPY": "no_usable_quotes", "NVDA": KeyError("x")}
+    world.tracked = ["THIN"]
+    world.outcomes["THIN"] = "no_options"
+    result = await _run(world)
+    assert result.missing == ["SPY", "NVDA"]
+
+
+async def test_the_nights_retry_is_not_failed_by_a_tracked_ticker_it_cannot_write(world: _World) -> None:
+    """DeepSeek on PR 109: judged on what was left to write, the retry
+    failed every night once a tracked name had no usable quotes."""
+    world.stored = {"QQQ", "SPY", "NVDA"}
+    world.tracked = ["THIN"]
+    world.outcomes = {"THIN": "no_usable_quotes"}
+    result = await _run(world)
+    assert result.no_usable_quotes == ["THIN"]
+    assert result.missing == []
+
+
+async def test_nothing_missing_when_every_configured_ticker_is_stored(world: _World) -> None:
+    result = await _run(world)
+    assert result.missing == []
+

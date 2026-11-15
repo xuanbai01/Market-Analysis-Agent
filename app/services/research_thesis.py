@@ -224,17 +224,25 @@ def unbacked_numbers(
 ) -> list[float]:
     """Numbers ``text`` quotes that none of ``claims`` shows: not a claim's
     figure at the quote's precision (as ``_quoted`` matches), nor a number
-    written in a description ("the last 8 reports", "IV30") of ``labels``
-    (default ``claims``), unless it carries a unit (%, pts, $): "30 days" is
-    a label, "a 30% move" a figure. ISO dates and years are labels. For
+    written in a description ("the last 8 reports", "IV30") or a text value
+    of ``labels`` (default ``claims``), unless it carries a unit (%, pts,
+    $): "30 days" is a label, "a 30% move" a figure. ISO dates and years are
+    labels. For
     prose that must hold no number of its own, checked in code rather than
     only by the offline rubric."""
     shown = [n for c in claims for n in _claim_numbers(c)]
-    written = {n for c in (claims if labels is None else labels) for n in _numbers(c.description)}
+    written = {n for c in (claims if labels is None else labels) for n in _written_numbers(c)}
     return [
         value for value, decimals, figure in _quotes_with_units(text)
         if not _matches(value, decimals, shown) and (figure or value not in written)
     ]
+
+
+def _written_numbers(claim: Claim) -> list[float]:
+    """Numbers a claim carries as words: in its description, and in its
+    value when that is text (a refusal's reason, "98 days out")."""
+    text = claim.description + (" " + claim.value if isinstance(claim.value, str) else "")
+    return _numbers(text)
 
 
 # A unit after a number, or a dollar sign before it, makes it a figure.

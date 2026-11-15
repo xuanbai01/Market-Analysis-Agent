@@ -22,11 +22,9 @@ from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.schemas.options import OptionsRead, OptionsReadDraft, OptionsReport
 from app.schemas.research import ClaimRef, ThesisPoint
-from app.services import llm, options_report, research_thesis
+from app.services import llm, research_thesis
 from app.services import market_calendar as mc
 from app.services.claim_display import format_claim_line
 
@@ -102,11 +100,10 @@ def _remember(key: tuple[str, datetime], read: OptionsRead) -> None:
         _cache.popitem(last=False)
 
 
-def has_read(symbol: str) -> bool:
-    """Whether a read of the cached report is cached too: such a request
-    costs no model call."""
-    report = options_report.fresh_report(symbol)
-    return report is not None and (symbol, report.quoted_at) in _cache
+def has_read(report: OptionsReport) -> bool:
+    """Whether a read of exactly this report's quotes is cached: asking for
+    it costs no model call."""
+    return (report.symbol, report.quoted_at) in _cache
 
 
 def _quote_line(report: OptionsReport) -> str:
@@ -175,17 +172,13 @@ async def write_read(report: OptionsReport, now: datetime) -> OptionsRead | None
     )
 
 
-async def get_read(session: AsyncSession, symbol: str, *, now: datetime | None = None) -> OptionsRead:
-    """The read of the symbol's current report: cached, else written (one
-    model call per set of quotes, however many visits ask at once)."""
-    report = await options_report.get_report(session, symbol, now=now)
-    # No database connection held through the model call (CLAUDE.md): the
-    # report recorded the view and committed, but a failed history read can
-    # leave a transaction open. Closing releases it; the session reopens if
-    # used again.
-    await session.close()
+async def get_read(report: OptionsReport, *, now: datetime | None = None) -> OptionsRead:
+    """The read of ``report``: cached, else written (one model call per set
+    of quotes, however many visits ask at once). The caller fetches the
+    report, so the rate limit and the read see the same one."""
     if report.status != "ok":
-        raise NothingToRead(symbol)
+        raise NothingToRead(report.symbol)
+    symbol = report.symbol
     key = (symbol, report.quoted_at)
     if key in _cache:
         return _cache[key]

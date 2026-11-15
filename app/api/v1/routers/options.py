@@ -83,12 +83,23 @@ async def options_read(
     counts as a lookup, a read the model has to write as a read."""
     symbol = symbol.upper()
     await _limit_misses(request, symbol)
-    if not has_read(symbol):
-        await enforce_options_read_rate_limit(request)
     try:
-        return await get_read(session, symbol)
+        report = await get_report(session, symbol)
     except SymbolNotFound as exc:
         raise HTTPException(status_code=404, detail=f"No such symbol: {symbol}.") from exc
+    except Exception as exc:
+        logger.exception("options report for %s failed", symbol)
+        raise HTTPException(status_code=503, detail=_UNAVAILABLE) from exc
+    # No database connection through the model call (CLAUDE.md): the report
+    # committed its view, but a failed history read can leave a transaction
+    # open. The session reopens if anything uses it again.
+    await session.close()
+    # Decided on the report the read is written from, so a rebuild between
+    # the two can't make a read free.
+    if report.status == "ok" and not has_read(report):
+        await enforce_options_read_rate_limit(request)
+    try:
+        return await get_read(report)
     except NothingToRead as exc:
         raise HTTPException(status_code=404, detail=f"{symbol} has no priced options to read.") from exc
     except ReadUnavailable as exc:

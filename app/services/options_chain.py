@@ -123,6 +123,28 @@ def _next_earnings(ticker: Any, today: date) -> date | None:
         return None
 
 
+def _now() -> datetime:  # swapped in tests
+    return datetime.now(mc.ET)
+
+
+def _spot(price: float, closes: tuple[tuple[date, float], ...], now: datetime) -> float:
+    """The underlying's price the quotes go with. When they are a close's,
+    that session's official close from the daily history: Yahoo's
+    ``regularMarketPrice`` is the last regular-hours trade, not the closing
+    auction (NVDA, Nov 13: $162.85 against a $162.92 close). Otherwise
+    ``regularMarketPrice``; with none (a halted or new listing), the last
+    close, so every forward check has a spot."""
+    quoted_at = mc.quote_time(now)
+    if mc.is_close(quoted_at):
+        session = quoted_at.astimezone(mc.ET).date()
+        official = next((close for day, close in reversed(closes) if day == session), None)
+        if official:
+            return official
+    if price > 0:
+        return price
+    return closes[-1][1] if closes else 0.0
+
+
 def _dividend_yield(underlying: dict[str, Any]) -> float:
     """``trailingAnnualDividendYield`` is a fraction (KO 0.0216) beside
     ``dividendYield`` in percent (2.14); a value above 1 is read as a percent,
@@ -161,15 +183,14 @@ def _fetch_yfinance_chain(
         if _number(close) > 0
     )
     market_time = int(_number(underlying.get("regularMarketTime")))
+    now = _now()
     # Today, not the last print's date: a thin name last traded days ago
     # would keep an earnings date that has passed.
-    today = datetime.now(mc.ET).date()
-    # No regularMarketPrice (a halted or new listing): the last close stands
-    # in, before any smile is built, so every forward check has a spot.
-    price = _number(underlying.get("regularMarketPrice"))
+    today = now.astimezone(mc.ET).date()
     return ChainFetch(
         symbol=symbol,
-        spot=price if price > 0 else (closes[-1][1] if closes else 0.0),
+        # Resolved before any smile is built, so every forward check has it.
+        spot=_spot(_number(underlying.get("regularMarketPrice")), closes, now),
         market_time=market_time,
         dividend_yield=_dividend_yield(underlying),
         expiries=listed,

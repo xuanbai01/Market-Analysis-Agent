@@ -36,10 +36,19 @@ def _frame(rows: list[tuple[float, float, float, float | None, int, str]]) -> pd
 class _FakeTicker:
     """Just enough of yfinance.Ticker: option_chain(), options, history()."""
 
-    def __init__(self, expiries: Sequence[str], underlying: dict[str, Any] | None) -> None:
+    def __init__(
+        self, expiries: Sequence[str], underlying: dict[str, Any] | None, calendar: Any = None
+    ) -> None:
         self._expiries = tuple(expiries)
         self._underlying = underlying
+        self._calendar = calendar if calendar is not None else {}
         self.chain_calls: list[str | None] = []
+
+    @property
+    def calendar(self) -> Any:
+        if isinstance(self._calendar, Exception):
+            raise self._calendar
+        return self._calendar
 
     def option_chain(self, date: str | None = None) -> SimpleNamespace:
         self.chain_calls.append(date)
@@ -137,3 +146,20 @@ def test_the_rate_falls_back_to_an_assumed_value_and_says_so(monkeypatch: pytest
     monkeypatch.setattr(oc, "fetch_irx", broken)
     assert oc.risk_free_rate() == (oc.ASSUMED_RATE, True)
     oc.clear_rate_cache()
+
+
+@pytest.mark.parametrize(
+    ("calendar", "expected"),
+    [
+        ({"Earnings Date": [date(2027, 1, 28), date(2027, 2, 1)]}, date(2027, 1, 28)),
+        ({"Earnings Date": [date(2026, 10, 30)]}, None),  # already past
+        ({}, None),  # an ETF
+        (RuntimeError("yahoo"), None),  # never fails the chain
+    ],
+)
+def test_reads_the_next_earnings_date_from_the_calendar(
+    monkeypatch: pytest.MonkeyPatch, calendar: Any, expected: date | None
+) -> None:
+    _install(monkeypatch, _FakeTicker(["2026-11-16"], _UNDERLYING, calendar))
+    fetched = oc.fetch_chain("AAPL", lambda listed: listed)
+    assert fetched is not None and fetched.next_earnings == expected

@@ -115,3 +115,10 @@ Each entry has three parts:
 **Context:** The Disney Valuation card (workstream B, own-history multiples). The chart and tiles were right; the prose said price-to-free-cash-flow "of 20.39 matches its own median", when 20.39 was the median and today's figure was 24.6, and called a price-to-sales 26% below its median "above".
 **Mistake:** the factuality rubric only asks whether each number exists somewhere in the claims, so it passed. The claims invited the error: the comparison line put the median's number right after the metric's name ("Price-to-free-cash-flow vs its own median of 20.39 …"), today's figure was a separate line far up the list, and the direction was only the sign of a percentage.
 **Rule:** a comparison claim carries both figures, each with its label, and states the direction in words computed by code; the model should be able to copy the whole comparison from one line. When the prose can go wrong while every number checks out, add a rubric check for the words the number is attached to (`score_attribution`), not only for the number.
+
+### Stage the files you changed, not a directory
+
+**Date:** 2026-11-15
+**Context:** The half-day closes PR (#112).
+**Mistake:** `git add CLAUDE.md docs tasks` staged the owner's untracked `docs/screenshots/` PNGs along with the doc edits; only the AI review's "not reviewed — generated" line showed it. Those files were the owner's to commit or delete.
+**Rule:** stage changed files by name (or `git add -u` for tracked ones) and read `git show --stat HEAD` before pushing. Untracked files in the tree belong to the owner unless this session created them.

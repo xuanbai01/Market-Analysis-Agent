@@ -299,7 +299,7 @@ export function openInterestHistorySentence(history: OpenInterestTotal[]): Sente
   const first = history[0];
   const base = history.slice(0, -1).find(wholeRead);
   if (base && !wholeRead(last)) {
-    parts.push(`. No change since ${dateLabel(base.date)}: this session's read was short.`);
+    parts.push(". The change is left out: this session's read was short.");
   } else if (base && base.call > 0 && base.put > 0) {
     parts.push(
       "; calls ",

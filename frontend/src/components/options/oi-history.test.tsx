@@ -42,11 +42,14 @@ describe("open interest history words", () => {
   it("gives no change from a short read, which would look like a drop", () => {
     const shortLast = [TWO[0], { ...TWO[1], expiries: 23 }];
     expect(text(openInterestHistorySentence(shortLast))).toMatch(
-      /\(put\/call \*\*0\.88\*\*\)\. No change since Nov 16: this session's read was short\.$/,
+      /\(put\/call \*\*0\.88\*\*\)\. The change is left out: this session's read was short\.$/,
     );
     // A short first session: the change runs from the first whole read.
     const THREE = [{ ...TWO[0], date: "2026-11-13", expiries: 22 }, ...TWO];
     expect(text(openInterestHistorySentence(THREE))).toMatch(/calls \*\*up 10\.5%\*\* and puts \*\*up 2\.7%\*\* since Nov 16\.$/);
+    // Every session short: nothing to compare.
+    const allShort = TWO.map((h) => ({ ...h, expiries: 23 }));
+    expect(text(openInterestHistorySentence(allShort))).toMatch(/\. Recorded daily from Nov 16\.$/);
   });
 });
 

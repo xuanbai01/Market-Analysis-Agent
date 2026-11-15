@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Options analysis, PR4 (strategy builder)** in review on `feature/options-strategy`. PR1 (#109, the daily IV snapshot), PR2 (#110, the report API), PR3 (#111, the page) and the half-day closes (#112) are merged. Plan below.
+- **Options analysis, PR5 (cited AI read)** in review on `feature/options-read`. PR1 (#109, the daily IV snapshot), PR2 (#110, the report API), PR3 (#111, the page), the half-day closes (#112) and PR4 (#113, the strategy builder) are merged. Plan below.
 
 ## Plan — after Phase 5 (2026-11-13)
 
@@ -78,8 +78,8 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 - [x] **PR2 — report API** *(#110)*: split `earnings_calendar.py` out of `earnings.py` (announcement times, before/after the open); `options_analysis` (term structure, expected-move cone, earnings event move from bracketing expiries, past earnings moves, open interest by strike, put/call ratios, claims with units); `GET /v1/options/{symbol}` (≤ 30 KB, 15-minute cache, per-symbol lock, rate limit on misses) and `GET /v1/options/{symbol}/chain/{expiry}`; IV percentile from 63 sessions, rank from 126; `options_tracked` written on a successful view.
 - [x] **PR3 — the page** *(#111)* `/options/:ticker` (lazy, not in the demo): expected-move cone, term structure by days to expiry, smile, open interest by strike, implied vs past earnings moves, chain table; a link on the symbol page.
 - [x] **Half-day closes** *(#112)*: `market_calendar.early_closes` (3 July, the day after Thanksgiving, Christmas Eve, each when a session) close at 1 pm; quote times, `is_close`, time to expiry and the earnings timing follow. `METHOD_VERSION` 2, so the history ranks from the first version-2 session. Raised by the AI review of #111.
-- [x] **PR4 — strategy builder** *(branch `feature/options-strategy`, in review)*: long call/put, verticals, iron condor; payoff, breakevens, max profit/loss, risk-neutral probability of profit at mid and at the natural price. Templates only, never ranked.
-- [ ] **PR5 — cited AI read** on the page (claims → `synth_call` → `resolve_points(max_refs=None)`), cached per session; no advice, forecasts or strategy suggestions.
+- [x] **PR4 — strategy builder** *(#113)*: long call/put, verticals, iron condor; payoff, breakevens, max profit/loss, risk-neutral probability of profit at mid and at the natural price. Templates only, never ranked.
+- [x] **PR5 — cited AI read** *(branch `feature/options-read`, in review)* on the page (claims → `synth_call` → `resolve_points(max_refs=None)`), cached per symbol and quote time; no advice, forecasts or strategy suggestions; numbers checked in code; a live eval (`suite=options`).
 
 ## Handoff — pickup notes (2026-11-13)
 

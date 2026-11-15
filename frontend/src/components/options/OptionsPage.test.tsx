@@ -9,7 +9,12 @@ import { OptionsReportSchema } from "../../lib/options-schemas";
 import { RAW_NO_OPTIONS_REPORT, RAW_OPTIONS_REPORT } from "./fixture";
 import OptionsPage from "./OptionsPage";
 
-vi.mock("../../lib/options-api", () => ({ fetchOptionsReport: vi.fn(), fetchOptionsChain: vi.fn() }));
+// The read stays on its way: the page shows the card writing it.
+vi.mock("../../lib/options-api", () => ({
+  fetchOptionsReport: vi.fn(),
+  fetchOptionsChain: vi.fn(),
+  fetchOptionsRead: vi.fn(() => new Promise(() => {})),
+}));
 
 const REPORT = OptionsReportSchema.parse(RAW_OPTIONS_REPORT);
 
@@ -48,7 +53,7 @@ describe("OptionsPage", () => {
     expect(screen.getByText("NVIDIA Corporation")).toBeInTheDocument();
     expect(screen.getByTestId("options-asof")).toHaveTextContent(/last close/i);
     expect(screen.getByTestId("options-tiles")).toHaveTextContent("59.5%");
-    for (const id of ["options-cone", "options-term", "options-earnings", "options-expiry-section", "options-strategy-panel"]) {
+    for (const id of ["options-read-loading", "options-cone", "options-term", "options-earnings", "options-expiry-section", "options-strategy-panel"]) {
       expect(screen.getByTestId(id)).toBeInTheDocument();
     }
     expect(screen.getByTestId("options-disclaimer")).toHaveTextContent(/not advice/i);

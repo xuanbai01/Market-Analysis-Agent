@@ -2,8 +2,8 @@
  * OptionsPage — /options/:ticker (ADR 0008). What the option prices say:
  * headline figures, the expected-move cone, the term structure, the next
  * report's implied move against past ones, one expiry at a time (smile,
- * open interest, chain) and a strategy builder on that expiry. Signed in
- * only; not in the public demo.
+ * open interest, chain), a strategy builder on that expiry, and a cited AI
+ * read of the figures. Signed in only; not in the public demo.
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
@@ -17,6 +17,7 @@ import { drawsCone, drawsEarnings, drawsTerm } from "./draws";
 import { EarningsMoves } from "./EarningsMoves";
 import { ExpectedMoveCone } from "./ExpectedMoveCone";
 import { ExpirySection } from "./ExpirySection";
+import { OptionsReadCard } from "./OptionsReadCard";
 import { Panel } from "./Panel";
 import { TermStructureChart } from "./TermStructureChart";
 import { useSignOutOn401 } from "./useSignOutOn401";
@@ -139,6 +140,7 @@ export default function OptionsPage() {
       {report && report.status === "ok" && (
         <>
           <Tiles report={report} />
+          <OptionsReadCard symbol={symbol} quotedAt={report.quoted_at} />
           <div className={`grid gap-6 ${cone !== null && term ? "xl:grid-cols-2" : ""}`}>
             {cone !== null && (
               <Panel title="Expected move, one standard deviation">

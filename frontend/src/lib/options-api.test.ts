@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { RAW_OPTIONS_REPORT } from "../components/options/fixture";
+import { RAW_OPTIONS_READ, RAW_OPTIONS_REPORT } from "../components/options/fixture";
 import { ApiError } from "./api";
 import { setStoredToken } from "./auth";
-import { fetchOptionsChain, fetchOptionsReport } from "./options-api";
+import { fetchOptionsChain, fetchOptionsRead, fetchOptionsReport } from "./options-api";
 
 function respond(status: number, body: unknown, headers: Record<string, string> = {}) {
   return vi.fn().mockResolvedValue(
@@ -46,5 +46,13 @@ describe("options api", () => {
     const error = await fetchOptionsReport("SPY").catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).retryAfterSeconds).toBe(120);
+  });
+
+  it("fetches the cited read", async () => {
+    const fetchMock = respond(200, RAW_OPTIONS_READ);
+    vi.stubGlobal("fetch", fetchMock);
+    const read = await fetchOptionsRead("nvda");
+    expect(read.headline).toMatch(/Options price/);
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/v1\/options\/NVDA\/read$/);
   });
 });

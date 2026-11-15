@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -131,12 +132,66 @@ def test_claims_carry_units_and_skip_what_is_missing() -> None:
     )
     by_name = {c.description: c for c in found}
     assert by_name["Implied volatility, 30 days (IV30)"].unit == "fraction"
-    assert by_name["IV30 minus realized volatility (20 sessions)"].value == pytest.approx(0.05)
-    assert by_name["IV30 minus realized volatility (20 sessions)"].unit == "percentage_points"
-    assert by_name["25-delta skew, expiry nearest 30 days (put IV minus call IV)"].unit == "percentage_points"
-    assert by_name["Put/call open interest, expiries read"].unit == "ratio"
-    assert not any("90 days" in d for d in by_name)
+    gap = by_name["IV30 above realized volatility (20 sessions): options price more movement than the stock has shown"]
+    assert gap.value == pytest.approx(0.05) and gap.unit == "percentage_points"
+    assert by_name["25-delta skew, expiry nearest 30 days: puts carry higher IV than calls"].unit == "percentage_points"
+    assert by_name["Put/call open interest, expiries read: more puts open than calls"].unit == "ratio"
+    assert not any("90 days" in d or "IV90" in d for d in by_name)
     assert all(c.source.tool == "computed.options" for c in found)
+
+
+def _earnings(implied: float | None, past_moves: list[float], refused: str | None = None) -> Any:
+    nxt = Announcement(datetime(2026, 11, 17, 16, tzinfo=mc.ET), "after_close", False)
+    event = EventMove(None, implied, None, "two_after", refused, (date(2026, 11, 18), date(2026, 11, 27)))
+    past = [PastMove(announced=date(2026, 8, 26), timing="after_close", move=m) for m in past_moves]
+    return oa.earnings_block(Schedule(nxt, ()), event, past, 160.0, estimated=False)
+
+
+def _comparisons(**overrides: Any) -> dict[str, Any]:
+    args: dict[str, Any] = {
+        "iv30": 0.25, "iv90": 0.22, "rv20": 0.20, "rv60": None, "skew25": 0.05, "default": None,
+        "put_call_oi": 0.8, "earnings": None, "history": oa.iv_history([], 0.25),
+        "at": datetime(2026, 11, 15, tzinfo=mc.ET),
+    }
+    return {c.description: c for c in oa.claims(**{**args, **overrides})}
+
+
+def test_comparisons_state_their_direction_in_words() -> None:
+    """ADR 0007: code works out which way a comparison goes, so the read
+    copies the words instead of reading a sign."""
+    by_name = _comparisons(earnings=_earnings(0.06, [0.05, -0.03]))
+    term = by_name["IV90 below IV30: the term structure slopes down, longer expiries price less volatility"]
+    assert term.value == pytest.approx(-0.03) and term.unit == "percentage_points"
+    assert "Put/call open interest, expiries read: more calls open than puts" in by_name
+    move = by_name["Implied earnings move above the average absolute move after the last 2 reports"]
+    assert move.value == pytest.approx(0.02) and move.unit == "percentage_points"
+
+
+def test_the_other_directions_and_a_level_term_structure() -> None:
+    by_name = _comparisons(iv30=0.18, iv90=0.18, skew25=-0.01, put_call_oi=1.0, earnings=_earnings(0.03, [0.05]))
+    assert "IV30 below realized volatility (20 sessions): options price less movement than the stock has shown" in by_name
+    assert "IV90 level with IV30: the term structure is flat" in by_name
+    assert "25-delta skew, expiry nearest 30 days: calls carry higher IV than puts" in by_name
+    assert "Put/call open interest, expiries read: as many puts open as calls" in by_name
+    assert "Implied earnings move below the average absolute move after the last 1 report" in by_name
+
+
+def test_no_put_open_interest_is_more_calls_not_a_tie() -> None:
+    assert "Put/call open interest, expiries read: more calls open than puts" in _comparisons(put_call_oi=0.0)
+
+
+def test_no_earnings_comparison_without_a_priced_move() -> None:
+    by_name = _comparisons(earnings=_earnings(None, [0.05]))
+    assert not any("average move" in d for d in by_name)
+
+
+def test_a_refused_earnings_move_is_a_fact_with_its_reason() -> None:
+    """KO's live read set the month's one-sigma move against past report
+    moves when no earnings move was priced; the reason it isn't priced is
+    now a fact the read can quote."""
+    refused = _earnings(None, [0.05], refused="the first expiry after the report is 98 days out")
+    claim = _comparisons(earnings=refused)["Implied earnings move, report on 2026-11-17: not priced"]
+    assert claim.value == "the first expiry after the report is 98 days out" and claim.unit == "string"
 
 
 def test_the_earnings_block() -> None:

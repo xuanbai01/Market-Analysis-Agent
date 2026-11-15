@@ -200,3 +200,26 @@ async def test_zero_or_negative_window_raises() -> None:
         TokenBucket(capacity=3, window_seconds=0)
     with pytest.raises(ValueError, match="window_seconds"):
         TokenBucket(capacity=3, window_seconds=-100)
+
+
+async def test_buckets_that_have_refilled_are_dropped_once_there_are_many() -> None:
+    """A full bucket holds no state, so memory follows recent callers, not
+    every caller ever seen (security review, #114)."""
+    clock = [0.0]
+    bucket = TokenBucket(capacity=2, window_seconds=60.0, time_source=lambda: clock[0])
+    for i in range(bucket.PRUNE_AT + 10):
+        await bucket.take(f"10.0.{i // 256}.{i % 256}")
+    clock[0] = 61.0  # every bucket has refilled
+    await bucket.take("10.9.9.9")
+    assert len(bucket._buckets) == 1
+
+
+async def test_a_drained_bucket_survives_pruning() -> None:
+    clock = [0.0]
+    bucket = TokenBucket(capacity=1, window_seconds=60.0, time_source=lambda: clock[0])
+    await bucket.take("drained")
+    for i in range(bucket.PRUNE_AT + 10):
+        await bucket.take(f"k{i}")
+    clock[0] = 1.0  # one second: "drained" is still empty
+    assert (await bucket.take("drained"))[0] is False
+

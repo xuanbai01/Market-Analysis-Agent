@@ -6,7 +6,7 @@
  */
 import { z } from "zod";
 
-import { ClaimSchema } from "./schemas";
+import { ClaimSchema, ThesisPointSchema } from "./schemas";
 
 const Num = z.number();
 const MaybeNum = z.number().nullable();
@@ -137,3 +137,18 @@ export const OptionsReportSchema = z.object({
   generated_at: z.string(),
 });
 export type OptionsReport = z.infer<typeof OptionsReportSchema>;
+
+/** The cited read (GET /v1/options/{symbol}/read): points cite ``claims``
+ * by index, the report's claims as they stood when it was written. */
+export const OptionsReadSchema = z.object({
+  symbol: z.string(),
+  quoted_at: z.string(),
+  at_close: z.boolean(),
+  headline: z.string(),
+  // No defaults: a read that lost its points or claims is an error, not
+  // an uncited headline.
+  points: z.array(ThesisPointSchema),
+  claims: z.array(ClaimSchema),
+  generated_at: z.string(),
+});
+export type OptionsRead = z.infer<typeof OptionsReadSchema>;

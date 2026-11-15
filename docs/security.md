@@ -26,8 +26,10 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 
 - Router → Service → (Agent / DB) separation. Business logic never lives in route handlers where it can be bypassed.
 - Immutable audit records: ingested market bars and news items should be append-only (use a ts-indexed table; supersede, don't update).
-- Rate-limit LLM-backed endpoints, and anything that fans out to a provider: an options page build (about a dozen Yahoo calls) is limited per IP on cache misses (`OPTIONS_RATE_LIMIT_PER_HOUR`, 60); cached reports are free.
+- Rate-limit LLM-backed endpoints, and anything that fans out to a provider: an options page build (about a dozen Yahoo calls) is limited per IP on cache misses (`OPTIONS_RATE_LIMIT_PER_HOUR`, 60); cached reports are free. The options read is a model call, limited per IP when no read of the same quotes is cached (`OPTIONS_READ_RATE_LIMIT_PER_HOUR`, 20); its prompt holds the validated ticker, the quote time and computed claims, nothing a caller typed.
 - Rate-limit LLM-backed endpoints. `/v1/research/{symbol}` has a per-IP limit on fresh reports (default 3/h; 30/h in production while the owner is the only user — lower it before sharing the URL).
+- **Every per-IP limit keys on `Fly-Client-IP`,** which Fly's proxy sets to the address it accepted the connection from, and only when it parses as an IP (`dependencies._client_ip`; off Fly, the socket's peer). Not `X-Forwarded-For`: Fly appends to it and keeps whatever the client wrote first, so keying on that let a caller mint a new bucket per request, on the open demo routes too (security review, #114). Buckets that have refilled are dropped once there are 1,024 keys (`TokenBucket.PRUNE_AT`), so memory follows recent callers. This assumes Fly's proxy: behind another proxy that sets only `X-Forwarded-For`, every caller would share the proxy's address.
+- **Workflow secrets live on the steps that use them,** not the job: install steps run third-party code (`live-eval.yml`).
 
 ## A05 — Security Misconfiguration
 

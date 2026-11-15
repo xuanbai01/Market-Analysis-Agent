@@ -122,3 +122,18 @@ Each entry has three parts:
 **Context:** The half-day closes PR (#112).
 **Mistake:** `git add CLAUDE.md docs tasks` staged the owner's untracked `docs/screenshots/` PNGs along with the doc edits; only the AI review's "not reviewed — generated" line showed it. Those files were the owner's to commit or delete.
 **Rule:** stage changed files by name (or `git add -u` for tracked ones) and read `git show --stat HEAD` before pushing. Untracked files in the tree belong to the owner unless this session created them.
+
+### Run only the tools the project has
+
+**Date:** 2026-11-15
+**Context:** The strategy builder (#113).
+**Mistake:** `npx prettier --write` on one file: prettier isn't a dependency here, so npx fetched it and reformatted the whole file to its defaults, a 170-line diff of style. Caught before commit and reverted by hand.
+**Rule:** format and lint with the project's own commands (`npm run lint`, `uv run ruff`); `npx <tool>` for a tool that isn't in `package.json` downloads and runs it.
+
+### A pending promise set in `beforeEach` killed the vitest worker
+
+**Date:** 2026-11-15
+**Context:** The options read card (PR5), Node 25.1 on Windows.
+**Mistake:** `beforeEach(() => vi.mocked(fetchOptionsRead).mockReturnValue(new Promise(() => {})))` made the page's test file die with "Worker exited unexpectedly", with no test failure to read. Bisecting against `main` found it: the same never-settling promise from the `vi.mock` factory (`vi.fn(() => new Promise(() => {}))`) runs fine.
+**Rule:** give a mock its default behaviour in the `vi.mock` factory; when a file dies without a failure, bisect the test file against `main` before suspecting the component.
+

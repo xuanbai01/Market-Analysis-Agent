@@ -6,10 +6,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import enforce_options_rate_limit, get_session
+from app.api.v1.dependencies import (
+    enforce_options_rate_limit,
+    enforce_options_read_rate_limit,
+    get_session,
+)
 from app.core.auth import require_shared_secret
-from app.schemas.options import ExpiryChain, OptionsReport, SnapshotRun
+from app.schemas.options import ExpiryChain, OptionsRead, OptionsReport, SnapshotRun
 from app.services.options_chain import SymbolNotFound
+from app.services.options_read import NothingToRead, ReadUnavailable, get_read, has_read
 from app.services.options_report import (
     ExpiryNotListed,
     NoUsableQuotes,
@@ -67,6 +72,40 @@ async def options_chain(
         raise HTTPException(status_code=404, detail=f"No usable quotes for {symbol} expiring {expiry}.") from exc
     except Exception as exc:
         logger.exception("options chain for %s %s failed", symbol, expiry)
+        raise HTTPException(status_code=503, detail=_UNAVAILABLE) from exc
+
+
+@router.get("/options/{symbol}/read", response_model=OptionsRead)
+async def options_read(
+    request: Request, symbol: Symbol, session: AsyncSession = Depends(get_session)
+) -> OptionsRead:
+    """The cited AI read of the symbol's options report. A report build
+    counts as a lookup, a read the model has to write as a read."""
+    symbol = symbol.upper()
+    await _limit_misses(request, symbol)
+    try:
+        report = await get_report(session, symbol)
+    except SymbolNotFound as exc:
+        raise HTTPException(status_code=404, detail=f"No such symbol: {symbol}.") from exc
+    except Exception as exc:
+        logger.exception("options report for %s failed", symbol)
+        raise HTTPException(status_code=503, detail=_UNAVAILABLE) from exc
+    # No database connection through the model call (CLAUDE.md): the report
+    # committed its view, but a failed history read can leave a transaction
+    # open. The session reopens if anything uses it again.
+    await session.close()
+    # Decided on the report the read is written from, so a rebuild between
+    # the two can't make a read free.
+    if report.status == "ok" and not has_read(report):
+        await enforce_options_read_rate_limit(request)
+    try:
+        return await get_read(report)
+    except NothingToRead as exc:
+        raise HTTPException(status_code=404, detail=f"{symbol} has no priced options to read.") from exc
+    except ReadUnavailable as exc:
+        raise HTTPException(status_code=503, detail="No read could be written just now; try again shortly.") from exc
+    except Exception as exc:
+        logger.exception("options read for %s failed", symbol)
         raise HTTPException(status_code=503, detail=_UNAVAILABLE) from exc
 
 

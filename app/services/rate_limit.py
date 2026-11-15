@@ -68,6 +68,19 @@ class TokenBucket:
         self._buckets: dict[str, tuple[float, float]] = {}
         self._lock = asyncio.Lock()
 
+    # Past this many keys, a take() first drops the buckets that have
+    # refilled: a full bucket holds no state, so memory follows recent
+    # callers rather than every caller ever seen.
+    PRUNE_AT = 1024
+
+    def _prune(self, now: float) -> None:
+        full = [
+            key for key, (tokens, last) in self._buckets.items()
+            if tokens + (now - last) * self._refill_rate >= self._capacity
+        ]
+        for key in full:
+            del self._buckets[key]
+
     async def take(self, key: str) -> tuple[bool, float]:
         """Try to consume one token for ``key``.
 
@@ -78,6 +91,8 @@ class TokenBucket:
         """
         async with self._lock:
             now = self._time()
+            if len(self._buckets) >= self.PRUNE_AT:
+                self._prune(now)
             tokens, last = self._buckets.get(
                 key, (float(self._capacity), now)
             )

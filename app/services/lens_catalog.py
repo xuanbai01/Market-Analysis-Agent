@@ -48,13 +48,17 @@ class LensSpec:
     description: str
     metric: LensMetric
     companies: tuple[LensCompanySpec, ...]
+    # Companies SEC shows never tag the metric. The index leaves them out
+    # before any data is read; a build finds the same from the data and
+    # names them on the lens page.
+    untagged: tuple[str, ...] = ()
 
     def summary(self) -> LensSummary:
         return LensSummary(
             id=self.id,
             title=self.title,
             description=self.description,
-            tickers=[c.ticker for c in self.companies],
+            tickers=[c.ticker for c in self.companies if c.ticker not in self.untagged],
             metric=self.metric.info(),
         )
 
@@ -133,5 +137,6 @@ LENSES: dict[str, LensSpec] = {
         ),
         metric=RND,
         companies=MEGACAPS,
+        untagged=("AMZN",),
     ),
 }

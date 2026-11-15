@@ -162,6 +162,8 @@ def test_the_rate_falls_back_to_an_assumed_value_and_says_so(monkeypatch: pytest
         ({"Earnings Date": [date(2027, 1, 28), date(2027, 2, 1)]}, date(2027, 1, 28)),
         ({"Earnings Date": [date(2026, 10, 30)]}, None),  # already past
         ({}, None),  # an ETF
+        ({"Earnings Date": date(2027, 1, 28)}, date(2027, 1, 28)),  # one date, not a list
+        ({"Earnings Date": "soon"}, None),  # a shape we don't know
         (RuntimeError("yahoo"), None),  # never fails the chain
     ],
 )
@@ -189,3 +191,14 @@ def test_an_expiry_missing_one_side_is_dropped_not_the_ticker(monkeypatch: pytes
     _install(monkeypatch, ticker)
     fetched = oc.fetch_chain("AAPL", lambda listed: listed)
     assert fetched is not None and sorted(fetched.chains) == [date(2026, 11, 16)]
+
+
+@pytest.mark.parametrize(("raw", "expected"), [(0.0216, 0.0216), (2.16, 0.0216), (None, 0.0)])
+def test_the_dividend_yield_is_a_fraction(monkeypatch: pytest.MonkeyPatch, raw: Any, expected: float) -> None:
+    """Yahoo sends trailingAnnualDividendYield as a fraction (KO 0.0216)
+    beside dividendYield in percent (2.14); a percent read as a fraction
+    would make the fallback forward 100 times wrong."""
+    _install(monkeypatch, _FakeTicker(["2026-11-16"], {**_UNDERLYING, "trailingAnnualDividendYield": raw}))
+    fetched = oc.fetch_chain("KO", lambda listed: listed)
+    assert fetched is not None and fetched.dividend_yield == pytest.approx(expected)
+

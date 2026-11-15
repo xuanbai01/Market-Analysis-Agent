@@ -168,7 +168,7 @@ function LegsTable({
                     onChange={(e) => onStrike(i, Number(e.target.value))}
                     className="rounded border border-strata-border bg-strata-canvas px-1 py-0.5 text-strata-fg"
                   >
-                    {strikes.map((k) => (
+                    {(strikes.includes(leg.strike) ? strikes : [...strikes, leg.strike].sort((a, b) => a - b)).map((k) => (
                       <option key={k} value={String(k)}>
                         {k}
                       </option>

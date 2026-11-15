@@ -53,8 +53,9 @@ export function EarningsMoves({ earnings }: { earnings: EarningsBlock }) {
         )}
         {past.length > 0 && earnings.past_mean_abs !== null && (
           <>
-            The last {past.length} reports moved <span className="text-strata-hi">{pct(earnings.past_mean_abs)}</span> on
-            average.
+            {past.length > 1 ? `The last ${past.length} reports moved` : "The last report moved"}{" "}
+            <span className="text-strata-hi">{pct(earnings.past_mean_abs)}</span>
+            {past.length > 1 ? " on average." : "."}
           </>
         )}
       </p>

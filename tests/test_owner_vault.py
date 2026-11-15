@@ -23,40 +23,68 @@ def keyed(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_a_row_round_trips() -> None:
     payload = {"symbol": "NVDA  261218C00175000", "net-value": "-412.35", "account": 1}
-    nonce, ciphertext = vault.seal(payload, 4242)
+    nonce, ciphertext = vault.seal(payload, 4242, estimated_fee=False)
     assert len(nonce) == vault.NONCE_BYTES
-    assert vault.unseal(nonce, ciphertext, 4242) == payload
+    assert vault.unseal(nonce, ciphertext, 4242, key_version=1, estimated_fee=False) == payload
 
 
 def test_nothing_readable_is_stored() -> None:
-    _nonce, ciphertext = vault.seal({"symbol": "ZZQXDISTINCT", "description": "Sold 1 ZZQXDISTINCT"}, 1)
+    _nonce, ciphertext = vault.seal({"symbol": "ZZQXDISTINCT", "description": "Sold 1 ZZQXDISTINCT"}, 1, estimated_fee=False)
     assert b"ZZQXDISTINCT" not in ciphertext
 
 
 def test_each_seal_has_its_own_nonce() -> None:
-    first, _ = vault.seal({"a": 1}, 1)
-    second, _ = vault.seal({"a": 1}, 1)
+    first, _ = vault.seal({"a": 1}, 1, estimated_fee=False)
+    second, _ = vault.seal({"a": 1}, 1, estimated_fee=False)
     assert first != second
 
 
 def test_a_ciphertext_moved_to_another_row_does_not_open() -> None:
-    nonce, ciphertext = vault.seal({"a": 1}, 1)
+    nonce, ciphertext = vault.seal({"a": 1}, 1, estimated_fee=False)
     with pytest.raises(vault.VaultUnavailable):
-        vault.unseal(nonce, ciphertext, 2)
+        vault.unseal(nonce, ciphertext, 2, key_version=1, estimated_fee=False)
 
 
 def test_another_key_does_not_open_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    nonce, ciphertext = vault.seal({"a": 1}, 1)
+    nonce, ciphertext = vault.seal({"a": 1}, 1, estimated_fee=False)
     monkeypatch.setattr(settings_module.settings, "OWNER_VAULT_KEY", SecretStr(OTHER))
     with pytest.raises(vault.VaultUnavailable):
-        vault.unseal(nonce, ciphertext, 1)
+        vault.unseal(nonce, ciphertext, 1, key_version=1, estimated_fee=False)
+
+
+def test_the_clear_flag_and_version_are_bound_to_the_ciphertext() -> None:
+    """Someone who could write to the table can't flip a row's estimated-fee
+    flag, or pass it off under another key version (PR 4's security review)."""
+    nonce, ciphertext = vault.seal({"a": 1}, 7, estimated_fee=True)
+    assert vault.unseal(nonce, ciphertext, 7, key_version=1, estimated_fee=True) == {"a": 1}
+    with pytest.raises(vault.VaultUnavailable):
+        vault.unseal(nonce, ciphertext, 7, key_version=1, estimated_fee=False)
+    with pytest.raises(vault.VaultUnavailable, match="version"):
+        vault.unseal(nonce, ciphertext, 7, key_version=2, estimated_fee=True)
+
+
+def test_a_damaged_row_is_the_vault_s_error_not_a_crash() -> None:
+    nonce, ciphertext = vault.seal({"a": 1}, 7, estimated_fee=False)
+    with pytest.raises(vault.VaultUnavailable):
+        vault.unseal(nonce[:4], ciphertext, 7, key_version=1, estimated_fee=False)
+    with pytest.raises(vault.VaultUnavailable):
+        vault.unseal(nonce, ciphertext[:-1], 7, key_version=1, estimated_fee=False)
+
+
+def test_a_settings_error_never_prints_a_secret() -> None:
+    """A bad key stops the app before it starts; pydantic's message would
+    otherwise quote the settings' values, the refresh token included."""
+    with pytest.raises(ValidationError) as caught:
+        Settings(_env_file=None, OWNER_VAULT_KEY="not base64!", TASTYTRADE_REFRESH_TOKEN="REFRESHTOKENDISTINCT0123456789")  # type: ignore[arg-type]
+    assert "REFRESHTOKENDISTINCT" not in str(caught.value)
+    assert "OWNER_VAULT_KEY must be base64" in str(caught.value)
 
 
 def test_without_a_key_it_refuses_and_writes_nothing_in_the_clear(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings_module.settings, "OWNER_VAULT_KEY", SecretStr(""))
     assert vault.is_configured() is False
     with pytest.raises(vault.VaultUnavailable):
-        vault.seal({"a": 1}, 1)
+        vault.seal({"a": 1}, 1, estimated_fee=False)
 
 
 @pytest.mark.parametrize(

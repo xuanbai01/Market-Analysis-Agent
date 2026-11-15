@@ -120,7 +120,7 @@ async def test_the_first_sync_copies_every_transaction_sealed(world: _World) -> 
     for tid, row in world.rows.items():
         assert set(row) == {"id", "key_version", "nonce", "ciphertext", "estimated_fee"}
         assert b"NVDA" not in row["ciphertext"] and ACCOUNT.encode() not in row["ciphertext"]
-        payload = vault.unseal(row["nonce"], row["ciphertext"], tid)
+        payload = vault.unseal(row["nonce"], row["ciphertext"], tid, key_version=1, estimated_fee=row["estimated_fee"])
         assert payload["account"] == 1 and "account-number" not in payload  # numbered, never named
 
 
@@ -141,7 +141,8 @@ async def test_estimated_fees_are_replaced_once_final_and_only_then(world: _Worl
     world.history = [_txn(1, "2026-11-13", **{"is-estimated-fee": False, "net-value": "478.86"})]
     ot.reset()
     assert (await _sync(world)).replaced == 1
-    assert vault.unseal(world.rows[1]["nonce"], world.rows[1]["ciphertext"], 1)["net-value"] == "478.86"
+    row = world.rows[1]
+    assert vault.unseal(row["nonce"], row["ciphertext"], 1, key_version=1, estimated_fee=False)["net-value"] == "478.86"
     ot.reset()
     assert (await _sync(world)).replaced == 0  # a final row is never touched again
 
@@ -194,3 +195,49 @@ def test_a_csv_cell_that_a_spreadsheet_would_run_is_defused() -> None:
     assert ot.csv_cell("+1") == "'+1" and ot.csv_cell("@x") == "'@x" and ot.csv_cell("-x") == "'-x"
     assert ot.csv_cell("Sold 1 NVDA") == "Sold 1 NVDA"
     assert ot.csv_cell(-120.5) == "-120.5"  # numbers stay numbers
+
+
+async def test_an_account_number_in_free_text_is_scrubbed_before_sealing(world: _World) -> None:
+    world.history = [_txn(1, "2026-10-01", description=f"Transfer to {ACCOUNT}", transaction_type="Money Movement")]
+    await _sync(world)
+    row = world.rows[1]
+    payload = vault.unseal(row["nonce"], row["ciphertext"], 1, key_version=1, estimated_fee=False)
+    assert payload["description"] == "Transfer to account 1"
+
+
+async def test_a_failed_sync_is_spaced_too(world: _World) -> None:
+    world.history = [_txn(1, "2026-10-01")]
+    world.fail = tt.TastytradeUnavailable("tastytrade answered 503")
+    with pytest.raises(tt.TastytradeUnavailable):
+        await _sync(world)
+    world.fail = None
+    assert (await _sync(world)).skipped is True  # not asked again within the minute
+
+
+async def test_two_visits_at_once_sync_once(world: _World) -> None:
+    import asyncio
+
+    world.history = [_txn(1, "2026-10-01")]
+    first, second = await asyncio.gather(_sync(world), _sync(world))
+    assert sorted([first.skipped, second.skipped]) == [False, True]
+    assert len(world.calls) == 1
+
+
+async def test_a_closed_account_is_skipped(world: _World, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = world.get
+
+    async def two(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        if path == "/customers/me/accounts":
+            return {"data": {"items": [{"account": {"account-number": "GONE0001"}}, {"account": {"account-number": ACCOUNT}}]}}
+        if path == "/accounts/GONE0001/transactions":
+            raise tt.TastytradeNotFound("/accounts/***/transactions")
+        return await real(path, params, op=op)
+
+    monkeypatch.setattr(tt, "get", two)
+    world.history = [_txn(1, "2026-10-01")]
+    assert (await _sync(world)).new == 1
+
+
+def test_a_formula_behind_spaces_or_a_newline_is_defused_too() -> None:
+    assert ot.csv_cell(" =1+1") == "' =1+1"
+    assert ot.csv_cell("\n=1+1") == "'\n=1+1"

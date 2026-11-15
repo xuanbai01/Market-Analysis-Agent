@@ -79,6 +79,14 @@ describe("TradesPage", () => {
     expect(await screen.findByTestId("trades-no-vault")).toHaveTextContent("OWNER_VAULT_KEY");
   });
 
+  it("gives the server's reason when the copy doesn't open", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerTrades).mockRejectedValue(new ApiError({ status: 503, title: "a stored trade doesn't open with this key" }));
+    renderPage();
+    expect(await screen.findByTestId("trades-vault-error")).toHaveTextContent("doesn't open with this key");
+    expect(screen.queryByTestId("trades-no-vault")).toBeNull();
+  });
+
   it("forgets a refused key, and the trades with it", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchOwnerTrades).mockRejectedValue(new ApiError({ status: 403, title: "This needs the owner key." }));
@@ -96,8 +104,13 @@ describe("TradesPage", () => {
     const revoked = vi.fn();
     Object.assign(URL, { createObjectURL: created, revokeObjectURL: revoked });
     renderPage();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     fireEvent.click(await screen.findByRole("button", { name: "Download CSV" }));
-    await waitFor(() => expect(revoked).toHaveBeenCalledWith("blob:x"));
+    await waitFor(() => expect(created).toHaveBeenCalled());
+    expect(revoked).not.toHaveBeenCalled(); // not at once: Safari would cancel the save
+    vi.advanceTimersByTime(1000);
+    expect(revoked).toHaveBeenCalledWith("blob:x");
+    vi.useRealTimers();
     expect(fetchOwnerTradesCsv).toHaveBeenCalledWith("k".repeat(40));
   });
 });

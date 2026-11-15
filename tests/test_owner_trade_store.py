@@ -20,6 +20,13 @@ async def test_rows_are_written_once(db_session: AsyncSession) -> None:
     assert next(r for r in rows if r.id == 2).ciphertext == b"sealed"  # the first write stands
 
 
+async def test_a_first_sync_larger_than_one_statement_takes_is_written_in_chunks(db_session: AsyncSession) -> None:
+    """Postgres takes at most 32,767 parameters a statement: 6,000 rows of 5
+    in one would fail every time (PR 4's security review)."""
+    assert await store.insert(db_session, [_row(i) for i in range(1, 6001)]) == 6000
+    assert len(await store.stored(db_session)) == 6000
+
+
 async def test_nothing_to_insert_writes_nothing(db_session: AsyncSession) -> None:
     assert await store.insert(db_session, []) == 0
 

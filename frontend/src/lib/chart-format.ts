@@ -9,6 +9,12 @@ function trimmed(n: number, decimals: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(decimals);
 }
 
+/** A tick at the fewest decimals that write it, up to two: niceTicks steps
+ *  by 1, 2, 2.5 or 5 × a power of ten, so 40, 40.25, 40.5 all read exactly. */
+function tickNumber(n: number): string {
+  return String(Number(n.toFixed(2)));
+}
+
 /** "2025-Q3" → "Q3 '25"; other period shapes pass through. */
 export function shortPeriod(period: string): string {
   const m = /^(\d{4})-Q([1-4])$/.exec(period);
@@ -30,15 +36,15 @@ export function fractionPct(v: number): string {
   return `${(v * 100).toFixed(1)}%`;
 }
 
-/** A stored fraction as a percent tick: 0.2 → "20%", -0.25 → "-25%". */
+/** A stored fraction as a percent tick: 0.2 → "20%", -0.25 → "-25%", 0.4025 → "40.25%". */
 export function fractionPctTick(v: number): string {
-  return `${trimmed(Number((v * 100).toFixed(2)), 1)}%`;
+  return `${tickNumber(v * 100)}%`;
 }
 
 /** A dollar amount as a billions tick: 0 → "$0", 2.5e9 → "$2.5B", 1e11 → "$100B". */
 export function usdBillionsTick(v: number): string {
   if (v === 0) return "$0";
-  return `${v < 0 ? "-" : ""}$${trimmed(Number((Math.abs(v) / 1e9).toFixed(2)), 1)}B`;
+  return `${v < 0 ? "-" : ""}$${tickNumber(Math.abs(v) / 1e9)}B`;
 }
 
 /** Indexed value (first period = 100): 236.4 → "236". */

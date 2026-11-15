@@ -108,6 +108,17 @@ def _claim(
     )
 
 
+def _gap_to_median(today: float, gap: float, median_name: str) -> str:
+    """The end of a "vs median" description: today's figure and the
+    direction in words ("today 24.38, above the median by"), so the prose
+    copies both from one line instead of reading a sign. On 2026-11-14
+    the Disney prose gave the median as today's figure and called a
+    discount "above"."""
+    if gap == 0:
+        return f"today {today:.2f}, level with the {median_name}"
+    return f"today {today:.2f}, {'above' if gap > 0 else 'below'} the {median_name} by"
+
+
 def _ratio(numerator: float | None, denominator: float | None) -> float | None:
     """numerator / denominator, only over a positive denominator."""
     if numerator is None or denominator is None or denominator <= 0:
@@ -315,9 +326,10 @@ def valuation_claims(fundamentals: Any, peers: Any = None) -> list[Claim]:
     for key, label in _PEER_MULTIPLES.items():
         own, median = _num(f, key), _num(p, f"median.{key}")
         if own and own > 0 and median and median > 0:
+            gap = own / median - 1
             out.append(_claim(
-                f"{label} vs peer median of {median:.2f}: premium (+) or discount (−)",
-                own / median - 1,
+                f"{label} vs peer median of {median:.2f}: {_gap_to_median(own, gap, 'peer median')}",
+                gap,
                 "fraction",
                 f"{key} / median.{key} − 1",
                 f,
@@ -482,7 +494,9 @@ def valuation_history_claims(fundamentals: Any, annual: Any) -> list[Claim]:
     comparison and keeps the median.
 
     The year-end points are fiscal-year figures and today's are trailing
-    twelve months, which the descriptions say.
+    twelve months, which the descriptions say. The median says it is not
+    today's figure, and the comparison carries both figures and the
+    direction in words (``_gap_to_median``).
     """
     f, a = _claims(fundamentals), _claims(annual)
     out: list[Claim] = []
@@ -504,9 +518,9 @@ def valuation_history_claims(fundamentals: Any, annual: Any) -> list[Claim]:
         if len(points) < MIN_ANNUAL_POINTS or (bank and key == "pfcf_annual"):
             continue
         mid = median(p.value for p in points)
-        span = f"{len(points)} fiscal year-ends"
+        span = f"{len(points)} fiscal year-ends ({points[0].period}–{points[-1].period})"
         out.append(_claim(
-            f"Median {median_label} across {span} ({points[0].period}–{points[-1].period})",
+            f"Median {median_label} across {span}: the company's own norm, not today's multiple",
             mid,
             "ratio",
             f"median({key})",
@@ -514,9 +528,10 @@ def valuation_history_claims(fundamentals: Any, annual: Any) -> list[Claim]:
         ))
         now = today[key]
         if now is not None and now > 0 and mid > 0:
+            gap = now / mid - 1
             out.append(_claim(
-                f"{today_label} vs its own median of {mid:.2f} across {span}: premium (+) or discount (−)",
-                now / mid - 1,
+                f"{today_label} vs its own median of {mid:.2f} across {span}: {_gap_to_median(now, gap, 'median')}",
+                gap,
                 "fraction",
                 f"today's trailing multiple ÷ median({key}) − 1",
                 f,

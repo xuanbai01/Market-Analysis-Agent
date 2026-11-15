@@ -69,6 +69,26 @@ describe("extractOwnHistory", () => {
     expect(pe.premium).toBe(1.0);
   });
 
+  it("reads the descriptions that name today's figure and the direction (report version 7)", () => {
+    // 2026-11-14: the comparison line now carries today's figure and says
+    // above or below in words; the median line says it is not today's.
+    const v7 = FULL.map((c) =>
+      c.description.startsWith("Median")
+        ? { ...c, description: `${c.description}: the company's own norm, not today's multiple` }
+        : c.description.startsWith("Price-to-sales vs its own median")
+          ? {
+              ...c,
+              description:
+                "Price-to-sales vs its own median of 6.00 across 5 fiscal year-ends (2021–2025): " +
+                "today 8.00, above the median by",
+            }
+          : c,
+    );
+    const ps = extractOwnHistory(report(v7))[1];
+    expect(ps.median).toBe(6);
+    expect(ps.premium).toBe(0.3333);
+  });
+
   it("reads today's price-to-free-cash-flow from its derived claim", () => {
     const pfcf = extractOwnHistory(report(FULL))[2];
     expect(pfcf.today).toBe(27.5);

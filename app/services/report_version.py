@@ -45,12 +45,17 @@ History:
        filing list, so their reports gain risk changes; a warm cache
        no longer serves a 10-K a year behind (AAPL's FY2025 in place
        of FY2026).
+    8  2026-11-14 — valuation prose names today's multiple and the median
+       apart: each "vs median" claim (own history and peers) carries
+       today's figure and says above or below in words, the median says
+       it is not today's figure, and both prompts say to compare a
+       multiple only with its own median.
 """
 from __future__ import annotations
 
 from app.schemas.research import ResearchReport
 
-REPORT_VERSION = 7
+REPORT_VERSION = 8
 
 
 def is_outdated(report: ResearchReport) -> bool:

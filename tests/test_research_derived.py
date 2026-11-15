@@ -7,6 +7,7 @@ TTM sums the last four.
 """
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -172,10 +173,10 @@ PEERS = {
 class TestValuation:
     def test_premium_or_discount_to_the_peer_median(self) -> None:
         d = by_description(rd.valuation_claims(FUND, PEERS))
-        assert d["Trailing P/E vs peer median of 35.24: premium (+) or discount (−)"].value == pytest.approx(
+        assert d["Trailing P/E vs peer median of 35.24: today 28.00, below the peer median by"].value == pytest.approx(
             28 / 35.24 - 1
         )
-        assert d["EV/EBITDA vs peer median of 20.00: premium (+) or discount (−)"].value == pytest.approx(0.25)
+        assert d["EV/EBITDA vs peer median of 20.00: today 25.00, above the peer median by"].value == pytest.approx(0.25)
 
     def test_gross_margin_gap_to_peers_in_points(self) -> None:
         """On the trailing figure peers are measured on (0.62), not the
@@ -261,7 +262,7 @@ class TestBanks:
         assert "Operating margin change, 2025-Q3 → 2026-Q3" in d
         assert "Dividend payout ratio (forward dividend ÷ trailing earnings)" in d
         assert "Shareholder yield (forward dividend + latest-year buybacks)" in d
-        assert "Trailing P/E vs peer median of 35.24: premium (+) or discount (−)" in d
+        assert "Trailing P/E vs peer median of 35.24: today 28.00, below the peer median by" in d
 
 
 def test_latest_surprise_against_the_long_run_average() -> None:
@@ -342,25 +343,34 @@ ANNUAL = {
 }
 
 
+MEDIAN_PE = "Median P/E across 5 fiscal year-ends (2021–2025): the company's own norm, not today's multiple"
+
+
 class TestOwnHistory:
     """ADR 0004 named this gap first: is it expensive against its own
     history? Today's multiple against the median of its fiscal year-ends."""
 
     def test_the_median_of_the_year_end_readings(self) -> None:
         d = by_description(rd.valuation_history_claims(FUND, ANNUAL))
-        median = d["Median P/E across 5 fiscal year-ends (2021–2025)"]
+        median = d[MEDIAN_PE]
         assert median.value == pytest.approx(14.0)
         assert median.unit == "ratio"
-        assert d["Median price-to-sales across 5 fiscal year-ends (2021–2025)"].value == pytest.approx(6.0)
-        assert d["Median price-to-free-cash-flow across 5 fiscal year-ends (2021–2025)"].value == pytest.approx(25.0)
+        assert d["Median price-to-sales across 5 fiscal year-ends (2021–2025): the company's own norm, not today's multiple"].value == pytest.approx(6.0)
+        assert d["Median price-to-free-cash-flow across 5 fiscal year-ends (2021–2025): the company's own norm, not today's multiple"].value == pytest.approx(25.0)
 
     def test_todays_multiple_against_that_median(self) -> None:
         d = by_description(rd.valuation_history_claims(FUND, ANNUAL))
         # FUND: trailing P/E 28, P/S 8.
-        pe = d["Trailing P/E vs its own median of 14.00 across 5 fiscal year-ends: premium (+) or discount (−)"]
+        pe = d[
+            "Trailing P/E vs its own median of 14.00 across 5 fiscal year-ends (2021–2025): "
+            "today 28.00, above the median by"
+        ]
         assert pe.value == pytest.approx(1.0)
         assert pe.unit == "fraction"
-        ps = d["Price-to-sales vs its own median of 6.00 across 5 fiscal year-ends: premium (+) or discount (−)"]
+        ps = d[
+            "Price-to-sales vs its own median of 6.00 across 5 fiscal year-ends (2021–2025): "
+            "today 8.00, above the median by"
+        ]
         assert ps.value == pytest.approx(8 / 6 - 1)
 
     def test_todays_price_to_free_cash_flow_is_price_to_sales_over_the_trailing_fcf_margin(self) -> None:
@@ -369,10 +379,35 @@ class TestOwnHistory:
         assert today.value == pytest.approx(8.0 / (FCF_TTM / REV_TTM))
         assert today.unit == "ratio"
         gap = d[
-            "Price-to-free-cash-flow vs its own median of 25.00 across 5 fiscal year-ends: "
-            "premium (+) or discount (−)"
+            "Price-to-free-cash-flow vs its own median of 25.00 across 5 fiscal year-ends (2021–2025): "
+            f"today {today.value:.2f}, above the median by"
         ]
         assert gap.value == pytest.approx(today.value / 25 - 1)
+
+    def test_a_discount_says_below_in_words(self) -> None:
+        """DIS, 2026-11-14: P/S was 26% under its own median and the prose
+        called it "above". The direction is computed, not read off a sign."""
+        rich_history = {**ANNUAL, "ps_annual": annual([10.0, 11.0, 12.0, 13.0, 14.0])}
+        d = by_description(rd.valuation_history_claims(FUND, rich_history))
+        gap = d[
+            "Price-to-sales vs its own median of 12.00 across 5 fiscal year-ends (2021–2025): "
+            "today 8.00, below the median by"
+        ]
+        assert gap.value == pytest.approx(8 / 12 - 1)
+
+    def test_each_comparison_names_todays_figure_and_the_median_apart(self) -> None:
+        """DIS, 2026-11-14: the prose gave the median (20.39) as today's
+        price-to-free-cash-flow (24.6). Each comparison line now carries
+        both figures, each with its own label, and the median line says
+        it is not today's."""
+        for claim in rd.valuation_history_claims(FUND, ANNUAL):
+            text = claim.description
+            if text.startswith("Median"):
+                assert "not today's" in text
+            elif "own median" in text:
+                assert re.search(r"own median of \d+\.\d{2}", text)
+                assert re.search(r"today \d+\.\d{2}", text)
+                assert "premium (+)" not in text
 
     def test_a_history_too_short_to_have_a_median_says_nothing(self) -> None:
         short = {**ANNUAL, "pe_annual": annual([10.0, 12.0, 14.0, 16.0])}
@@ -383,7 +418,7 @@ class TestOwnHistory:
     def test_a_loss_today_keeps_the_median_and_drops_the_comparison(self) -> None:
         losing = {**FUND, "trailing_pe": c(None)}
         d = by_description(rd.valuation_history_claims(losing, ANNUAL))
-        assert "Median P/E across 5 fiscal year-ends (2021–2025)" in d
+        assert MEDIAN_PE in d
         assert not any(k.startswith("Trailing P/E vs its own median") for k in d)
 
     def test_a_bank_has_no_free_cash_flow_multiple(self) -> None:

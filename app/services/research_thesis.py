@@ -113,6 +113,17 @@ claims. If a sector note is given, follow it.
 "at fiscal year-end" or "annual" belongs to the fiscal year its history \
 ends on, not to today. Say "today" or "currently" only for trailing \
 figures and for the claims that compare today with a median.
+7. A multiple against its own history: today's multiple is the \
+trailing claim ("P/E ratio (trailing 12 months)", "Price-to-free-cash-flow \
+(trailing 12 months)"); its norm is the "Median … across N fiscal \
+year-ends" claim, which is not today's figure; the "… vs its own median …" \
+claim states both. Take each number from the claim that names it, and \
+the direction from the comparison claim's words ("above the median by", \
+"below the median by"), never from your own reading of the numbers. \
+Compare a multiple only with its own median (P/E with the median P/E, \
+never price-to-sales with it), and leave the fiscal year-end values out \
+of a today-against-the-median sentence. The same holds for the "vs peer \
+median" claims.
 """
 
 

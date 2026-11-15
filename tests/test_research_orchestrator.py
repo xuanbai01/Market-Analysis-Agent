@@ -1545,3 +1545,14 @@ def test_both_prompts_say_a_year_end_figure_is_not_todays() -> None:
     for prompt in (orch_module._SYSTEM_PROMPT, research_thesis.THESIS_SYSTEM_PROMPT):
         assert "A value is as of when its description says" in prompt
         assert "at fiscal year-end" in prompt
+
+
+def test_both_prompts_say_how_to_read_a_multiple_against_its_own_median() -> None:
+    """DIS, 2026-11-14: the prose gave the median as today's
+    price-to-free-cash-flow and set price-to-sales against the median P/E."""
+    from app.services import research_thesis
+
+    for prompt in (orch_module._SYSTEM_PROMPT, research_thesis.THESIS_SYSTEM_PROMPT):
+        assert "A multiple against its own history" in prompt
+        assert "only with its own median" in prompt
+        assert "direction from the comparison claim's words" in prompt

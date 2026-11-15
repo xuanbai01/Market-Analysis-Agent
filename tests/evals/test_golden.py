@@ -97,12 +97,28 @@ else:
             f"overall={report.overall_confidence.value}, "
             f"factuality={result.factuality.score:.3f}"
         )
+        # The Valuation prose, so a run can be read for which figure each
+        # number is attached to, not only whether it exists.
+        for section in report.sections:
+            if section.title == "Valuation":
+                print(f"   Valuation card: {section.card_narrative}")
+                print(f"   Valuation summary: {section.summary}")
         if result.factuality.score < 0.95:
             _dump_report_for_diagnosis(report, result.factuality.unmatched_numbers)
 
         assert result.factuality.score >= 0.95, (
             f"{case.symbol}/{case.focus}: factuality {result.factuality.score:.2f}, "
             f"unmatched numbers in prose: {result.factuality.unmatched_numbers}"
+        )
+
+        # Attribution (2026-11-14): the numbers can all be claims and
+        # still sit on the wrong labels — the median given as today's
+        # multiple, a discount called "above".
+        for error in result.attribution.errors:
+            print(f"   attribution: {error}")
+        assert not result.attribution.errors, (
+            f"{case.symbol}/{case.focus}: {len(result.attribution.errors)} misattributed "
+            f"valuation figure(s): {result.attribution.errors}"
         )
 
 

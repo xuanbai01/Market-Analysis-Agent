@@ -76,5 +76,5 @@ class OwnerPositions(BaseModel):
     source: Literal["tastytrade"] = "tastytrade"
     # tastytrade failed and this is the last copy read (``as_of`` says when).
     stale: bool = False
-    # More positions than one read takes (owner_positions.MAX_POSITIONS).
+    # More accounts or positions than one read takes (owner_positions.MAX_ACCOUNTS, MAX_POSITIONS).
     truncated: bool = False

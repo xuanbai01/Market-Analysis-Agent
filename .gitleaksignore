@@ -1,0 +1,2 @@
+# Test values Gitleaks reads as secrets (none is one). Format: <commit>:<file>:<rule>:<line>
+cc090dcea58447b1c0937f7ce265a0178ad57010:tests/test_owner_positions.py:generic-api-key:26

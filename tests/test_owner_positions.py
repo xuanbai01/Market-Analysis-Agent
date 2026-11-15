@@ -24,7 +24,7 @@ from app.services import tastytrade_client as tt
 
 ACCOUNT = "5WZ9QX7T"  # distinctive: must never leave the service
 OTHER = "5WZ9QX8U"
-OWNER_KEY = "owner-key-for-tests-0123456789abcdef"
+OWNER_KEY = "o" * 40  # plainly fake: a value that looks like a key trips Gitleaks
 
 
 def _position(symbol: str, kind: str, quantity: str, direction: str, **extra: Any) -> dict[str, Any]:
@@ -287,13 +287,37 @@ async def test_an_account_entry_of_the_wrong_shape_is_skipped(account: _Tastytra
     assert (await op.get_positions()).accounts == 1
 
 
+async def test_a_refused_quote_request_costs_only_its_own_quotes(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An index underlying (SPX) asked for as an equity may be refused; the
+    option legs' quotes still come (#127's AI review)."""
+    account.positions[ACCOUNT] = [_position("SPXW  261120P05900000", "Equity Option", "1", "Long", underlying="SPX")]
+    account.quotes = {"SPXW  261120P05900000": _quote("SPXW  261120P05900000", 41.0)}
+    real = account.get
+
+    async def picky(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        if path == "/market-data/by-type" and "equity" in (params or {}):
+            raise tt.TastytradeUnavailable("tastytrade answered 400")
+        return await real(path, params, op=op)
+
+    monkeypatch.setattr(op.tt, "get", picky)
+    (group,) = (await op.get_positions()).groups
+    assert group.quote is None and group.legs[0].quote is not None and group.legs[0].quote.mark == 41.0
+
+
+async def test_more_accounts_than_one_read_takes_says_so(account: _Tastytrade) -> None:
+    account.accounts = [f"5WZ9QX{i:02d}" for i in range(op.MAX_ACCOUNTS + 2)]
+    result = await op.get_positions()
+    assert result.accounts == op.MAX_ACCOUNTS and result.truncated is True
+
+
 async def test_quotes_are_asked_for_at_most_a_hundred_at_a_time(account: _Tastytrade) -> None:
     account.positions[ACCOUNT] = [
         _position(f"SPY   261218C00{500 + i:03d}000", "Equity Option", "1", "Long") for i in range(150)
     ]
     await op.get_positions()
     calls = account.quote_calls()
-    assert len(calls) == 2
+    # The underlying on its own, then the 150 options in two.
+    assert [sorted(p) for p in calls] == [["equity"], ["equity-option"], ["equity-option"]]
     for params in calls:
         assert sum(len(v.split(",")) for v in params.values()) <= op.QUOTE_BATCH
 
@@ -416,6 +440,18 @@ async def test_the_route_serves_them_never_cached_by_a_browser(account: _Tastytr
     assert resp.status_code == 200
     assert resp.headers["Cache-Control"] == "no-store"
     assert resp.json()["groups"][0]["underlying"] == "SPY"
+
+
+async def test_even_an_unexpected_error_is_never_kept_by_a_browser(
+    account: _Tastytrade, owner: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 500 is built outside the middleware that marks owner responses (#127's AI review)."""
+    async def broken() -> None:
+        raise RuntimeError("a bug")
+
+    monkeypatch.setattr("app.api.v1.routers.owner.get_positions", broken)
+    resp = await _get(owner)
+    assert resp.status_code == 500 and resp.headers["Cache-Control"] == "no-store"
 
 
 async def test_the_route_is_a_503_with_the_reason_when_tastytrade_fails(account: _Tastytrade, owner: dict[str, str]) -> None:

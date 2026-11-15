@@ -90,3 +90,10 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **DXLink:** refused, because the quote token's address was `tasty-openapi-dxlink-md-ws.dxfeed.com`, not the documented `tasty-openapi-ws.dxfeed.com`. Its level is `api` and its path `/realtime`, not `/delayed`. Both hosts are allowed now.
 
   The follow-up also takes DeepSeek's review of #117: an account scope's authority must be `owner` or `read-only`, so one naming trading is refused. The probe prints only known scope shapes (account numbers masked, anything else `<other scope>`). Deployment §9 no longer claims a trade-capable grant signs in. 1744 backend tests.
+- **tastytrade, the probe's third run (2026-11-15, Sunday, #118 deployed):** DXLink connected, and Summary (open interest) and Greeks (IV) came back for an option. Every candle request came back empty. A one-off check printed only symbols, flags and counts, and showed why. The server echoes a candle symbol in its normal form (`SPY{=1d}` as `SPY{=d}`), and `fetch_candles` matched the symbol exactly. `fromTime` is in milliseconds, not the seconds tastytrade's docs give: seconds read as January 1970. Both are fixed. Measured as metadata (counts, date ranges, how many candles carry each field):
+  - **SPY daily:** 8,000 candles back to 1995. 8,000 is the per-request cap.
+  - **IV:** about 9 years of daily IV (2,357 SPY days; 2,359 of NVDA's 2,985 since 2015). Open interest on a similar span.
+  - **Intraday:** SPY hourly back to February 2026; 5-minute bars about six weeks back, all with IV.
+  - **One near-money SPY call:** a year of daily candles with IV and open interest on 249 of 250 days.
+
+  So tastytrade holds the IV history our own snapshot only began collecting on 2026-11-13. It can be charted live, never stored (ADR 0009). 1746 backend tests.

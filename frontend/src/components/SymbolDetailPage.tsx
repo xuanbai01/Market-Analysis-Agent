@@ -28,7 +28,7 @@
  */
 import { useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { ApiError, fetchDemoReport, fetchResearchReport } from "../lib/api";
 import { clearStoredToken } from "../lib/auth";
@@ -168,6 +168,14 @@ export function SymbolDetailPage() {
               <ConfidenceBadge confidence={report.overall_confidence} size="sm" />
             </span>
             <HeaderPills signals={report.layout_signals} />
+            {!demo && (
+              <Link
+                to={ROUTES.options(upperTicker)}
+                className="rounded-md border border-strata-border px-2 py-1 font-mono text-[10px] uppercase tracking-kicker text-strata-dim hover:border-strata-highlight hover:text-strata-hi"
+              >
+                Options
+              </Link>
+            )}
             {!demo && <WatchlistButton ticker={upperTicker} />}
           </div>
 

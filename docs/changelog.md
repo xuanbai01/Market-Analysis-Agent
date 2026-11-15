@@ -105,4 +105,9 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **AI read:** its sentences quote the figures, so each point's chips fold behind "Sources (n)" and no figure shows twice (`CitedPoints collapsed`; the lens keeps open chips).
   - **No direction read into a figure:** "downside protection costs more" describes prices, and the cone's line speaks of what option prices put a chance on.
   - **Not done, a change of the spot to Yahoo's "official close":** the page's $162.85 for NVDA's Nov 13 close differs from another vendor's $162.92, but Yahoo's daily history says $162.85 too. There is nothing in Yahoo's data to switch to, and the 0.04% gap doesn't reach the IVs, which use the parity forward. That PR (#120) was closed unmerged.
-  - **Size and tests:** options chunk 15.8 KB gz, main 90.23 KB; 796 frontend tests.
+  - **From review:**
+    - The ⓘ opened on focus or hover and its click toggle shut it again, so a tap never left it open. A click now only opens; blur, leaving and Escape close it, and tests replay the browser's event order.
+    - Juneteenth on a Saturday is observed on Friday the 18th, which moves June 2027's monthly to Thursday.
+    - The term structure's sentence starts at the same nearest expiry the chart draws.
+    - An unused earnings sentence is gone.
+  - **Size and tests:** options chunk 15.8 KB gz, main 90.23 KB; 799 frontend tests.

@@ -11,6 +11,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from websockets.asyncio.client import connect as real_connect
+from websockets.datastructures import Headers
+from websockets.exceptions import InvalidStatus
+from websockets.http11 import Response
 
 from app.services import dxlink
 from app.services import tastytrade_client as tt
@@ -42,6 +46,9 @@ class FakeServer:
         self.connected_to: list[str] = []
         self.open_sessions = 0
         self.max_open_sessions = 0
+        self.options: dict[str, Any] = {}
+        self.close_delay = 0.0
+        self.error: Any = None  # sent as an ERROR message in answer to AUTH
 
     def reply(self, message: dict[str, Any]) -> None:
         self.inbox.put_nowait(json.dumps(message))
@@ -53,6 +60,8 @@ class FakeServer:
         if kind == "SETUP":
             self.reply({"type": "SETUP", "channel": 0, "keepaliveTimeout": 60, "version": "1.0-test"})
             self.reply({"type": "AUTH_STATE", "channel": 0, "state": "UNAUTHORIZED"})
+        elif kind == "AUTH" and self.error is not None:
+            self.reply({"type": "ERROR", "channel": 0, "error": self.error, "message": f"bad token {message['token']}"})
         elif kind == "AUTH":
             state = "AUTHORIZED" if self.authorize and message["token"] == QUOTE_TOKEN else "UNAUTHORIZED"
             self.reply({"type": "AUTH_STATE", "channel": 0, "state": state, "userId": "u1"})
@@ -71,8 +80,9 @@ class FakeServer:
     async def recv(self) -> str:
         return await self.inbox.get()
 
-    def connect(self, url: str, **_: Any) -> Any:
+    def connect(self, url: str, **options: Any) -> Any:
         server = self
+        server.options = options
 
         @asynccontextmanager
         async def session() -> Any:
@@ -83,6 +93,8 @@ class FakeServer:
                 yield server
             finally:
                 server.open_sessions -= 1
+                if server.close_delay:
+                    await asyncio.sleep(server.close_delay)
 
         return session()
 
@@ -129,6 +141,14 @@ async def test_quote_token_is_read_once_and_cached(quote_tokens: list[str]) -> N
         "wss://notdxfeed.com/realtime",
         "https://tasty-openapi-ws.dxfeed.com/realtime",
         "wss://169.254.169.254/realtime",
+        "wss://other.dxfeed.com/realtime",  # a dxFeed host, but not tastytrade's feed
+        "wss://tasty-openapi-ws.dxfeed.com:22/realtime",
+        "wss://u:p@tasty-openapi-ws.dxfeed.com/realtime",
+        "wss://tasty-openapi-ws.dxfeed.com/realtime?token=abc",
+        "wss://tasty-openapi-ws.dxfeed.com/realtime#x",
+        "wss://localhost\x00.tasty-openapi-ws.dxfeed.com/realtime",
+        "wss://evil.example\uff0e.tasty-openapi-ws.dxfeed.com/realtime",
+        "wss://tasty-openapi-ws.dxfeed.com:notaport/realtime",
     ],
 )
 async def test_a_feed_address_off_dxfeed_is_refused(
@@ -271,3 +291,126 @@ async def test_logs_hold_no_quote_token(server: FakeServer, caplog: pytest.LogCa
         if record.exc_info:
             text += logging.Formatter().formatException(record.exc_info)
         assert QUOTE_TOKEN not in text
+
+
+def test_the_feed_address_of_tastytrade_is_accepted() -> None:
+    assert dxlink.is_feed_url("wss://tasty-openapi-ws.dxfeed.com/realtime")
+    assert dxlink.is_feed_url("wss://tasty-openapi-ws.dxfeed.com:443/realtime")
+    assert dxlink.is_feed_url("wss://TASTY-OPENAPI-WS.DXFEED.COM/realtime")  # hostnames compare lowercased
+
+
+def test_a_redirect_is_never_followed() -> None:
+    redirect = InvalidStatus(Response(302, "Found", Headers({"Location": "wss://evil.example/steal"}), b""))
+    url = "wss://tasty-openapi-ws.dxfeed.com/realtime"
+    assert real_connect(url).process_redirect(redirect) == "wss://evil.example/steal"  # websockets would follow it
+    assert dxlink._NoRedirects(url).process_redirect(redirect) is redirect
+    assert dxlink._connect is dxlink._NoRedirects
+
+
+async def test_the_session_is_capped_uncompressed_and_quiet_in_the_logs(server: FakeServer) -> None:
+    server.on_subscribe = [["Candle", candle_row("SPY{=1d}", "2026-11-13", 600.0, flags=dxlink.SNAPSHOT_END)]]
+    await dxlink.fetch_candles("SPY", "1d", datetime(2026, 11, 1, tzinfo=UTC))
+    options = server.options
+    assert options["compression"] is None
+    assert options["max_size"] <= 4 * 1024 * 1024
+    assert options["max_queue"] <= 4
+    assert options["logger"].getEffectiveLevel() >= logging.WARNING
+    assert not options["logger"].isEnabledFor(logging.DEBUG)
+
+
+def test_the_quote_tokens_repr_hides_it() -> None:
+    token = dxlink.QuoteToken(QUOTE_TOKEN, "wss://tasty-openapi-ws.dxfeed.com/realtime", "api")
+    assert QUOTE_TOKEN not in repr(token)
+
+
+@pytest.mark.parametrize(("code", "shown"), [("UNAUTHORIZED", "UNAUTHORIZED"), ("invalid token: qt-test-dxlink-token\nINFO forged", "unknown"), ({"x": 1}, "unknown")])
+async def test_a_dxlink_error_shows_only_a_known_code(server: FakeServer, code: Any, shown: str) -> None:
+    server.error = code
+    with pytest.raises(dxlink.DxlinkError) as raised:
+        await dxlink.fetch_candles("SPY", "1d", datetime(2026, 11, 1, tzinfo=UTC))
+    assert str(raised.value) == f"DXLink error: {shown}"
+    assert QUOTE_TOKEN not in str(raised.value)
+
+
+async def test_malformed_messages_and_rows_are_skipped(server: FakeServer) -> None:
+    sym = "SPY{=1d}"
+    bad_time = candle_row(sym, "2026-11-12", 602.0)
+    bad_time[CANDLE_FIELDS.index("time")] = 1e20
+    server.on_subscribe = [
+        {"not": "a list"},
+        7,
+        ["Candle", {"not": "a list"}],
+        [["Candle"], 3, "x"],
+        ["Candle", bad_time + candle_row(sym, "2026-11-13", 603.0, flags=dxlink.SNAPSHOT_END)],
+    ]
+    server.inbox.put_nowait("not json")
+    history = await dxlink.fetch_candles("SPY", "1d", datetime(2026, 11, 1, tzinfo=UTC))
+    assert [c.close for c in history.candles] == [603.0]
+    assert history.complete is True
+
+
+async def test_a_message_that_isnt_an_object_is_skipped_in_the_handshake(server: FakeServer) -> None:
+    server.inbox.put_nowait("[1, 2, 3]")
+    server.inbox.put_nowait('"text"')
+    server.on_subscribe = [["Candle", candle_row("SPY{=1d}", "2026-11-13", 600.0, flags=dxlink.SNAPSHOT_END)]]
+    history = await dxlink.fetch_candles("SPY", "1d", datetime(2026, 11, 1, tzinfo=UTC))
+    assert history.complete is True
+
+
+async def test_odd_field_names_from_the_server_fall_back_to_ours(server: FakeServer) -> None:
+    server.feed_fields = {"Candle": [["nested"], 3]}
+    server.on_subscribe = [["Candle", candle_row("SPY{=1d}", "2026-11-13", 600.0, flags=dxlink.SNAPSHOT_END)]]
+    history = await dxlink.fetch_candles("SPY", "1d", datetime(2026, 11, 1, tzinfo=UTC))
+    assert [c.close for c in history.candles] == [600.0]
+
+
+async def test_a_history_past_the_cap_stops_short(monkeypatch: pytest.MonkeyPatch, server: FakeServer) -> None:
+    monkeypatch.setattr(dxlink, "MAX_CANDLES", 2)
+    sym = "SPY{=1d}"
+    rows = candle_row(sym, "2026-11-13", 603.0) + candle_row(sym, "2026-11-12", 602.0) + candle_row(sym, "2026-11-11", 601.0, flags=dxlink.SNAPSHOT_END)
+    server.on_subscribe = [["Candle", rows]]
+    history = await dxlink.fetch_candles("SPY", "1d", datetime(2026, 11, 1, tzinfo=UTC))
+    assert len(history.candles) == 2
+    assert history.complete is False
+
+
+async def test_too_many_events_stop_the_fetch(monkeypatch: pytest.MonkeyPatch, server: FakeServer) -> None:
+    monkeypatch.setattr(dxlink, "MAX_EVENTS", 3)
+    rows = sum((candle_row("OTHER{=1d}", "2026-11-13", 1.0) for _ in range(5)), [])
+    server.on_subscribe = [["Candle", rows]]
+    history = await dxlink.fetch_candles("SPY", "1d", datetime(2026, 11, 1, tzinfo=UTC))
+    assert history == dxlink.CandleHistory(candles=(), complete=False)
+
+
+async def test_an_unexpected_failure_names_only_its_type(monkeypatch: pytest.MonkeyPatch, server: FakeServer) -> None:
+    async def breaks(text: str) -> None:
+        raise ConnectionResetError(f"peer said {QUOTE_TOKEN}")
+
+    monkeypatch.setattr(server, "send", breaks)
+    with pytest.raises(dxlink.DxlinkError) as raised:
+        await dxlink.fetch_candles("SPY", "1d", datetime(2026, 11, 1, tzinfo=UTC))
+    assert str(raised.value) == "the DXLink session failed (ConnectionResetError)"
+
+
+async def test_a_slow_close_keeps_a_complete_history(monkeypatch: pytest.MonkeyPatch, server: FakeServer) -> None:
+    monkeypatch.setattr(dxlink, "FETCH_TIMEOUT_SECONDS", 0.2)
+    server.close_delay = 0.5
+    server.on_subscribe = [["Candle", candle_row("SPY{=1d}", "2026-11-13", 600.0, flags=dxlink.SNAPSHOT_END)]]
+    history = await dxlink.fetch_candles("SPY", "1d", datetime(2026, 11, 1, tzinfo=UTC))
+    assert history.complete is True
+
+
+async def test_a_feed_that_never_goes_quiet_still_ends(monkeypatch: pytest.MonkeyPatch, server: FakeServer) -> None:
+    monkeypatch.setattr(dxlink, "FETCH_TIMEOUT_SECONDS", 0.3)
+
+    async def chatty() -> None:
+        for _ in range(200):
+            server.reply({"type": "FEED_DATA", "channel": 3, "data": ["Candle", candle_row("SPY{=1d}", "2026-11-13", 600.0)]})
+            await asyncio.sleep(0.01)
+
+    task = asyncio.create_task(chatty())
+    try:
+        history = await asyncio.wait_for(dxlink.fetch_candles("SPY", "1d", datetime(2026, 11, 1, tzinfo=UTC)), 2.0)
+    finally:
+        task.cancel()
+    assert history.complete is False

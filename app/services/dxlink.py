@@ -17,18 +17,30 @@ in seconds and dxFeed's own APIs take milliseconds, so
 ``fetch_candles`` sends seconds unless told otherwise; the probe
 (``tastytrade_probe``) checks which one DXLink honours.
 
-The quote token is a credential: it is never logged. What comes back is
-tastytrade's data: callers keep it in memory and never store it or put it
-in a prompt.
+The server is trusted as little as the feed allows:
+- the address, which comes in tastytrade's answer, must be tastytrade's
+  feed host over TLS on 443, and a redirect is never followed;
+- messages are capped at 4 MiB and not compressed (no decompression bomb);
+- a fetch keeps at most ``MAX_EVENTS`` events and ``MAX_CANDLES`` candles;
+- a malformed message or row is skipped;
+- anything unexpected surfaces as a ``DxlinkError`` naming its type, never
+  the server's text.
+
+The quote token is a credential: it is never logged (its repr hides it,
+and websockets' own frame log is held at WARNING). What comes back is
+tastytrade's data: callers keep it in memory and never store it or put
+it in a prompt.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
+import re
 import time
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
@@ -43,10 +55,13 @@ FETCH_TIMEOUT_SECONDS = 20.0
 # Once events have come, a feed this quiet has sent all it will.
 IDLE_SECONDS = 3.0
 OPEN_TIMEOUT_SECONDS = 10.0
-MAX_MESSAGE_BYTES = 16 * 1024 * 1024
-# tastytrade's DXLink feed (tasty-openapi-ws.dxfeed.com); the address comes
-# with the quote token, and nothing else is connected to.
-FEED_DOMAIN = "dxfeed.com"
+MAX_MESSAGE_BYTES = 4 * 1024 * 1024
+MAX_QUEUE = 4
+MAX_EVENTS = 100_000
+MAX_CANDLES = 20_000
+# tastytrade's DXLink feed. The address comes with the quote token, and
+# nothing else is connected to.
+FEED_HOSTS = frozenset({"tasty-openapi-ws.dxfeed.com"})
 _CHANNEL = 3
 _SETUP = {
     "type": "SETUP",
@@ -55,6 +70,9 @@ _SETUP = {
     "keepaliveTimeout": 60,
     "acceptKeepaliveTimeout": 60,
 }
+# DXLink's error codes; any other text from the server is not repeated.
+_ERROR_CODES = frozenset({"UNSUPPORTED_PROTOCOL", "TIMEOUT", "UNAUTHORIZED", "INVALID_MESSAGE", "BAD_ACTION", "UNKNOWN"})
+_HOSTNAME = re.compile(r"[a-z0-9.-]+")
 
 # dxFeed's eventFlags.
 REMOVE_EVENT = 0x02
@@ -74,14 +92,19 @@ QUOTE_FIELDS = ("eventType", "eventSymbol", "bidPrice", "askPrice", "bidSize", "
 _FIELDS = {"Candle": CANDLE_FIELDS, "Summary": SUMMARY_FIELDS, "Greeks": GREEKS_FIELDS, "Quote": QUOTE_FIELDS}
 _TEXT_FIELDS = frozenset({"eventType", "eventSymbol"})
 
+# websockets logs every frame, the AUTH frame and its token included, at
+# DEBUG; this logger never lets that through, whatever the root's level.
+_WS_LOGGER = logging.getLogger("websockets.dxlink")
+_WS_LOGGER.setLevel(logging.WARNING)
+
 
 class DxlinkError(Exception):
-    """The session couldn't be set up: a refused token, an error, a timeout."""
+    """The session couldn't be set up or failed: a refused token, an error, a timeout."""
 
 
 @dataclass(frozen=True)
 class QuoteToken:
-    token: str
+    token: str = field(repr=False)
     url: str
     level: str  # "api" for the account's own feed; "demo" comes with a /delayed URL
 
@@ -104,8 +127,16 @@ class CandleHistory:
     complete: bool  # the server marked the snapshot's end
 
 
+class _NoRedirects(_ws_connect):
+    """websockets' connect, following no redirect: the address was checked,
+    and a redirect could carry the quote token to another host."""
+
+    def process_redirect(self, exc: Exception) -> Exception | str:
+        return exc
+
+
 # Swapped in tests.
-_connect: Callable[..., Any] = _ws_connect
+_connect: Callable[..., Any] = _NoRedirects
 _clock = time.monotonic
 
 _quote: tuple[QuoteToken, float] | None = None
@@ -124,29 +155,41 @@ def _lock() -> asyncio.Lock:
     return _session_lock
 
 
+def is_feed_url(url: str) -> bool:
+    """Only tastytrade's feed host, over TLS on 443, with no credentials,
+    query or fragment in the address."""
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return False
+    host = parts.hostname or ""
+    return (
+        parts.scheme == "wss"
+        and _HOSTNAME.fullmatch(host) is not None
+        and host in FEED_HOSTS
+        and port in (None, 443)
+        and parts.username is None
+        and parts.password is None
+        and not parts.query
+        and not parts.fragment
+    )
+
+
 async def quote_token() -> QuoteToken:
     """The DXLink token and address for the owner's account, cached 23 hours."""
     global _quote
     if _quote is not None and _quote[1] > _clock():
         return _quote[0]
     payload = await tt.get("/api-quote-tokens", op="api_quote_token")
-    data = payload.get("data") or {}
-    try:
-        token = QuoteToken(token=str(data["token"]), url=str(data["dxlink-url"]), level=str(data.get("level") or ""))
-    except KeyError as exc:
-        raise DxlinkError(f"the quote token answer has no {exc.args[0]}") from None
-    if not _is_feed_url(token.url):
-        raise DxlinkError("the quote token's feed address is not a dxFeed websocket")
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict) or not all(isinstance(data.get(k), str) for k in ("token", "dxlink-url")):
+        raise DxlinkError("the quote token answer is missing its token or address")
+    token = QuoteToken(token=data["token"], url=data["dxlink-url"], level=str(data.get("level") or ""))
+    if not is_feed_url(token.url):
+        raise DxlinkError("the quote token's feed address is not tastytrade's dxFeed host")
     _quote = (token, _clock() + QUOTE_TOKEN_TTL_SECONDS)
     return token
-
-
-def _is_feed_url(url: str) -> bool:
-    """The server connects where tastytrade's answer says, so only to a
-    dxFeed websocket over TLS."""
-    parts = urlsplit(url)
-    host = (parts.hostname or "").lower()
-    return parts.scheme == "wss" and (host == FEED_DOMAIN or host.endswith("." + FEED_DOMAIN))
 
 
 def _forget_quote_token() -> None:
@@ -159,35 +202,55 @@ def _number(value: Any) -> float | None:
         return None
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return number if math.isfinite(number) else None
 
 
 def _events(data: list[Any], event_type: str, fields: Sequence[str]) -> Iterator[dict[str, Any]]:
     """The ``event_type`` events in a COMPACT ``data`` list: alternating
-    event types and flat value arrays, ``len(fields)`` values per event."""
+    event types and flat value arrays, ``len(fields)`` values per event.
+    Anything else in the list is skipped."""
     pairs = data if data and isinstance(data[0], list) else [data[i : i + 2] for i in range(0, len(data), 2)]
     width = len(fields)
     for pair in pairs:
-        if len(pair) != 2 or pair[0] != event_type or not isinstance(pair[1], list):
+        if not isinstance(pair, list) or len(pair) != 2 or pair[0] != event_type or not isinstance(pair[1], list):
             continue
         values = pair[1]
         for start in range(0, len(values) - width + 1, width):
             row = dict(zip(fields, values[start : start + width], strict=True))
-            yield {name: value if name in _TEXT_FIELDS else _number(value) for name, value in row.items()}
+            yield {
+                name: (value if isinstance(value, str) else None) if name in _TEXT_FIELDS else _number(value)
+                for name, value in row.items()
+            }
+
+
+def _error_code(message: dict[str, Any]) -> str:
+    code = message.get("error")
+    return code if isinstance(code, str) and code in _ERROR_CODES else "unknown"
 
 
 async def _send(ws: Any, message: dict[str, Any]) -> None:
     await ws.send(json.dumps(message))
 
 
+async def _receive(ws: Any) -> dict[str, Any] | None:
+    """The next message as a dict; None for one that isn't a JSON object."""
+    try:
+        message = json.loads(await ws.recv())
+    except ValueError:
+        return None
+    if not isinstance(message, dict):
+        return None
+    if message.get("type") == "ERROR":
+        raise DxlinkError(f"DXLink error: {_error_code(message)}")
+    return message
+
+
 async def _expect(ws: Any, kind: str) -> dict[str, Any]:
     while True:
-        message = json.loads(await ws.recv())
-        if message.get("type") == "ERROR":
-            raise DxlinkError(f"DXLink error: {message.get('error') or 'unknown'}")
-        if message.get("type") == kind:
+        message = await _receive(ws)
+        if message is not None and message.get("type") == kind:
             return message
 
 
@@ -211,52 +274,94 @@ async def _open_feed(ws: Any, token: QuoteToken, event_type: str) -> list[str]:
         "acceptEventFields": {event_type: wanted},
     })
     config = await _expect(ws, "FEED_CONFIG")
-    return list((config.get("eventFields") or {}).get(event_type) or wanted)
+    sent = config.get("eventFields")
+    given = sent.get(event_type) if isinstance(sent, dict) else None
+    if isinstance(given, list) and given and all(isinstance(name, str) for name in given):
+        return given
+    return wanted
 
 
-async def _run(
-    event_type: str, subscriptions: list[dict[str, Any]], on_event: Callable[[dict[str, Any]], bool]
-) -> bool:
-    """Opens a session, subscribes, and hands each ``event_type`` event to
-    ``on_event`` until it returns True (then True). False when the feed
-    went quiet after some events or the time ran out after subscribing.
-    ``DxlinkError`` when the session couldn't be set up in time."""
-    async with _lock():
-        token = await quote_token()
-        subscribed = False
+# An event handler's answer: None to read on, True when the fetch is done
+# and complete, False to stop short.
+OnEvent = Callable[[dict[str, Any]], "bool | None"]
+
+
+async def _read(ws: Any, event_type: str, fields: list[str], on_event: OnEvent, deadline: float) -> bool:
+    loop = asyncio.get_running_loop()
+    seen = 0
+    while loop.time() < deadline:
         try:
-            async with asyncio.timeout(FETCH_TIMEOUT_SECONDS):
-                async with _connect(token.url, open_timeout=OPEN_TIMEOUT_SECONDS, max_size=MAX_MESSAGE_BYTES) as ws:
-                    fields = await _open_feed(ws, token, event_type)
-                    await _send(ws, {"type": "FEED_SUBSCRIPTION", "channel": _CHANNEL, "reset": True, "add": subscriptions})
-                    subscribed = True
-                    seen = False
-                    while True:
-                        try:
-                            raw = await (asyncio.wait_for(ws.recv(), IDLE_SECONDS) if seen else ws.recv())
-                        except TimeoutError:  # quiet after events (wait_for's own timeout)
-                            return False
-                        message = json.loads(raw)
-                        if message.get("type") == "ERROR":
-                            raise DxlinkError(f"DXLink error: {message.get('error') or 'unknown'}")
-                        if message.get("type") != "FEED_DATA":
-                            continue
-                        for event in _events(message.get("data") or [], event_type, fields):
-                            seen = True
-                            if on_event(event):
-                                return True
-        except TimeoutError:
-            if not subscribed:
-                raise DxlinkError("DXLink timed out before the feed opened") from None
+            if seen:
+                async with asyncio.timeout(IDLE_SECONDS):
+                    message = await _receive(ws)
+            else:
+                message = await _receive(ws)
+        except TimeoutError:  # quiet after events: the inner timeout's
             return False
+        if message is None or message.get("type") != "FEED_DATA" or not isinstance(message.get("data"), list):
+            continue
+        for event in _events(message["data"], event_type, fields):
+            seen += 1
+            if seen > MAX_EVENTS:
+                return False
+            answer = on_event(event)
+            if answer is not None:
+                return answer
+    return False
+
+
+async def _run(event_type: str, subscriptions: list[dict[str, Any]], on_event: OnEvent) -> bool:
+    """Opens a session, subscribes, and hands each ``event_type`` event to
+    ``on_event`` until it answers. False when the feed went quiet, a cap
+    was reached or the time ran out after subscribing. ``DxlinkError``
+    when the session couldn't be set up in time or failed."""
+    token = await quote_token()
+    lock = _lock()
+    try:
+        async with asyncio.timeout(2 * FETCH_TIMEOUT_SECONDS):
+            await lock.acquire()
+    except TimeoutError:
+        raise DxlinkError("another DXLink session is still open") from None
+    subscribed = False
+    result = False
+    try:
+        deadline = asyncio.get_running_loop().time() + FETCH_TIMEOUT_SECONDS
+        async with asyncio.timeout_at(deadline):
+            async with _connect(
+                token.url,
+                open_timeout=OPEN_TIMEOUT_SECONDS,
+                max_size=MAX_MESSAGE_BYTES,
+                max_queue=MAX_QUEUE,
+                compression=None,
+                logger=_WS_LOGGER,
+            ) as ws:
+                fields = await _open_feed(ws, token, event_type)
+                await _send(ws, {"type": "FEED_SUBSCRIPTION", "channel": _CHANNEL, "reset": True, "add": subscriptions})
+                subscribed = True
+                result = await _read(ws, event_type, fields, on_event, deadline)
+        return result
+    except TimeoutError:
+        if not subscribed:
+            raise DxlinkError("DXLink timed out before the feed opened") from None
+        return result  # a close that ran past the deadline keeps what was read
+    except DxlinkError:
+        raise
+    except Exception as exc:  # the server's text stays out of the message
+        raise DxlinkError(f"the DXLink session failed ({type(exc).__name__})") from None
+    finally:
+        lock.release()
 
 
 def _candle(event: dict[str, Any]) -> Candle | None:
     millis = event.get("time")
     if millis is None:
         return None
+    try:
+        start = datetime.fromtimestamp(millis / 1000, tz=UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
     return Candle(
-        time=datetime.fromtimestamp(millis / 1000, tz=UTC),
+        time=start,
         open=event.get("open"),
         high=event.get("high"),
         low=event.get("low"),
@@ -269,21 +374,24 @@ def _candle(event: dict[str, Any]) -> Candle | None:
 
 async def fetch_candles(symbol: str, period: str, from_time: datetime, *, time_unit_ms: bool = False) -> CandleHistory:
     """``symbol``'s candles of ``period`` (dxFeed's codes: ``1d``, ``1h``,
-    ``5m``) from ``from_time``, oldest first. ``symbol`` is a streamer
-    symbol (an option's comes from the chain's ``streamer-symbol``)."""
+    ``5m``) from ``from_time``, oldest first, at most ``MAX_CANDLES``.
+    ``symbol`` is a streamer symbol (an option's comes from the chain's
+    ``streamer-symbol``)."""
     candle_symbol = f"{symbol}{{={period}}}"
     stamp = from_time.timestamp()
     from_value = int(stamp * 1000) if time_unit_ms else int(stamp)
     by_time: dict[datetime, Candle] = {}
 
-    def on_event(event: dict[str, Any]) -> bool:
+    def on_event(event: dict[str, Any]) -> bool | None:
         if event.get("eventSymbol") != candle_symbol:
-            return False
+            return None
         flags = int(event.get("eventFlags") or 0)
         candle = _candle(event)
         if candle is not None and not flags & REMOVE_EVENT:
             by_time[candle.time] = candle
-        return bool(flags & (SNAPSHOT_END | SNAPSHOT_SNIP))
+        if flags & (SNAPSHOT_END | SNAPSHOT_SNIP):
+            return True
+        return False if len(by_time) >= MAX_CANDLES else None
 
     summary = {"symbol": candle_symbol, "from": from_time.date().isoformat(), "unit": "ms" if time_unit_ms else "s"}
     with log_external_call("dxlink.candles", summary) as call:
@@ -298,11 +406,11 @@ async def fetch_once(event_type: str, symbols: Sequence[str]) -> dict[str, dict[
     wanted = set(symbols)
     found: dict[str, dict[str, Any]] = {}
 
-    def on_event(event: dict[str, Any]) -> bool:
+    def on_event(event: dict[str, Any]) -> bool | None:
         symbol = event.get("eventSymbol")
-        if symbol in wanted and symbol not in found:
+        if isinstance(symbol, str) and symbol in wanted and symbol not in found:
             found[symbol] = event
-        return len(found) == len(wanted)
+        return True if len(found) == len(wanted) else None
 
     with log_external_call(f"dxlink.{event_type.lower()}", {"symbols": len(wanted)}) as call:
         await _run(event_type, [{"type": event_type, "symbol": s} for s in sorted(wanted)], on_event)

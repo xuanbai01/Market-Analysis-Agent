@@ -23,6 +23,8 @@ build/
 .env
 .env.local
 .env.*.local
+.env.*
+*.env
 !.env.example
 
 # Editors / OS

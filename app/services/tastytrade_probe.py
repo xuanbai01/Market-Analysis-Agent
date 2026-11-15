@@ -17,24 +17,41 @@ Claude Code session included) may be one. So the report holds metadata
 only: ages, counts, date ranges, field names, and yes/no answers computed
 here (is tastytrade's mid inside Yahoo's spread, is its IV30 within two
 points of ours). For the owner's own account it prints counts and a
-month: no account number, balance or amount.
+month: no account number, balance or amount. An error prints its text
+only when this code wrote it (``_OWN_ERRORS``); any other prints its type,
+since a library's message can quote the server or a connection string.
+
+Call logging (``log_external_call``'s INFO records) is left off on
+purpose: the report is the output. Warnings, which carry no secret, still
+reach stderr. Never lower the root logger here: httpx logs each request's
+URL at INFO, account number and all.
 
 Never imported by the app.
 """
 from __future__ import annotations
 
 import asyncio
+import re
 import statistics
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit
 
 from app.services import dxlink
 from app.services import market_calendar as mc
 from app.services import tastytrade_client as tt
 
 Say = Callable[[str], None]
+
+
+class ProbeError(Exception):
+    """An answer the probe can't read; its message is the probe's own."""
+
+
+_OWN_ERRORS = (ProbeError, tt.TastytradeUnavailable, tt.TastytradeNotFound, dxlink.DxlinkError)
+_ACCOUNT_NUMBER = re.compile(r"[A-Z0-9]+")
 
 METRICS_SYMBOLS = ("QQQ", "SPY", "NVDA")
 CHAIN_SYMBOL = "SPY"
@@ -70,6 +87,11 @@ def number(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def field_names(value: Any) -> list[str] | str:
+    """An object's field names; for anything else, only its type."""
+    return sorted(str(k) for k in value) if isinstance(value, dict) else f"<{type(value).__name__}>"
 
 
 def present(item: dict[str, Any], names: tuple[str, ...]) -> list[str]:
@@ -142,15 +164,25 @@ async def _section(say: Say, title: str, body: Callable[[], Awaitable[Any]]) -> 
     say(f"\n== {title} ==")
     try:
         return await body()
-    except Exception as exc:  # a probe reports every failure and carries on
+    except _OWN_ERRORS as exc:
         say(f"  failed: {type(exc).__name__}: {exc}")
-        return None
+    except Exception as exc:  # a probe reports every failure and carries on
+        say(f"  failed: {type(exc).__name__}")
+    return None
 
 
 async def probe_quote_token(say: Say) -> None:
     token = await dxlink.quote_token()
-    delayed = "/delayed" in token.url
-    say(f"  level: {token.level or '(none)'}; feed: {token.url}; delayed URL: {'yes' if delayed else 'no'}")
+    parts = urlsplit(token.url)
+    delayed = "/delayed" in parts.path
+    say(f"  level: {token.level or '(none)'}; feed: {parts.hostname}{parts.path}; delayed URL: {'yes' if delayed else 'no'}")
+
+
+async def probe_grant(say: Say) -> None:
+    scopes = await tt.grant_scopes()
+    say(f"  the stored grant may: {sorted(scopes) or '(not said)'}")
+    if "trade" in scopes:
+        say("  WARNING: the grant can trade. Delete it on my.tastytrade.com and create one with the read scope only.")
 
 
 async def _spot(symbol: str) -> float:
@@ -160,25 +192,27 @@ async def _spot(symbol: str) -> float:
         value = number(field(item, name))
         if value:
             return value
-    raise ValueError(f"no price for {symbol}")
+    raise ProbeError(f"no price for {symbol}")
 
 
 async def probe_chain(say: Say, today: date) -> ChainPick:
     spot = await _spot(CHAIN_SYMBOL)
     payload = await tt.get(f"/option-chains/{tt.symbol_path(CHAIN_SYMBOL)}/nested", op="option_chain")
     chains = (payload.get("data") or {}).get("items") or []
-    if not chains:
-        raise ValueError("no chain")
+    if not chains or not isinstance(chains[0], dict):
+        raise ProbeError("no chain")
     chain = chains[0]
     expirations = field(chain, "expirations") or []
     pick = nearest_expiry(expirations, today)
     if pick is None:
-        raise ValueError("no expirations")
+        raise ProbeError("no expirations")
     strikes = field(pick, "strikes") or []
+    if not isinstance(strikes, list) or not all(isinstance(s, dict) for s in strikes):
+        raise ProbeError("the strikes are not objects")
     say(f"  {len(chains)} chain(s), {len(expirations)} expirations; the one nearest {TARGET_DAYS} days has {len(strikes)} strikes")
-    say(f"  chain fields: {sorted(chain)}")
-    say(f"  expiration fields: {sorted(pick)}")
-    say(f"  strike fields: {sorted(strikes[0]) if strikes else []}")
+    say(f"  chain fields: {field_names(chain)}")
+    say(f"  expiration fields: {field_names(pick)}")
+    say(f"  strike fields: {field_names(strikes[0]) if strikes else []}")
     return ChainPick(spot=spot, expiry=field(pick, "expiration-date"), strikes=near_money(strikes, spot))
 
 
@@ -203,7 +237,7 @@ async def probe_quotes(say: Say, pick: ChainPick, now: datetime) -> None:
     items = (payload.get("data") or {}).get("items") or []
     by_symbol = {field(i, "symbol"): i for i in items}
     if items:
-        say(f"  quote fields: {sorted(items[0])}")
+        say(f"  quote fields: {field_names(items[0])}")
     underlying = by_symbol.get(CHAIN_SYMBOL) or {}
     underlying_age = age_seconds(field(underlying, "updated-at"), now)
     try:
@@ -304,8 +338,8 @@ async def probe_account(say: Say) -> None:
     say(f"  {len(accounts)} account(s)")
     for index, entry in enumerate(accounts, start=1):
         account_number = field(field(entry, "account") or {}, "account-number")
-        if not account_number:
-            say(f"  account {index}: no account number in the answer")
+        if not isinstance(account_number, str) or not _ACCOUNT_NUMBER.fullmatch(account_number):
+            say(f"  account {index}: no account number in the expected form")
             continue
         first = await tt.get(
             f"/accounts/{account_number}/transactions", {"per-page": 1, "sort": "Asc"}, op="transactions"
@@ -321,6 +355,7 @@ async def probe_account(say: Say) -> None:
 async def main(say: Say = print) -> None:
     now = datetime.now(UTC)
     say(f"tastytrade probe, {now.astimezone(mc.ET):%Y-%m-%d %H:%M} ET; configured: {tt.is_configured()}")
+    await _section(say, "The grant", lambda: probe_grant(say))
     await _section(say, "Quote token", lambda: probe_quote_token(say))
     pick = await _section(say, f"{CHAIN_SYMBOL} chain", lambda: probe_chain(say, now.astimezone(mc.ET).date()))
     if pick is not None:

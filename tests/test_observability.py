@@ -158,6 +158,27 @@ def test_an_api_key_in_a_failed_calls_url_is_not_printed() -> None:
     assert "apiKey=[REDACTED]" in text and "api_key=[REDACTED]" in text
 
 
+def test_a_bearer_token_quoted_in_an_error_is_masked() -> None:
+    """h11 quotes an illegal header's value ("Bearer <token>") in its
+    message, which a failed external call's traceback prints."""
+    import io
+
+    from app.core.logging import configure_logging
+
+    stream = io.StringIO()
+    configure_logging(stream)
+    try:
+        with pytest.raises(ValueError):
+            with log_external_call("tastytrade.quotes"):
+                raise ValueError("Illegal header value b'Bearer at-SECRET.part2\\n'")
+    finally:
+        configure_logging()
+
+    text = stream.getvalue()
+    assert "at-SECRET.part2" not in text
+    assert "Bearer [REDACTED]" in text
+
+
 _FRESH_APP = """
 import logging
 import app.main

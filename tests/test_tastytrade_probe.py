@@ -26,7 +26,8 @@ SECRET_VALUES = (
 
 
 def _stamp(seconds_ago: float) -> str:
-    return (NOW - timedelta(seconds=seconds_ago)).isoformat().replace("+00:00", "Z")
+    """A quote time ``seconds_ago`` before now, at the moment the fake answers."""
+    return (datetime.now(UTC) - timedelta(seconds=seconds_ago)).isoformat().replace("+00:00", "Z")
 
 
 def _strike(k: int) -> dict[str, Any]:
@@ -106,6 +107,9 @@ def run(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     async def fake_iv30(symbol: str) -> float:
         return 0.30
 
+    async def fake_grant() -> frozenset[str]:
+        return frozenset({"read"})
+
     monkeypatch.setattr(tt, "get", fake_get)
     monkeypatch.setattr(dxlink, "fetch_candles", fake_candles)
     monkeypatch.setattr(dxlink, "fetch_once", fake_once)
@@ -114,6 +118,7 @@ def run(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         (side, float(k)): (1.20, 1.50) for k in range(590, 616) for side in ("call", "put")
     })
     monkeypatch.setattr(probe, "_our_iv30", fake_iv30)
+    monkeypatch.setattr(tt, "grant_scopes", fake_grant)
     lines: list[str] = []
     return lines
 
@@ -121,7 +126,10 @@ def run(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 async def test_the_report_answers_the_open_questions(run: list[str]) -> None:
     await probe.main(run.append)
     report = "\n".join(run)
+    assert "the stored grant may: ['read']" in report
+    assert "WARNING" not in report
     assert "level: api" in report
+    assert "feed: tasty-openapi-ws.dxfeed.test/realtime" in report
     assert "delayed URL: no" in report
     assert "2 expirations; the one nearest 30 days has 26 strikes" in report
     assert "11 of 11 quotes came back" in report
@@ -187,3 +195,74 @@ def test_the_app_never_imports_the_probe() -> None:
     importing = re.compile(r"^\s*(from\s+\S*tastytrade_probe\b|import\s+.*\btastytrade_probe\b|from\s+app\.services\s+import\s+.*\btastytrade_probe\b)", re.M)
     for path in (ROOT / "app").rglob("*.py"):
         assert not importing.search(path.read_text(encoding="utf-8")), path
+
+
+async def test_a_grant_that_can_trade_is_called_out(monkeypatch: pytest.MonkeyPatch, run: list[str]) -> None:
+    async def trading_grant() -> frozenset[str]:
+        return frozenset({"read", "trade"})
+
+    monkeypatch.setattr(tt, "grant_scopes", trading_grant)
+    await probe.main(run.append)
+    report = "\n".join(run)
+    assert "the stored grant may: ['read', 'trade']" in report
+    assert "WARNING: the grant can trade" in report
+
+
+async def test_an_account_number_in_an_odd_form_is_not_printed(monkeypatch: pytest.MonkeyPatch, run: list[str]) -> None:
+    async def odd_accounts(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        if path == "/customers/me/accounts":
+            return {"data": {"items": [{"account": {"account-number": "ab-98765"}}]}}
+        return await fake_get(path, params, op=op)
+
+    monkeypatch.setattr(tt, "get", odd_accounts)
+    await probe.main(run.append)
+    report = "\n".join(run)
+    assert "no account number in the expected form" in report
+    assert "98765" not in report
+
+
+async def test_a_foreign_errors_text_is_never_printed(monkeypatch: pytest.MonkeyPatch, run: list[str]) -> None:
+    async def db_down(symbol: str) -> float:
+        raise OSError("could not connect to postgresql://postgres:hunter2@db.internal:5432/marketdb")
+
+    async def leaky(*args: Any, **kwargs: Any) -> Any:
+        raise ConnectionError("server closed with reason: mark 1.2345")
+
+    monkeypatch.setattr(probe, "_our_iv30", db_down)
+    monkeypatch.setattr(dxlink, "fetch_candles", leaky)
+    await probe.main(run.append)
+    report = "\n".join(run)
+    assert "failed: ConnectionError" in report
+    assert "our snapshot unreadable (OSError)" in report
+    for value in ("hunter2", "db.internal", "1.2345"):
+        assert value not in report
+
+
+async def test_the_feed_address_prints_without_query_or_credentials(monkeypatch: pytest.MonkeyPatch, run: list[str]) -> None:
+    async def token_in_url() -> dxlink.QuoteToken:
+        return dxlink.QuoteToken("qt-secret", "wss://u:pw@tasty-openapi-ws.dxfeed.com/realtime?token=qt-secret", "api")
+
+    monkeypatch.setattr(dxlink, "quote_token", token_in_url)
+    await probe.main(run.append)
+    report = "\n".join(run)
+    assert "feed: tasty-openapi-ws.dxfeed.com/realtime;" in report
+    assert "qt-secret" not in report and "pw" not in report.split("feed:")[1].split(";")[0]
+
+
+async def test_strikes_that_arent_objects_are_not_printed(monkeypatch: pytest.MonkeyPatch, run: list[str]) -> None:
+    async def array_strikes(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        if path == "/option-chains/SPY/nested":
+            return {"data": {"items": [{"expirations": [{"expiration-date": EXPIRY, "strikes": [["603.21", "SPY C"]]}]}]}}
+        return await fake_get(path, params, op=op)
+
+    monkeypatch.setattr(tt, "get", array_strikes)
+    await probe.main(run.append)
+    report = "\n".join(run)
+    assert "failed: ProbeError: the strikes are not objects" in report
+    assert "603.21" not in report
+
+
+def test_field_names_name_a_non_object_only_by_type() -> None:
+    assert probe.field_names({"b": 1, "a": 2}) == ["a", "b"]
+    assert probe.field_names(["603.21"]) == "<list>"
+    assert probe.field_names("1.2345") == "<str>"

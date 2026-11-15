@@ -61,13 +61,13 @@ function normPdf(x: number): number {
 // ── Prices ──────────────────────────────────────────────────────────
 
 /** A leg's price per share, or null where the market doesn't give one.
- * Mid needs both a bid and an offer. Natural buys at the offer (none, no
- * price) and sells at the bid, where a zero bid beside an offer is a
- * price: selling there gets nothing. */
+ * Mid needs both a bid and an offer; natural buys at the offer and sells
+ * at the bid, so with no offer there's nothing to buy and with no bid
+ * nobody to sell to. */
 export function premium(q: Quote, side: Side, basis: Basis): number | null {
   if (basis === "mid") return q.bid > 0 && q.ask > 0 ? (q.bid + q.ask) / 2 : null;
-  if (side === 1) return q.ask > 0 ? q.ask : null;
-  return q.bid > 0 || q.ask > 0 ? q.bid : null;
+  const price = side === 1 ? q.ask : q.bid;
+  return price > 0 ? price : null;
 }
 
 export function quoteFor(rows: ChainRow[], leg: Leg): Quote | null {
@@ -243,13 +243,13 @@ export const TEMPLATES = {
 } as const;
 export type Template = keyof typeof TEMPLATES;
 
-/** Strikes a leg can trade at, ascending: an offer to buy from, or for a
- * sale, a bid or an offer. */
+/** Strikes a leg can trade at, ascending: an offer to buy from, a bid to
+ * sell to. */
 function quotedStrikes(rows: ChainRow[], kind: OptionKind, side: Side): number[] {
   return rows
     .filter((r) => {
       const [bid, ask] = kind === "call" ? [r.call_bid, r.call_ask] : [r.put_bid, r.put_ask];
-      return side === 1 ? ask > 0 : bid > 0 || ask > 0;
+      return (side === 1 ? ask : bid) > 0;
     })
     .map((r) => r.strike)
     .sort((a, b) => a - b);

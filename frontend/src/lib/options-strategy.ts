@@ -132,28 +132,24 @@ export function extremes(legs: PricedLeg[]): { maxProfit: number | null; maxLoss
 
 // ── Risk-neutral probabilities from the smile ───────────────────────
 
+// A strike is on a smile point when ln(K/F) matches it this closely: the
+// browser's log and the server's can differ in the last bit.
+const ON_POINT = 1e-9;
+
 /** IV and its slope dσ/d ln(K/F) at x: linear between points, flat
- * beyond them; at a point, the mean of the slopes either side. */
+ * beyond them; on a point (a leg's own strike), the mean of the slopes
+ * either side, which is what −dC/dK gives across the kink. */
 function smileAt(points: [number, number][], x: number): { vol: number; slope: number } {
   const n = points.length;
-  if (n === 1 || x <= points[0][0]) {
-    return { vol: points[0][1], slope: x === points[0][0] && n > 1 ? segmentSlope(points, 0) / 2 : 0 };
-  }
-  if (x >= points[n - 1][0]) {
-    return { vol: points[n - 1][1], slope: x === points[n - 1][0] ? segmentSlope(points, n - 2) / 2 : 0 };
-  }
+  const slope = (i: number) => (i < 0 || i >= n - 1 ? 0 : (points[i + 1][1] - points[i][1]) / (points[i + 1][0] - points[i][0]));
+  const on = points.findIndex(([px]) => Math.abs(px - x) < ON_POINT);
+  if (on >= 0) return { vol: points[on][1], slope: (slope(on - 1) + slope(on)) / 2 };
+  if (x < points[0][0]) return { vol: points[0][1], slope: 0 };
+  if (x > points[n - 1][0]) return { vol: points[n - 1][1], slope: 0 };
   let i = 0;
   while (points[i + 1][0] < x) i++;
   const [x0, v0] = points[i];
-  const [x1, v1] = points[i + 1];
-  if (x === x1) return { vol: v1, slope: (segmentSlope(points, i) + segmentSlope(points, i + 1)) / 2 };
-  return { vol: v0 + ((v1 - v0) * (x - x0)) / (x1 - x0), slope: segmentSlope(points, i) };
-}
-
-function segmentSlope(points: [number, number][], i: number): number {
-  const [x0, v0] = points[i];
-  const [x1, v1] = points[i + 1];
-  return x1 === x0 ? 0 : (v1 - v0) / (x1 - x0);
+  return { vol: v0 + slope(i) * (x - x0), slope: slope(i) };
 }
 
 /** The risk-neutral chance the stock ends above ``strike``: −dC/dK along
@@ -181,12 +177,24 @@ export function probProfit(legs: PricedLeg[], smile: Smile): number {
   return Math.min(1, Math.max(0, prob));
 }
 
+/** The expiry's smile, one point per moneyness (two at one strike are
+ * averaged), or null with none. */
 export function smileOf(chain: ExpiryChain): Smile | null {
   if (chain.smile.length === 0 || chain.days <= 0) return null;
-  const points = chain.smile
-    .map((p) => [p.log_moneyness, p.iv] as [number, number])
+  const byX = new Map<number, number[]>();
+  for (const p of chain.smile) byX.set(p.log_moneyness, [...(byX.get(p.log_moneyness) ?? []), p.iv]);
+  const points = [...byX.entries()]
+    .map(([x, ivs]) => [x, ivs.reduce((a, b) => a + b, 0) / ivs.length] as [number, number])
     .sort((a, b) => a[0] - b[0]);
   return { forward: chain.forward, years: chain.days / 365, points };
+}
+
+/** The expiry's one-sigma move as a fraction (σ√T): the chain's ATM IV,
+ * else the smile's IV at the forward; null with neither. */
+export function oneSigma(chain: ExpiryChain): number | null {
+  const smile = smileOf(chain);
+  const vol = chain.atm_iv ?? (smile ? smileAt(smile.points, 0).vol : null);
+  return vol === null || chain.days <= 0 ? null : vol * Math.sqrt(chain.days / 365);
 }
 
 // ── One position, analysed ─────────────────────────────────────────
@@ -249,15 +257,16 @@ function nearest(strikes: number[], target: number): number | null {
  * A template's legs at strikes picked by a fixed rule from the forward and
  * the expiry's one-sigma move (σ√T): long legs at the money, a spread's
  * other strike half a sigma out, a credit spread's short strike half a
- * sigma out and its long one a full sigma. A rule for a starting point,
- * not a recommendation; every strike can be changed. Null when the chain
- * has no strikes to fit.
+ * sigma out and its long one a full sigma. Without an IV the "sigma"
+ * steps fall to the next strikes out. A rule for a starting point, not a
+ * recommendation; every strike can be changed. Null when the chain has no
+ * strikes to fit.
  */
 export function templateLegs(template: Template, chain: ExpiryChain): Leg[] | null {
   const calls = quotedStrikes(chain.rows, "call");
   const puts = quotedStrikes(chain.rows, "put");
   const f = chain.forward;
-  const sigma = (chain.atm_iv ?? 0) * Math.sqrt(Math.max(chain.days, 0) / 365);
+  const sigma = oneSigma(chain) ?? 0;
   const up = (n: number) => f * Math.exp(n * sigma);
   const above = (strikes: number[], target: number, than: number) => nearest(strikes.filter((k) => k > than), target);
   const below = (strikes: number[], target: number, than: number) => nearest(strikes.filter((k) => k < than), target);

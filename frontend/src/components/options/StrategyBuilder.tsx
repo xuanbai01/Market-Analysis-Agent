@@ -16,6 +16,7 @@ import {
   TEMPLATES,
   type Template,
   analyse,
+  oneSigma,
   quoteFor,
   smileOf,
   templateLegs,
@@ -29,13 +30,19 @@ function perContract(v: number): string {
   return `$${Math.abs(v * CONTRACT_SIZE).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** A profit or loss with its sign: a best case below zero must read as a loss. */
+function signed(v: number): string {
+  const rounded = Math.round(v * CONTRACT_SIZE * 100);
+  return `${rounded < 0 ? "−" : rounded > 0 ? "+" : ""}${perContract(v)}`;
+}
+
 const legName = (leg: Leg) => `${leg.side === 1 ? "Buy" : "Sell"} the ${leg.strike} ${leg.kind}`;
 
 /** Why a leg has no price at mid, or null when it has one. */
 function unpriced(leg: Leg, rows: ChainRow[]): string | null {
   const q = quoteFor(rows, leg);
   if (!q || (q.bid <= 0 && q.ask <= 0)) return `${legName(leg)}: no quote at this strike.`;
-  if (q.ask <= 0) return `${legName(leg)}: no offer at this strike, so no mid${leg.side === 1 ? " and nothing to buy" : ""}.`;
+  if (q.ask <= 0) return `${legName(leg)}: no offer at this strike, so no mid${leg.side === 1 ? " and nothing to buy" : "; it can still be sold at the bid"}.`;
   return null;
 }
 
@@ -54,7 +61,8 @@ export function StrategyBuilder({ chain }: { chain: ExpiryChain }) {
   const mid = legs && analyse(legs, chain.rows, "mid", smile);
   const natural = legs && analyse(legs, chain.rows, "natural", smile);
   const reasons = legs ? legs.map((l) => unpriced(l, chain.rows)).filter((r): r is string => r !== null) : [];
-  const sigma = (chain.atm_iv ?? 0) * Math.sqrt(Math.max(chain.days, 0) / 365);
+  const sigma = oneSigma(chain);
+  const shown = mid ?? natural;
 
   return (
     <div data-testid="strategy">
@@ -81,17 +89,25 @@ export function StrategyBuilder({ chain }: { chain: ExpiryChain }) {
       ) : (
         <>
           <LegsTable legs={legs} rows={chain.rows} strikes={strikes} onStrike={setStrike} />
-          {mid ? (
+          {reasons.length > 0 && (
+            <p data-testid="strategy-unpriced" className="mt-4 text-sm text-strata-dim">
+              {reasons.join(" ")}
+            </p>
+          )}
+          {shown && (
             <div className="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
-              <Summary mid={mid} natural={natural} />
+              <div>
+                <Summary mid={mid} natural={natural} />
+                {shown.pop === null && (
+                  <p data-testid="strategy-no-smile" className="mt-2 font-mono text-[10px] text-strata-muted">
+                    No smile at this expiry, so no probability.
+                  </p>
+                )}
+              </div>
               <div className="min-w-0">
                 <PayoffChart mid={mid} natural={natural} forward={chain.forward} sigma={sigma} />
               </div>
             </div>
-          ) : (
-            <p data-testid="strategy-unpriced" className="mt-4 text-sm text-strata-dim">
-              {reasons.join(" ")}
-            </p>
           )}
         </>
       )}
@@ -169,9 +185,9 @@ function LegsTable({
   );
 }
 
-function Summary({ mid, natural }: { mid: Analysis; natural: Analysis | null }) {
+function Summary({ mid, natural }: { mid: Analysis | null; natural: Analysis | null }) {
   const net = (a: Analysis) => `${a.cost >= 0 ? "Debit" : "Credit"} ${perContract(a.cost)}`;
-  const cap = (v: number | null) => (v === null ? "Unlimited" : perContract(v));
+  const cap = (v: number | null) => (v === null ? "Unlimited" : signed(v));
   const evens = (a: Analysis) => (a.breakevens.length ? a.breakevens.map(money).join(", ") : "None");
   const rows: [string, (a: Analysis) => string][] = [
     ["Net", net],
@@ -193,7 +209,7 @@ function Summary({ mid, natural }: { mid: Analysis; natural: Analysis | null }) 
         {rows.map(([label, value]) => (
           <tr key={label} className="border-b border-strata-border/40">
             <td className="py-1 pr-2 text-strata-dim">{label}</td>
-            <td className="px-2 py-1 text-right text-strata-hi">{value(mid)}</td>
+            <td className="px-2 py-1 text-right text-strata-hi">{mid ? value(mid) : dash}</td>
             <td className="px-2 py-1 text-right text-strata-fg">{natural ? value(natural) : dash}</td>
           </tr>
         ))}

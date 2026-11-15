@@ -260,7 +260,9 @@ def test_without_a_price_the_last_close_is_the_spot(monkeypatch: pytest.MonkeyPa
     their forward check saw no spot. It is resolved at the source now."""
     _install(monkeypatch, _FakeTicker(["2026-11-16"], {**_UNDERLYING, "regularMarketPrice": None}))
     fetched = oc.fetch_chain("TEST", lambda listed, _q: list(listed))
-    assert fetched is not None and fetched.spot == fetched.closes[-1][1] > 0
+    assert fetched is not None and fetched.closes
+    _day, latest_close = max(fetched.closes)  # by date, whatever the order
+    assert fetched.spot == latest_close > 0
 
 
 def test_a_row_without_a_strike_is_dropped() -> None:

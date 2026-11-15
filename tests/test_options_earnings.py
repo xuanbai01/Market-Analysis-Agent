@@ -157,3 +157,18 @@ def test_inside_a_session_the_rest_of_today_counts() -> None:
     reaction = (date(2026, 11, 18), date(2026, 11, 18))
     move = oe.event_move(smiles, quoted, reaction, estimated=False)
     assert move.event_sigma == pytest.approx(EVENT_SIGMA, rel=1e-9)
+
+
+def test_a_report_reacting_today_waits_for_todays_close() -> None:
+    """Review of #115: past moves take completed closes, so inside the
+    reaction session the newest report has no close after yet; it is left
+    out, not read off the live price."""
+    from app.services.options_metrics import completed_closes
+
+    yesterday = Announcement(datetime(2026, 11, 16, 16, 30, tzinfo=mc.ET), "after_close", False)
+    closes = [(date(2026, 11, 13), 100.0), (date(2026, 11, 16), 101.0), (date(2026, 11, 17), 109.0)]
+    in_session = completed_closes(closes, datetime(2026, 11, 17, 11, tzinfo=mc.ET))
+    assert oe.past_moves([yesterday], in_session) == []
+    after_close = completed_closes(closes, datetime(2026, 11, 17, 16, tzinfo=mc.ET))
+    assert [round(m.move, 4) for m in oe.past_moves([yesterday], after_close)] == [round(math.log(109 / 101), 4)]
+

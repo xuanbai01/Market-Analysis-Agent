@@ -7,7 +7,7 @@
  * never sent to a prompt, never in the demo. Every sentence is written in
  * code, and none says what to do.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
 import { clearOwnerKey, useOwnerKey } from "../../lib/owner";
@@ -58,6 +58,8 @@ function Positions({ ownerKey }: { ownerKey: string }) {
     queryKey: ["owner-positions"],
     queryFn: () => fetchOwnerPositions(ownerKey),
     staleTime: FIFTEEN_SECONDS,
+    // Gone from memory as soon as nothing shows it (unmount, sign out).
+    gcTime: 0,
     refetchOnWindowFocus: true,
     retry: false,
   });
@@ -126,6 +128,11 @@ function Positions({ ownerKey }: { ownerKey: string }) {
 
 export default function PositionsPage() {
   const ownerKey = useOwnerKey();
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    // No key (refused, cleared in another tab, signed out): no positions in memory either.
+    if (!ownerKey) queryClient.removeQueries({ queryKey: ["owner-positions"] });
+  }, [ownerKey, queryClient]);
   return (
     <div className="mx-auto w-full max-w-screen-xl px-6 py-8 lg:px-8">
       {ownerKey ? <Positions ownerKey={ownerKey} /> : <OwnerUnlock />}

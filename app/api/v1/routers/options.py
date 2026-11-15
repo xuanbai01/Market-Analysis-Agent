@@ -3,7 +3,7 @@ import logging
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import (
@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(require_shared_secret)])
 
 Symbol = Annotated[str, Path(pattern=r"^[A-Za-z][A-Za-z0-9.\-]{0,9}$", description="a ticker, e.g. NVDA or BRK-B")]
+# False: read without recording the view (the positions page, whose
+# underlyings are the owner's holdings).
+Track = Annotated[bool, Query(description="record the view (the daily run then snapshots the symbol)")]
 _UNAVAILABLE = "Option data is unavailable right now; try again shortly."
 
 
@@ -43,12 +46,12 @@ async def _limit_misses(request: Request, symbol: str, expiry: date | None = Non
 
 @router.get("/options/{symbol}", response_model=OptionsReport)
 async def options_report(
-    request: Request, symbol: Symbol, session: AsyncSession = Depends(get_session)
+    request: Request, symbol: Symbol, track: Track = True, session: AsyncSession = Depends(get_session)
 ) -> OptionsReport:
     symbol = symbol.upper()
     await _limit_misses(request, symbol)
     try:
-        return await get_report(session, symbol)
+        return await get_report(session, symbol, track=track)
     except SymbolNotFound as exc:
         raise HTTPException(status_code=404, detail=f"No such symbol: {symbol}.") from exc
     except Exception as exc:
@@ -58,12 +61,12 @@ async def options_report(
 
 @router.get("/options/{symbol}/chain/{expiry}", response_model=ExpiryChain)
 async def options_chain(
-    request: Request, symbol: Symbol, expiry: date, session: AsyncSession = Depends(get_session)
+    request: Request, symbol: Symbol, expiry: date, track: Track = True, session: AsyncSession = Depends(get_session)
 ) -> ExpiryChain:
     symbol = symbol.upper()
     await _limit_misses(request, symbol, expiry)
     try:
-        return await get_chain(session, symbol, expiry)
+        return await get_chain(session, symbol, expiry, track=track)
     except SymbolNotFound as exc:
         raise HTTPException(status_code=404, detail=f"No such symbol: {symbol}.") from exc
     except ExpiryNotListed as exc:

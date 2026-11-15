@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -50,8 +50,10 @@ const POSITIONS: OwnerPositions = OwnerPositionsSchema.parse({
   unanalysed: [{ account: 1, instrument_type: "Future", symbol: "/ESZ6", quantity: 1 }],
 });
 
+let client: QueryClient;
+
 function renderPage() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
@@ -89,6 +91,9 @@ describe("PositionsPage", () => {
     const groups = await screen.findAllByTestId("position-group");
     expect(groups).toHaveLength(2);
     expect(fetchOwnerPositions).toHaveBeenCalledWith("k".repeat(40));
+    // The holdings' option reports are read without recording a view.
+    await waitFor(() => expect(fetchOptionsReport).toHaveBeenCalledWith("NVDA", { track: false }));
+    expect(fetchOptionsChain).toHaveBeenCalledWith("NVDA", "2026-12-11", { track: false });
     expect(screen.getByTestId("positions-asof")).toHaveTextContent("Live · tastytrade");
     expect(screen.getByTestId("positions-totals")).toBeInTheDocument();
     const nvda = groups[0];
@@ -110,6 +115,18 @@ describe("PositionsPage", () => {
     renderPage();
     expect(await screen.findByTestId("owner-unlock")).toBeInTheDocument();
     expect(getOwnerKey()).toBeNull();
+    await waitFor(() => expect(client.getQueryData(["owner-positions"])).toBeUndefined());
+  });
+
+  it("drops the positions from memory once the key goes", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerPositions).mockResolvedValue(POSITIONS);
+    renderPage();
+    await screen.findAllByTestId("position-group");
+    expect(client.getQueryData(["owner-positions"])).toBeDefined();
+    act(() => clearOwnerKey());
+    expect(await screen.findByTestId("owner-unlock")).toBeInTheDocument();
+    await waitFor(() => expect(client.getQueryData(["owner-positions"])).toBeUndefined());
   });
 
   it("says when the copy is old or cut short", async () => {

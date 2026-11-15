@@ -201,7 +201,7 @@ def build(symbol: str, now: datetime) -> _Built:
     return _Built(symbol, fetched, {s.expiry: s for s in smiles}, parts)
 
 
-async def _assemble(session: AsyncSession, built: _Built, now: datetime) -> OptionsReport:
+async def _assemble(session: AsyncSession, built: _Built, now: datetime, track: bool) -> OptionsReport:
     parts = built.parts
     usable = parts["status"] == "ok"
     points: list[tuple[date, float]] = []
@@ -218,7 +218,8 @@ async def _assemble(session: AsyncSession, built: _Built, now: datetime) -> Opti
                 )
                 for t in await store.open_interest_history(session, built.symbol)
             ]
-            await store.touch_tracked(session, built.symbol, now)
+            if track:  # the positions page reads its holdings' reports without recording them
+                await store.touch_tracked(session, built.symbol, now)
         except Exception:
             logger.exception("options history for %s unavailable; serving the report without it", built.symbol)
     history = oa.iv_history(points, parts["iv30"])
@@ -232,20 +233,26 @@ async def _assemble(session: AsyncSession, built: _Built, now: datetime) -> Opti
     return OptionsReport(**parts, history=history, open_interest_history=totals, claims=claims, generated_at=now)
 
 
-async def get_report(session: AsyncSession, symbol: str, *, now: datetime | None = None) -> OptionsReport:
+async def get_report(
+    session: AsyncSession, symbol: str, *, now: datetime | None = None, track: bool = True
+) -> OptionsReport:
+    """``symbol``'s report, built or from the cache. A build records the view
+    (the daily run then snapshots the symbol) unless ``track`` is False: the
+    positions page reads every underlying the owner holds, and recording
+    those would store a list of the holdings."""
     entry = _fresh(symbol)
     if entry is not None:
         return entry.report
     lock = _locks.setdefault(symbol, asyncio.Lock())
     try:
         async with lock:
-            return await _get_report_locked(session, symbol, now)
+            return await _get_report_locked(session, symbol, now, track)
     finally:
         if symbol not in _cache and not lock.locked():
             _locks.pop(symbol, None)  # a symbol that failed leaves no lock behind
 
 
-async def _get_report_locked(session: AsyncSession, symbol: str, now: datetime | None) -> OptionsReport:
+async def _get_report_locked(session: AsyncSession, symbol: str, now: datetime | None, track: bool) -> OptionsReport:
     entry = _fresh(symbol)
     if entry is not None:
         return entry.report
@@ -261,7 +268,7 @@ async def _get_report_locked(session: AsyncSession, symbol: str, now: datetime |
         logger.exception("options for %s failed; serving the copy from before", symbol)
         stale.expires_at = _clock() + RETRY_AFTER_FAILURE_SECONDS
         return stale.report
-    report = await _assemble(session, built, now)
+    report = await _assemble(session, built, now, track)
     ttl = NO_OPTIONS_TTL_SECONDS if report.status == "no_options" else CACHE_TTL_SECONDS
     _remember(symbol, _Entry(report, built, _clock() + ttl))
     return report
@@ -286,9 +293,9 @@ def _fetch_expiry(symbol: str, expiry: date, built: _Built) -> Smile:
 
 
 async def get_chain(
-    session: AsyncSession, symbol: str, expiry: date, *, now: datetime | None = None
+    session: AsyncSession, symbol: str, expiry: date, *, now: datetime | None = None, track: bool = True
 ) -> ExpiryChain:
-    await get_report(session, symbol, now=now)
+    await get_report(session, symbol, now=now, track=track)
     built = _cache[symbol].built
     if built.fetched is None or expiry not in built.fetched.expiries:
         raise ExpiryNotListed(expiry)

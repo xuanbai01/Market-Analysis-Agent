@@ -2,6 +2,7 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
+import { clearStoredToken } from "../../lib/auth";
 import { clearOwnerKey, getOwnerKey, setOwnerKey, useOwnerKey } from "../../lib/owner";
 import * as ownerApi from "../../lib/owner-api";
 import { OWNER_USERNAME, OwnerUnlock } from "./OwnerUnlock";
@@ -12,6 +13,29 @@ afterEach(() => {
 });
 
 describe("the owner key in this browser", () => {
+  it("goes when the sign-in goes, whatever ended it (a 401 included)", () => {
+    setOwnerKey("k".repeat(40));
+    clearStoredToken();
+    expect(getOwnerKey()).toBeNull();
+  });
+
+  it("lasts the page in memory when storage refuses it", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("private mode");
+    });
+    setOwnerKey("k".repeat(40));
+    expect(getOwnerKey()).toBe("k".repeat(40));
+  });
+
+  it("asks the server without following a redirect, and never caches", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ tastytrade: true }), { status: 200 }));
+    await ownerApi.fetchOwnerStatus("k".repeat(40));
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(init.redirect).toBe("error");
+    expect(init.cache).toBe("no-store");
+    expect((init.headers as Record<string, string>)[ownerApi.OWNER_HEADER]).toBe("k".repeat(40));
+  });
+
   it("is kept, read back and forgotten, and a hook follows it", () => {
     const { result } = renderHook(() => useOwnerKey());
     expect(result.current).toBeNull();

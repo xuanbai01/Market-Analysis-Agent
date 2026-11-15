@@ -149,17 +149,17 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **The gate:** routes under `/v1/owner` take `require_owner`: the shared secret, then `X-Owner-Key`.
     - **Why:** the shared secret is also a GitHub Actions secret, so it alone must not open the owner's account.
     - **Responses:** with `OWNER_KEY` unset the routes answer 404, local dev included. A missing or wrong key is a 403.
-    - **Lockout:** ten wrong keys an hour lock an address out, the right key included. `TokenBucket.peek` checks the lockout before any key is compared.
+    - **Lockout:** ten wrong keys an hour lock an address out, the right key included. Each request takes a try before its key is compared and a right key gives it back (`TokenBucket.give_back`); `peek` only decides when to log a lockout.
     - **CORS** allows the header. The first route, `GET /v1/owner/status`, says whether tastytrade is configured.
   - **Password managers:** the sign-in form gets a fixed hidden username, so Chrome, Edge, Bitwarden or 1Password can save the shared secret under a name and sync it. The owner pages' unlock form will do the same.
   - **Setup:** docs/deployment.md §10 makes and imports the key.
   - **From the security review** (no high or medium findings):
     - each request takes a try before its key is compared and a right key gives it back, so a burst of guesses can't slip past one check;
-    - IPv6 callers count by their /64;
+    - IPv6 callers count by their /64, and an IPv4 address written as IPv6 by its IPv4 form (#126's AI review);
     - `TokenBucket` prunes at most every 30 s, so many unrefilled keys can't cost every request a full scan (this covers the open demo route too);
     - refusals and lockouts are logged under a keyed hash of the caller;
     - the app won't start with a key under 32 characters or equal to the shared secret, and the tries per hour are bounded 1 to 100;
     - the routes are left out of the OpenAPI schema;
-    - a test fails if any router other than the owner's imports tastytrade or the owner's services;
+    - a test fails if any router other than the owner's imports tastytrade, or a service that does;
     - the sign-in form posts.
 

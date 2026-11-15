@@ -138,6 +138,18 @@ async def test_an_ipv6_caller_is_one_caller_across_its_64(client: AsyncClient, m
     assert (await client.get(_STATUS, headers=_headers(ip="2001:db8:0:8::1"))).status_code == 200
 
 
+async def test_an_ipv4_address_written_as_ipv6_is_still_its_own_caller(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under the /64 rule every IPv4-mapped address would share one block,
+    so ten guesses from anywhere would lock out every IPv4 caller (#126's AI review)."""
+    monkeypatch.setattr(settings_module.settings, "OWNER_KEY_FAILURES_PER_HOUR", 2)
+    for _ in range(2):
+        assert (await client.get(_STATUS, headers=_headers(owner="guess", ip="::ffff:203.0.113.7"))).status_code == 403
+    assert (await client.get(_STATUS, headers=_headers(ip="203.0.113.7"))).status_code == 429  # the same caller
+    assert (await client.get(_STATUS, headers=_headers(ip="::ffff:198.51.100.9"))).status_code == 200
+
+
 async def test_refusals_and_lockouts_are_logged_by_an_anonymous_caller_id(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -157,19 +169,34 @@ def test_the_owner_routes_are_left_out_of_the_public_schema() -> None:
     assert not any(path.startswith("/v1/owner") for path in app.openapi()["paths"])
 
 
+_APP = Path(__file__).resolve().parents[1] / "app"
+_OWNER_SOURCES = {"tastytrade_client", "dxlink"}
+
+
+def _imported_services(source: Path) -> set[str]:
+    """The ``app.services`` modules a file imports, by their short names."""
+    found = set()
+    for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            found |= {a.name.removeprefix("app.services.") for a in node.names if a.name.startswith("app.services.")}
+        elif isinstance(node, ast.ImportFrom) and node.module == "app.services":
+            found |= {a.name for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("app.services."):
+            found.add(node.module.removeprefix("app.services."))
+    return found
+
+
 def test_only_the_owner_router_reads_tastytrade() -> None:
     """tastytrade's data and the owner's trades are served from behind the
-    owner key only (ADR 0009)."""
-    routers = Path(__file__).resolve().parents[1] / "app" / "api" / "v1" / "routers"
-    readers = set()
-    for source in routers.glob("*.py"):
-        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
-            names = (
-                [a.name for a in node.names] if isinstance(node, ast.Import | ast.ImportFrom) else []
-            ) + ([node.module] if isinstance(node, ast.ImportFrom) and node.module else [])
-            if any(n and ("tastytrade" in n or "dxlink" in n or "owner_" in n) for n in names):
-                readers.add(source.name)
-    assert readers <= {"owner.py"}
+    owner key only (ADR 0009): no other router imports tastytrade, or a
+    service that does (the probe aside, which is never imported)."""
+    readers = {
+        path.stem for path in (_APP / "services").glob("*.py")
+        if _imported_services(path) & _OWNER_SOURCES and path.stem != "tastytrade_probe"
+    } | _OWNER_SOURCES
+    routers = {path.name: _imported_services(path) & readers for path in (_APP / "api" / "v1" / "routers").glob("*.py")}
+    assert routers["owner.py"], "the detector found nothing: it's broken"
+    assert {name for name, hits in routers.items() if hits} == {"owner.py"}
 
 
 @pytest.mark.parametrize(

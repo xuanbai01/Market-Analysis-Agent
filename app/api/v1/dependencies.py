@@ -194,13 +194,16 @@ def _owner_failures() -> TokenBucket:
 def _owner_caller(request: Request) -> str:
     """The lockout's key: the caller's address, an IPv6 one by its /64, the
     block one subscriber is usually given (else each address would get its
-    own tries)."""
+    own tries). An IPv4 address written as IPv6 (``::ffff:203.0.113.7``) is
+    the IPv4 caller, or every such caller would share one block."""
     address = _client_ip(request)
     try:
         ip = ipaddress.ip_address(address)
     except ValueError:
         return address
-    return str(ipaddress.ip_network(f"{ip}/64", strict=False)) if ip.version == 6 else address
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return str(ip.ipv4_mapped)
+    return str(ipaddress.ip_network(f"{ip}/64", strict=False)) if ip.version == 6 else str(ip)
 
 
 def _caller_name(caller: str) -> str:

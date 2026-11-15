@@ -137,3 +137,10 @@ Each entry has three parts:
 **Mistake:** `beforeEach(() => vi.mocked(fetchOptionsRead).mockReturnValue(new Promise(() => {})))` made the page's test file die with "Worker exited unexpectedly", with no test failure to read. Bisecting against `main` found it: the same never-settling promise from the `vi.mock` factory (`vi.fn(() => new Promise(() => {}))`) runs fine.
 **Rule:** give a mock its default behaviour in the `vi.mock` factory; when a file dies without a failure, bisect the test file against `main` before suspecting the component.
 
+
+## Mutation checks revert to the last commit, so commit first
+
+**Date:** 2026-11-15
+**Context:** The tastytrade client's account-scope fix (#117), checked by breaking the guard with `sed` and restoring the file with `git checkout`.
+**Mistake:** the fix wasn't committed yet. `git checkout` restored the file to its last commit, which also threw away the fix being checked; the next test run would have passed on old code had the change not been re-applied.
+**Rule:** commit (or stash) a change before mutating it to check its tests, and restore with `git checkout` only from a clean tree. The same goes for an untracked file, which `git checkout` can't restore at all (earlier lesson).

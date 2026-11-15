@@ -163,9 +163,9 @@ def is_feed_url(url: str) -> bool:
     try:
         parts = urlsplit(url)
         port = parts.port
+        host = parts.hostname or ""
     except ValueError:
         return False
-    host = parts.hostname or ""
     return (
         parts.scheme == "wss"
         and _HOSTNAME.fullmatch(host) is not None

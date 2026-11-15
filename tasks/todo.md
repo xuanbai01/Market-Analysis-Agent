@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **tastytrade, PR A (connect and probe)** on `feature/tastytrade-connect`: the read-only client, DXLink, and a probe that reports what the owner's account gets. Plan below.
+- **tastytrade, PR A** merged (#116); its review follow-up is on `fix/tastytrade-probe-robustness`. **Owner:** create the OAuth app and set the Fly secrets (deployment.md §9); then the probe runs during a session. Plan below.
 - **Options analysis:** the plan's five PRs and the edge-case review are merged (#109–#115). Follow-ups below.
 
 ## Plan — after Phase 5 (2026-11-13)
@@ -95,7 +95,7 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 
 So nothing from tastytrade is stored, sent to a prompt or shown in the demo. The client only reads: it requests `scope=read` and makes GET calls only, besides the token POST. The owner's own trades are outside the terms' "Data", but stay out of the database and any prompt too. One PR each, in order.
 
-- [ ] **PR A — connect and probe** *(branch `feature/tastytrade-connect`)*: ADR 0009; `tastytrade_client` (OAuth refresh with `scope=read`, a path allowlist, backoff, an hour's pause after a refused sign-in); `dxlink` (candles, one-shot Summary/Greeks); `tastytrade_probe` (`python -m`, prints what the account gets, stores nothing). **Owner:** create the personal OAuth app and grant, set the three Fly secrets. **Done when** the probe has run on Fly during a session and its answers are recorded here: real-time or not, candle depth, whether candles carry IV, whether options have candles.
+- [ ] **PR A — connect and probe** *(code merged in #116; review follow-up on `fix/tastytrade-probe-robustness`)*: ADR 0009; `tastytrade_client` (OAuth refresh with `scope=read`, a path allowlist, backoff, an hour's pause after a refused sign-in); `dxlink` (candles, one-shot Summary/Greeks); `tastytrade_probe` (`python -m`, prints what the account gets, stores nothing). **Owner:** create the personal OAuth app and grant, set the three Fly secrets. **Done when** the probe has run on Fly during a session and its answers are recorded here: real-time or not, candle depth, whether candles carry IV, whether options have candles. **First run (2026-11-15, Sunday):** the grant is read-only (`read` and an account scope, no `trade`); the client refused it over the account scope, fixed on `fix/tastytrade-probe-robustness`; nothing else ran.
 - [ ] **PR B — live quotes on the options page:** `GET /v1/options/{symbol}/live/{expiry}`, cached 10 s; our IVs from live mids; Yahoo's open interest; a Live/Delayed switch; the builder prices at live bid/ask.
 - [ ] **PR C — market history, live:** `GET /v1/options/{symbol}/history` (market metrics; daily candles, with IV if they carry it); a "History · tastytrade" panel.
 - [ ] **PR D — the owner's trades:** `trade_journal` (orders to strategies, FIFO opens and closes, expirations and assignments, fees); `GET /v1/trades`; a lazy `/trades` page. Fetched on demand, account numbers masked, no advice.

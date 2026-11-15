@@ -47,12 +47,17 @@ from app.services import tastytrade_client as tt
 Say = Callable[[str], None]
 
 
+def _now() -> datetime:  # swapped in tests
+    return datetime.now(UTC)
+
+
 class ProbeError(Exception):
     """An answer the probe can't read; its message is the probe's own."""
 
 
 _OWN_ERRORS = (ProbeError, tt.TastytradeUnavailable, tt.TastytradeNotFound, dxlink.DxlinkError)
 _ACCOUNT_NUMBER = re.compile(r"[A-Z0-9]+")
+_ACCOUNT_IN_SCOPE = re.compile(r"^(accounts:)[^:]*(:|$)")
 
 METRICS_SYMBOLS = ("QQQ", "SPY", "NVDA")
 CHAIN_SYMBOL = "SPY"
@@ -107,16 +112,35 @@ def age_seconds(stamp: Any, now: datetime) -> float | None:
         then = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
     except ValueError:
         return None
+    if then.tzinfo is None:  # a time with no zone can't be aged
+        return None
     return (now - then).total_seconds()
 
 
+def _date(value: Any) -> date | None:
+    """A date, or the date of a timestamp; None when neither reads."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def shown_scopes(scopes: frozenset[str]) -> list[str]:
+    """Scopes to print, each account number masked (``accounts:***:owner``)."""
+    return sorted(_ACCOUNT_IN_SCOPE.sub(r"\1***\2", s) for s in scopes)
+
+
 def nearest_expiry(expirations: list[dict[str, Any]], today: date, target_days: int = TARGET_DAYS) -> dict[str, Any] | None:
-    dated = [e for e in expirations if isinstance(field(e, "expiration-date"), str)]
-    return min(
-        dated,
-        key=lambda e: abs((date.fromisoformat(field(e, "expiration-date")) - today).days - target_days),
-        default=None,
-    )
+    """The expiry nearest ``target_days`` out; one whose date doesn't read is skipped."""
+    dated = [(day, e) for e in expirations if isinstance(e, dict) and (day := _date(field(e, "expiration-date")))]
+    best = min(dated, key=lambda pair: abs((pair[0] - today).days - target_days), default=None)
+    return None if best is None else best[1]
 
 
 def near_money(strikes: list[dict[str, Any]], spot: float, n: int = NEAR_MONEY_STRIKES) -> list[dict[str, Any]]:
@@ -184,7 +208,7 @@ async def probe_quote_token(say: Say) -> None:
 
 async def probe_grant(say: Say) -> None:
     scopes = await tt.grant_scopes()
-    say(f"  the stored grant may: {sorted(scopes) or '(not said)'}")
+    say(f"  the stored grant may: {shown_scopes(scopes) or '(not said)'}")
     if "trade" in scopes:
         say("  WARNING: the grant can trade. Delete it on my.tastytrade.com and create one with the read scope only.")
 
@@ -209,7 +233,7 @@ async def probe_chain(say: Say, today: date) -> ChainPick:
     expirations = field(chain, "expirations") or []
     pick = nearest_expiry(expirations, today)
     if pick is None:
-        raise ProbeError("no expirations")
+        raise ProbeError(f"none of the {len(expirations)} expirations has a date that reads")
     strikes = field(pick, "strikes") or []
     if not isinstance(strikes, list) or not all(isinstance(s, dict) for s in strikes):
         raise ProbeError("the strikes are not objects")
@@ -217,7 +241,8 @@ async def probe_chain(say: Say, today: date) -> ChainPick:
     say(f"  chain fields: {field_names(chain)}")
     say(f"  expiration fields: {field_names(pick)}")
     say(f"  strike fields: {field_names(strikes[0]) if strikes else []}")
-    return ChainPick(spot=spot, expiry=field(pick, "expiration-date"), strikes=near_money(strikes, spot))
+    expiry = _date(field(pick, "expiration-date"))
+    return ChainPick(spot=spot, expiry=expiry.isoformat() if expiry else "", strikes=near_money(strikes, spot))
 
 
 def _yahoo_quotes(symbol: str, expiry: str) -> dict[tuple[str, float], tuple[float, float]]:
@@ -370,7 +395,7 @@ async def probe_account(say: Say) -> None:
 
 
 async def main(say: Say = print) -> None:
-    now = datetime.now(UTC)
+    now = _now()
     say(f"tastytrade probe, {now.astimezone(mc.ET):%Y-%m-%d %H:%M} ET; configured: {tt.is_configured()}")
     await _section(say, "The grant", lambda: probe_grant(say))
     await _section(say, "Quote token", lambda: probe_quote_token(say))

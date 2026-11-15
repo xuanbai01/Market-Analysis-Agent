@@ -49,7 +49,7 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 - **The owner's tastytrade credential** (ADR 0009) is a personal OAuth app's client ID and secret and its grant's refresh token. The refresh token never expires and opens a brokerage account.
   - **Storage:** they are Fly secrets only (`TASTYTRADE_*`, docs/deployment.md §9), never in GitHub or a browser.
   - **Read only:** every refresh asks for `scope=read`.
-    - `tastytrade_client` uses an access token only when the answer's `scope` field, or else the token's own claim, holds nothing beyond `read` and `openid`. A missing or garbled scope counts as a refusal.
+    - `tastytrade_client` uses an access token only when the answer's `scope` field, or else the token's own claim, holds `read` and nothing beyond `openid` and tastytrade's per-account scopes (`accounts:<number>:<authority>`). `trade` or an unknown scope is refused without being printed (a scope can name an account). A missing or garbled scope counts as a refusal.
     - Apart from the sign-in POST, it can only GET, and only paths on its allowlist, none of them an order path. `tests/test_tastytrade_client.py` checks the source and every request.
     - The probe checks that the stored grant itself can't trade (`grant_scopes`). A read-only access token proves nothing about the refresh token, which is the credential that could leak.
   - **Failed sign-in:** every failure is remembered, so waiting and later callers don't sign in again. Repeated failed logins block the server's IP for about 8 hours.

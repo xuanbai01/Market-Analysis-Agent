@@ -129,10 +129,13 @@ class _Strike:
         )
 
 
-def headline(chain: ExpiryQuotes, s: Smile) -> tuple[float | None, float]:
+def headline(chain: ExpiryQuotes, s: Smile) -> tuple[float | None, float | None]:
     """(max pain, net gamma exposure) for the across-expiries table: no
-    by-strike rows and no flip, so it stays cheap over every expiry read."""
+    by-strike rows and no flip, so it stays cheap over every expiry read.
+    Both None for an expiry with no open interest at all."""
     calls, puts = _open_interest(chain)
+    if not any(calls.values()) and not any(puts.values()):
+        return None, None
     years = max(s.years, _MIN_YEARS)
     net = sum(
         om.gamma76(s.forward, k, years, _vol_at(s, k)) * s.forward * s.forward * (calls.get(k, 0) - puts.get(k, 0))

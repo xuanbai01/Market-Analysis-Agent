@@ -142,4 +142,4 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Best-effort:** a totals failure is named (`totals: <error>`) but never fails the cron, which still fails only on a missing snapshot. Its summary counts the totals.
   - **The report** carries `open_interest_history`, read in the same guarded block as the IV history.
   - **The page** shows an "Open interest, all expiries" panel: the latest totals, put/call, and the change since the first session, with a two-line chart once two sessions exist.
-  - **First data** after Monday 2026-11-16's run. Options chunk 19.6 KB gz (near its ~20 KB budget). 1776 backend / 822 frontend tests.
+  - **First data** after Monday 2026-11-16's run. Options chunk 19.6 KB gz (near its ~20 KB budget). From #122's review: an expiry with no open interest shows no net gamma (it showed $0), and the across-expiries sentence counts the expiries with open interest. 1777 backend / 822 frontend tests.

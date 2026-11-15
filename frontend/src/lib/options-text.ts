@@ -254,14 +254,14 @@ export function acrossSentence(expiries: ExpirySummary[]): Sentence | null {
   const low = priced.reduce((a, b) => (b.max_pain < a.max_pain ? b : a));
   const high = priced.reduce((a, b) => (b.max_pain > a.max_pain ? b : a));
   if (low.max_pain === high.max_pain) {
-    return ["Max pain is ", { strong: usd(low.max_pain) }, ` at all ${priced.length} expiries read.`];
+    return ["Max pain is ", { strong: usd(low.max_pain) }, ` at all ${priced.length} expiries with open interest.`];
   }
   return [
     "Max pain runs from ",
     { strong: usd(low.max_pain) },
     ` (${dateLabel(low.expiry)}) to `,
     { strong: usd(high.max_pain) },
-    ` (${dateLabel(high.expiry)}) across the ${priced.length} expiries read.`,
+    ` (${dateLabel(high.expiry)}) across the ${priced.length} expiries with open interest.`,
   ];
 }
 

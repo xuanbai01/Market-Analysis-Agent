@@ -311,16 +311,39 @@ async def test_a_quote_batch_that_fails_for_another_reason_is_not_retried_alone(
     25 more calls would only extend the trouble (#127's AI review)."""
     account.positions[ACCOUNT] = [_position("NVDA", "Equity", "10", "Long"), _position("AAPL", "Equity", "10", "Long")]
     real = account.get
+    asked: list[dict[str, Any]] = []
 
     async def down(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
         if path == "/market-data/by-type":
+            asked.append(params or {})
             raise tt.TastytradeUnavailable("tastytrade failed 3 times (503)")
         return await real(path, params, op=op)
 
     monkeypatch.setattr(op.tt, "get", down)
     with pytest.raises(op.PositionsUnavailable):
         await op.get_positions()
-    assert len(account.quote_calls()) == 0  # the fake records only calls it answers
+    assert asked == [{"equity": "NVDA,AAPL"}]  # the batch once, nothing alone
+
+
+@pytest.mark.parametrize("status", [401, 429])
+async def test_a_401_or_429_is_not_a_refusal_to_retry_alone(
+    account: _Tastytrade, monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    """A stale sign-in or a throttle isn't about the symbols (#127's AI review)."""
+    account.positions[ACCOUNT] = [_position("NVDA", "Equity", "10", "Long"), _position("AAPL", "Equity", "10", "Long")]
+    real = account.get
+    asked: list[dict[str, Any]] = []
+
+    async def no(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        if path == "/market-data/by-type":
+            asked.append(params or {})
+            raise tt.TastytradeUnavailable(f"tastytrade answered {status}", status=status)
+        return await real(path, params, op=op)
+
+    monkeypatch.setattr(op.tt, "get", no)
+    with pytest.raises(op.PositionsUnavailable):
+        await op.get_positions()
+    assert len(asked) == 1
 
 
 async def test_a_failure_reason_never_carries_an_account_number(account: _Tastytrade) -> None:

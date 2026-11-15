@@ -2,18 +2,20 @@
 owner pages (``/positions``) without the owner's data (ADR 0009: a Claude
 session must not see it).
 
-Runs the real app on :8000, with tastytrade's answers taken from fixtures
-below (a covered call on NVDA and a long SPY put, nothing anyone holds), the
-owner key set to a throwaway value, and no shared secret. Option chains and
-prices come from Yahoo as usual, so the context around the positions is
-real; with no database, the stored IV history is just missing. Never run it
-with production settings.
+Runs the real app on 127.0.0.1:8000, with tastytrade's answers taken from
+fixtures below (a covered call on NVDA and a long SPY put, nothing anyone
+holds). Whatever ``.env`` says, it runs with a throwaway shared secret and
+owner key, no LLM, news, FRED or tastytrade keys, and a database address
+nothing listens on, so it can't spend, write anywhere or reach the real
+account; it refuses to start on Fly. Option chains and prices come from
+Yahoo as usual, so the context around the positions is real; the stored IV
+history is just missing.
 
     uv run python scripts/fake_owner_api.py
 
 then the frontend dev server; in the browser set localStorage
-``market-agent.auth-token`` to any value (no shared secret is set) and
-unlock ``/positions`` with ``FAKE_OWNER_KEY``.
+``market-agent.auth-token`` to ``FAKE_SHARED_SECRET`` and unlock
+``/positions`` with ``FAKE_OWNER_KEY``.
 """
 from __future__ import annotations
 
@@ -23,10 +25,25 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-FAKE_OWNER_KEY = "o" * 40
-EXPIRY = "2026-12-18"  # a monthly expiry Yahoo lists for both tickers
-os.environ["OWNER_KEY"] = FAKE_OWNER_KEY
-os.environ["BACKEND_SHARED_SECRET"] = ""
+FAKE_SHARED_SECRET = "local-dev"
+FAKE_OWNER_KEY = "o" * 40  # plainly fake
+if os.environ.get("FLY_APP_NAME") or os.environ.get("APP_ENV") == "prod":
+    sys.exit("fake_owner_api is for a developer's machine, never a deployed app")
+# Environment variables beat .env in pydantic-settings: every secret and
+# address that could reach something real is overridden here.
+os.environ.update({
+    "BACKEND_SHARED_SECRET": FAKE_SHARED_SECRET,
+    "OWNER_KEY": FAKE_OWNER_KEY,
+    "OWNER_VAULT_KEY": "",
+    "DATABASE_URL": "postgresql+asyncpg://nobody:nothing@127.0.0.1:9/none",
+    "ANTHROPIC_API_KEY": "",
+    "DEEPSEEK_API_KEY": "",
+    "NEWSAPI_KEY": "",
+    "FRED_API_KEY": "",
+    "TASTYTRADE_CLIENT_ID": "",
+    "TASTYTRADE_CLIENT_SECRET": "",
+    "TASTYTRADE_REFRESH_TOKEN": "",
+})
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

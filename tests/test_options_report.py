@@ -92,6 +92,19 @@ async def test_a_report_from_a_chain(world: Any) -> None:
     assert report.earnings is not None and report.earnings.refused == "no earnings date"
 
 
+async def test_a_report_read_for_the_positions_page_records_no_view(world: Any) -> None:
+    """The positions page reads the report of every underlying the owner
+    holds; recording those as views would store a list of the holdings
+    (positions PR 3's security review)."""
+    _yahoo, store, _clock = world
+    await orp.get_report(None, "HELD", now=NOW, track=False)  # type: ignore[arg-type]
+    assert store.touched == []
+    await orp.get_chain(None, "OTHER", EXP_20, now=NOW, track=False)  # type: ignore[arg-type]
+    assert store.touched == []
+    await _report("VIEWED")
+    assert store.touched == ["VIEWED"]
+
+
 async def test_quotes_in_a_session_are_not_the_close(world: Any) -> None:
     monday_11am_et = datetime(2026, 11, 16, 16, tzinfo=UTC)
     report = await orp.get_report(None, "TEST", now=monday_11am_et)  # type: ignore[arg-type]

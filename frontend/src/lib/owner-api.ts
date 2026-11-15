@@ -12,6 +12,8 @@ async function ownerGet<T>(path: string, key: string, parse: (resp: Response) =>
   const resp = await fetch(`${BACKEND_URL}${path}`, {
     headers: { ...authHeaders(), [OWNER_HEADER]: key },
     cache: "no-store",
+    // A redirect would carry the custom header to wherever it points.
+    redirect: "error",
   });
   if (!resp.ok) {
     throw new ApiError({

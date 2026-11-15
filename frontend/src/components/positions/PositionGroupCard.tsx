@@ -122,14 +122,14 @@ export function PositionGroupCard({ group, now }: { group: PositionGroup; now: D
   const hasOptions = expiry !== null;
   const report = useQuery({
     queryKey: ["options", group.symbol],
-    queryFn: () => fetchOptionsReport(group.symbol),
+    queryFn: () => fetchOptionsReport(group.symbol, { track: false }), // a holding isn't a view
     staleTime: FIVE_MINUTES,
     enabled: hasOptions,
     retry: false,
   });
   const chain = useQuery({
     queryKey: ["options-chain", group.symbol, expiry],
-    queryFn: () => fetchOptionsChain(group.symbol, expiry as string),
+    queryFn: () => fetchOptionsChain(group.symbol, expiry as string, { track: false }),
     staleTime: FIVE_MINUTES,
     enabled: hasOptions,
     retry: false,

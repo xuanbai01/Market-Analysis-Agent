@@ -9,12 +9,14 @@ import { useSyncExternalStore } from "react";
 
 const OWNER_KEY_STORAGE = "market-agent.owner-key";
 const CHANGED = "market-agent:owner-key";
+// When storage refuses the key (private mode), it lasts the page here.
+let inMemory: string | null = null;
 
 export function getOwnerKey(): string | null {
   try {
-    return window.localStorage.getItem(OWNER_KEY_STORAGE);
+    return window.localStorage.getItem(OWNER_KEY_STORAGE) ?? inMemory;
   } catch {
-    return null; // private mode: no key, the unlock form asks again
+    return inMemory;
   }
 }
 
@@ -25,14 +27,16 @@ function changed(): void {
 export function setOwnerKey(key: string): void {
   try {
     window.localStorage.setItem(OWNER_KEY_STORAGE, key);
+    inMemory = null;
   } catch {
-    // storage refused: the key lasts until the page reloads
+    inMemory = key; // storage refused: the key lasts until the page reloads
   }
   changed();
 }
 
 /** Forget the owner key: on sign out, and when the server refuses it. */
 export function clearOwnerKey(): void {
+  inMemory = null;
   try {
     window.localStorage.removeItem(OWNER_KEY_STORAGE);
   } catch {

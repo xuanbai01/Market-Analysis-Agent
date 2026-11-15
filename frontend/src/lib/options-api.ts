@@ -31,16 +31,24 @@ async function getJson<T>(path: string, parse: (resp: Response) => Promise<T>): 
   return parse(resp);
 }
 
+/** ``track: false`` reads without recording a view: the positions page,
+ * whose underlyings are the owner's holdings, must not leave a list of them. */
+export interface ReadOptions {
+  track?: boolean;
+}
+
+const query = (opts?: ReadOptions) => (opts?.track === false ? "?track=false" : "");
+
 /** Everything the page draws; built server-side in a couple of seconds, then cached 15 minutes. */
-export function fetchOptionsReport(symbol: string): Promise<OptionsReport> {
+export function fetchOptionsReport(symbol: string, opts?: ReadOptions): Promise<OptionsReport> {
   const ticker = encodeURIComponent(symbol.toUpperCase());
-  return getJson(`/v1/options/${ticker}`, (resp) => parseJsonAndValidate(resp, OptionsReportSchema));
+  return getJson(`/v1/options/${ticker}${query(opts)}`, (resp) => parseJsonAndValidate(resp, OptionsReportSchema));
 }
 
 /** One expiry's smile, chain rows and open interest (``expiry`` is YYYY-MM-DD). */
-export function fetchOptionsChain(symbol: string, expiry: string): Promise<ExpiryChain> {
+export function fetchOptionsChain(symbol: string, expiry: string, opts?: ReadOptions): Promise<ExpiryChain> {
   const ticker = encodeURIComponent(symbol.toUpperCase());
-  return getJson(`/v1/options/${ticker}/chain/${encodeURIComponent(expiry)}`, (resp) =>
+  return getJson(`/v1/options/${ticker}/chain/${encodeURIComponent(expiry)}${query(opts)}`, (resp) =>
     parseJsonAndValidate(resp, ExpiryChainSchema),
   );
 }

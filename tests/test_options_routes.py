@@ -41,6 +41,7 @@ class _Service:
         self.read_fail: Exception | None = None
         self.read_cached: set[str] = set()
         self.events: list[str] = []
+        self.tracks: list[bool] = []
 
     async def get_read(self, report: OptionsReport) -> OptionsRead:
         self.reads.append(report.symbol)
@@ -54,13 +55,15 @@ class _Service:
     def has_read(self, report: OptionsReport) -> bool:
         return report.symbol in self.read_cached
 
-    async def get_report(self, _session: Any, symbol: str) -> OptionsReport:
+    async def get_report(self, _session: Any, symbol: str, *, track: bool = True) -> OptionsReport:
         self.symbols.append(symbol)
+        self.tracks.append(track)
         if self.fail:
             raise self.fail
         return _report(symbol)
 
-    async def get_chain(self, _session: Any, symbol: str, expiry: date) -> ExpiryChain:
+    async def get_chain(self, _session: Any, symbol: str, expiry: date, *, track: bool = True) -> ExpiryChain:
+        self.tracks.append(track)
         if self.fail:
             raise self.fail
         return ExpiryChain(expiry=expiry, days=30.0, forward=100.0, atm_iv=0.25, smile=[], rows=[], open_interest=[])
@@ -215,3 +218,14 @@ async def test_a_read_whose_report_needs_building_counts_as_a_lookup(setup: Any)
     service.read_cached = {"T0", "T1", "T2"}
     statuses = [(await client.get(f"/v1/options/T{i}/read")).status_code for i in range(3)]
     assert statuses == [200, 200, 429]  # the options build limit (2)
+
+
+async def test_a_page_can_read_without_recording_a_view(setup: tuple[AsyncClient, _Service]) -> None:
+    client, service = setup
+    service.fresh = {"NVDA"}
+    service.chains = {date(2026, 12, 18)}
+    await client.get("/v1/options/NVDA")
+    await client.get("/v1/options/NVDA?track=false")
+    await client.get("/v1/options/NVDA/chain/2026-12-18?track=false")
+    assert service.tracks == [True, False, False]
+

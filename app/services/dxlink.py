@@ -31,6 +31,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from websockets.asyncio.client import connect as _ws_connect
 
@@ -43,6 +44,9 @@ FETCH_TIMEOUT_SECONDS = 20.0
 IDLE_SECONDS = 3.0
 OPEN_TIMEOUT_SECONDS = 10.0
 MAX_MESSAGE_BYTES = 16 * 1024 * 1024
+# tastytrade's DXLink feed (tasty-openapi-ws.dxfeed.com); the address comes
+# with the quote token, and nothing else is connected to.
+FEED_DOMAIN = "dxfeed.com"
 _CHANNEL = 3
 _SETUP = {
     "type": "SETUP",
@@ -131,8 +135,18 @@ async def quote_token() -> QuoteToken:
         token = QuoteToken(token=str(data["token"]), url=str(data["dxlink-url"]), level=str(data.get("level") or ""))
     except KeyError as exc:
         raise DxlinkError(f"the quote token answer has no {exc.args[0]}") from None
+    if not _is_feed_url(token.url):
+        raise DxlinkError("the quote token's feed address is not a dxFeed websocket")
     _quote = (token, _clock() + QUOTE_TOKEN_TTL_SECONDS)
     return token
+
+
+def _is_feed_url(url: str) -> bool:
+    """The server connects where tastytrade's answer says, so only to a
+    dxFeed websocket over TLS."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    return parts.scheme == "wss" and (host == FEED_DOMAIN or host.endswith("." + FEED_DOMAIN))
 
 
 def _forget_quote_token() -> None:

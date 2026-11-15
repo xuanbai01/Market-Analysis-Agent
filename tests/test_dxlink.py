@@ -105,7 +105,7 @@ def quote_tokens(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     async def fake_get(path: str, params: Any = None, *, op: str) -> dict[str, Any]:
         calls.append(path)
-        return {"data": {"token": QUOTE_TOKEN, "dxlink-url": "wss://tasty-openapi-ws.dxfeed.test/realtime", "level": "api"}}
+        return {"data": {"token": QUOTE_TOKEN, "dxlink-url": "wss://tasty-openapi-ws.dxfeed.com/realtime", "level": "api"}}
 
     monkeypatch.setattr(tt, "get", fake_get)
     dxlink.reset()
@@ -116,8 +116,31 @@ def quote_tokens(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 async def test_quote_token_is_read_once_and_cached(quote_tokens: list[str]) -> None:
     first = await dxlink.quote_token()
     second = await dxlink.quote_token()
-    assert first == second == dxlink.QuoteToken(QUOTE_TOKEN, "wss://tasty-openapi-ws.dxfeed.test/realtime", "api")
+    assert first == second == dxlink.QuoteToken(QUOTE_TOKEN, "wss://tasty-openapi-ws.dxfeed.com/realtime", "api")
     assert quote_tokens == ["/api-quote-tokens"]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "ws://tasty-openapi-ws.dxfeed.com/realtime",  # no TLS
+        "wss://evil.example/realtime",
+        "wss://dxfeed.com.evil.example/realtime",
+        "wss://notdxfeed.com/realtime",
+        "https://tasty-openapi-ws.dxfeed.com/realtime",
+        "wss://169.254.169.254/realtime",
+    ],
+)
+async def test_a_feed_address_off_dxfeed_is_refused(
+    monkeypatch: pytest.MonkeyPatch, server: FakeServer, url: str
+) -> None:
+    async def fake_get(path: str, params: Any = None, *, op: str) -> dict[str, Any]:
+        return {"data": {"token": QUOTE_TOKEN, "dxlink-url": url, "level": "api"}}
+
+    monkeypatch.setattr(tt, "get", fake_get)
+    with pytest.raises(dxlink.DxlinkError, match="dxFeed"):
+        await dxlink.fetch_candles("SPY", "1d", datetime(2026, 11, 1, tzinfo=UTC))
+    assert server.connected_to == []
 
 
 async def test_handshake_follows_the_documented_order(server: FakeServer) -> None:
@@ -131,7 +154,7 @@ async def test_handshake_follows_the_documented_order(server: FakeServer) -> Non
     setup = server.sent[3]
     assert setup["acceptDataFormat"] == "COMPACT"
     assert setup["acceptEventFields"] == {"Candle": CANDLE_FIELDS}
-    assert server.connected_to == ["wss://tasty-openapi-ws.dxfeed.test/realtime"]
+    assert server.connected_to == ["wss://tasty-openapi-ws.dxfeed.com/realtime"]
 
 
 async def test_candles_come_back_oldest_first_until_the_snapshot_ends(server: FakeServer) -> None:

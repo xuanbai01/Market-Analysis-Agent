@@ -101,7 +101,7 @@ describe("positioning words", () => {
       { ...e[1], max_pain: 190 },
       { ...e[2], max_pain: 160 },
     ];
-    expect(text(acrossSentence(priced))).toMatch(/^Max pain runs from \*\*\$160\.00\*\* \(.+\) to \*\*\$190\.00\*\* \(.+\) across the 3 expiries read\.$/);
+    expect(text(acrossSentence(priced))).toMatch(/^Max pain runs from \*\*\$160\.00\*\* \(.+\) to \*\*\$190\.00\*\* \(.+\) across the 3 expiries with open interest\.$/);
     expect(acrossSentence([{ ...e[0], max_pain: null }])).toBeNull();
   });
 });

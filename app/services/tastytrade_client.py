@@ -4,8 +4,9 @@ The owner's tastytrade account, read only (ADR 0009).
 A personal OAuth app's refresh token, which never expires, buys access
 tokens that last 15 minutes. Every refresh asks for the ``read`` scope,
 and the access token is used only if what it may do (the answer's
-``scope``, else the token's own claim) is known and holds nothing beyond
-``read`` and ``openid``: this code never places, changes or cancels an
+``scope``, else the token's own claim) is known: ``read``, perhaps
+``openid``, and one ``accounts:<number>:<authority>`` scope per account it
+reaches, but never ``trade`` and nothing unknown: this code never places, changes or cancels an
 order. Apart from the sign-in, every call is a GET on a path ``_ALLOWED``
 matches; order paths are not on it. ``grant_scopes`` asks what the stored
 grant itself may do, for the probe: a grant that can trade should be
@@ -65,7 +66,12 @@ FRESH_TOKEN_SECONDS = 60
 SIGN_IN_PAUSE_SECONDS = 3600  # refused: a revoked or wrong grant
 SIGN_IN_RETRY_SECONDS = 60  # throttled, down, or a garbled answer
 _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+_TRADE_SCOPE = "trade"
 _READ_ONLY_SCOPES = frozenset({"read", "openid"})
+# tastytrade adds one scope per account the grant reaches, with the owner's
+# authority on it ("accounts:5wt00001:owner"). It names the accounts a token
+# may reach; acting on them still takes the ``trade`` scope.
+_ACCOUNT_SCOPE = re.compile(r"accounts:[a-z0-9]+:[a-z-]+")
 # What a bearer token may hold: anything else could break a header and
 # end up quoted in a transport error's message.
 _TOKEN_CHARS = re.compile(r"[A-Za-z0-9._~+/=-]+")
@@ -255,10 +261,13 @@ async def _access_token(client: httpx.AsyncClient) -> str:
         if _token is not None and _expires_at > _clock():
             return _token
         token, lifetime, scopes = await _sign_in(client, SCOPE)
-        if not scopes:
-            raise _pause(SIGN_IN_PAUSE_SECONDS, "tastytrade didn't say what the token may do; refusing it")
-        if not scopes <= _READ_ONLY_SCOPES:
+        if _TRADE_SCOPE in scopes:
             raise _pause(SIGN_IN_PAUSE_SECONDS, "tastytrade granted a token that can trade; make a grant with the read scope only")
+        unknown = [s for s in scopes if s not in _READ_ONLY_SCOPES and not _ACCOUNT_SCOPE.fullmatch(s)]
+        if unknown:  # not printed: a scope can name an account
+            raise _pause(SIGN_IN_PAUSE_SECONDS, f"tastytrade granted {len(unknown)} scope(s) this client doesn't know; refusing the token")
+        if SCOPE not in scopes:
+            raise _pause(SIGN_IN_PAUSE_SECONDS, "tastytrade didn't say the token may read; refusing it")
         _token, _issued_at = token, _clock()
         _expires_at = _issued_at + lifetime - min(TOKEN_MARGIN_SECONDS, lifetime / 2)
         return token

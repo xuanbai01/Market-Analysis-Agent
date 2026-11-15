@@ -57,6 +57,7 @@ class ProbeError(Exception):
 
 _OWN_ERRORS = (ProbeError, tt.TastytradeUnavailable, tt.TastytradeNotFound, dxlink.DxlinkError)
 _ACCOUNT_NUMBER = re.compile(r"[A-Z0-9]+")
+_ACCOUNT_IN_SCOPE = re.compile(r"^(accounts:)[^:]*(:|$)")
 
 METRICS_SYMBOLS = ("QQQ", "SPY", "NVDA")
 CHAIN_SYMBOL = "SPY"
@@ -117,12 +118,22 @@ def age_seconds(stamp: Any, now: datetime) -> float | None:
 
 
 def _date(value: Any) -> date | None:
+    """A date, or the date of a timestamp; None when neither reads."""
     if not isinstance(value, str):
         return None
     try:
         return date.fromisoformat(value)
     except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+    except ValueError:
         return None
+
+
+def shown_scopes(scopes: frozenset[str]) -> list[str]:
+    """Scopes to print, each account number masked (``accounts:***:owner``)."""
+    return sorted(_ACCOUNT_IN_SCOPE.sub(r"\1***\2", s) for s in scopes)
 
 
 def nearest_expiry(expirations: list[dict[str, Any]], today: date, target_days: int = TARGET_DAYS) -> dict[str, Any] | None:
@@ -197,7 +208,7 @@ async def probe_quote_token(say: Say) -> None:
 
 async def probe_grant(say: Say) -> None:
     scopes = await tt.grant_scopes()
-    say(f"  the stored grant may: {sorted(scopes) or '(not said)'}")
+    say(f"  the stored grant may: {shown_scopes(scopes) or '(not said)'}")
     if "trade" in scopes:
         say("  WARNING: the grant can trade. Delete it on my.tastytrade.com and create one with the read scope only.")
 
@@ -222,7 +233,7 @@ async def probe_chain(say: Say, today: date) -> ChainPick:
     expirations = field(chain, "expirations") or []
     pick = nearest_expiry(expirations, today)
     if pick is None:
-        raise ProbeError("no expirations")
+        raise ProbeError(f"none of the {len(expirations)} expirations has a date that reads")
     strikes = field(pick, "strikes") or []
     if not isinstance(strikes, list) or not all(isinstance(s, dict) for s in strikes):
         raise ProbeError("the strikes are not objects")
@@ -230,7 +241,8 @@ async def probe_chain(say: Say, today: date) -> ChainPick:
     say(f"  chain fields: {field_names(chain)}")
     say(f"  expiration fields: {field_names(pick)}")
     say(f"  strike fields: {field_names(strikes[0]) if strikes else []}")
-    return ChainPick(spot=spot, expiry=field(pick, "expiration-date"), strikes=near_money(strikes, spot))
+    expiry = _date(field(pick, "expiration-date"))
+    return ChainPick(spot=spot, expiry=expiry.isoformat() if expiry else "", strikes=near_money(strikes, spot))
 
 
 def _yahoo_quotes(symbol: str, expiry: str) -> dict[tuple[str, float], tuple[float, float]]:

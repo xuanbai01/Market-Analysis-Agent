@@ -108,7 +108,7 @@ def run(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         return 0.30
 
     async def fake_grant() -> frozenset[str]:
-        return frozenset({"read"})
+        return frozenset({"read", "accounts:5wt12345:owner"})
 
     monkeypatch.setattr(tt, "get", fake_get)
     monkeypatch.setattr(dxlink, "fetch_candles", fake_candles)
@@ -127,7 +127,7 @@ def run(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 async def test_the_report_answers_the_open_questions(run: list[str]) -> None:
     await probe.main(run.append)
     report = "\n".join(run)
-    assert "the stored grant may: ['read']" in report
+    assert "the stored grant may: ['accounts:***:owner', 'read']" in report
     assert "WARNING" not in report
     assert "level: api" in report
     assert "feed: tasty-openapi-ws.dxfeed.test/realtime" in report
@@ -151,7 +151,7 @@ async def test_the_report_holds_no_tastytrade_value_or_account_detail(run: list[
     await probe.main(run.append)
     report = "\n".join(run)
     for value in (*SECRET_VALUES, "qt-secret"):
-        assert value not in report
+        assert value.lower() not in report.lower()
 
 
 async def test_a_failing_section_is_reported_and_the_rest_runs(monkeypatch: pytest.MonkeyPatch, run: list[str]) -> None:
@@ -309,8 +309,20 @@ def test_an_expiry_whose_date_doesnt_read_is_skipped() -> None:
         {"expiration-date": "2027-01-15"},
         {"expiration-date": "2026-12-18"},
     ]
-    assert probe.nearest_expiry(expirations, today)["expiration-date"] == "2026-12-18"
+    assert probe._date(probe.nearest_expiry(expirations, today)["expiration-date"]) == date(2026, 12, 18)
     assert probe.nearest_expiry([{"expiration-date": "soon"}], today) is None
+
+
+def test_an_expiry_given_as_a_timestamp_reads_as_its_date() -> None:
+    assert probe._date("2026-12-18T16:00:00Z") == date(2026, 12, 18)
+    assert probe._date("2026-12-18T00:00:00+00:00") == date(2026, 12, 18)
+    assert probe._date("2026-12-18") == date(2026, 12, 18)
+    assert probe._date("") is None
+
+
+def test_shown_scopes_mask_account_numbers() -> None:
+    shown = probe.shown_scopes(frozenset({"read", "accounts:5wt12345:owner", "accounts:5wt99999:trade-only", "accounts:x"}))
+    assert shown == ["accounts:***", "accounts:***:owner", "accounts:***:trade-only", "read"]
 
 
 def test_a_quote_time_without_a_zone_is_not_aged() -> None:

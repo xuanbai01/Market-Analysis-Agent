@@ -150,6 +150,7 @@ async def test_quote_token_is_read_once_and_cached(quote_tokens: list[str]) -> N
         "wss://evil.example\uff0e.tasty-openapi-ws.dxfeed.com/realtime",
         "wss://tasty-openapi-ws.dxfeed.com:notaport/realtime",
         "wss://[zz]/realtime",
+        "wss://tasty-openapi-ws..dxfeed.com/realtime",  # an empty label
         "wss://[::1]/realtime",
     ],
 )

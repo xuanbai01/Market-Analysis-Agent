@@ -227,7 +227,7 @@ async def test_a_token_that_can_trade_or_wont_say_is_refused(
     answer: dict[str, object], fake: FakeTastytrade, clock: FakeClock
 ) -> None:
     fake.token_responses = [httpx.Response(200, json={"access_token": ACCESS_TOKEN, "expires_in": 900, **answer})]
-    with pytest.raises(tt.TastytradeUnavailable, match="trade|may do"):
+    with pytest.raises(tt.TastytradeUnavailable, match="can trade|may read"):
         await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
     assert fake.gets == []
     with pytest.raises(tt.TastytradeUnavailable):
@@ -543,3 +543,34 @@ async def test_a_paused_sign_in_says_so_in_the_logs(
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING and r.name.startswith("app")]
     assert any("paused" in w and "refused the sign-in (401)" in w for w in warnings)
     assert sum("refused while the sign-in is paused" in w for w in warnings) == 1  # once per pause
+
+
+
+@pytest.mark.parametrize(
+    "scope", ["read accounts:5wt12345:owner", "read openid accounts:5wt12345:owner accounts:5wt99999:trade-only"]
+)
+async def test_account_scopes_beside_read_are_accepted(scope: str, fake: FakeTastytrade, clock: FakeClock) -> None:
+    fake.token_responses = [httpx.Response(200, json={"access_token": ACCESS_TOKEN, "expires_in": 900, "scope": scope})]
+    await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert fake.gets[0].headers["Authorization"] == f"Bearer {ACCESS_TOKEN}"
+
+
+@pytest.mark.parametrize(
+    ("scope", "reason"),
+    [
+        ("read accounts:5wt12345:owner trade", "can trade"),
+        ("accounts:5wt12345:owner", "may read"),
+        ("read admin", "doesn't know"),
+        ("read accounts:5wt12345", "doesn't know"),
+        ("read accounts:../x:owner", "doesn't know"),
+    ],
+)
+async def test_other_scopes_are_refused_and_named_without_the_account(
+    scope: str, reason: str, fake: FakeTastytrade, clock: FakeClock, caplog: pytest.LogCaptureFixture
+) -> None:
+    fake.token_responses = [httpx.Response(200, json={"access_token": ACCESS_TOKEN, "expires_in": 900, "scope": scope})]
+    with caplog.at_level(logging.WARNING, logger="app"), pytest.raises(tt.TastytradeUnavailable, match=reason) as raised:
+        await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert fake.gets == []
+    assert "5wt12345" not in str(raised.value)
+    assert all("5wt12345" not in r.getMessage() for r in caplog.records)

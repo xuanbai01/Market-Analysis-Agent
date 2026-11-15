@@ -304,6 +304,35 @@ async def test_a_refused_quote_request_costs_only_its_own_quotes(account: _Tasty
     assert group.quote is None and group.legs[0].quote is not None and group.legs[0].quote.mark == 41.0
 
 
+async def test_one_refused_symbol_costs_only_its_own_quote(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A batch tastytrade refuses is asked for again a symbol at a time, so
+    one index among stocks doesn't blank every underlying (#127's AI review)."""
+    account.positions[ACCOUNT] = [
+        _position("SPXW  261120P05900000", "Equity Option", "1", "Long", underlying="SPX"),
+        _position("NVDA", "Equity", "10", "Long"),
+    ]
+    account.quotes = {"NVDA": _quote("NVDA", 162.9), "SPXW  261120P05900000": _quote("SPXW  261120P05900000", 41.0)}
+    real = account.get
+
+    async def no_spx(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        if path == "/market-data/by-type" and "SPX" in (params or {}).get("equity", "").split(","):
+            raise tt.TastytradeUnavailable("tastytrade answered 400")
+        return await real(path, params, op=op)
+
+    monkeypatch.setattr(op.tt, "get", no_spx)
+    groups = {g.underlying: g for g in (await op.get_positions()).groups}
+    assert groups["NVDA"].quote is not None and groups["NVDA"].quote.mark == 162.9
+    assert groups["SPX"].quote is None and groups["SPX"].legs[0].quote is not None
+
+
+async def test_a_stock_row_without_a_multiplier_is_still_a_stock(account: _Tastytrade) -> None:
+    row = _position("NVDA", "Equity", "200", "Long")
+    del row["multiplier"]
+    account.positions[ACCOUNT] = [row]
+    (group,) = (await op.get_positions()).groups
+    assert (group.legs[0].kind, group.legs[0].multiplier, group.legs[0].quantity) == ("stock", 1, 200)
+
+
 async def test_more_accounts_than_one_read_takes_says_so(account: _Tastytrade) -> None:
     account.accounts = [f"5WZ9QX{i:02d}" for i in range(op.MAX_ACCOUNTS + 2)]
     result = await op.get_positions()

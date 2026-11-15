@@ -203,3 +203,44 @@ async def test_a_symbol_that_fails_leaves_no_lock_behind(world: Any) -> None:
     with pytest.raises(SymbolNotFound):
         await _report("ZZZZQ")
     assert "ZZZZQ" not in orp._locks
+
+
+async def test_during_an_outage_the_stale_copy_holds_for_a_while(world: Any) -> None:
+    """DeepSeek on PR 110: the stale copy stayed expired, so every request
+    in an outage re-ran the whole build against a failing Yahoo."""
+    yahoo, _store, clock = world
+    first = await _report()
+    clock[0] = orp.CACHE_TTL_SECONDS + 1
+    yahoo.broken = True
+    assert await _report() == first
+    clock[0] += orp.RETRY_AFTER_FAILURE_SECONDS - 1
+    assert await _report() == first
+    assert yahoo.calls == ["TEST", "TEST"]  # the second request didn't retry yet
+    clock[0] += 2
+    await _report()
+    assert yahoo.calls == ["TEST", "TEST", "TEST"]
+
+
+async def test_concurrent_requests_for_a_new_expiry_share_one_fetch(world: Any) -> None:
+    yahoo, _store, _clock = world
+    yahoo.listed = (EXP_20, EXP_48, EXP_FAR)
+    yahoo.skip = {EXP_FAR}
+    await _report()
+    yahoo.skip = set()
+    await asyncio.gather(*(orp.get_chain(None, "TEST", EXP_FAR, now=NOW) for _ in range(3)))  # type: ignore[arg-type]
+    assert yahoo.calls == ["TEST", "TEST"]
+
+
+async def test_the_page_does_not_read_the_earnings_calendar(world: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """DeepSeek on PR 110: the schedule has the date; the calendar call was wasted."""
+    yahoo, _store, _clock = world
+    seen: list[bool] = []
+    real = yahoo.fetch_chain
+
+    def spy(symbol: str, pick: Any, **kw: Any) -> Any:
+        seen.append(kw.get("read_calendar", True))
+        return real(symbol, pick, **{k: v for k, v in kw.items() if k != "read_calendar"})
+
+    monkeypatch.setattr(orp.options_chain, "fetch_chain", spy)
+    await _report()
+    assert seen == [False]

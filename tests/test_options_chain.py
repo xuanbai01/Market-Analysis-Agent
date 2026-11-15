@@ -237,3 +237,8 @@ def test_the_picker_sees_the_quote_and_the_fetch_carries_name_and_estimate(
     assert (fetched.name, fetched.earnings_estimated, fetched.quote_type) == ("Apple Inc.", True, "EQUITY")
     assert ticker.history_periods == ["2y"]
 
+
+def test_the_calendar_can_be_left_unread(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, _FakeTicker(["2026-11-16"], _UNDERLYING, {"Earnings Date": [date(2027, 1, 28)]}))
+    fetched = oc.fetch_chain("AAPL", lambda listed, _quote: listed, read_calendar=False)
+    assert fetched is not None and fetched.next_earnings is None

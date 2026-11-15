@@ -17,6 +17,7 @@ import {
   type Template,
   analyse,
   oneSigma,
+  premium,
   quoteFor,
   smileOf,
   templateLegs,
@@ -174,9 +175,10 @@ function LegsTable({
                     ))}
                   </select>
                 </td>
-                <td className={cell}>{q && q.bid > 0 ? q.bid.toFixed(2) : dash}</td>
+                {/* The same rules the pricing uses: a zero bid beside an offer is a price, a mid needs both. */}
+                <td className={cell}>{q && (q.bid > 0 || q.ask > 0) ? q.bid.toFixed(2) : dash}</td>
                 <td className={cell}>{q && q.ask > 0 ? q.ask.toFixed(2) : dash}</td>
-                <td className={cell}>{q && q.ask > 0 ? ((q.bid + q.ask) / 2).toFixed(2) : dash}</td>
+                <td className={cell}>{q ? (premium(q, leg.side, "mid")?.toFixed(2) ?? dash) : dash}</td>
                 <td className={cell}>{iv === null ? dash : pct(iv)}</td>
               </tr>
             );

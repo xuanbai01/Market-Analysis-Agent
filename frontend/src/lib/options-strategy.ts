@@ -243,10 +243,14 @@ export const TEMPLATES = {
 } as const;
 export type Template = keyof typeof TEMPLATES;
 
-/** Strikes with an offer on that side, ascending. */
-function quotedStrikes(rows: ChainRow[], kind: OptionKind): number[] {
+/** Strikes a leg can trade at, ascending: an offer to buy from, or for a
+ * sale, a bid or an offer. */
+function quotedStrikes(rows: ChainRow[], kind: OptionKind, side: Side): number[] {
   return rows
-    .filter((r) => (kind === "call" ? r.call_ask : r.put_ask) > 0)
+    .filter((r) => {
+      const [bid, ask] = kind === "call" ? [r.call_bid, r.call_ask] : [r.put_bid, r.put_ask];
+      return side === 1 ? ask > 0 : bid > 0 || ask > 0;
+    })
     .map((r) => r.strike)
     .sort((a, b) => a - b);
 }
@@ -265,8 +269,10 @@ function nearest(strikes: number[], target: number): number | null {
  * strikes to fit.
  */
 export function templateLegs(template: Template, chain: ExpiryChain): Leg[] | null {
-  const calls = quotedStrikes(chain.rows, "call");
-  const puts = quotedStrikes(chain.rows, "put");
+  const calls = quotedStrikes(chain.rows, "call", 1);
+  const puts = quotedStrikes(chain.rows, "put", 1);
+  const callsToSell = quotedStrikes(chain.rows, "call", -1);
+  const putsToSell = quotedStrikes(chain.rows, "put", -1);
   const f = chain.forward;
   const sigma = oneSigma(chain) ?? 0;
   const up = (n: number) => f * Math.exp(n * sigma);
@@ -282,24 +288,24 @@ export function templateLegs(template: Template, chain: ExpiryChain): Leg[] | nu
         return [leg("put", 1, nearest(puts, f))];
       case "bull_call": {
         const long = nearest(calls, f);
-        return long === null ? [null] : [leg("call", 1, long), leg("call", -1, above(calls, up(0.5), long))];
+        return long === null ? [null] : [leg("call", 1, long), leg("call", -1, above(callsToSell, up(0.5), long))];
       }
       case "bear_put": {
         const long = nearest(puts, f);
-        return long === null ? [null] : [leg("put", 1, long), leg("put", -1, below(puts, up(-0.5), long))];
+        return long === null ? [null] : [leg("put", 1, long), leg("put", -1, below(putsToSell, up(-0.5), long))];
       }
       case "bull_put": {
-        const short = nearest(puts, up(-0.5));
+        const short = nearest(putsToSell, up(-0.5));
         return short === null ? [null] : [leg("put", -1, short), leg("put", 1, below(puts, up(-1), short))];
       }
       case "bear_call": {
-        const short = nearest(calls, up(0.5));
+        const short = nearest(callsToSell, up(0.5));
         return short === null ? [null] : [leg("call", -1, short), leg("call", 1, above(calls, up(1), short))];
       }
       case "iron_condor": {
-        const shortPut = nearest(puts, up(-0.5));
+        const shortPut = nearest(putsToSell, up(-0.5));
         if (shortPut === null) return [null];
-        const shortCall = above(calls, up(0.5), shortPut);
+        const shortCall = above(callsToSell, up(0.5), shortPut);
         if (shortCall === null) return [null];
         return [
           leg("put", 1, below(puts, up(-1), shortPut)),

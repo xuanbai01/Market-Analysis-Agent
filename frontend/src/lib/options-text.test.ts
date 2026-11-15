@@ -4,7 +4,6 @@ import {
   coneSentence,
   daysLabel,
   daysUntil,
-  earningsSentence,
   expiryKind,
   expiryLabel,
   openInterestSentence,
@@ -12,7 +11,7 @@ import {
   termSentence,
   type Sentence,
 } from "./options-text";
-import type { EarningsBlock, ExpiryChain, ExpirySummary } from "./options-schemas";
+import type { ExpiryChain, ExpirySummary } from "./options-schemas";
 
 const text = (s: Sentence | null) => (s === null ? null : s.map((p) => (typeof p === "string" ? p : `**${p.strong}**`)).join(""));
 
@@ -44,6 +43,14 @@ describe("expiryKind", () => {
     expect(expiryKind("2026-06-18")).toBe("monthly");
     expect(expiryKind("2026-06-19")).toBe("weekly");
   });
+
+  it("moves it too when Juneteenth is a Saturday, observed on Friday the 18th", () => {
+    // 2027-06-19 is a Saturday: the market closes Friday 2027-06-18, the third Friday.
+    expect(expiryKind("2027-06-18")).toBe("weekly");
+    expect(expiryKind("2027-06-17")).toBe("monthly");
+    // 2028-06-19 is a Monday (the 18th a Sunday): the third Friday, June 16, stands.
+    expect(expiryKind("2028-06-16")).toBe("monthly");
+  });
 });
 
 describe("labels", () => {
@@ -68,8 +75,9 @@ describe("sentences", () => {
 
   it("names the term structure's slope from the numbers", () => {
     const down = [summary("2026-11-20", 5, 0.8), summary("2026-11-27", 12, 0.63), summary("2027-05-21", 187, 0.48)];
+    // The nearest expiry, a week out or not: the same end the chart draws.
     expect(text(termSentence(down))).toBe(
-      "At-the-money IV runs from **63.0%** at 12 days to **48.0%** at 187 days, sloping down: near expiries price more movement than far ones.",
+      "At-the-money IV runs from **80.0%** at 5 days to **48.0%** at 187 days, sloping down: near expiries price more movement than far ones.",
     );
     const up = [summary("2026-11-27", 12, 0.3), summary("2027-05-21", 187, 0.4)];
     expect(text(termSentence(up))).toContain("sloping up");
@@ -93,18 +101,5 @@ describe("sentences", () => {
     expect(text(openInterestSentence(chain))).toBe("Most open near the money: **$185.00 calls (8,099)** and **$150.00 puts (3,912)**.");
     expect(openInterestSentence({ ...chain, open_interest: [] })).toBeNull();
     expect(openInterestSentence({ ...chain, open_interest: [{ strike: 150, call: 0, put: 0 }] })).toBeNull();
-  });
-
-  it("puts the next report's priced move beside past ones, singular and plural", () => {
-    const base = {
-      next_date: "2026-11-17", next_timing: "after_close", estimated: false, reaction_date: "2026-11-18",
-      implied_move: 0.0712, implied_move_usd: 11.59, event_sigma: 0.089, base_vol: 0.5, method: "before_and_after",
-      refused: null, expiries: [], past: [{ announced: "2026-08-27", timing: "after_close", move: -0.03, spans_extra_day: false }],
-      past_mean_abs: 0.0404,
-    } as unknown as EarningsBlock;
-    expect(text(earningsSentence(base))).toBe("Options price the **Nov 17** report at about **±7.1%**; the last report moved **4.0%**.");
-    const eight = { ...base, past: Array(8).fill(base.past[0]) };
-    expect(text(earningsSentence(eight))).toContain("the last 8 reports moved **4.0%** on average.");
-    expect(earningsSentence({ ...base, implied_move: null })).toBeNull();
   });
 });

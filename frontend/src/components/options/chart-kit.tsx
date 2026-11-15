@@ -117,7 +117,10 @@ export function Tooltip({ testId, left, width, children }: { testId: string; lef
   );
 }
 
-/** A ⓘ that explains a figure: on hover, focus or tap. */
+/** A ⓘ that explains a figure. Hover, focus or a tap opens it; leaving,
+ * tapping elsewhere (blur) or Escape closes it. A click only ever opens:
+ * a browser focuses the button on mousedown (or the pointer has entered
+ * it), so a toggle on click would shut what that just opened. */
 export function InfoTip({ label, text, testId }: { label: string; text: string; testId?: string }) {
   const [open, setOpen] = useState(false);
   return (
@@ -127,9 +130,12 @@ export function InfoTip({ label, text, testId }: { label: string; text: string; 
         data-testid={testId}
         aria-label={`About ${label}`}
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(true)}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setOpen(false);
+        }}
         className="ml-1 rounded-full px-0.5 font-mono text-[10px] leading-none text-strata-muted hover:text-strata-hi focus:text-strata-hi focus:outline-none"
       >
         ⓘ

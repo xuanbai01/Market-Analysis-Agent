@@ -6,7 +6,7 @@
  *
  * A sentence is a list of segments: plain text, or a figure to set in bold.
  */
-import type { EarningsBlock, ExpiryChain, ExpirySummary, Positioning, TopContract } from "./options-schemas";
+import type { ExpiryChain, ExpirySummary, Positioning, TopContract } from "./options-schemas";
 
 export type Segment = string | { strong: string };
 export type Sentence = Segment[];
@@ -46,12 +46,17 @@ function easter(year: number): Date {
 }
 
 /** NYSE holidays that can fall on a month's third Friday (the 15th to the
- * 21st): Good Friday and Juneteenth. The others never land there. */
+ * 21st): Good Friday, and Juneteenth on June 19 or, when that's a
+ * Saturday, observed on Friday the 18th. The others never land there. */
 function fridayHoliday(date: Date): boolean {
   const year = date.getUTCFullYear();
   const goodFriday = new Date(easter(year).getTime() - 2 * 86_400_000);
   const sameDay = (x: Date) => x.getUTCMonth() === date.getUTCMonth() && x.getUTCDate() === date.getUTCDate();
-  return sameDay(goodFriday) || (date.getUTCMonth() === 5 && date.getUTCDate() === 19 && year >= 2022);
+  if (sameDay(goodFriday)) return true;
+  if (year < 2022 || date.getUTCMonth() !== 5) return false;
+  const juneteenth = new Date(Date.UTC(year, 5, 19));
+  const observed = juneteenth.getUTCDay() === 6 ? 18 : juneteenth.getUTCDay() === 0 ? 20 : 19;
+  return date.getUTCDate() === observed;
 }
 
 function utc(iso: string): Date {
@@ -111,10 +116,11 @@ export function coneSentence(expiries: ExpirySummary[], spot: number): Sentence 
   ];
 }
 
-/** The term structure: the front's at-the-money IV against the farthest's. */
+/** The term structure: the nearest expiry's at-the-money IV against the
+ * farthest's, the same two ends the chart draws. */
 export function termSentence(expiries: ExpirySummary[]): Sentence | null {
   const sorted = [...expiries].sort((a, b) => a.days - b.days);
-  const front = sorted.find((e) => e.days >= 7) ?? sorted[0];
+  const front = sorted[0];
   const back = sorted[sorted.length - 1];
   if (!front || !back || front === back) return null;
   const gap = back.atm_iv - front.atm_iv;
@@ -158,27 +164,6 @@ export function openInterestSentence(chain: ExpiryChain): Sentence | null {
   if (topPut.put > 0) parts.push({ strong: `${usd(topPut.strike)} puts (${count(topPut.put)})` });
   parts.push(".");
   return topCall.call > 0 || topPut.put > 0 ? parts : null;
-}
-
-/** Earnings: what the next report is priced at, beside past moves. */
-export function earningsSentence(earnings: EarningsBlock): Sentence | null {
-  if (earnings.implied_move === null || earnings.next_date === null) return null;
-  const parts: Sentence = [
-    "Options price the ",
-    { strong: dateLabel(earnings.next_date) },
-    " report at about ",
-    { strong: `±${pct(earnings.implied_move)}` },
-  ];
-  if (earnings.past_mean_abs !== null && earnings.past.length > 0) {
-    parts.push(
-      `; the last ${earnings.past.length === 1 ? "report" : `${earnings.past.length} reports`} moved `,
-      { strong: pct(earnings.past_mean_abs) },
-      earnings.past.length === 1 ? "." : " on average.",
-    );
-  } else {
-    parts.push(".");
-  }
-  return parts;
 }
 
 /** Dollars in short form: "$48.9M", "−$17.0M", "$950K", "$2.40B". */

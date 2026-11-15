@@ -105,7 +105,12 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **AI read:** its sentences quote the figures, so each point's chips fold behind "Sources (n)" and no figure shows twice (`CitedPoints collapsed`; the lens keeps open chips).
   - **No direction read into a figure:** "downside protection costs more" describes prices, and the cone's line speaks of what option prices put a chance on.
   - **Not done, a change of the spot to Yahoo's "official close":** the page's $162.85 for NVDA's Nov 13 close differs from another vendor's $162.92, but Yahoo's daily history says $162.85 too. There is nothing in Yahoo's data to switch to, and the 0.04% gap doesn't reach the IVs, which use the parity forward. That PR (#120) was closed unmerged.
-  - **Size and tests:** options chunk 15.8 KB gz, main 90.23 KB; 796 frontend tests.
+  - **From review:**
+    - The ⓘ opened on focus or hover and its click toggle shut it again, so a tap never left it open. A click now only opens; blur, leaving and Escape close it, and tests replay the browser's event order.
+    - Juneteenth on a Saturday is observed on Friday the 18th, which moves June 2027's monthly to Thursday.
+    - The term structure's sentence starts at the same nearest expiry the chart draws.
+    - An unused earnings sentence is gone.
+  - **Size and tests:** options chunk 15.8 KB gz, main 90.23 KB; 799 frontend tests.
 - **Options: positioning (2026-11-15):** the views OptionCharts has that the page lacked, computed by our code from Yahoo's open interest and our own IVs.
   - **`options_positioning`, per expiry:**
     - call/put totals and the 10 largest contracts;
@@ -125,4 +130,4 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **GEX:** agrees in sign but not in size (ours −$17.0M, theirs −$4.6M). A one-day expiry's gamma swings with the price and time used: they take the after-hours $161.02 and a one-day count.
     - **DEX:** their "per 1% move" figures look like total dollar delta, 100 times a per-1% number. The ⓘ says so.
   - **Wording:** the sentences state the GEX sign's meaning only as a conditional on the assumption, and max pain as a description, not a forecast.
-  - Options chunk 18.7 KB gz. 1763 backend / 809 frontend tests.
+  - Options chunk 18.7 KB gz. 1763 backend / 812 frontend tests.

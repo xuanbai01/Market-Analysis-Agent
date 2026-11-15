@@ -114,13 +114,18 @@ def snapshot_one(
         return "no_options", None
     if metrics.status != "ok":
         return metrics.status, None
+    # No regularMarketPrice (a halted or new listing): the last completed
+    # close is the spot at the quote time; a $0 spot would be stored forever.
+    spot = fetched.spot if fetched.spot > 0 else next((c for _d, c in reversed(fetched.closes)), 0.0)
+    if spot <= 0:
+        return "no_usable_quotes", None
     underlying_date = mc.et_date(fetched.market_time).isoformat() if fetched.market_time else None
     return "ok", {
         "symbol": symbol,
         "trade_date": session_date,
         "as_of": quoted_at,
         "method_version": om.METHOD_VERSION,
-        "spot": fetched.spot,
+        "spot": spot,
         "rate": rate,
         "iv30": metrics.iv30,
         "iv30_extrapolated": metrics.iv30_extrapolated,
@@ -200,6 +205,9 @@ async def _run(session: AsyncSession, now: datetime) -> SnapshotRun:
                 await _sleep(RATE_LIMIT_PAUSE_SECONDS)
                 continue  # the same ticker once more
             logger.exception("IV snapshot failed for %s", symbol)
+            # A failed statement leaves the session needing a rollback; without
+            # it every later ticker's insert would fail too.
+            await session.rollback()
             failed.append(FailedTicker(symbol=symbol, reason=type(exc).__name__))
             i += 1
             continue

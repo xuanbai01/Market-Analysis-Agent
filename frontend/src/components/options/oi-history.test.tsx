@@ -18,6 +18,7 @@ describe("open interest history words", () => {
     expect(compactCount(10_240_000)).toBe("10.24M");
     expect(compactCount(950_400)).toBe("950K");
     expect(compactCount(820)).toBe("820");
+    expect(compactCount(999_600)).toBe("1.00M"); // not "1000K"
   });
 
   it("gives the latest totals and the change since the first session", () => {

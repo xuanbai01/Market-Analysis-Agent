@@ -67,7 +67,10 @@ jobs:
           status=$(jq -r .status run.json)
           count() { jq "[.$1[]] | length" run.json; }
           targets=$(count targets); written=$(count written); skipped=$(count skipped)
-          failed=$(count failed); deferred=$(count deferred)
+          # Totals failures ("totals: ...") are counted on their own line.
+          failed=$(jq '[.failed[] | select(.reason | startswith("totals:") | not)] | length' run.json)
+          deferred=$(count deferred)
+          totals_failed=$(jq '[.failed[] | select(.reason | startswith("totals:"))] | length' run.json)
           no_options=$(count no_options); no_quotes=$(count no_usable_quotes)
           totals_written=$(jq '[.totals_written[]?] | length' run.json)
           totals_deferred=$(jq '[.totals_deferred[]?] | length' run.json)
@@ -78,7 +81,7 @@ jobs:
             echo "|---|---|---|---|---|---|---|"
             echo "| $targets | $written | $skipped | $failed | $deferred | $no_options | $no_quotes |"
             echo ""
-            echo "Whole-chain open interest (best-effort): $totals_written written, $totals_deferred deferred."
+            echo "Whole-chain open interest (best-effort): $totals_written written, $totals_deferred deferred, $totals_failed failed."
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$status" = "market_open" ]; then
             echo "::error::The market was open; the run stored nothing."

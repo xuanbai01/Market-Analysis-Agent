@@ -135,9 +135,9 @@ def _items(payload: Any) -> list[dict[str, Any]]:
 
 
 async def _account_numbers() -> list[str]:
-    """The owner's account numbers (MAX_ACCOUNTS at most), read once an hour.
-    One that isn't letters and digits is dropped, so it never reaches a
-    path; none at all isn't remembered."""
+    """The owner's account numbers, read once an hour; more than MAX_ACCOUNTS
+    is cut off (the caller says so). One that isn't letters and digits is
+    dropped, so it never reaches a path; none at all isn't remembered."""
     global _accounts
     if _accounts is not None and _clock() - _accounts[0] < ACCOUNTS_SECONDS:
         return _accounts[1]
@@ -148,7 +148,6 @@ async def _account_numbers() -> list[str]:
         number = _field(account, "account-number") if isinstance(account, dict) else None
         if isinstance(number, str) and _ACCOUNT.fullmatch(number):
             numbers.append(number)
-    numbers = numbers[:MAX_ACCOUNTS]
     _accounts = (_clock(), numbers) if numbers else None
     return numbers
 
@@ -219,22 +218,32 @@ def _live_quote(item: dict[str, Any]) -> LiveQuote:
 
 
 async def _quotes(legs: list[_Leg]) -> dict[str, LiveQuote]:
-    """Live quotes for every leg and underlying, QUOTE_BATCH symbols a call."""
-    wanted: dict[str, str] = {}
+    """Live quotes for every leg and underlying, QUOTE_BATCH symbols a call,
+    underlyings and options asked for apart. A refused call costs only its
+    own quotes (an index such as SPX may be refused as an equity): those
+    legs show none, and the rest of the page stands."""
+    by_kind: dict[str, list[str]] = {"equity": [], "equity-option": []}
     for item in legs:
-        wanted.setdefault(item.underlying, "equity")
-        if item.leg.kind != "stock":
-            wanted.setdefault(item.leg.symbol, "equity-option")
-    pairs = list(wanted.items())
+        if item.underlying not in by_kind["equity"]:
+            by_kind["equity"].append(item.underlying)
+        if item.leg.kind != "stock" and item.leg.symbol not in by_kind["equity-option"]:
+            by_kind["equity-option"].append(item.leg.symbol)
     quotes: dict[str, LiveQuote] = {}
-    for start in range(0, len(pairs), QUOTE_BATCH):
-        params: dict[str, str] = {}
-        for symbol, kind in pairs[start:start + QUOTE_BATCH]:
-            params[kind] = f"{params[kind]},{symbol}" if kind in params else symbol
-        for item in _items(await tt.get("/market-data/by-type", params, op="quotes")):
-            symbol = _field(item, "symbol")
-            if isinstance(symbol, str) and symbol in wanted:
-                quotes[symbol] = _live_quote(item)
+    refused = 0
+    for kind, symbols in by_kind.items():
+        for start in range(0, len(symbols), QUOTE_BATCH):
+            batch = symbols[start:start + QUOTE_BATCH]
+            try:
+                payload = await tt.get("/market-data/by-type", {kind: ",".join(batch)}, op="quotes")
+            except (tt.TastytradeUnavailable, tt.TastytradeNotFound):
+                refused += len(batch)
+                continue
+            for item in _items(payload):
+                symbol = _field(item, "symbol")
+                if isinstance(symbol, str) and symbol in batch:
+                    quotes[symbol] = _live_quote(item)
+    if refused:
+        logger.warning("owner positions: %d quotes refused", refused)
     return quotes
 
 
@@ -261,9 +270,10 @@ def _groups(legs: list[_Leg], quotes: dict[str, LiveQuote]) -> list[PositionGrou
 
 async def _build() -> OwnerPositions:
     numbers = await _account_numbers()
+    truncated = len(numbers) > MAX_ACCOUNTS
+    numbers = numbers[:MAX_ACCOUNTS]
     legs: list[_Leg] = []
     unanalysed: list[UnanalysedPosition] = []
-    truncated = False
     for index, number in enumerate(numbers, start=1):
         try:
             rows = _items(await tt.get(f"/accounts/{number}/positions", op="positions"))

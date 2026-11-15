@@ -8,6 +8,8 @@ FastAPI dependencies.
   client IP via the in-memory ``TokenBucket`` from
   ``app.services.rate_limit``. Disabled when
   ``RESEARCH_RATE_LIMIT_PER_HOUR=0``.
+- ``require_owner`` gates the owner's routes on a second key, with a
+  per-IP lockout after repeated wrong keys.
 
 The rate-limit dependency lives here (as opposed to in the router) so
 the router stays a thin coordinator and test setup can override the
@@ -15,16 +17,21 @@ bucket without touching the route handler.
 """
 from __future__ import annotations
 
+import hmac
 import ipaddress
+import logging
 import math
 from collections.abc import AsyncGenerator
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import require_shared_secret
 from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.services.rate_limit import TokenBucket
+
+logger = logging.getLogger(__name__)
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
@@ -163,6 +170,66 @@ async def enforce_options_read_rate_limit(request: Request) -> None:
     """Per-IP limit on cited reads the model has to write (the route calls
     it only when no read of the same quotes is cached)."""
     await _enforce_hourly("read", settings.OPTIONS_READ_RATE_LIMIT_PER_HOUR, request, "option reads")
+
+
+OWNER_HEADER = "X-Owner-Key"
+# Wrong owner keys per IP: a bucket that only a wrong key takes from, and
+# that is checked before any key is compared, so a locked-out address can't
+# keep guessing (the right key waits too).
+_OWNER_FAILURES: TokenBucket | None = None
+
+
+def _owner_failures() -> TokenBucket:
+    global _OWNER_FAILURES
+    if _OWNER_FAILURES is None:
+        _OWNER_FAILURES = TokenBucket(capacity=max(settings.OWNER_KEY_FAILURES_PER_HOUR, 0), window_seconds=3600.0)
+    return _OWNER_FAILURES
+
+
+def _locked_out(retry_after: float) -> HTTPException:
+    retry_int = 3600 if math.isinf(retry_after) else max(1, int(math.ceil(retry_after)))
+    return HTTPException(
+        status_code=429,
+        detail=f"Too many wrong owner keys from this address. Retry in ~{retry_int} seconds.",
+        headers={"Retry-After": str(retry_int)},
+    )
+
+
+async def require_owner(
+    request: Request,
+    _shared: None = Depends(require_shared_secret),
+    owner_key: str | None = Header(default=None, alias=OWNER_HEADER),
+) -> None:
+    """Gate the owner's routes (``/v1/owner``, ADR 0009) on the shared
+    secret and ``X-Owner-Key: <OWNER_KEY>``.
+
+    The shared secret is also a GitHub Actions secret, so it alone must not
+    open the owner's account data. With no owner key configured the routes
+    don't exist (404), even in local dev where the shared secret is off. A
+    missing or wrong key is a 403, and takes one of the address's hourly
+    tries; with none left, every request from it is a 429 until one
+    refills. The comparison is constant-time on bytes (a non-ASCII value is
+    just wrong), and the key is never logged.
+    """
+    expected = settings.OWNER_KEY.get_secret_value()
+    if not expected:
+        raise HTTPException(status_code=404, detail="Not Found")
+    bucket = _owner_failures()
+    address = _client_ip(request)
+    allowed, retry_after = await bucket.peek(address)
+    if not allowed:
+        raise _locked_out(retry_after)
+    if owner_key is not None and hmac.compare_digest(owner_key.encode("utf-8"), expected.encode("utf-8")):
+        return
+    await bucket.take(address)
+    logger.warning("owner key refused: %s", "missing" if not owner_key else "wrong")
+    raise HTTPException(status_code=403, detail="This needs the owner key.")
+
+
+def reset_owner_failures_for_tests() -> None:
+    """Drop the wrong-key counts so the next request rebuilds them (tests only)."""
+    global _OWNER_FAILURES
+    _OWNER_FAILURES = None
 
 
 def reset_options_rate_limit_for_tests() -> None:

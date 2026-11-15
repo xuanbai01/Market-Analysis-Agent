@@ -81,6 +81,19 @@ class TokenBucket:
         for key in full:
             del self._buckets[key]
 
+    async def peek(self, key: str) -> tuple[bool, float]:
+        """Whether a ``take`` for ``key`` would pass now, as ``(allowed,
+        retry_after_seconds)``, without taking a token or storing a key."""
+        async with self._lock:
+            now = self._time()
+            tokens, last = self._buckets.get(key, (float(self._capacity), now))
+            tokens = min(float(self._capacity), tokens + (now - last) * self._refill_rate)
+            if tokens >= 1.0:
+                return True, 0.0
+            if self._refill_rate <= 0:
+                return False, float("inf")
+            return False, (1.0 - tokens) / self._refill_rate
+
     async def take(self, key: str) -> tuple[bool, float]:
         """Try to consume one token for ``key``.
 

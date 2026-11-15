@@ -36,8 +36,9 @@ def configure_cors(app: FastAPI, *, origin: str) -> None:
     Allowed methods: ``GET, POST, OPTIONS`` — the surface the frontend
     actually uses.
 
-    Allowed headers: ``Authorization, Content-Type`` — the bearer
-    token (Phase 3.0 A1) and the JSON body header.
+    Allowed headers: ``Authorization, Content-Type, X-Owner-Key`` — the
+    bearer token (Phase 3.0 A1), the JSON body header, and the owner
+    routes' second key (``require_owner``).
 
     Credentials disabled: we use bearer tokens in ``Authorization``,
     not cookies, so ``allow_credentials=False`` is safer (and is
@@ -51,6 +52,6 @@ def configure_cors(app: FastAPI, *, origin: str) -> None:
         CORSMiddleware,
         allow_origins=[origin],
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", "X-Owner-Key"],
         allow_credentials=False,
     )

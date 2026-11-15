@@ -92,6 +92,16 @@ class Settings(BaseSettings):
     # small-group use; swap for Clerk / magic-link when multi-user
     # accounts land. See ADR 0004 for the trade-off.
     BACKEND_SHARED_SECRET: str = ""
+    # The owner's second key (ADR 0009, amended 2026-11-15): routes under
+    # /v1/owner hold the owner's own account data and need it in an
+    # ``X-Owner-Key`` header on top of the shared secret, which is also a
+    # GitHub Actions secret. Empty: those routes don't exist (404), local
+    # dev included. A Fly secret; the owner keeps it in their password
+    # manager.
+    OWNER_KEY: SecretStr = SecretStr("")
+    # Wrong owner keys one IP may send per hour before it's locked out,
+    # the right key included, until a try refills.
+    OWNER_KEY_FAILURES_PER_HOUR: int = 10
     # CORS allowlist origin for the frontend (Phase 3.0). When empty,
     # CORS middleware is not installed (same-origin only). When set,
     # exactly one origin is allowlisted (e.g.

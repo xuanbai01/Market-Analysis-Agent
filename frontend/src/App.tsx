@@ -34,6 +34,8 @@ const ComparePage = lazyWithReload(() => import("./components/compare/ComparePag
 // Cross-company lenses (ADR 0007 layer 3) — their own chunks.
 const LensIndexPage = lazyWithReload(() => import("./components/lens/LensIndexPage"));
 const LensPage = lazyWithReload(() => import("./components/lens/LensPage"));
+// A symbol's options page (ADR 0008): its own chunk, signed in only.
+const OptionsPage = lazyWithReload(() => import("./components/options/OptionsPage"));
 const SymbolDetailPage = lazyWithReload(() => import("./components/SymbolDetailPage"));
 // Public read-only demo: its own chunks, outside the auth guard.
 const DemoShell = lazyWithReload(() => import("./components/demo/DemoShell"));
@@ -132,6 +134,14 @@ export function App() {
             element={
               <Suspense fallback={null}>
                 <LensPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path={ROUTE_PATHS.options}
+            element={
+              <Suspense fallback={null}>
+                <OptionsPage />
               </Suspense>
             }
           />

@@ -55,15 +55,17 @@ export function groupSentence(group: PositionGroup, value: number | null, cost: 
 /** The Greeks as P&L: per 1% move, per day, per IV point. */
 export function greeksSentence(g: Greeks): Sentence | null {
   if (g.deltaShares === null || g.deltaDollars === null) return null;
+  const shares = Math.round(g.deltaShares); // signed after rounding: no "−0"
   const parts: Sentence = [
     "Moves like ",
-    { strong: `${g.deltaShares < 0 ? "−" : ""}${count(Math.round(g.deltaShares))} shares` },
+    { strong: `${shares < 0 ? "−" : ""}${count(shares)} shares` },
     ": ",
     { strong: signedUsd(g.deltaDollars) },
     " for a 1% rise",
   ];
-  if (g.gammaShares !== null && Math.abs(g.gammaShares) >= 0.5) {
-    parts.push(", which itself changes by ", { strong: `${g.gammaShares < 0 ? "−" : "+"}${count(Math.round(g.gammaShares))} shares` }, " per 1%");
+  const gamma = g.gammaShares === null ? 0 : Math.round(g.gammaShares);
+  if (gamma !== 0) {
+    parts.push(", which itself changes by ", { strong: `${gamma < 0 ? "−" : "+"}${count(gamma)} shares` }, " per 1%");
   }
   parts.push(".");
   if (g.thetaDay !== null) parts.push(" A day passing: ", { strong: signedUsd(g.thetaDay) }, ".");

@@ -55,7 +55,7 @@ export function OptionsReadCard({ symbol, quotedAt }: { symbol: string; quotedAt
       <Shell testId="options-read-unavailable">
         <p className="font-mono text-[11px] text-strata-muted">
           {error?.status === 429
-            ? `The hourly limit on written reads is reached; try again in about ${minutes ?? MINUTE} minutes.`
+            ? `The hourly limit on written reads is reached; try again ${minutes ? `in about ${minutes} minutes` : "later"}.`
             : "No read could be written just now; the figures below stand on their own."}
         </p>
       </Shell>

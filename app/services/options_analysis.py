@@ -318,7 +318,7 @@ def claims(
         priced_gap = _gap(earnings.implied_move, earnings.past_mean_abs)
         if priced_gap is not None:
             way = _EARNINGS_WAY[_direction(priced_gap, points)]
-            rows.append((f"Implied earnings move {way} the average move after the last {n} report{'s' if n > 1 else ''}",
+            rows.append((f"Implied earnings move {way} the average absolute move after the last {n} report{'s' if n > 1 else ''}",
                          priced_gap, "percentage_points", "implied earnings move − average absolute move"))
     if history.percentile is not None:
         rows.append((f"IV30 percentile over {min(history.sessions, HISTORY_WINDOW)} stored sessions",

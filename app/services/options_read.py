@@ -179,6 +179,11 @@ async def get_read(session: AsyncSession, symbol: str, *, now: datetime | None =
     """The read of the symbol's current report: cached, else written (one
     model call per set of quotes, however many visits ask at once)."""
     report = await options_report.get_report(session, symbol, now=now)
+    # No database connection held through the model call (CLAUDE.md): the
+    # report recorded the view and committed, but a failed history read can
+    # leave a transaction open. Closing releases it; the session reopens if
+    # used again.
+    await session.close()
     if report.status != "ok":
         raise NothingToRead(symbol)
     key = (symbol, report.quoted_at)

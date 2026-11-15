@@ -225,15 +225,33 @@ def unbacked_numbers(
     """Numbers ``text`` quotes that none of ``claims`` shows: not a claim's
     figure at the quote's precision (as ``_quoted`` matches), nor a number
     written in a description ("the last 8 reports", "IV30") of ``labels``
-    (default ``claims``). ISO dates and years are labels, not figures. For
+    (default ``claims``), unless it carries a unit (%, pts, $): "30 days" is
+    a label, "a 30% move" a figure. ISO dates and years are labels. For
     prose that must hold no number of its own, checked in code rather than
     only by the offline rubric."""
     shown = [n for c in claims for n in _claim_numbers(c)]
     written = {n for c in (claims if labels is None else labels) for n in _numbers(c.description)}
     return [
-        value for value, decimals in _quotes(text)
-        if value not in written and not _matches(value, decimals, shown)
+        value for value, decimals, figure in _quotes_with_units(text)
+        if not _matches(value, decimals, shown) and (figure or value not in written)
     ]
+
+
+# A unit after a number, or a dollar sign before it, makes it a figure.
+_UNIT_AFTER = re.compile(r"\s*(%|pts?\b|points?\b|bps\b|×|x\b)", re.IGNORECASE)
+
+
+def _quotes_with_units(text: str) -> list[tuple[float, int, bool]]:
+    """Like ``_quotes``, with whether each number carries a unit: "30 days"
+    and "IV30" may be labels, "a 30% move" is a figure."""
+    cleaned = _LABEL_RE.sub(" ", text)
+    out: list[tuple[float, int, bool]] = []
+    for match in _NUMBER_RE.finditer(cleaned):
+        plain = match.group(0).replace(",", "")
+        decimals = len(plain.split(".")[1]) if "." in plain else 0
+        figure = bool(_UNIT_AFTER.match(cleaned, match.end())) or cleaned[max(0, match.start() - 1):match.start()] == "$"
+        out.append((float(plain), decimals, figure))
+    return out
 
 
 MAX_TITLE_WORDS = 8

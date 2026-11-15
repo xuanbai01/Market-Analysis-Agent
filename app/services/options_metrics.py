@@ -136,17 +136,17 @@ def smile(
     if atm is None:
         return None
     reach = MONEYNESS_SIGMAS * atm * math.sqrt(years)
-    near = sorted(
-        ((abs(math.log(q.strike / forward)), q.strike, q, call) for q, call in otm),
-        key=lambda row: row[:2],
+    near = _spread_across(
+        [(math.log(q.strike / forward), q, call) for q, call in otm if abs(math.log(q.strike / forward)) <= reach],
+        reach,
+        keep={below.strike, above.strike},
     )
-    near = [row for row in near if row[0] <= reach][:MAX_STRIKES]
     known = {below.strike: v_below, above.strike: v_above}
     points = []
-    for _distance, strike, q, call in near:
-        v = known.get(strike) or vol(q, call)
+    for _x, q, call in near:
+        v = known.get(q.strike) or vol(q, call)
         if v is not None:
-            points.append((strike, v))
+            points.append((q.strike, v))
     return Smile(
         expiry=chain.expiry,
         years=years,
@@ -155,8 +155,26 @@ def smile(
         discount=discount,
         atm_vol=atm,
         points=tuple(sorted(points)),
-        quotes=_raw_rows(chain, {strike for _d, strike, _q, _c in near}),
+        quotes=_raw_rows(chain, {q.strike for _x, q, _c in near}),
     )
+
+
+def _spread_across(
+    candidates: list[tuple[float, Quote, bool]], reach: float, *, keep: set[float]
+) -> list[tuple[float, Quote, bool]]:
+    """At most ``MAX_STRIKES`` of the (ln(K/F), quote, call) candidates,
+    spread evenly over [-reach, reach] rather than the nearest ones: a
+    chain with a strike every dollar would otherwise never reach the
+    25-delta wings. The strikes around the forward are always kept."""
+    if len(candidates) <= MAX_STRIKES:
+        return sorted(candidates, key=lambda c: c[0])
+    chosen = {c[1].strike: c for c in candidates if c[1].strike in keep}
+    slots = MAX_STRIKES - len(chosen)
+    for i in range(slots):
+        target = -reach + 2 * reach * i / (slots - 1)
+        best = min(candidates, key=lambda c: abs(c[0] - target))
+        chosen.setdefault(best[1].strike, best)
+    return sorted(chosen.values(), key=lambda c: c[0])
 
 
 def snapshot_expiries(listed: tuple[date, ...], quoted_at: datetime) -> list[date]:

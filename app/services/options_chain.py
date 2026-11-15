@@ -18,8 +18,10 @@ import math
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Any
+
+from app.services import market_calendar as mc
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,7 @@ class ChainFetch:
     expiries: tuple[date, ...]  # every expiry Yahoo lists
     chains: dict[date, ExpiryQuotes]  # the picked ones
     closes: tuple[tuple[date, float], ...]  # daily closes, oldest first
+    next_earnings: date | None = None  # from Yahoo's calendar; None for a fund
 
 
 # Which listed expiries to fetch, given all of them.
@@ -92,6 +95,19 @@ def _quotes(frame: Any) -> tuple[Quote, ...]:
     )
 
 
+def _next_earnings(ticker: Any, today: date) -> date | None:
+    """The first upcoming date in ``calendar["Earnings Date"]`` (Yahoo's
+    JSON calendar, not the scraped earnings page). Never fails the chain."""
+    try:
+        calendar = ticker.calendar
+    except Exception:
+        logger.warning("could not read the earnings calendar", exc_info=True)
+        return None
+    raw = calendar.get("Earnings Date") if isinstance(calendar, dict) else None
+    days = [d.date() if isinstance(d, datetime) else d for d in raw or [] if isinstance(d, date)]
+    return min((d for d in days if d >= today), default=None)
+
+
 def _fetch_yfinance_chain(symbol: str, pick: ExpiryPicker) -> ChainFetch | None:
     import yfinance  # noqa: PLC0415  -- lazy: tests swap in a fake module
 
@@ -114,14 +130,17 @@ def _fetch_yfinance_chain(symbol: str, pick: ExpiryPicker) -> ChainFetch | None:
         for day, close in zip(history.index.date, history["Close"].tolist(), strict=False)
         if _number(close) > 0
     )
+    market_time = int(_number(underlying.get("regularMarketTime")))
+    today = mc.et_date(market_time) if market_time else datetime.now(mc.ET).date()
     return ChainFetch(
         symbol=symbol,
         spot=_number(underlying.get("regularMarketPrice")),
-        market_time=int(_number(underlying.get("regularMarketTime"))),
+        market_time=market_time,
         dividend_yield=_number(underlying.get("trailingAnnualDividendYield")),
         expiries=listed,
         chains=chains,
         closes=closes,
+        next_earnings=_next_earnings(ticker, today),
     )
 
 

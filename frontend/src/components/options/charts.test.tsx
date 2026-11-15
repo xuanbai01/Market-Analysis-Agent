@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { OptionsReportSchema } from "../../lib/options-schemas";
-import { dayTicks } from "./chart-kit";
+import { dayTicks, hitBands } from "./chart-kit";
 import { EarningsMoves } from "./EarningsMoves";
 import { ExpectedMoveCone } from "./ExpectedMoveCone";
 import { RAW_OPTIONS_REPORT } from "./fixture";
@@ -130,5 +130,28 @@ describe("dayTicks", () => {
 
   it("labels the farthest expiry when it is nearer than a week", () => {
     expect(dayTicks(4.6)).toEqual([5]);
+  });
+});
+
+describe("hitBands", () => {
+  it("splits the plot at the midpoints, so close expiries never overlap", () => {
+    expect(hitBands([10, 12, 40], 0, 100)).toEqual([
+      { left: 0, width: 11 },
+      { left: 11, width: 15 },
+      { left: 26, width: 74 },
+    ]);
+  });
+});
+
+describe("TermStructureChart hover", () => {
+  it("gives each expiry its own band, however close on the day scale", () => {
+    render(<TermStructureChart expiries={REPORT.expiries} rv20={REPORT.rv20} />);
+    const hits = screen.getAllByTestId("options-term-hit").map((r) => ({
+      x: Number(r.getAttribute("x")),
+      w: Number(r.getAttribute("width")),
+    }));
+    for (let i = 1; i < hits.length; i++) {
+      expect(hits[i - 1].x + hits[i - 1].w).toBeLessThanOrEqual(hits[i].x + 1e-9);
+    }
   });
 });

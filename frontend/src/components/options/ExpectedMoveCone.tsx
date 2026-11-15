@@ -7,7 +7,7 @@ import { useState } from "react";
 
 import type { ExpirySummary } from "../../lib/options-schemas";
 import { niceTicks } from "../MultiLine";
-import { AxisText, COLOR, PAD, Tooltip, YGrid, linear, money, pct, shortDate, sqrtDays, useChartWidth, dayTicks } from "./chart-kit";
+import { AxisText, COLOR, PAD, Tooltip, YGrid, linear, money, pct, shortDate, sqrtDays, useChartWidth, dayTicks, hitBands } from "./chart-kit";
 import { conePoints, drawsCone } from "./draws";
 
 const HEIGHT = 260;
@@ -69,16 +69,15 @@ export function ExpectedMoveCone({ expiries, spot, eventDays }: Props) {
         {hover !== null && (
           <line x1={edges[hover]} x2={edges[hover]} y1={PAD.top} y2={HEIGHT - PAD.bottom} stroke={COLOR.axis} strokeWidth={1} />
         )}
-        {points.map((p, i) => {
-          const left = i === 0 ? PAD.left : (edges[i - 1] + edges[i]) / 2;
-          const right = i === points.length - 1 ? W - PAD.right : (edges[i] + edges[i + 1]) / 2;
+        {hitBands(edges, PAD.left, W - PAD.right).map(({ left, width }, i) => {
+          const p = points[i];
           return (
             <rect
               key={p.expiry}
               data-testid="options-cone-hit"
               x={left}
               y={PAD.top}
-              width={Math.max(1, right - left)}
+              width={width}
               height={HEIGHT - PAD.top - PAD.bottom}
               fill="transparent"
               onMouseEnter={() => setHover(i)}

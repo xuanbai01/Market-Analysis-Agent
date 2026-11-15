@@ -51,6 +51,16 @@ export function dayTicks(maxDays: number): number[] {
   return ticks.length > 0 ? ticks : [Math.max(1, Math.round(maxDays))];
 }
 
+/** Hover bands for marks at sorted x positions: each runs to the midpoints
+ * with its neighbours, so marks close together never overlap. */
+export function hitBands(xs: number[], x0: number, x1: number): { left: number; width: number }[] {
+  return xs.map((x, i) => {
+    const left = i === 0 ? x0 : (xs[i - 1] + x) / 2;
+    const right = i === xs.length - 1 ? x1 : (x + xs[i + 1]) / 2;
+    return { left, width: Math.max(1, right - left) };
+  });
+}
+
 export function pct(v: number, digits = 1): string {
   return `${(v * 100).toFixed(digits)}%`;
 }

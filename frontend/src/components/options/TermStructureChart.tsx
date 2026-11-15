@@ -7,7 +7,7 @@ import { useState } from "react";
 
 import type { ExpirySummary } from "../../lib/options-schemas";
 import { niceTicks } from "../MultiLine";
-import { AxisText, COLOR, FONT, PAD, Tooltip, YGrid, linear, pct, shortDate, sqrtDays, useChartWidth, dayTicks } from "./chart-kit";
+import { AxisText, COLOR, FONT, PAD, Tooltip, YGrid, linear, pct, shortDate, sqrtDays, useChartWidth, dayTicks, hitBands } from "./chart-kit";
 import { drawsTerm } from "./draws";
 
 const HEIGHT = 240;
@@ -65,13 +65,13 @@ export function TermStructureChart({ expiries, rv20 }: { expiries: ExpirySummary
             strokeWidth={2}
           />
         ))}
-        {points.map((p, i) => (
+        {hitBands(points.map((p) => x(p.days)), PAD.left, W - PAD.right - 60).map(({ left, width }, i) => (
           <rect
-            key={`hit-${p.expiry}`}
+            key={`hit-${points[i].expiry}`}
             data-testid="options-term-hit"
-            x={x(p.days) - 10}
+            x={left}
             y={PAD.top}
-            width={20}
+            width={width}
             height={HEIGHT - PAD.top - PAD.bottom}
             fill="transparent"
             onMouseEnter={() => setHover(i)}

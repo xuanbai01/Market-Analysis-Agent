@@ -80,6 +80,12 @@ describe("OptionsPage", () => {
     expect(tiles).not.toHaveTextContent("Collecting");
   });
 
+  it("flags an IV30 the backend had to extrapolate", async () => {
+    vi.mocked(fetchOptionsReport).mockResolvedValue({ ...REPORT, iv30_extrapolated: true });
+    renderPage();
+    expect(await screen.findByTestId("options-tiles")).toHaveTextContent(/extrapolated/i);
+  });
+
   it("says when the quotes are delayed prints from a session", async () => {
     vi.mocked(fetchOptionsReport).mockResolvedValue({ ...REPORT, at_close: false, quoted_at: "2026-11-16T10:45:00-05:00" });
     renderPage();

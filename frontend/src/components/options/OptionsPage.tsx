@@ -65,6 +65,14 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
+function ivSub(report: OptionsReport): string | undefined {
+  const parts = [
+    report.rv20 !== null ? `RV20 ${pct(report.rv20)}` : null,
+    report.iv30 !== null && report.iv30_extrapolated ? "extrapolated" : null,
+  ].filter((s) => s !== null);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
 function Tiles({ report }: { report: OptionsReport }) {
   const { history, chain } = report;
   const nearest = report.expiries.find((e) => e.expiry === chain?.expiry);
@@ -77,7 +85,7 @@ function Tiles({ report }: { report: OptionsReport }) {
   return (
     <div data-testid="options-tiles" className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
       <Tile label="Spot" value={report.spot !== null ? money(report.spot) : "—"} />
-      <Tile label="IV30" value={report.iv30 !== null ? pct(report.iv30) : "—"} sub={report.rv20 !== null ? `RV20 ${pct(report.rv20)}` : undefined} />
+      <Tile label="IV30" value={report.iv30 !== null ? pct(report.iv30) : "—"} sub={ivSub(report)} />
       <Tile label="IV history" value={history.percentile !== null ? ordinal(Math.round(history.percentile)) : "—"} sub={ivRank} />
       <Tile
         label="Expected move"

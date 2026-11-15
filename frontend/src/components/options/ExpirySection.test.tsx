@@ -75,6 +75,16 @@ describe("ExpirySection", () => {
     expect(within(first).getByTestId("options-chain-put-ask")).toHaveTextContent("—");
   });
 
+  it("drops an expiry's error once the report's own chain is that expiry", async () => {
+    vi.mocked(fetchOptionsChain).mockRejectedValue(new ApiError({ status: 503, title: "Option data is unavailable" }));
+    const { rerender } = renderSection();
+    const picked = REPORT.listed_expiries[2];
+    fireEvent.change(select(), { target: { value: picked } });
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    rerender(section({ ...CHAIN, expiry: picked }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("sends a stale sign-in back to the sign-in page when an expiry is read", async () => {
     vi.mocked(fetchOptionsChain).mockRejectedValue(new ApiError({ status: 401, title: "Unauthorized" }));
     renderSection();

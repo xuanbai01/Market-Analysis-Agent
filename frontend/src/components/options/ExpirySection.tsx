@@ -43,6 +43,9 @@ export function ExpirySection({ symbol, listed, initial, spot }: Props) {
   });
   const chain = expiry === initial.expiry ? initial : query.data;
   const unauthorized = useSignOutOn401(query.error);
+  // An error belongs to an expiry read on demand; once the report's own
+  // chain is that expiry, it no longer applies.
+  const failed = expiry !== initial.expiry && !unauthorized ? query.error : null;
 
   return (
     <div data-testid="options-expiry-section">
@@ -63,7 +66,7 @@ export function ExpirySection({ symbol, listed, initial, spot }: Props) {
         {chain && <span>{Math.round(chain.days)} days · forward ${chain.forward.toFixed(2)}</span>}
       </label>
       {query.isFetching && <p className="font-mono text-[11px] text-strata-muted">Reading {shortDate(expiry, true)}…</p>}
-      {query.error && !unauthorized && <ErrorBanner error={query.error} />}
+      {failed && <ErrorBanner error={failed} />}
       {chain && (
         <>
           <div className="grid gap-6 lg:grid-cols-2">

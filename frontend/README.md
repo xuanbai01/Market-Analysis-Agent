@@ -11,6 +11,7 @@ React 18 + Vite + TypeScript dashboard for the [Market Analysis Agent](../) back
 | `/symbol/:ticker` | The dashboard: section nav, hero, analyst view, Quality / Earnings / Valuation / Per-share growth, Cash & capital · Capital returns · Risk · Macro, Business + News. Adapts to distressed names (pills, hero metric swap, survival cards first). |
 | `/compare?a=X&b=Y` | Two tickers side by side. |
 | `/lens`, `/lens/:id` | Cross-company lenses (megacap capex, stock-based compensation, R&D). |
+| `/options/:ticker` | A symbol's options (ADR 0008): expected-move cone, term structure, earnings move, smile, open interest, chain. Not in the demo. |
 
 Every signed-in page has the sidebar (Search ⌘K, Home, Compare, Lenses, Watchlist, Recent) and the market strip.
 
@@ -40,7 +41,7 @@ CI runs lint, typecheck, test and build on every PR.
 
 ## Bundle budget
 
-The main chunk must stay under **100 KB gzipped**; it is 90.03 KB (2026-11-14). Every route except `/` and `/login` is lazy-loaded into its own chunk: dashboard 26.8 KB, demo shell + index 1.8 KB, compare 6.6 KB, lens 4.6 KB (+ 0.7 KB index), search modal 1.3 KB. There is no charting library; charts are hand-rolled SVG. These sizes are kept only here. Check them with `npm run build` before adding a dependency.
+The main chunk must stay under **100 KB gzipped**; it is 90.20 KB (2026-11-15). Every route except `/` and `/login` is lazy-loaded into its own chunk: dashboard 26.8 KB, demo shell + index 1.8 KB, compare 6.6 KB, lens 4.6 KB (+ 0.7 KB index), options 7.8 KB, search modal 1.3 KB. There is no charting library; charts are hand-rolled SVG. These sizes are kept only here. Check them with `npm run build` before adding a dependency.
 
 ## Layout
 
@@ -61,6 +62,7 @@ src/
 │   │                       # hand-rolled SVG primitives
 │   ├── compare/            # ComparePage (lazy) and its rows
 │   ├── lens/               # LensPage, LensIndexPage, DistributionChart, AmountBars (lazy)
+│   ├── options/            # OptionsPage, the cone, term, smile, OI and earnings charts, ExpirySection (lazy)
 │   └── search/             # SearchModal (lazy)
 └── lib/
     ├── api.ts              # the only fetch caller — typed ApiError, Zod validation

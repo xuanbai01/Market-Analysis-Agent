@@ -70,6 +70,7 @@ class UnanalysedPosition(BaseModel):
 
 class OwnerPositions(BaseModel):
     as_of: datetime
+    # Accounts whose positions were read (legs keep their place in the list).
     accounts: int
     groups: list[PositionGroup]
     unanalysed: list[UnanalysedPosition]

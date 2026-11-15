@@ -35,6 +35,12 @@ export function fractionPctTick(v: number): string {
   return `${trimmed(Number((v * 100).toFixed(2)), 1)}%`;
 }
 
+/** A dollar amount as a billions tick: 0 → "$0", 2.5e9 → "$2.5B", 1e11 → "$100B". */
+export function usdBillionsTick(v: number): string {
+  if (v === 0) return "$0";
+  return `${v < 0 ? "-" : ""}$${trimmed(Number((Math.abs(v) / 1e9).toFixed(2)), 1)}B`;
+}
+
 /** Indexed value (first period = 100): 236.4 → "236". */
 export function indexValue(v: number): string {
   return v.toFixed(0);

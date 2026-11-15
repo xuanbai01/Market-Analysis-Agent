@@ -12,7 +12,8 @@
  */
 import { useState } from "react";
 
-import { companiesInYear, companyColor, pct, percentTickLabels } from "../../lib/lens";
+import { fractionPctTick } from "../../lib/chart-format";
+import { companiesInYear, companyColor, pct } from "../../lib/lens";
 import type { LensReport } from "../../lib/schemas";
 import { useMeasuredWidth } from "../../lib/use-measured-width";
 import { niceTicks } from "../MultiLine";
@@ -42,7 +43,6 @@ export function DistributionChart({ report, height = 300 }: Props) {
   const innerH = height - PAD.top - PAD.bottom;
   const values = companies.flatMap((c) => c.points.map((p) => p.intensity ?? 0));
   const ticks = niceTicks(0, Math.max(...values, ...stats.map((s) => s.p75)), 5);
-  const tickLabels = percentTickLabels(ticks);
   const yMax = ticks[ticks.length - 1] || 1;
   const step = innerW / (years.length - 1);
   const x = (i: number) => PAD.left + i * step;
@@ -84,11 +84,11 @@ export function DistributionChart({ report, height = 300 }: Props) {
         aria-label={`${metric.label} intensity by company, CY${years[0]}–CY${years[last]}. Median ${pct(first.median)} in CY${first.year}, ${pct(latest.median)} in CY${latest.year}.`}
         onMouseLeave={() => setHover(null)}
       >
-        {ticks.map((t, k) => (
+        {ticks.map((t) => (
           <g key={t}>
             <line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} stroke="#1f2630" strokeWidth={1} />
             <text x={PAD.left - 8} y={y(t) + 4} textAnchor="end" fontSize={11} fill="#8892a0" fontFamily="JetBrains Mono, monospace">
-              {tickLabels[k]}
+              {fractionPctTick(t)}
             </text>
           </g>
         ))}

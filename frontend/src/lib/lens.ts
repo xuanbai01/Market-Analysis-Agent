@@ -33,41 +33,6 @@ export function usdBillions(v: number): string {
   return `${sign}$${(abs / 1e6).toFixed(0)}M`;
 }
 
-// Steps come from niceTicks (1, 2, 2.5 or 5 × a power of ten), so a few
-// decimals always suffice; the tolerance absorbs float error in the step.
-const MAX_TICK_DECIMALS = 4;
-const STEP_TOLERANCE = 1e-6;
-
-/** Decimals that write every multiple of `step` exactly: 5 → 0, 2.5 → 1, 0.25 → 2. */
-function stepDecimals(step: number): number {
-  for (let d = 0; d < MAX_TICK_DECIMALS; d++) {
-    const scaled = step * 10 ** d;
-    if (Math.abs(scaled - Math.round(scaled)) < STEP_TOLERANCE) return d;
-  }
-  return MAX_TICK_DECIMALS;
-}
-
-/** Decimals for an evenly spaced axis, after `toUnit` converts a tick. */
-function axisDecimals(ticks: number[], toUnit: (t: number) => number): number {
-  return ticks.length > 1 ? stepDecimals(toUnit(ticks[1]) - toUnit(ticks[0])) : 0;
-}
-
-const toPercent = (t: number) => t * 100;
-const toBillions = (t: number) => t / 1e9;
-
-/** Intensity axis labels, one precision for the whole axis:
- *  steps of 5% → "0%, 5%, 10%"; steps of 2.5% → "0.0%, 2.5%, 5.0%". */
-export function percentTickLabels(ticks: number[]): string[] {
-  const d = axisDecimals(ticks, toPercent);
-  return ticks.map((t) => `${toPercent(t).toFixed(d)}%`);
-}
-
-/** Dollar axis labels in billions: "$0, $100B, $200B" or "$0, $2.5B, $5.0B". */
-export function billionTickLabels(ticks: number[]): string[] {
-  const d = axisDecimals(ticks, toBillions);
-  return ticks.map((t) => (t === 0 ? "$0" : `$${toBillions(t).toFixed(d)}B`));
-}
-
 /** 0.1839 → "18.4%". */
 export function pct(v: number): string {
   return `${(v * 100).toFixed(1)}%`;

@@ -143,6 +143,17 @@ Verify from outside:
 - `GET /v1/research` without a token → 401 "Missing Authorization header."; with a wrong token → 401 "Invalid token.".
 - Sign in on the dashboard and open a ticker. A first report takes ~20–90 s; a DeepSeek 401/402 in the error banner means the key is revoked or out of credit (DeepSeek's free `GET /models` checks a key without spending).
 
+### 8. The daily IV snapshot (2 min)
+
+`.github/workflows/iv-snapshot.yml` calls `POST /v1/options/snapshots` after each US close (ADR 0008). It needs the API address and the shared secret on GitHub:
+
+```bash
+gh variable set API_BASE_URL --body https://market-analysis-agent.fly.dev
+gh secret set BACKEND_SHARED_SECRET   # prompts; paste the same value as the Fly secret
+```
+
+Typing it at the prompt avoids PowerShell's pipe, which would add a byte-order mark. The tickers it always records are `OPTIONS_SNAPSHOT_SYMBOLS` in `fly.toml`. Check it with `gh workflow run iv-snapshot.yml` and `gh run watch`: the step summary lists what was written. A weekend run reports `no_new_session`, which is a success.
+
 ## Ongoing operations
 
 ### Rolling out a change

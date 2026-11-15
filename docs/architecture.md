@@ -29,9 +29,9 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + per-call LLM b
 | Frontend stack | Vite + React 18 + Tailwind + TanStack Query + Zod | ✅ |
 | Tests | pytest + pytest-asyncio (backend), vitest + happy-dom (frontend) | ✅ counts in [testing.md](testing.md) |
 | Lint | ruff (backend), ESLint (frontend) | ✅ |
-| CI | GitHub Actions (tests + Gitleaks + DeepSeek PR review) + push-to-deploy | ✅ |
+| CI | GitHub Actions (tests + Gitleaks + DeepSeek PR review) + push-to-deploy, and one daily cron (IV snapshot) | ✅ |
 
-**Indefinitely deferred per [ADR 0004](adr/0004-visual-first-product-shape.md):** pgvector (`search_history`), yfinance options chain (`compute_options`), Redis (no horizontal-scale rate limit need yet), Celery (no scheduled work).
+**Indefinitely deferred per [ADR 0004](adr/0004-visual-first-product-shape.md):** pgvector (`search_history`), Redis (no horizontal-scale rate limit need yet), Celery (the one scheduled job, the daily IV snapshot, is a GitHub Actions cron calling the API; ADR 0008).
 
 ## Repository Structure
 
@@ -48,7 +48,7 @@ Real operating cost: ~$0–5/mo (Fly auto-stop + Neon free tier + per-call LLM b
 │   │   └── models/              # Symbol, NewsItemModel, NewsSymbol, Candle, ResearchReportRow
 │   ├── schemas/                 # Pydantic request/response (research.py is the v2 schema)
 │   └── services/                # tools (fetch_*, parse_*), orchestrator, cache, rate_limit, llm
-├── alembic/versions/            # 0001 baseline, 0002 news_symbols, 0003 research_reports
+├── alembic/versions/            # 0001 baseline, 0002 news_symbols, 0003 research_reports, 0004 option snapshots
 ├── frontend/                    # Vite + React 18 + TS dashboard (Phase 4)
 │   ├── src/
 │   │   ├── App.tsx              # Router + auth guard. SymbolDetailPage + ComparePage lazy.
@@ -121,6 +121,8 @@ POST /v1/research/{symbol}
 | `news_items` | `id` (PK, varchar 64), `ts` (timestamptz), `title`, `url`, `source` | Indexed on `ts DESC`. |
 | `news_symbols` | composite PK `(news_id, symbol)` | Join table for symbol-tagged news. Cascading FKs both directions. |
 | `candles` | composite PK `(symbol, ts, interval)`; OHLCV + volume | FK → `symbols`. Indexed `(symbol, interval, ts DESC)`. Append-only. |
+| `option_iv_snapshots` | composite PK `(symbol, trade_date)`; IV30/IV90 (+ extrapolated flags), `skew25`, `rv20`/`rv60`, call/put open interest and volume, `next_earnings`, `method_version`, `detail` (JSONB: each expiry's forward, smile and raw near-money quotes) | Daily IV history (ADR 0008). Insert-only, first good row wins; ~7 KB a row. |
+| `options_tracked` | `symbol` PK, `last_viewed` (timestamptz) | Symbols whose options page was opened; snapshotted for 60 days. |
 | `research_reports` | composite PK `(symbol, focus, report_date)`; `report_json` (JSONB), `generated_at` (timestamptz) | Same-day cache. JSONB stores serialized `ResearchReport`. Lookup is time-windowed via `generated_at` (configurable via `RESEARCH_CACHE_MAX_AGE_HOURS`). |
 
 ## Backend routes (current)
@@ -136,6 +138,7 @@ POST /v1/research/{symbol}
 | Phase 4 — prices | `GET /v1/market/:ticker/prices?range={60D\|1Y\|5Y}` | ✅ Phase 4.1 — read-through `candles` cache, falls through to yfinance ingest on miss. Auth-gated. |
 | Market strip | `GET /v1/market/overview` | ✅ 2026-11 — headline quotes (S&P 500, Nasdaq 100, Dow, VIX, Russell 2000, US 10Y, dollar, gold, WTI, bitcoin) + our fear & greed estimate (`market_sentiment.py`: momentum, VIX, safe-haven and junk-bond demand, each ranked against its past year). yfinance, in-memory cache (5 min quotes / 1 h sentiment), serves stale on provider failure. Auth-gated. |
 | Demo | `GET /v1/demo`, `GET /v1/demo/research/{symbol}`, `GET /v1/demo/market/{symbol}/prices` | ✅ 2026-11 — public and read-only: the latest stored report and stored prices for the tickers in `DEMO_SYMBOLS`. Never generates or fetches; responses cached 5 min as bytes; per-IP limit. **Not auth-gated, by design** (security.md A01). |
+| Options | `POST /v1/options/snapshots` | ✅ 2026-11 (ADR 0008) — the daily IV snapshot, called by `.github/workflows/iv-snapshot.yml` after each US close and once more that night. For `OPTIONS_SNAPSHOT_SYMBOLS` plus recently viewed symbols (≤ 30): one row per ticker for the last completed session (`market_calendar`), insert-only; `market_open` while quotes move, `no_new_session` when everything is stored. No DB connection held during the Yahoo fetch; fetch and math on the options thread; a second Yahoo throttle defers the rest; 300 s budget; 409 when a run is already going. Auth-gated. |
 | Lenses | `GET /v1/lens`, `GET /v1/lens/{id}` | ✅ 2026-11 (ADR 0007 layer 3) — cross-company lens built from SEC XBRL annual filings (`xbrl.py`: tag merging per year, SEC calendar frames, 24 h disk cache) and `lens.py` (10-year window ending at the latest year every company filed; per-year distribution stats; computed facts; cited AI narrative). Each lens is one metric (`lens_catalog.py`: XBRL tags, label, definition) across a group; a company that never tagged the metric is left out and named. Lenses: megacap capex, stock-based compensation and R&D (without Amazon, which tags no R&D). In-memory cache 24 h, stale on failure, 503 when nothing cached. Auth-gated. |
 
 ## Frontend routes (current)
@@ -158,7 +161,7 @@ Errors are serialized as [RFC 7807 problem+json](https://www.rfc-editor.org/rfc/
 
 | Service | Purpose | Failure mode |
 |---|---|---|
-| yfinance | OHLCV, fundamentals, peers, earnings, ten years of closes for the year-end multiples | Defensive `_safe_loc` lookups; missing fields become `None`-valued claims with stable shape |
+| yfinance | OHLCV, fundamentals, peers, earnings, ten years of closes for the year-end multiples, option chains and `^IRX` (options; Yahoo's own IV column is never used) | Defensive `_safe_loc` lookups; missing fields become `None`-valued claims with stable shape |
 | SEC EDGAR | Filings (10-K, Form 4, 13F-HR); XBRL company concepts for lenses and the ten-year per-share history | Disk-cached: filing texts forever (filings never change), the list of filings 12 h, XBRL 24 h. SEC lists a big filer's filings older than a year in extra pages (JPM files 26,000 a year); they are read, back three years, when the latest year doesn't hold enough. SEC `User-Agent` mandatory; every request in the process spaced through one lock (8 a second, under SEC's 10). A company that moved to a new registrant is read across both (`sec_registrants.py`). A ticker SEC doesn't know fails the SEC tools only; their cards drop out and the page says so |
 | NewsAPI | News articles | Optional — skipped silently when `NEWSAPI_KEY` empty |
 | FRED | Macro series | Optional — `fetch_macro` emits metadata claims with None values when `FRED_API_KEY` empty |
@@ -177,4 +180,5 @@ ADRs in [docs/adr/](adr/):
 - [0004](adr/0004-visual-first-product-shape.md) — Visual-first, delta-driven; not chasing Morningstar-narrative depth.
 - [0005](adr/0005-symbol-centric-dashboard.md) — **Read this before proposing surface-shape changes.** Pivot from "click Generate → static report" to symbol-centric dashboard with adaptive layouts (Phase 4).
 - [0006](adr/0006-pluggable-llm-provider.md) — LLM provider switchable per `LLM_PROVIDER` (Anthropic default, DeepSeek Flash).
+- [0008](adr/0008-options-from-free-snapshots.md) — Options analysis from free yfinance chains on a separate page, our own IVs (Black-76 on a parity forward), and a daily IV snapshot by GitHub Actions cron.
 - [0007](adr/0007-analytical-narratives.md) — Card prose interprets: derived comparison claims (`research_derived.py`), history in the prompt, sector-aware framing; citation rule unchanged.

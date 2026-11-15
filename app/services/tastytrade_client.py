@@ -96,7 +96,13 @@ _ACCOUNT_IN_PATH = re.compile(r"(/accounts/)[^/?#]+")
 
 
 class TastytradeUnavailable(Exception):
-    """Not configured, the sign-in was refused, or tastytrade didn't answer."""
+    """Not configured, the sign-in was refused, or tastytrade didn't answer.
+    ``status`` is the HTTP status when tastytrade answered a request with a
+    refusal it won't retry (a 4xx other than 401 and 429), else None."""
+
+    def __init__(self, reason: str, *, status: int | None = None) -> None:
+        super().__init__(reason)
+        self.status = status
 
 
 class TastytradeNotFound(Exception):
@@ -356,7 +362,7 @@ async def get(path: str, params: dict[str, Any] | None = None, *, op: str) -> di
     if response.status_code == 404:
         raise TastytradeNotFound(_masked(path))
     if response.status_code >= 400:
-        raise TastytradeUnavailable(f"tastytrade answered {response.status_code}")
+        raise TastytradeUnavailable(f"tastytrade answered {response.status_code}", status=response.status_code)
     try:
         return response.json()
     except ValueError:

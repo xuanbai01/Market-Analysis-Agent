@@ -263,16 +263,82 @@ async def test_no_account_is_not_remembered_for_an_hour(account: _Tastytrade) ->
     assert (await op.get_positions()).accounts == 1
 
 
-@pytest.mark.parametrize("payload", [[], "x", {"data": []}, {"data": {"items": {"a": 1}}}, {"data": {"items": ["x", 1]}}])
-async def test_an_answer_of_the_wrong_shape_reads_as_nothing(
+@pytest.mark.parametrize("payload", [[], "x", {"data": []}, {"data": {"items": {"a": 1}}}])
+async def test_an_answer_of_the_wrong_shape_is_a_failure_not_an_empty_account(
     account: _Tastytrade, monkeypatch: pytest.MonkeyPatch, payload: object
 ) -> None:
+    """A changed answer shape must not read as "no open positions" (#127's AI review)."""
+    real = account.get
+
     async def odd(path: str, params: dict[str, Any] | None = None, *, op: str) -> object:
-        return payload
+        return payload if path.endswith("/positions") else await real(path, params, op=op)
 
     monkeypatch.setattr(op.tt, "get", odd)
+    with pytest.raises(op.PositionsUnavailable, match="readable"):
+        await op.get_positions()
+
+
+async def test_rows_that_are_not_records_are_skipped(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = account.get
+
+    async def junk(path: str, params: dict[str, Any] | None = None, *, op: str) -> object:
+        return {"data": {"items": ["x", 1]}} if path.endswith("/positions") else await real(path, params, op=op)
+
+    monkeypatch.setattr(op.tt, "get", junk)
     result = await op.get_positions()
-    assert (result.accounts, result.groups, result.unanalysed) == (0, [], [])
+    assert (result.accounts, result.groups, result.unanalysed) == (1, [], [])
+
+
+@pytest.mark.parametrize(("sent", "read"), [("0.48", 0.48), ("2.9", 2.9), ("48.0", None), ("0", None), ("-0.2", None)])
+async def test_an_iv_that_cannot_be_a_fraction_is_no_figure(account: _Tastytrade, sent: str, read: float | None) -> None:
+    """The page reads IV as a fraction; 48.0 would show as 4800% (#127's AI review)."""
+    account.positions[ACCOUNT] = [_position("SPY   261218C00600000", "Equity Option", "1", "Long")]
+    account.quotes = {"SPY   261218C00600000": _quote("SPY   261218C00600000", 3.0, volatility=sent)}
+    (group,) = (await op.get_positions()).groups
+    assert group.legs[0].quote is not None and group.legs[0].quote.iv == read
+
+
+async def test_a_stock_is_one_share_per_unit_whatever_the_row_says(account: _Tastytrade) -> None:
+    account.positions[ACCOUNT] = [_position("NVDA", "Equity", "200", "Long", multiplier=100)]
+    (group,) = (await op.get_positions()).groups
+    assert group.legs[0].multiplier == 1
+
+
+async def test_a_quote_batch_that_fails_for_another_reason_is_not_retried_alone(
+    account: _Tastytrade, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a refusal is retried a symbol at a time: after a 5xx or a 429,
+    25 more calls would only extend the trouble (#127's AI review)."""
+    account.positions[ACCOUNT] = [_position("NVDA", "Equity", "10", "Long"), _position("AAPL", "Equity", "10", "Long")]
+    real = account.get
+
+    async def down(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        if path == "/market-data/by-type":
+            raise tt.TastytradeUnavailable("tastytrade failed 3 times (503)")
+        return await real(path, params, op=op)
+
+    monkeypatch.setattr(op.tt, "get", down)
+    with pytest.raises(op.PositionsUnavailable):
+        await op.get_positions()
+    assert len(account.quote_calls()) == 0  # the fake records only calls it answers
+
+
+async def test_a_failure_reason_never_carries_an_account_number(account: _Tastytrade) -> None:
+    account.fail = tt.TastytradeUnavailable(f"tastytrade answered 500 for /accounts/{ACCOUNT}/positions")
+    with pytest.raises(op.PositionsUnavailable) as caught:
+        await op.get_positions()
+    assert ACCOUNT not in str(caught.value) and "/accounts/***/" in str(caught.value)
+
+
+async def test_reading_stops_at_the_cap_and_asks_no_more_accounts(account: _Tastytrade) -> None:
+    account.accounts = [ACCOUNT, OTHER]
+    account.positions = {
+        ACCOUNT: [_position(f"SPY   2612{d:02d}C00{500 + s:03d}000", "Equity Option", "1", "Long") for d in range(1, 29) for s in range(30)],
+        OTHER: [_position("SPY   261218C00600000", "Equity Option", "1", "Long", account=OTHER)],
+    }
+    result = await op.get_positions()
+    assert result.truncated is True
+    assert not any(path == f"/accounts/{OTHER}/positions" for path, _ in account.calls)
 
 
 async def test_an_account_entry_of_the_wrong_shape_is_skipped(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -296,7 +362,7 @@ async def test_a_refused_quote_request_costs_only_its_own_quotes(account: _Tasty
 
     async def picky(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
         if path == "/market-data/by-type" and "equity" in (params or {}):
-            raise tt.TastytradeUnavailable("tastytrade answered 400")
+            raise tt.TastytradeUnavailable("tastytrade answered 400", status=400)
         return await real(path, params, op=op)
 
     monkeypatch.setattr(op.tt, "get", picky)
@@ -316,7 +382,7 @@ async def test_one_refused_symbol_costs_only_its_own_quote(account: _Tastytrade,
 
     async def no_spx(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
         if path == "/market-data/by-type" and "SPX" in (params or {}).get("equity", "").split(","):
-            raise tt.TastytradeUnavailable("tastytrade answered 400")
+            raise tt.TastytradeUnavailable("tastytrade answered 400", status=400)
         return await real(path, params, op=op)
 
     monkeypatch.setattr(op.tt, "get", no_spx)

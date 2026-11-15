@@ -1147,3 +1147,14 @@ def test_a_complete_info_is_read_once(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert made == ["JPM"]
     assert raw["gross_margin_ttm"] is None
+
+
+def test_the_retry_only_fills_gaps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A field the first answer had stays as it was: the retry fills
+    what's missing and doesn't mix in a second snapshot."""
+    _patch_yfinance_infos(monkeypatch, [_KO_PARTIAL, {**_KO_FULL, "trailingPE": 26.0}])
+
+    raw, _ = _fetch_yfinance_fundamentals("KO")
+
+    assert raw["trailing_pe"] == 25.0
+    assert raw["p_s"] == 6.4

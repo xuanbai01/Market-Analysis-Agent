@@ -61,6 +61,8 @@ class ExpirySummary(BaseModel):
     call_volume: int
     put_volume: int
     includes_earnings: bool = False
+    max_pain: float | None = Field(default=None, description="the settle among the strikes that pays holders least")
+    net_gex: float | None = Field(default=None, description="net gamma exposure, dollars per 1% move (dealer assumption)")
 
 
 class SmilePoint(BaseModel):
@@ -94,6 +96,45 @@ class OpenInterestPoint(BaseModel):
     put: int
 
 
+class TopContract(BaseModel):
+    strike: float
+    side: Literal["call", "put"]
+    open_interest: int
+
+
+class StrikeExposure(BaseModel):
+    """One strike's net gamma and delta exposure (calls and puts together),
+    in whole dollars per 1% move."""
+
+    strike: float
+    gex: float = Field(description="call gamma minus put gamma exposure (dealer assumption)")
+    dex: float
+
+
+class Positioning(BaseModel):
+    """Where one expiry's open interest sits (options_positioning), in
+    dollars per 1% move of the stock. Gamma exposure assumes dealers hold
+    the other side of customers' calls and puts in the common way
+    (``assumption``); delta exposure is the options' own delta."""
+
+    call_open_interest: int
+    put_open_interest: int
+    put_call: float | None
+    top: list[TopContract] = Field(description="the contracts with the most open interest, most first")
+    max_pain: float | None = Field(description="the settle among the strikes that pays holders least")
+    exposure: list[StrikeExposure] = Field(description="by strike, the strikes the open interest chart shows")
+    call_gex: float
+    put_gex: float
+    net_gex: float
+    call_dex: float
+    put_dex: float
+    net_dex: float
+    call_wall: float | None = Field(description="the strike with the largest call gamma exposure")
+    put_wall: float | None = Field(description="the strike with the largest put gamma exposure")
+    gamma_flip: float | None = Field(description="the price nearest the spot where net gamma exposure changes sign")
+    assumption: str
+
+
 class ExpiryChain(BaseModel):
     """One expiry's smile, near-the-money chain and open interest by strike."""
 
@@ -104,6 +145,7 @@ class ExpiryChain(BaseModel):
     smile: list[SmilePoint]
     rows: list[ChainRow]
     open_interest: list[OpenInterestPoint]
+    positioning: Positioning | None = None
 
 
 class PastMove(BaseModel):

@@ -38,6 +38,7 @@ from app.schemas.options import (
 from app.schemas.research import Claim, ClaimUnit, Source
 from app.services import market_calendar as mc
 from app.services import options_math as om
+from app.services import options_positioning as op
 from app.services.earnings_calendar import Schedule, reaction_sessions
 from app.services.options_chain import ExpiryQuotes, Quote
 from app.services.options_earnings import MAX_EVENT_DAYS, EventMove
@@ -99,6 +100,7 @@ def expiry_summary(
     puts = {q.strike: q for q in chain.puts if usable(q)}
     strike = min(calls.keys() & puts.keys(), key=lambda k: abs(k - s.forward), default=None)
     call_oi, put_oi, call_vol, put_vol = _totals(chain)
+    pain, net_gex = op.headline(chain, s)
     return ExpirySummary(
         expiry=s.expiry,
         days=s.days,
@@ -116,6 +118,8 @@ def expiry_summary(
         call_volume=call_vol,
         put_volume=put_vol,
         includes_earnings=reaction is not None and s.expiry >= reaction[1],
+        max_pain=pain,
+        net_gex=net_gex,
     )
 
 
@@ -138,7 +142,9 @@ def _call_delta(s: Smile, strike: float, vol: float | None) -> float | None:
     return om.norm_cdf(d1)
 
 
-def expiry_chain(chain: ExpiryQuotes, s: Smile) -> ExpiryChain:
+def expiry_chain(chain: ExpiryQuotes, s: Smile, spot: float | None = None) -> ExpiryChain:
+    """The expiry's smile, near-money rows, open interest by strike and
+    positioning (options_positioning; the spot defaults to the forward)."""
     sigma_t = s.atm_vol * math.sqrt(s.years)
     calls = {q.strike: q for q in chain.calls}
     puts = {q.strike: q for q in chain.puts}
@@ -179,6 +185,7 @@ def expiry_chain(chain: ExpiryQuotes, s: Smile) -> ExpiryChain:
         ],
         rows=rows,
         open_interest=open_interest,
+        positioning=op.positioning(chain, s, spot if spot and spot > 0 else s.forward, shown=[p.strike for p in open_interest]),
     )
 
 

@@ -111,3 +111,27 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - The term structure's sentence starts at the same nearest expiry the chart draws.
     - An unused earnings sentence is gone.
   - **Size and tests:** options chunk 15.8 KB gz, main 90.23 KB; 799 frontend tests.
+- **Options: positioning (2026-11-15):** the views OptionCharts has that the page lacked, computed by our code from Yahoo's open interest and our own IVs.
+  - **`options_positioning`, per expiry:**
+    - call/put totals and the 10 largest contracts;
+    - max pain: the listed strike that pays holders least, in one pass with running sums;
+    - gamma and delta exposure by strike, in dollars per 1% move: GEX = Γ·F²·OI with the forward gamma φ(d1)/(Fσ√T) (new `options_math.gamma76`/`delta76`), DEX = Δ·F·OI, calls plus and puts minus under the common dealer assumption, which the payload carries in words;
+    - the call and put walls;
+    - the gamma flip: net GEX at hypothetical prices ±25% in 0.5% steps with each strike's IV held, the strict sign change nearest the price.
+  - **The report:** each expiry read gets max pain and net GEX (`headline`, no flip, cheap). The chain shown gets the full block, one net row per strike on the open interest chart, in whole dollars.
+  - **Cost:** a 400-strike chain's positioning is about 15 ms of CPU (about 0.25 s at Fly's throttled rate), plus about 2 ms per expiry summary. It stays under 14 KB on the wire, a limit a test holds.
+  - **On the page:**
+    - a "Largest open interest" ranked list;
+    - gamma and delta exposure charts (bars blue where calls dominate, orange where puts do, the price and flip marked);
+    - stats tables with the walls and flip, and the assumption in a footnote;
+    - max pain marked on the open interest chart and named in its sentence;
+    - an "Across expiries" table: max pain and its gap to the price, net gamma, put/call OI.
+  - **Checked against OptionCharts, NVDA's Nov 16 expiry on live Yahoo data:** max pain $167.50, 175,164 calls and 121,003 puts, put/call 0.69, and the five largest contracts all match exactly.
+    - **GEX:** agrees in sign but not in size (ours −$17.0M, theirs −$4.6M). A one-day expiry's gamma swings with the price and time used: they take the after-hours $161.02 and a one-day count.
+    - **DEX:** their "per 1% move" figures look like total dollar delta, 100 times a per-1% number. The ⓘ says so.
+  - **Wording:** the sentences state the GEX sign's meaning only as a conditional on the assumption, and max pain as a description, not a forecast.
+  - **From review:**
+    - Delta exposure is the open options' own delta (calls +, puts −, as OptionCharts counts it), not a dealer's, and the stated assumption now says it covers gamma only.
+    - A tip near a phone's right edge opens leftward.
+    - A marker label near the chart's right edge sits left of its line.
+  - Options chunk 18.9 KB gz. 1763 backend / 813 frontend tests.

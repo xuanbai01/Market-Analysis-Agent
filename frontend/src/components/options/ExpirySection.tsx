@@ -8,10 +8,25 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { fetchOptionsChain } from "../../lib/options-api";
-import type { ChainRow, ExpiryChain } from "../../lib/options-schemas";
-import { GLOSSARY, daysUntil, expiryKind, expiryLabel, openInterestSentence, smileSentence } from "../../lib/options-text";
+import type { ChainRow, ExpiryChain, Positioning } from "../../lib/options-schemas";
+import {
+  GLOSSARY,
+  type Sentence,
+  compactUsd,
+  daysUntil,
+  deltaSentence,
+  expiryKind,
+  expiryLabel,
+  gammaSentence,
+  maxPainSentence,
+  openInterestSentence,
+  positioningSentence,
+  smileSentence,
+} from "../../lib/options-text";
 import { ErrorBanner } from "../ErrorBanner";
-import { InfoTip, SentenceText, pct, shortDate } from "./chart-kit";
+import { InfoTip, SentenceText, StatsTable, money, pct, shortDate } from "./chart-kit";
+import { ExposureChart } from "./ExposureChart";
+import { TopOpenInterest } from "./TopOpenInterest";
 import { OpenInterestChart } from "./OpenInterestChart";
 import { Panel } from "./Panel";
 import { SmileChart } from "./SmileChart";
@@ -90,12 +105,13 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
                 <ChartBlock
                   title="Open interest by strike"
                   info={GLOSSARY.openInterest}
-                  sentence={openInterestSentence(chain)}
+                  sentence={chain.positioning ? maxPainSentence(chain.positioning, spot) : openInterestSentence(chain)}
                   testId="options-oi-block"
                 >
                   <OpenInterestChart chain={chain} spot={spot} />
                 </ChartBlock>
               </div>
+              {chain.positioning && <PositioningBlock expiry={chain.expiry} p={chain.positioning} price={spot} />}
               <ChainTable chain={chain} />
             </>
           )}
@@ -111,10 +127,17 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
   );
 }
 
-/** A chart inside the expiry panel, with its own small title, ⓘ and takeaway. */
+/** A chart inside the expiry panel, with its own small title, ⓘ, takeaway and stats. */
 function ChartBlock({
-  title, info, sentence, testId, children,
-}: { title: string; info: string; sentence: ReturnType<typeof smileSentence>; testId: string; children: React.ReactNode }) {
+  title, info, sentence, testId, stats, children,
+}: {
+  title: string;
+  info: string;
+  sentence: Sentence | null;
+  testId: string;
+  stats?: { label: string; value: string }[];
+  children: React.ReactNode;
+}) {
   return (
     <div className="min-w-0" data-testid={testId}>
       <h3 className="mb-1 font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
@@ -127,6 +150,65 @@ function ChartBlock({
         </p>
       )}
       {children}
+      {stats && <StatsTable rows={stats} testId={`${testId}-stats`} />}
+    </div>
+  );
+}
+
+const maybeMoney = (v: number | null) => (v === null ? "—" : money(v));
+
+/** Where the expiry's open interest sits: the largest contracts, gamma and
+ * delta exposure by strike, with the dealer assumption stated. */
+function PositioningBlock({ expiry, p, price }: { expiry: string; p: Positioning; price: number | null }) {
+  if (p.call_open_interest + p.put_open_interest === 0) return null;
+  return (
+    <div data-testid="options-positioning" className="mt-6 border-t border-strata-border pt-5">
+      <div className="grid gap-6 lg:grid-cols-2">
+        <ChartBlock
+          title="Largest open interest"
+          info={GLOSSARY.topOpenInterest}
+          sentence={positioningSentence(p, expiry)}
+          testId="options-top-oi-block"
+          stats={[
+            { label: "Calls open", value: p.call_open_interest.toLocaleString("en-US") },
+            { label: "Puts open", value: p.put_open_interest.toLocaleString("en-US") },
+            { label: "Put/call", value: p.put_call === null ? "—" : p.put_call.toFixed(2) },
+            { label: "Max pain", value: maybeMoney(p.max_pain) },
+          ]}
+        >
+          <TopOpenInterest expiry={expiry} top={p.top} />
+        </ChartBlock>
+        <ChartBlock
+          title="Gamma exposure by strike"
+          info={GLOSSARY.gamma}
+          sentence={gammaSentence(p)}
+          testId="options-gex-block"
+          stats={[
+            { label: "Net, per 1% move", value: compactUsd(p.net_gex) },
+            { label: "Calls / puts", value: `${compactUsd(p.call_gex)} / ${compactUsd(p.put_gex)}` },
+            { label: "Call wall", value: maybeMoney(p.call_wall) },
+            { label: "Put wall", value: maybeMoney(p.put_wall) },
+            { label: "Gamma flip", value: maybeMoney(p.gamma_flip) },
+          ]}
+        >
+          <ExposureChart positioning={p} field="gex" price={price} testId="options-gex" />
+        </ChartBlock>
+        <ChartBlock
+          title="Delta exposure by strike"
+          info={GLOSSARY.delta}
+          sentence={deltaSentence(p)}
+          testId="options-dex-block"
+          stats={[
+            { label: "Net, per 1% move", value: compactUsd(p.net_dex) },
+            { label: "Calls / puts", value: `${compactUsd(p.call_dex)} / ${compactUsd(p.put_dex)}` },
+          ]}
+        >
+          <ExposureChart positioning={p} field="dex" price={price} testId="options-dex" />
+        </ChartBlock>
+        <p data-testid="options-positioning-assumption" className="self-end font-mono text-[10px] leading-relaxed text-strata-muted">
+          {p.assumption} Exposures are in dollars per 1% move of the stock, from open interest and our own IVs.
+        </p>
+      </div>
     </div>
   );
 }

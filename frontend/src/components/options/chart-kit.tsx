@@ -4,7 +4,7 @@
  * lens palette's first two hues (blue, orange), validated on this surface
  * (#0e1116): colour-blind ΔE 26.8, normal 31.8, contrast over 3:1.
  */
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import type { Sentence } from "../../lib/options-text";
 import { useMeasuredWidth } from "../../lib/use-measured-width";
@@ -82,6 +82,12 @@ export function shortDate(iso: string, withYear = false): string {
   return text;
 }
 
+/** A marker label beside its line: to the right, or to the left when the
+ * line sits too near the chart's right edge for the text to fit. */
+export function markerText(x: number, width: number): { x: number; anchor: "start" | "end" } {
+  return x > width - PAD.right - 110 ? { x: x - 4, anchor: "end" } : { x: x + 4, anchor: "start" };
+}
+
 export function AxisText({ x, y, anchor = "end", children }: { x: number; y: number; anchor?: "start" | "middle" | "end"; children: ReactNode }) {
   return (
     <text x={x} y={y} textAnchor={anchor} fontSize={11} fill={COLOR.axis} fontFamily={FONT}>
@@ -117,21 +123,33 @@ export function Tooltip({ testId, left, width, children }: { testId: string; lef
   );
 }
 
+const TIP_WIDTH = 256; // w-64
+const EDGE_ROOM = 16;
+
 /** A ⓘ that explains a figure. Hover, focus or a tap opens it; leaving,
  * tapping elsewhere (blur) or Escape closes it. A click only ever opens:
  * a browser focuses the button on mousedown (or the pointer has entered
  * it), so a toggle on click would shut what that just opened. */
 export function InfoTip({ label, text, testId }: { label: string; text: string; testId?: string }) {
   const [open, setOpen] = useState(false);
+  // A tip near the screen's right edge (a phone's right-hand tile) opens
+  // leftward from the ⓘ instead of past the edge.
+  const [leftward, setLeftward] = useState(false);
+  const anchor = useRef<HTMLSpanElement>(null);
+  const show = () => {
+    const box = anchor.current?.getBoundingClientRect();
+    setLeftward(box !== undefined && box.left + TIP_WIDTH + EDGE_ROOM > window.innerWidth);
+    setOpen(true);
+  };
   return (
-    <span className="relative inline-block align-middle" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+    <span ref={anchor} className="relative inline-block align-middle" onMouseEnter={show} onMouseLeave={() => setOpen(false)}>
       <button
         type="button"
         data-testid={testId}
         aria-label={`About ${label}`}
         aria-expanded={open}
-        onClick={() => setOpen(true)}
-        onFocus={() => setOpen(true)}
+        onClick={show}
+        onFocus={show}
         onBlur={() => setOpen(false)}
         onKeyDown={(e) => {
           if (e.key === "Escape") setOpen(false);
@@ -143,7 +161,7 @@ export function InfoTip({ label, text, testId }: { label: string; text: string; 
       {open && (
         <span
           role="tooltip"
-          className="absolute left-0 top-5 z-20 w-64 rounded-md border border-strata-border bg-strata-surface p-2.5 text-left font-sans text-[11px] normal-case leading-snug tracking-normal text-strata-fg shadow-lg"
+          className={`absolute ${leftward ? "right-0" : "left-0"} top-5 z-20 w-64 max-w-[calc(100vw-2rem)] rounded-md border border-strata-border bg-strata-surface p-2.5 text-left font-sans text-[11px] normal-case leading-snug tracking-normal text-strata-fg shadow-lg`}
         >
           {text}
         </span>

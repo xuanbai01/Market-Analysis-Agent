@@ -6,13 +6,14 @@ import { useState } from "react";
 
 import type { ExpiryChain } from "../../lib/options-schemas";
 import { niceTicks } from "../MultiLine";
-import { AxisText, COLOR, Legend, PAD, Tooltip, linear, money, useChartWidth } from "./chart-kit";
+import { AxisText, COLOR, Legend, PAD, Tooltip, linear, markerText, money, useChartWidth } from "./chart-kit";
 
 const HEIGHT = 220;
 
 const count = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(v >= 10_000 ? 0 : 1)}k` : String(v));
 
 export function OpenInterestChart({ chain, spot }: { chain: ExpiryChain; spot: number | null }) {
+  const maxPain = chain.positioning?.max_pain ?? null;
   const [ref, W] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
   const points = [...chain.open_interest].sort((a, b) => a.strike - b.strike);
@@ -52,8 +53,16 @@ export function OpenInterestChart({ chain, spot }: { chain: ExpiryChain; spot: n
         {spot !== null && spot >= low && spot <= high && (
           <g data-testid="options-oi-price">
             <line x1={x(spot)} x2={x(spot)} y1={PAD.top} y2={HEIGHT - PAD.bottom} stroke={COLOR.axis} strokeDasharray="4 3" />
-            <AxisText x={x(spot) + 4} y={PAD.top + 10} anchor="start">
+            <AxisText {...markerText(x(spot), W)} y={PAD.top + 10}>
               {`price ${money(spot)}`}
+            </AxisText>
+          </g>
+        )}
+        {maxPain !== null && maxPain >= low && maxPain <= high && (
+          <g data-testid="options-oi-max-pain">
+            <line x1={x(maxPain)} x2={x(maxPain)} y1={PAD.top} y2={HEIGHT - PAD.bottom} stroke={COLOR.neutral} strokeDasharray="1 3" />
+            <AxisText {...markerText(x(maxPain), W)} y={PAD.top + 22}>
+              {`max pain ${money(maxPain)}`}
             </AxisText>
           </g>
         )}

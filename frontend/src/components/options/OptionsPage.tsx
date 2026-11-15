@@ -10,11 +10,12 @@ import { Link, useParams } from "react-router-dom";
 
 import { fetchOptionsReport } from "../../lib/options-api";
 import type { ExpirySummary, OptionsReport } from "../../lib/options-schemas";
-import { GLOSSARY, coneSentence, daysLabel, termSentence } from "../../lib/options-text";
+import { GLOSSARY, acrossSentence, coneSentence, daysLabel, termSentence } from "../../lib/options-text";
 import { ROUTES } from "../../lib/routes";
 import { ErrorBanner } from "../ErrorBanner";
 import { InfoTip, money, pct, shortDate } from "./chart-kit";
 import { drawsCone, drawsEarnings, drawsTerm } from "./draws";
+import { AcrossExpiries, drawsAcross } from "./AcrossExpiries";
 import { EarningsMoves } from "./EarningsMoves";
 import { ExpectedMoveCone } from "./ExpectedMoveCone";
 import { ExpirySection } from "./ExpirySection";
@@ -221,6 +222,16 @@ export default function OptionsPage() {
           {report.earnings && drawsEarnings(report.earnings) && (
             <Panel title="Earnings" info={GLOSSARY.earnings}>
               <EarningsMoves earnings={report.earnings} />
+            </Panel>
+          )}
+          {drawsAcross(report.expiries) && (
+            <Panel
+              title="Across expiries"
+              testId="options-across-panel"
+              info={GLOSSARY.acrossExpiries}
+              summary={acrossSentence(report.expiries)}
+            >
+              <AcrossExpiries expiries={report.expiries} price={report.spot} />
             </Panel>
           )}
           {report.chain && (

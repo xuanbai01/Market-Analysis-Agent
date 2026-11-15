@@ -41,7 +41,7 @@ CI runs lint, typecheck, test and build on every PR.
 
 ## Bundle budget
 
-The main chunk must stay under **100 KB gzipped**; it is 90.23 KB (2026-11-15). Every route except `/` and `/login` is lazy-loaded into its own chunk: dashboard 26.8 KB, demo shell + index 1.8 KB, compare 6.6 KB, lens 4.6 KB (+ 0.7 KB index), options 15.8 KB (+ 0.6 KB `CitedPoints`, shared with lens), search modal 1.3 KB. There is no charting library; charts are hand-rolled SVG. These sizes are kept only here. Check them with `npm run build` before adding a dependency.
+The main chunk must stay under **100 KB gzipped**; it is 90.23 KB (2026-11-15). Every route except `/` and `/login` is lazy-loaded into its own chunk: dashboard 26.8 KB, demo shell + index 1.8 KB, compare 6.6 KB, lens 4.6 KB (+ 0.7 KB index), options 18.9 KB (+ 0.6 KB `CitedPoints`, shared with lens), search modal 1.3 KB. There is no charting library; charts are hand-rolled SVG. These sizes are kept only here. Check them with `npm run build` before adding a dependency.
 
 ## Layout
 

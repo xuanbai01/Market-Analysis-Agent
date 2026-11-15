@@ -92,7 +92,7 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 
 - [x] ~~**PR 1: the official close as the spot**~~ *(#120, closed)*: Yahoo's daily history close equals its price (NVDA Nov 13: both $162.85; another vendor shows $162.92), so there is nothing to switch to.
 - [ ] **PR 2: clarity pass (frontend)** *(branch `feature/options-clarity`)*: each panel's takeaway sentence, stats and ⓘ; the expiry picker's days and weekly/monthly (`expiryKind`); the price labelled on the open interest chart; the AI read showing each figure once (chips folded behind "Sources").
-- [ ] **PR 3: positioning (`options_positioning.py`):**
+- [ ] **PR 3: positioning (`options_positioning.py`)** *(branch `feature/options-positioning`)*:
   - per expiry: call/put totals, the top 10 open interest contracts, max pain, GEX and DEX by strike, net GEX/DEX, the call and put walls, the gamma flip (`options_math.gamma76`/`delta76`);
   - max pain and net GEX for every expiry the report reads;
   - charts and an across-expiries table.

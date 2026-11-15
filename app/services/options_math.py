@@ -100,6 +100,17 @@ def implied_vol(
     return vol
 
 
+def delta76(forward: float, strike: float, years: float, vol: float) -> float:
+    """A call's forward delta, N(d1); a put's is this minus 1."""
+    return norm_cdf(_d1(forward, strike, years, vol))
+
+
+def gamma76(forward: float, strike: float, years: float, vol: float) -> float:
+    """The forward gamma, φ(d1) / (F·σ·√T): how fast ``delta76`` moves with
+    the forward. The same for a call and a put at one strike."""
+    return norm_pdf(_d1(forward, strike, years, vol)) / (forward * vol * math.sqrt(years))
+
+
 def interpolate(x: float, xs: Sequence[float], ys: Sequence[float]) -> float | None:
     """Linear interpolation on ascending ``xs``; None outside them."""
     if not xs or x < xs[0] or x > xs[-1]:

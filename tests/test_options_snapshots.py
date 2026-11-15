@@ -16,6 +16,8 @@ from app.services import options_snapshots as snaps
 
 SATURDAY = datetime(2026, 11, 14, 17, tzinfo=UTC)  # after Friday 13 Nov's session
 FRIDAY = date(2026, 11, 13)
+FIRST_RUN = datetime(2026, 11, 13, 22, 17, tzinfo=UTC)  # the cron's first run, 1 h 17 min after the close
+NIGHT_RUN = datetime(2026, 11, 14, 0, 47, tzinfo=UTC)  # its retry, 3 h 47 min after
 
 
 class _Session:
@@ -121,9 +123,12 @@ class _World:
             outcome = outcome.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
+        row = {"symbol": symbol, "trade_date": FRIDAY, "call_open_interest": 10, "put_open_interest": 9, "expiries": 24, "listed": 24}
+        if outcome == "partial":
+            return "partial", {**row, "expiries": 23}
         if outcome != "ok":
             return outcome, None
-        return "ok", {"symbol": symbol, "trade_date": FRIDAY, "call_open_interest": 10, "put_open_interest": 9}
+        return "ok", row
 
 
 class YFRateLimitError(Exception):
@@ -484,20 +489,40 @@ def test_chain_totals_of_a_ticker_without_options(monkeypatch: pytest.MonkeyPatc
     assert snaps.chain_totals_one("BRK-A", FRIDAY, mc.session_close(FRIDAY)) == ("no_options", None)
 
 
-async def test_a_partial_chain_waits_for_the_retry_instead_of_being_stored(full_chain: _World) -> None:
-    """#123 review: a row is never updated, so a chain read with an expiry
-    missing would stand short forever. It's left for the retry run."""
+async def test_a_short_read_waits_for_the_night_run(full_chain: _World) -> None:
+    """#123 review: a row is never updated, so the first run leaves a read
+    with an expiry missing to the night's run rather than store it short."""
     full_chain.totals_outcomes["SPY"] = "partial"
-    run = await _run(full_chain)
+    run = await _run(full_chain, FIRST_RUN)
     assert run.totals_written == ["NVDA"]
     assert run.totals_deferred == ["SPY"]
     assert [r["symbol"] for r in full_chain.totals_inserted] == ["NVDA"]
 
 
-async def test_a_partial_read_stays_deferred_when_the_throttle_stops_the_rest(full_chain: _World) -> None:
+async def test_the_night_run_keeps_a_short_read_with_its_count(full_chain: _World) -> None:
+    """#124 review: a ticker Yahoo always reads short would otherwise never
+    get a row. The row says how many expiries were read, and the page says so."""
+    full_chain.totals_outcomes["SPY"] = "partial"
+    run = await _run(full_chain, NIGHT_RUN)
+    assert run.totals_written == ["SPY", "NVDA"] and run.totals_deferred == []
+    spy = next(r for r in full_chain.totals_inserted if r["symbol"] == "SPY")
+    assert (spy["expiries"], spy["listed"]) == (23, 24)
+
+
+async def test_a_chain_listed_but_not_read_waits_then_is_named(full_chain: _World) -> None:
+    full_chain.totals_outcomes["SPY"] = "unread"
+    first = await _run(full_chain, FIRST_RUN)
+    assert first.totals_deferred == ["SPY"] and first.failed == []
+    full_chain.totals_outcomes["SPY"] = "unread"
+    night = await _run(full_chain, NIGHT_RUN)
+    assert [(f.symbol, f.reason) for f in night.failed] == [("SPY", "totals: unread")]
+    assert all(r["symbol"] != "SPY" for r in full_chain.totals_inserted)
+
+
+async def test_a_short_read_stays_deferred_when_the_throttle_stops_the_rest(full_chain: _World) -> None:
     full_chain.totals_outcomes["SPY"] = "partial"
     full_chain.totals_outcomes["NVDA"] = [YFRateLimitError(), YFRateLimitError()]
-    run = await _run(full_chain)
+    run = await _run(full_chain, FIRST_RUN)
     assert run.totals_deferred == ["SPY", "NVDA"]
 
 
@@ -507,12 +532,38 @@ async def test_a_full_chain_ticker_without_options_is_named(full_chain: _World) 
     assert [(f.symbol, f.reason) for f in run.failed] == [("NVDA", "totals: no_options")]
 
 
-def test_a_chain_read_missing_an_expiry_is_partial(monkeypatch: pytest.MonkeyPatch) -> None:
+def _fetched(expiries: dict[date, tuple[int, int]], listed: tuple[date, ...]) -> Any:
+    """A chain read: each expiry's (call rows, put rows), one contract of open interest 10 a row."""
     from app.services.options_chain import ChainFetch, ExpiryQuotes, Quote
 
-    listed = (date(2026, 11, 16), date(2026, 11, 20))
-    one = ExpiryQuotes(listed[0], (Quote(100.0, 1.0, 1.1, 1, 10, True),), (Quote(100.0, 1.0, 1.1, 1, 5, True),))
-    fetched = ChainFetch(symbol="SPY", spot=100.0, market_time=0, dividend_yield=0.0, expiries=listed, chains={listed[0]: one}, closes=())
-    monkeypatch.setattr(snaps.options_chain, "fetch_chain", lambda *_a, **_k: fetched)
-    assert snaps.chain_totals_one("SPY", FRIDAY, mc.session_close(FRIDAY)) == ("partial", None)
+    def side(n: int) -> tuple[Quote, ...]:
+        return tuple(Quote(100.0 + k, 1.0, 1.1, 1, 10, True) for k in range(n))
 
+    chains = {d: ExpiryQuotes(d, side(c), side(p)) for d, (c, p) in expiries.items()}
+    return ChainFetch(symbol="SPY", spot=100.0, market_time=0, dividend_yield=0.0, expiries=listed, chains=chains, closes=())
+
+
+LISTED = (date(2026, 11, 16), date(2026, 11, 20))
+
+
+@pytest.mark.parametrize(
+    ("read", "why"),
+    [
+        ({LISTED[0]: (1, 1)}, "an expiry Yahoo dropped"),
+        ({LISTED[0]: (1, 1), LISTED[1]: (0, 1)}, "an expiry with its calls empty"),
+    ],
+)
+def test_a_chain_read_short_an_expiry_is_partial_and_counts_only_whole_ones(
+    monkeypatch: pytest.MonkeyPatch, read: dict[date, tuple[int, int]], why: str
+) -> None:
+    monkeypatch.setattr(snaps.options_chain, "fetch_chain", lambda *_a, **_k: _fetched(read, LISTED))
+    status, row = snaps.chain_totals_one("SPY", FRIDAY, mc.session_close(FRIDAY))
+    assert status == "partial", why
+    assert row is not None
+    assert (row["expiries"], row["listed"], row["call_open_interest"], row["put_open_interest"]) == (1, 2, 10, 10)
+
+
+def test_a_chain_listed_with_nothing_read_is_unread(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Not "no options": Yahoo listed expiries, so it's a failed read the night run tries again."""
+    monkeypatch.setattr(snaps.options_chain, "fetch_chain", lambda *_a, **_k: _fetched({}, LISTED))
+    assert snaps.chain_totals_one("SPY", FRIDAY, mc.session_close(FRIDAY)) == ("unread", None)

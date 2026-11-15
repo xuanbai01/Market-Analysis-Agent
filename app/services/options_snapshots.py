@@ -50,6 +50,14 @@ TRACKED_DAYS = 60
 TIME_BUDGET_SECONDS = 300
 RATE_LIMIT_PAUSE_SECONDS = 30
 TOTALS_HISTORY = "5d"  # fetch_chain reads daily closes too; the totals need none
+# A stored totals row is never updated, so the cron's first run (22:17 UTC,
+# 1-2 h after the close) leaves a short read to its night run (00:47 UTC,
+# 3 h 47 min or more after), which stores whatever it reads with the count
+# of expiries read: a ticker Yahoo always reads short still gets its row,
+# and the page says how many expiries it covers. (On a 1 pm half day the
+# first run is already past this, so there's no second try.)
+KEEP_SHORT_READ_AFTER = timedelta(hours=3, minutes=30)
+_SHORT_READS = frozenset({"partial", "unread"})
 _SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 _RATE_LIMIT_ERRORS = frozenset({"YFRateLimitError"})
 
@@ -142,9 +150,9 @@ def snapshot_one(
 
 def chain_totals_one(symbol: str, session_date: date, quoted_at: datetime) -> tuple[str, dict[str, Any] | None]:
     """(status, row) of ``symbol``'s open interest and volume summed over
-    every listed expiry, adjusted contracts included. "partial" when Yahoo
-    returned an expiry with a side missing: a stored row is never updated,
-    so a short read is left for the retry run rather than kept. Blocking."""
+    every listed expiry, adjusted contracts included. An expiry counts as
+    read only with both sides quoted: "partial" (with the row) when one
+    listed wasn't, "unread" (no row) when none was. Blocking."""
     cpu_started = time.thread_time()
     with log_external_call("yfinance.options", {"symbol": symbol, "purpose": "chain_totals"}) as call:
         fetched = options_chain.fetch_chain(
@@ -155,12 +163,12 @@ def chain_totals_one(symbol: str, session_date: date, quoted_at: datetime) -> tu
             "listed": len(fetched.expiries) if fetched else 0,
             "cpu_ms": round((time.thread_time() - cpu_started) * 1000, 1),
         })
-    if fetched is None or not fetched.chains:
+    if fetched is None or not fetched.expiries:
         return "no_options", None
-    if len(fetched.chains) < len(fetched.expiries):
-        return "partial", None
-    chains = fetched.chains.values()
-    return "ok", {
+    chains = [c for c in fetched.chains.values() if c.calls and c.puts]
+    if not chains:
+        return "unread", None
+    return ("partial" if len(chains) < len(fetched.expiries) else "ok"), {
         "symbol": symbol,
         "trade_date": session_date,
         "as_of": quoted_at,
@@ -168,7 +176,7 @@ def chain_totals_one(symbol: str, session_date: date, quoted_at: datetime) -> tu
         "put_open_interest": sum(q.open_interest for c in chains for q in c.puts),
         "call_volume": sum(q.volume for c in chains for q in c.calls),
         "put_volume": sum(q.volume for c in chains for q in c.puts),
-        "expiries": len(fetched.chains),
+        "expiries": len(chains),
         "listed": len(fetched.expiries),
     }
 
@@ -259,7 +267,8 @@ async def _run(session: AsyncSession, now: datetime) -> SnapshotRun:
         lists[status].append(symbol)
         i += 1
     if not lists["deferred"]:
-        await _run_totals(session, totals_pending, session_date, quoted_at, started, paused, lists, failed)
+        keep_short = now - quoted_at >= KEEP_SHORT_READ_AFTER
+        await _run_totals(session, totals_pending, session_date, quoted_at, keep_short, started, paused, lists, failed)
     else:
         lists["totals_deferred"] = totals_pending  # throttled or out of time already: the retry run reads them
     return finish("ok", session_date, symbols)
@@ -270,13 +279,15 @@ async def _run_totals(
     pending: list[str],
     session_date: date,
     quoted_at: datetime,
+    keep_short: bool,
     started: float,
     paused: bool,
     lists: dict[str, list[str]],
     failed: list[FailedTicker],
 ) -> None:
     """The whole-chain totals, after the snapshots, under the run's budget
-    and its one throttle pause (``paused``: already used by the snapshots)."""
+    and its one throttle pause (``paused``: already used by the snapshots).
+    A short read waits for the night run unless ``keep_short``."""
     i = 0
     while i < len(pending):
         symbol = pending[i]
@@ -285,8 +296,8 @@ async def _run_totals(
             break
         try:
             status, row = await _on_options_thread(chain_totals_one, symbol, session_date, quoted_at)
-            if status == "partial":
-                lists["totals_deferred"].append(symbol)  # the retry run reads it again
+            if status in _SHORT_READS and not keep_short:
+                lists["totals_deferred"].append(symbol)  # the night run reads it again
             elif row is None:
                 failed.append(FailedTicker(symbol=symbol, reason=f"totals: {status}"))
             elif await _insert(session, row, store.insert_totals):

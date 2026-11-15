@@ -7,6 +7,7 @@ reaches the response or a log line.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date
 from typing import Any
@@ -171,6 +172,121 @@ async def test_a_zero_or_unreadable_row_is_left_out(account: _Tastytrade) -> Non
     assert [u.symbol for u in result.unanalysed] == ["SPY   2612", "SPY   261218C00610000"]
 
 
+@pytest.mark.parametrize("multiplier", ["NaN", "Infinity", "-100", "0", "12.5", "lots"])
+async def test_a_multiplier_that_is_not_a_whole_count_is_not_analysed(account: _Tastytrade, multiplier: str) -> None:
+    """One bad row must not take the page down (positions PR 2's security review)."""
+    account.positions[ACCOUNT] = [
+        _position("SPY   261218C00600000", "Equity Option", "1", "Long", multiplier=multiplier),
+        _position("SPY   261218C00610000", "Equity Option", "1", "Long"),
+    ]
+    result = await op.get_positions()
+    assert [leg.strike for leg in result.groups[0].legs] == [610.0]
+    assert [u.symbol for u in result.unanalysed] == ["SPY   261218C00600000"]
+
+
+async def test_a_figure_that_is_not_finite_is_no_figure(account: _Tastytrade) -> None:
+    """NaN or infinity would make the route a 500 (JSON can't carry them),
+    and the copy would stay cached (positions PR 2's security review)."""
+    account.positions[ACCOUNT] = [
+        _position("SPY   261218C00600000", "Equity Option", "1", "Long", average="NaN"),
+        _position("SPY   261218C00610000", "Equity Option", "Infinity", "Long"),
+    ]
+    account.quotes = {"SPY   261218C00600000": _quote("SPY   261218C00600000", 3.0, volatility="NaN", delta="-Infinity")}
+    result = await op.get_positions()
+    (leg,) = result.groups[0].legs
+    assert leg.average_open is None and leg.quote is not None and (leg.quote.iv, leg.quote.delta) == (None, None)
+    assert [u.symbol for u in result.unanalysed] == ["SPY   261218C00610000"]
+    result.model_dump_json()  # serialisable
+
+
+@pytest.mark.parametrize("direction", [None, "", "Sideways"])
+async def test_a_position_that_does_not_say_long_or_short_is_not_guessed(account: _Tastytrade, direction: str | None) -> None:
+    account.positions[ACCOUNT] = [_position("SPY   261218C00600000", "Equity Option", "1", direction)]  # type: ignore[arg-type]
+    result = await op.get_positions()
+    assert result.groups == []
+    assert [(u.symbol, u.quantity) for u in result.unanalysed] == [("SPY   261218C00600000", None)]
+
+
+@pytest.mark.parametrize("ticker", ["SPY,QQQ", "A" * 30, "spy", "../x", ""])
+async def test_a_stock_or_underlying_that_is_not_a_ticker_is_not_analysed(account: _Tastytrade, ticker: str) -> None:
+    account.positions[ACCOUNT] = [
+        _position(ticker, "Equity", "10", "Long"),
+        _position("SPY   261218C00600000", "Equity Option", "1", "Long", underlying=ticker),
+    ]
+    result = await op.get_positions()
+    assert result.groups == []
+    assert len(result.unanalysed) == 2
+    assert all(ticker not in (p or {}).get("equity", "") for p in account.quote_calls())
+
+
+async def test_a_huge_account_is_cut_off_and_says_so(account: _Tastytrade) -> None:
+    account.positions[ACCOUNT] = [
+        _position(f"SPY   2612{d:02d}C00{500 + s:03d}000", "Equity Option", "1", "Long")
+        for d in range(1, 29) for s in range(30)
+    ]
+    result = await op.get_positions()
+    assert result.truncated is True
+    assert sum(len(g.legs) for g in result.groups) + len(result.unanalysed) == op.MAX_POSITIONS
+
+
+async def test_an_account_tastytrade_cannot_find_is_skipped(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    account.accounts = [ACCOUNT, OTHER]
+    account.positions = {OTHER: [_position("SPY   261218C00600000", "Equity Option", "1", "Long", account=OTHER)]}
+    real = account.get
+
+    async def gone(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        if path == f"/accounts/{ACCOUNT}/positions":
+            raise tt.TastytradeNotFound("/accounts/***/positions")
+        return await real(path, params, op=op)
+
+    monkeypatch.setattr(op.tt, "get", gone)
+    result = await op.get_positions()
+    assert result.accounts == 2 and [leg.account for leg in result.groups[0].legs] == [2]
+
+
+async def test_a_build_that_runs_too_long_is_a_failure(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def slow(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        await asyncio.sleep(1)
+        return {}
+
+    monkeypatch.setattr(op.tt, "get", slow)
+    monkeypatch.setattr(op, "BUILD_SECONDS", 0.01)
+    with pytest.raises(op.PositionsUnavailable, match="too long"):
+        await op.get_positions()
+
+
+async def test_no_account_is_not_remembered_for_an_hour(account: _Tastytrade) -> None:
+    account.accounts = []
+    assert (await op.get_positions()).accounts == 0
+    account.accounts = [ACCOUNT]
+    account.clock[0] += op.CACHE_SECONDS + 1  # type: ignore[attr-defined]
+    assert (await op.get_positions()).accounts == 1
+
+
+@pytest.mark.parametrize("payload", [[], "x", {"data": []}, {"data": {"items": {"a": 1}}}, {"data": {"items": ["x", 1]}}])
+async def test_an_answer_of_the_wrong_shape_reads_as_nothing(
+    account: _Tastytrade, monkeypatch: pytest.MonkeyPatch, payload: object
+) -> None:
+    async def odd(path: str, params: dict[str, Any] | None = None, *, op: str) -> object:
+        return payload
+
+    monkeypatch.setattr(op.tt, "get", odd)
+    result = await op.get_positions()
+    assert (result.accounts, result.groups, result.unanalysed) == (0, [], [])
+
+
+async def test_an_account_entry_of_the_wrong_shape_is_skipped(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = account.get
+
+    async def odd(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        if path == "/customers/me/accounts":
+            return {"data": {"items": [{"account": "flat"}, {"account": {"account-number": ACCOUNT}}]}}
+        return await real(path, params, op=op)
+
+    monkeypatch.setattr(op.tt, "get", odd)
+    assert (await op.get_positions()).accounts == 1
+
+
 async def test_quotes_are_asked_for_at_most_a_hundred_at_a_time(account: _Tastytrade) -> None:
     account.positions[ACCOUNT] = [
         _position(f"SPY   261218C00{500 + i:03d}000", "Equity Option", "1", "Long") for i in range(150)
@@ -229,6 +345,22 @@ async def test_a_failure_serves_the_last_copy_marked_stale(account: _Tastytrade)
     assert again.stale is True and again.as_of == first.as_of and again.groups == first.groups
 
 
+async def test_a_stale_copy_is_dropped_after_a_while(account: _Tastytrade) -> None:
+    """tastytrade's figures are cached briefly (ADR 0009): not served for
+    hours after the grant is revoked."""
+    account.positions[ACCOUNT] = [_position("SPY   261218C00600000", "Equity Option", "1", "Long")]
+    await op.get_positions()
+    account.fail = tt.TastytradeUnavailable("the sign-in was refused")
+    account.clock[0] += op.STALE_MAX_SECONDS - 1  # type: ignore[attr-defined]
+    assert (await op.get_positions()).stale is True
+    account.clock[0] += 2  # type: ignore[attr-defined]
+    with pytest.raises(op.PositionsUnavailable, match="sign-in was refused"):
+        await op.get_positions()
+    account.fail = None
+    account.clock[0] += 1  # type: ignore[attr-defined]
+    assert (await op.get_positions()).stale is False  # and nothing old comes back
+
+
 async def test_a_failure_with_nothing_cached_says_why(account: _Tastytrade) -> None:
     account.fail = tt.TastytradeUnavailable("the sign-in was refused")
     with pytest.raises(op.PositionsUnavailable, match="sign-in was refused"):
@@ -262,6 +394,20 @@ async def _get(headers: dict[str, str]) -> Any:
 async def test_the_route_needs_the_owner_key(account: _Tastytrade, owner: dict[str, str]) -> None:
     assert (await _get({})).status_code == 403
     assert account.calls == []
+
+
+async def test_no_owner_response_is_kept_by_a_browser_errors_included(
+    account: _Tastytrade, owner: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings_module.settings, "OWNER_KEY_FAILURES_PER_HOUR", 1)
+    assert (await _get({deps.OWNER_HEADER: "wrong"})).headers["Cache-Control"] == "no-store"  # 403
+    locked = await _get(owner)
+    assert locked.status_code == 429 and locked.headers["Cache-Control"] == "no-store"
+    deps.reset_owner_failures_for_tests()
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        status = await client.get("/v1/owner/status", headers=owner)
+    assert status.status_code == 200 and status.headers["Cache-Control"] == "no-store"
 
 
 async def test_the_route_serves_them_never_cached_by_a_browser(account: _Tastytrade, owner: dict[str, str]) -> None:

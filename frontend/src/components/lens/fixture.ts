@@ -3,22 +3,37 @@ import type { LensReport } from "../../lib/schemas";
 
 const SRC = { tool: "computed.analytics", fetched_at: "2026-11-09T00:00:00+00:00" };
 
-function point(year: number, capex: number | null, revenue: number | null, ocf: number | null) {
+function point(year: number, value: number | null, revenue: number | null, ocf: number | null) {
   return {
     year,
-    capex,
+    value,
     revenue,
     ocf,
-    capex_intensity: capex !== null && revenue ? capex / revenue : null,
-    capex_to_ocf: capex !== null && ocf && ocf > 0 ? capex / ocf : null,
+    intensity: value !== null && revenue ? value / revenue : null,
+    to_ocf: value !== null && ocf && ocf > 0 ? value / ocf : null,
   };
 }
+
+export const CAPEX_METRIC = {
+  key: "capex",
+  label: "Capex",
+  short: "capex",
+  definition: "Capex is purchases of property and equipment.",
+};
+
+export const SBC_METRIC = {
+  key: "sbc",
+  label: "SBC",
+  short: "SBC",
+  definition: "SBC is stock-based compensation.",
+};
 
 export const LENS: LensReport = {
   id: "megacap-capex",
   title: "Megacap tech capex",
   description: "How much of their revenue they reinvest.",
   tickers: ["AAA", "BBB", "CCC"],
+  metric: CAPEX_METRIC,
   method: "SEC XBRL annual filings.",
   years: [2023, 2024, 2025],
   companies: [
@@ -39,9 +54,9 @@ export const LENS: LensReport = {
     },
   ],
   stats: [
-    { year: 2023, companies: 2, median: 0.11, p25: 0.065, p75: 0.155, low: 0.02, low_ticker: "BBB", high: 0.2, high_ticker: "AAA", total_capex: 22e9 },
-    { year: 2024, companies: 3, median: 0.1, p25: 0.06, p75: 0.175, low: 0.02, low_ticker: "BBB", high: 0.25, high_ticker: "AAA", total_capex: 37e9 },
-    { year: 2025, companies: 3, median: 0.1, p25: 0.065, p75: 0.175, low: 0.03, low_ticker: "BBB", high: 0.25, high_ticker: "AAA", total_capex: 53e9 },
+    { year: 2023, companies: 2, median: 0.11, p25: 0.065, p75: 0.155, low: 0.02, low_ticker: "BBB", high: 0.2, high_ticker: "AAA", total: 22e9 },
+    { year: 2024, companies: 3, median: 0.1, p25: 0.06, p75: 0.175, low: 0.02, low_ticker: "BBB", high: 0.25, high_ticker: "AAA", total: 37e9 },
+    { year: 2025, companies: 3, median: 0.1, p25: 0.065, p75: 0.175, low: 0.03, low_ticker: "BBB", high: 0.25, high_ticker: "AAA", total: 53e9 },
   ],
   facts: [
     { description: "Highest capex intensity, CY2025: AAA", value: 0.25, unit: "fraction", source: SRC, history: [] },
@@ -52,4 +67,5 @@ export const LENS: LensReport = {
     points: [{ title: null, text: "AAA spends 25.00% of revenue.", claim_refs: [{ section: "Lens", index: 0 }] }],
   },
   generated_at: "2026-11-09T00:00:00+00:00",
+  excluded: [],
 };

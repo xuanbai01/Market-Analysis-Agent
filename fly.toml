@@ -71,7 +71,11 @@ kill_timeout = '10s'            # give in-flight requests time to drain
     protocol = 'http'
 
 # 512 MB is comfortable for FastAPI + pandas/numpy (yfinance pulls them in).
-# Shared CPU is fine for this workload — the hot path is external I/O.
+# A shared CPU gets 1/16 of a core (5 ms per 80 ms) once its burst balance
+# is spent; a machine boots with 5 s of it. A report's CPU work therefore
+# takes ~16x its desktop time here: RIVN's took 4-5.5 minutes until its
+# risk diff was cut from 20 CPU-seconds to 0.7 (2026-11-14). Keep a build's
+# CPU work small rather than buying a performance CPU.
 # Monthly cost at always-on: ~$1.94. With auto_stop_machines it'll be
 # pennies until real traffic.
 [[vm]]

@@ -87,6 +87,7 @@ from difflib import SequenceMatcher
 from typing import Any, TypeVar
 
 from lxml import etree
+from rapidfuzz.distance import LCSseq
 
 from app.core.observability import log_external_call
 from app.schemas.ten_k import Extracted10KSection, Risk10KDiff, RiskCategory
@@ -421,21 +422,33 @@ def _paragraph_diff(
 
       1. A paragraph present verbatim on the other side is kept with no
          fuzzy comparison.
-      2. Each candidate gets one reusable matcher with the candidate as
-         ``seq2`` (difflib indexes ``seq2`` up front; ``set_seq1`` swaps
-         the paragraph in cheaply). Argument order — and so autojunk,
-         which only applies to ``seq2`` — matches the naive scan.
-      3. ``real_quick_ratio()`` and ``quick_ratio()`` are difflib's
-         documented upper bounds on ``ratio()``, so a candidate that fails
-         either can't reach the threshold and is skipped.
+      2. A candidate is compared with ``ratio()`` only if an upper bound
+         on it reaches the threshold. The characters ``ratio()`` counts
+         are its matching blocks, which run in order through both texts:
+         a common subsequence, so no longer than the longest one (LCS).
+         ``2·LCS / (len a + len b)``, in difflib's own arithmetic, can't
+         be below ``ratio()``. RapidFuzz computes the LCS in C++, ~10 µs
+         a pair against ~400 µs for ``ratio()``, and the bound is tight:
+         any two English paragraphs share most of their letters, so
+         difflib's ``quick_ratio()`` passed 92% of RIVN's pairs, while
+         the LCS bound passes 1%. Length alone (what
+         ``real_quick_ratio()`` checks) rules a candidate out before that.
+      3. Each candidate that gets that far gets one reusable matcher with
+         the candidate as ``seq2`` (difflib indexes ``seq2`` up front;
+         ``set_seq1`` swaps the paragraph in cheaply). Argument order —
+         and so autojunk, which only applies to ``seq2`` — matches the
+         naive scan.
       4. Only "is the best ratio ≥ threshold" matters, so the scan stops
          at the first candidate that reaches it — and starts at the
          paragraph's proportional position, fanning outward, because
          risk factors mostly keep their order year to year. (Scan order
          can't change an any-match answer.)
 
-    On real filings this returns byte-identical results to the naive
-    scan; see the equivalence tests in ``tests/test_ten_k.py``.
+    RIVN's diff took 20 CPU-seconds before step 2 and takes 0.7 now. A
+    Fly shared CPU, once its burst allowance is spent, runs at 1/16 of a
+    core: at that quota RIVN's tool fan-out took 347 s before and 43 s
+    after. On 12 real filings this returns byte-identical results to the
+    naive scan; see also the equivalence tests in ``tests/test_ten_k.py``.
     """
     added = _unmatched(current, prior, similarity_threshold)
     removed = _unmatched(prior, current, similarity_threshold)
@@ -457,6 +470,13 @@ def _outward_from(start: int, n: int) -> Iterator[int]:
             yield lo
 
 
+def _ratio_of(matches: int, length: int) -> float:
+    """difflib's own ratio arithmetic (``difflib._calculate_ratio``). For a
+    fixed length it never decreases as ``matches`` grows, so a bound on the
+    matched characters gives a bound on the ratio with no rounding gap."""
+    return 2.0 * matches / length if length else 1.0
+
+
 def _unmatched(
     paragraphs: list[str], candidates: list[str], threshold: float
 ) -> list[str]:
@@ -465,23 +485,27 @@ def _unmatched(
     if not candidates:
         return list(paragraphs)
     verbatim = set(candidates)
-    matchers: list[SequenceMatcher] | None = None  # built on first fuzzy need
+    matchers: dict[int, SequenceMatcher] = {}  # built on first need
     scale = (len(candidates) - 1) / max(len(paragraphs) - 1, 1)
 
+    def could_match(text: str, candidate: str) -> bool:
+        length = len(text) + len(candidate)
+        return (
+            _ratio_of(min(len(text), len(candidate)), length) >= threshold
+            and _ratio_of(LCSseq.similarity(text, candidate), length) >= threshold
+        )
+
     def has_match(index: int, text: str) -> bool:
-        nonlocal matchers
         if text in verbatim:
             return True
-        if matchers is None:
-            matchers = [SequenceMatcher(None, "", c) for c in candidates]
-        for j in _outward_from(round(index * scale), len(matchers)):
-            m = matchers[j]
+        for j in _outward_from(round(index * scale), len(candidates)):
+            if not could_match(text, candidates[j]):
+                continue
+            m = matchers.get(j)
+            if m is None:
+                m = matchers[j] = SequenceMatcher(None, "", candidates[j])
             m.set_seq1(text)
-            if (
-                m.real_quick_ratio() >= threshold
-                and m.quick_ratio() >= threshold
-                and m.ratio() >= threshold
-            ):
+            if m.ratio() >= threshold:
                 return True
         return False
 
@@ -687,7 +711,8 @@ async def extract_10k_risks_diff(
             _section_paragraphs(prior_flat.paragraphs, section_id=section_id)
             or []
         )
-        # CPU-bound: RIVN's ~550 paragraphs a side take ~15 s.
+        # CPU-bound: RIVN's ~550 paragraphs a side take ~0.7 CPU-seconds,
+        # ~16 s on a Fly shared CPU throttled to 1/16 of a core.
         added, removed, kept_count = await _on_ten_k_thread(
             _paragraph_diff, current_paras, prior_paras
         )

@@ -318,22 +318,57 @@ export type ProblemDetail = z.infer<typeof ProblemDetailSchema>;
 
 // ── Cross-company lens (ADR 0007 layer 3) — mirrors app/schemas/lens.py ──
 
+/** What a lens measures. Lenses served before 2026-11-14 had no metric:
+ *  they were all capex. */
+export const LensMetricSchema = z.object({
+  key: z.string().min(1),
+  label: z.string().min(1),
+  short: z.string().min(1),
+  definition: z.string().default(""),
+});
+export type LensMetric = z.infer<typeof LensMetricSchema>;
+
+const CAPEX_METRIC: LensMetric = {
+  key: "capex",
+  label: "Capex",
+  short: "capex",
+  definition: "Capex is purchases of property and equipment.",
+};
+
 export const LensSummarySchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   description: z.string(),
   tickers: z.array(z.string()).default([]),
+  metric: LensMetricSchema.default(CAPEX_METRIC),
 });
 export type LensSummary = z.infer<typeof LensSummarySchema>;
 
-export const LensPointSchema = z.object({
-  year: z.number().int(),
-  capex: z.number().nullable().default(null),
-  revenue: z.number().nullable().default(null),
-  ocf: z.number().nullable().default(null),
-  capex_intensity: z.number().nullable().default(null),
-  capex_to_ocf: z.number().nullable().default(null),
-});
+/** Renamed keys (old → new) applied when only the old one is present:
+ *  the API and the dashboard deploy separately, so for a minute the API
+ *  can still answer in the capex-only shape. */
+function renameKeys(renames: Record<string, string>) {
+  return (raw: unknown) => {
+    if (raw === null || typeof raw !== "object") return raw;
+    const out: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
+    for (const [from, to] of Object.entries(renames)) {
+      if (out[to] === undefined && out[from] !== undefined) out[to] = out[from];
+    }
+    return out;
+  };
+}
+
+export const LensPointSchema = z.preprocess(
+  renameKeys({ capex: "value", capex_intensity: "intensity", capex_to_ocf: "to_ocf" }),
+  z.object({
+    year: z.number().int(),
+    value: z.number().nullable().default(null),
+    revenue: z.number().nullable().default(null),
+    ocf: z.number().nullable().default(null),
+    intensity: z.number().nullable().default(null),
+    to_ocf: z.number().nullable().default(null),
+  }),
+);
 export type LensPoint = z.infer<typeof LensPointSchema>;
 
 export const LensCompanySchema = z.object({
@@ -343,18 +378,21 @@ export const LensCompanySchema = z.object({
 });
 export type LensCompany = z.infer<typeof LensCompanySchema>;
 
-export const LensYearStatsSchema = z.object({
-  year: z.number().int(),
-  companies: z.number().int(),
-  median: z.number(),
-  p25: z.number(),
-  p75: z.number(),
-  low: z.number(),
-  low_ticker: z.string(),
-  high: z.number(),
-  high_ticker: z.string(),
-  total_capex: z.number(),
-});
+export const LensYearStatsSchema = z.preprocess(
+  renameKeys({ total_capex: "total" }),
+  z.object({
+    year: z.number().int(),
+    companies: z.number().int(),
+    median: z.number(),
+    p25: z.number(),
+    p75: z.number(),
+    low: z.number(),
+    low_ticker: z.string(),
+    high: z.number(),
+    high_ticker: z.string(),
+    total: z.number(),
+  }),
+);
 export type LensYearStats = z.infer<typeof LensYearStatsSchema>;
 
 export const LensNarrativeSchema = z.object({
@@ -371,6 +409,7 @@ export const LensReportSchema = LensSummarySchema.extend({
   facts: z.array(ClaimSchema).default([]),
   narrative: LensNarrativeSchema.nullable().default(null).catch(null),
   generated_at: z.string(),
+  excluded: z.array(z.string()).default([]),
 });
 export type LensReport = z.infer<typeof LensReportSchema>;
 

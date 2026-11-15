@@ -8,16 +8,26 @@ from pydantic import BaseModel, Field
 from app.schemas.research import Claim, ThesisDraftPoint, ThesisPoint
 
 
+class LensMetricInfo(BaseModel):
+    """What a lens measures: ``label`` starts a heading ("R&D"), ``short``
+    sits inside a sentence ("capex")."""
+
+    key: str
+    label: str
+    short: str
+    definition: str
+
+
 class LensPoint(BaseModel):
-    """One company-year. Ratios are None when an input is missing (or the
-    operating cash flow is not positive)."""
+    """One company-year of the lens's metric. Ratios are None when an
+    input is missing (or the operating cash flow is not positive)."""
 
     year: int
-    capex: float | None = None
+    value: float | None = Field(default=None, description="the metric, USD")
     revenue: float | None = None
     ocf: float | None = None
-    capex_intensity: float | None = Field(default=None, description="capex / revenue")
-    capex_to_ocf: float | None = Field(default=None, description="capex / operating cash flow")
+    intensity: float | None = Field(default=None, description="metric / revenue")
+    to_ocf: float | None = Field(default=None, description="metric / operating cash flow")
 
 
 class LensCompany(BaseModel):
@@ -27,8 +37,8 @@ class LensCompany(BaseModel):
 
 
 class LensYearStats(BaseModel):
-    """The distribution of capex intensity across the companies reporting
-    that year."""
+    """The distribution of the metric's intensity across the companies
+    reporting that year; ``total`` is the metric summed over them."""
 
     year: int
     companies: int
@@ -39,7 +49,7 @@ class LensYearStats(BaseModel):
     low_ticker: str
     high: float
     high_ticker: str
-    total_capex: float
+    total: float
 
 
 class LensNarrative(BaseModel):
@@ -55,6 +65,7 @@ class LensSummary(BaseModel):
     title: str
     description: str
     tickers: list[str]
+    metric: LensMetricInfo
 
 
 class LensReport(LensSummary):
@@ -65,6 +76,9 @@ class LensReport(LensSummary):
     facts: list[Claim]
     narrative: LensNarrative | None
     generated_at: datetime
+    excluded: list[str] = Field(
+        default_factory=list, description="tickers with no figure for the metric in their filings"
+    )
 
 
 class LensDraft(BaseModel):

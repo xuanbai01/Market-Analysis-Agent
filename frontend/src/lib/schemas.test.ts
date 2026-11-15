@@ -13,6 +13,7 @@ import {
   ClaimHistoryPointSchema,
   ClaimSchema,
   LayoutSignalsSchema,
+  LensReportSchema,
   ResearchReportSchema,
   ResearchReportSummariesSchema,
   ResearchReportSummarySchema,
@@ -428,5 +429,54 @@ describe("SourceSchema — links are web addresses or nothing (2026-11)", () => 
   it("leaves a missing or null link as it is", () => {
     expect(SourceSchema.parse(base).url).toBeUndefined();
     expect(SourceSchema.parse({ ...base, url: null }).url).toBeNull();
+  });
+});
+
+
+describe("LensReportSchema", () => {
+  const OLD_SHAPE = {
+    id: "megacap-capex",
+    title: "Megacap tech capex",
+    description: "d",
+    tickers: ["AAA"],
+    method: "m",
+    years: [2025],
+    companies: [
+      {
+        ticker: "AAA",
+        name: "Alpha",
+        points: [{ year: 2025, capex: 40e9, revenue: 160e9, ocf: 50e9, capex_intensity: 0.25, capex_to_ocf: 0.8 }],
+      },
+    ],
+    stats: [
+      { year: 2025, companies: 1, median: 0.25, p25: 0.25, p75: 0.25, low: 0.25, low_ticker: "AAA", high: 0.25, high_ticker: "AAA", total_capex: 40e9 },
+    ],
+    facts: [],
+    narrative: null,
+    generated_at: "2026-11-14T00:00:00+00:00",
+  };
+
+  it("reads a capex lens in the shape before lenses took a metric", () => {
+    // The API and the dashboard deploy separately; for a minute one is
+    // ahead of the other.
+    const parsed = LensReportSchema.parse(OLD_SHAPE);
+    expect(parsed.companies[0].points[0]).toMatchObject({ value: 40e9, intensity: 0.25, to_ocf: 0.8 });
+    expect(parsed.stats[0].total).toBe(40e9);
+    expect(parsed.metric).toMatchObject({ key: "capex", label: "Capex", short: "capex" });
+    expect(parsed.excluded).toEqual([]);
+  });
+
+  it("reads the metric-agnostic shape as is", () => {
+    const parsed = LensReportSchema.parse({
+      ...OLD_SHAPE,
+      metric: { key: "rnd", label: "R&D", short: "R&D", definition: "R&D expense." },
+      companies: [{ ticker: "AAA", name: "Alpha", points: [{ year: 2025, value: 20e9, revenue: 160e9, ocf: 50e9, intensity: 0.125, to_ocf: 0.4 }] }],
+      stats: [{ ...OLD_SHAPE.stats[0], total_capex: undefined, total: 20e9 }],
+      excluded: ["AMZN"],
+    });
+    expect(parsed.metric.label).toBe("R&D");
+    expect(parsed.companies[0].points[0].value).toBe(20e9);
+    expect(parsed.stats[0].total).toBe(20e9);
+    expect(parsed.excluded).toEqual(["AMZN"]);
   });
 });

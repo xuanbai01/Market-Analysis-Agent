@@ -44,6 +44,9 @@ CACHE_SECONDS = 15.0
 STALE_MAX_SECONDS = 900.0
 ACCOUNTS_SECONDS = 3600.0
 QUOTE_BATCH = 100
+# Symbols of a refused batch asked for again one at a time (a refusal is a
+# quick 4xx; more than this many, and the rest go without).
+RETRY_ALONE = 25
 # Bounds on one build, so a huge or slow answer can't hold every owner
 # request for minutes.
 MAX_ACCOUNTS = 10
@@ -174,7 +177,10 @@ def _read(item: dict[str, Any], account: int) -> _Leg | UnanalysedPosition | Non
     sign = _SIGNS.get(direction) if isinstance(direction, str) else None
     quantity = None if size is None or sign is None else sign * size
     other = UnanalysedPosition(account=account, instrument_type=kind or "Unknown", symbol=symbol, quantity=quantity)
-    multiplier = _count(_field(item, "multiplier"))
+    stated = _field(item, "multiplier")
+    # A share is one share; an option without a stated multiplier has an
+    # unknown deliverable and isn't modelled.
+    multiplier = 1 if kind == "Equity" and stated is None else _count(stated)
     if quantity is None or multiplier is None or kind not in ("Equity Option", "Equity"):
         return other
     average = _number(_field(item, "average-open-price"))
@@ -217,11 +223,26 @@ def _live_quote(item: dict[str, Any]) -> LiveQuote:
     )
 
 
+async def _quote_batch(kind: str, batch: list[str], quotes: dict[str, LiveQuote]) -> bool:
+    """Ask for one batch; False when tastytrade refuses it."""
+    try:
+        payload = await tt.get("/market-data/by-type", {kind: ",".join(batch)}, op="quotes")
+    except (tt.TastytradeUnavailable, tt.TastytradeNotFound):
+        return False
+    for item in _items(payload):
+        symbol = _field(item, "symbol")
+        if isinstance(symbol, str) and symbol in batch:
+            quotes[symbol] = _live_quote(item)
+    return True
+
+
 async def _quotes(legs: list[_Leg]) -> dict[str, LiveQuote]:
     """Live quotes for every leg and underlying, QUOTE_BATCH symbols a call,
-    underlyings and options asked for apart. A refused call costs only its
-    own quotes (an index such as SPX may be refused as an equity): those
-    legs show none, and the rest of the page stands."""
+    underlyings and options asked for apart. A refused batch is asked for
+    again a symbol at a time (up to RETRY_ALONE of them), so one symbol
+    tastytrade won't quote (an index such as SPX, asked for as an equity)
+    costs only its own quote; legs without one show none, and the rest of
+    the page stands."""
     by_kind: dict[str, list[str]] = {"equity": [], "equity-option": []}
     for item in legs:
         if item.underlying not in by_kind["equity"]:
@@ -233,15 +254,13 @@ async def _quotes(legs: list[_Leg]) -> dict[str, LiveQuote]:
     for kind, symbols in by_kind.items():
         for start in range(0, len(symbols), QUOTE_BATCH):
             batch = symbols[start:start + QUOTE_BATCH]
-            try:
-                payload = await tt.get("/market-data/by-type", {kind: ",".join(batch)}, op="quotes")
-            except (tt.TastytradeUnavailable, tt.TastytradeNotFound):
-                refused += len(batch)
+            if await _quote_batch(kind, batch, quotes):
                 continue
-            for item in _items(payload):
-                symbol = _field(item, "symbol")
-                if isinstance(symbol, str) and symbol in batch:
-                    quotes[symbol] = _live_quote(item)
+            alone = batch[:RETRY_ALONE] if len(batch) > 1 else []
+            for symbol in alone:
+                if not await _quote_batch(kind, [symbol], quotes):
+                    refused += 1
+            refused += len(batch) - len(alone)
     if refused:
         logger.warning("owner positions: %d quotes refused", refused)
     return quotes

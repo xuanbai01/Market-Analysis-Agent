@@ -127,6 +127,35 @@ async def enforce_demo_rate_limit(request: Request) -> None:
     )
 
 
+_OPTIONS_BUCKET: TokenBucket | None = None
+
+
+async def enforce_options_rate_limit(request: Request) -> None:
+    """Per-IP limit on options page builds (the route calls it only on a
+    cache miss). 429 with Retry-After on deny; 0 disables it."""
+    global _OPTIONS_BUCKET
+    per_hour = settings.OPTIONS_RATE_LIMIT_PER_HOUR
+    if per_hour <= 0:
+        return
+    if _OPTIONS_BUCKET is None:
+        _OPTIONS_BUCKET = TokenBucket(capacity=per_hour, window_seconds=3600.0)
+    allowed, retry_after = await _OPTIONS_BUCKET.take(_client_ip(request))
+    if allowed:
+        return
+    retry_int = 3600 if math.isinf(retry_after) else max(1, int(math.ceil(retry_after)))
+    raise HTTPException(
+        status_code=429,
+        detail=f"Too many option lookups: {per_hour}/hour per IP. Retry in ~{retry_int} seconds.",
+        headers={"Retry-After": str(retry_int)},
+    )
+
+
+def reset_options_rate_limit_for_tests() -> None:
+    """Drop the options bucket so the next request rebuilds it (tests only)."""
+    global _OPTIONS_BUCKET
+    _OPTIONS_BUCKET = None
+
+
 def reset_demo_rate_limit_for_tests() -> None:
     """Drop the demo bucket so the next request rebuilds it (tests only)."""
     global _DEMO_BUCKET

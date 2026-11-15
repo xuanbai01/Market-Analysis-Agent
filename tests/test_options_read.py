@@ -99,7 +99,7 @@ async def test_the_prompt_is_the_facts_with_ids_and_the_quote_time(fake_llm: _Ll
 
 def test_the_system_prompt_forbids_advice_and_forecasts() -> None:
     text = reader.READ_SYSTEM_PROMPT.lower()
-    for rule in ("no advice", "no forecasts", "risk-neutral", "never compute"):
+    for rule in ("no advice", "no forecasts", "risk-neutral", "never compute", "only when a fact states"):
         assert rule in text
 
 

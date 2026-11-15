@@ -178,7 +178,17 @@ def test_the_other_directions_and_a_level_term_structure() -> None:
 
 def test_no_earnings_comparison_without_a_priced_move() -> None:
     by_name = _comparisons(earnings=_earnings(None, [0.05]))
-    assert not any(d.startswith("Implied earnings move") for d in by_name)
+    assert not any("average move" in d for d in by_name)
+
+
+def test_a_refused_earnings_move_is_a_fact_with_its_reason() -> None:
+    """KO's live read set the month's one-sigma move against past report
+    moves when no earnings move was priced; the reason it isn't priced is
+    now a fact the read can quote."""
+    refused = _earnings(None, [0.05])
+    refused.refused = "the first expiry after the report is 98 days out"
+    claim = _comparisons(earnings=refused)["Implied earnings move, report on 2026-11-17: not priced"]
+    assert claim.value == "the first expiry after the report is 98 days out" and claim.unit == "string"
 
 
 def test_the_earnings_block() -> None:

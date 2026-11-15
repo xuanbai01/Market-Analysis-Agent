@@ -10,7 +10,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { fetchOptionsReport } from "../../lib/options-api";
 import type { ExpirySummary, OptionsReport } from "../../lib/options-schemas";
-import { GLOSSARY, acrossSentence, coneSentence, daysLabel, termSentence } from "../../lib/options-text";
+import { GLOSSARY, acrossSentence, compactCount, coneSentence, daysLabel, openInterestHistorySentence, termSentence } from "../../lib/options-text";
 import { ROUTES } from "../../lib/routes";
 import { ErrorBanner } from "../ErrorBanner";
 import { InfoTip, money, pct, shortDate } from "./chart-kit";
@@ -19,6 +19,7 @@ import { AcrossExpiries, drawsAcross } from "./AcrossExpiries";
 import { EarningsMoves } from "./EarningsMoves";
 import { ExpectedMoveCone } from "./ExpectedMoveCone";
 import { ExpirySection } from "./ExpirySection";
+import { OpenInterestHistory } from "./OpenInterestHistory";
 import { OptionsReadCard } from "./OptionsReadCard";
 import { Panel } from "./Panel";
 import { TermStructureChart } from "./TermStructureChart";
@@ -143,6 +144,18 @@ function termStats(report: OptionsReport): { label: string; value: string }[] {
   return rows.filter((r) => r.value !== null).map((r) => ({ label: r.label, value: pct(r.value as number) }));
 }
 
+function openInterestStats(report: OptionsReport): { label: string; value: string }[] {
+  const history = report.open_interest_history;
+  const last = history[history.length - 1];
+  if (!last) return [];
+  return [
+    { label: "Calls open", value: compactCount(last.call) },
+    { label: "Puts open", value: compactCount(last.put) },
+    { label: "Put/call", value: last.call ? (last.put / last.call).toFixed(2) : "—" },
+    { label: "Sessions recorded", value: `${history.length} since ${shortDate(history[0].date)}` },
+  ];
+}
+
 export default function OptionsPage() {
   const { ticker } = useParams<{ ticker: string }>();
   const symbol = (ticker ?? "").toUpperCase();
@@ -232,6 +245,17 @@ export default function OptionsPage() {
               summary={acrossSentence(report.expiries)}
             >
               <AcrossExpiries expiries={report.expiries} price={report.spot} />
+            </Panel>
+          )}
+          {report.open_interest_history.length > 0 && (
+            <Panel
+              title="Open interest, all expiries"
+              testId="options-oi-history-panel"
+              info={GLOSSARY.openInterestHistory}
+              summary={openInterestHistorySentence(report.open_interest_history)}
+              stats={openInterestStats(report)}
+            >
+              <OpenInterestHistory history={report.open_interest_history} />
             </Panel>
           )}
           {report.chain && (

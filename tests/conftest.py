@@ -34,6 +34,7 @@ from app.db.models.news import NewsItemModel  # noqa: F401  -- registers on Base
 from app.db.models.news_symbols import NewsSymbol  # noqa: F401  -- registers on Base.metadata
 from app.db.models.options import (  # noqa: F401  -- registers on Base.metadata
     OptionIvSnapshot,
+    OptionOiTotal,
     OptionsTracked,
 )
 from app.db.models.research_reports import (

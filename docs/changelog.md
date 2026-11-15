@@ -135,3 +135,11 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - A tip near a phone's right edge opens leftward.
     - A marker label near the chart's right edge sits left of its line.
   - Options chunk 18.9 KB gz. 1763 backend / 813 frontend tests.
+- **Options: whole-chain open interest history (2026-11-15):** the daily snapshot sums open interest only over the 2–4 expiries around 30 and 90 days, a window that rolls forward. A history of it would jump each time an expiry left the window, so it couldn't stand beside OptionCharts' all-expiries line. The owner chose whole chains for three tickers.
+  - **The run:** a second phase reads every listed expiry of each `OPTIONS_FULL_CHAIN_SYMBOLS` ticker (QQQ, SPY, NVDA in `fly.toml`) and stores call/put open interest and volume, and how many of the listed expiries were read, in a new insert-only `option_oi_totals` table (migration 0005).
+    - **Order:** it runs after the snapshots, so the slower reads (one Yahoo call per expiry, about 75–110 a night) can never cost a snapshot.
+    - **Limits:** the run's 300-second budget and its one throttle pause cover both phases, and whatever doesn't fit goes to the night's retry run.
+    - **Best-effort:** a totals failure is named (`totals: <error>`) but never fails the cron, which still fails only on a missing snapshot. Its summary counts the totals.
+  - **The report** carries `open_interest_history`, read in the same guarded block as the IV history.
+  - **The page** shows an "Open interest, all expiries" panel: the latest totals, put/call, and the change since the first session, with a two-line chart once two sessions exist.
+  - **First data** after Monday 2026-11-16's run. Options chunk 19.6 KB gz (near its ~20 KB budget). From #122's review: an expiry with no open interest shows no net gamma (it showed $0), and the across-expiries sentence counts the expiries with open interest. 1777 backend / 822 frontend tests.

@@ -152,7 +152,7 @@ gh variable set API_BASE_URL --body https://market-analysis-agent.fly.dev
 gh secret set BACKEND_SHARED_SECRET   # prompts; paste the same value as the Fly secret
 ```
 
-Typing it at the prompt avoids PowerShell's pipe, which would add a byte-order mark. The tickers it always records are `OPTIONS_SNAPSHOT_SYMBOLS` in `fly.toml`. Check it with `gh workflow run iv-snapshot.yml` and `gh run watch`: the step summary lists what was written. A weekend run reports `no_new_session`, which is a success.
+Typing it at the prompt avoids PowerShell's pipe, which would add a byte-order mark. The tickers it always records are `OPTIONS_SNAPSHOT_SYMBOLS` in `fly.toml`; for `OPTIONS_FULL_CHAIN_SYMBOLS` it also reads every expiry, after the snapshots, and stores total open interest (best-effort: the summary counts them, and only a missing snapshot fails the job). Check it with `gh workflow run iv-snapshot.yml` and `gh run watch`: the step summary lists what was written. A weekend run reports `no_new_session`, which is a success.
 
 ### 9. The owner's tastytrade account (optional, 5 min)
 

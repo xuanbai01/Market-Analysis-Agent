@@ -96,7 +96,7 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
   - per expiry: call/put totals, the top 10 open interest contracts, max pain, GEX and DEX by strike, net GEX/DEX, the call and put walls, the gamma flip (`options_math.gamma76`/`delta76`);
   - max pain and net GEX for every expiry the report reads;
   - charts and an across-expiries table.
-- [ ] **PR 4: open interest history** from our own snapshots (`open_interest_history`), charted once two sessions exist.
+- [ ] **PR 4: whole-chain open interest for QQQ, SPY and NVDA** *(branch `feature/options-oi-history`)*. The owner chose this over charting the snapshot's rolling 30/90-day window, which jumps as expiries roll. It adds `option_oi_totals` (migration 0005) and a second phase of the daily run (`OPTIONS_FULL_CHAIN_SYMBOLS`, best-effort), and the page charts it once two sessions exist.
 - [ ] **PR 5 (with tastytrade PR B): every expiry, live.** Open interest by expiry, max pain and GEX across the whole chain from DXLink. Owner only, never stored.
 
 ## Plan — tastytrade, live and personal (2026-11-15, ADR 0009)

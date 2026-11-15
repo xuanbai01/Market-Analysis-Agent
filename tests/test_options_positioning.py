@@ -71,6 +71,10 @@ def test_the_headline_figures_agree_with_the_full_positioning() -> None:
     assert net == pytest.approx(full.net_gex, rel=1e-9)
 
 
+def test_the_headline_of_an_expiry_with_no_open_interest_is_empty() -> None:
+    assert op.headline(chain({100.0: 0}, {100.0: 0}), smile()) == (None, None)
+
+
 def test_gamma_exposure_at_the_money_matches_its_closed_form() -> None:
     # F = S = 100, σ√T = 0.1, d1 = 0.05: Γ·F² per contract-share = φ(0.05) / 0.1 × 100.
     p = op.positioning(chain({100.0: 1000}, {}), smile(), spot=100.0)

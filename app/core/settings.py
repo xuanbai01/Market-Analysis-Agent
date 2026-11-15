@@ -124,6 +124,11 @@ class Settings(BaseSettings):
     # written per hour: each is a model call. A read already written for
     # the same quotes is free. 0 disables the limit.
     OPTIONS_READ_RATE_LIMIT_PER_HOUR: int = 20
+    # Tickers whose whole option chain the daily run also reads, after the
+    # snapshots, to store total open interest across every expiry
+    # (option_oi_totals): one Yahoo call per listed expiry, so a short
+    # list. Empty = off.
+    OPTIONS_FULL_CHAIN_SYMBOLS: str = ""
     # The owner's tastytrade account (ADR 0009): a personal OAuth app's
     # client ID and secret and its grant's refresh token. The client asks
     # for the read scope only and calls GET endpoints only. An empty secret

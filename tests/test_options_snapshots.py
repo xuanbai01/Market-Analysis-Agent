@@ -46,6 +46,12 @@ class _World:
         self.outcomes: dict[str, Any] = {}  # symbol -> status, or an exception (or a list of them)
         self.sleeps: list[float] = []
         self.bad_rows: set[str] = set()
+        # The full-chain open interest totals (PR 4).
+        self.totals_stored: set[str] = set()
+        self.totals_inserted: list[dict[str, Any]] = []
+        self.totals_fetched: list[str] = []
+        self.totals_outcomes: dict[str, Any] = {}
+        self.calls: list[str] = []  # "snapshot:X" and "totals:X", in order
 
     async def stored_symbols(self, session: _Session, trade_date: date) -> set[str]:
         session.in_tx = True
@@ -78,6 +84,7 @@ class _World:
         assert not self.session.in_tx, "a database connection was held during the Yahoo fetch"
         assert quoted_at == mc.session_close(FRIDAY)
         self.fetched.append(symbol)
+        self.calls.append(f"snapshot:{symbol}")
         outcome = self.outcomes.get(symbol, "ok")
         if isinstance(outcome, list):
             outcome = outcome.pop(0)
@@ -89,6 +96,34 @@ class _World:
 
     async def sleep(self, seconds: float) -> None:
         self.sleeps.append(seconds)
+
+    async def stored_totals(self, session: _Session, trade_date: date) -> set[str]:
+        session.in_tx = True
+        assert trade_date == FRIDAY
+        return set(self.totals_stored)
+
+    async def insert_totals(self, session: _Session, row: dict[str, Any]) -> bool:
+        session.in_tx = True
+        written = row["symbol"] not in self.totals_stored
+        if written:
+            self.totals_inserted.append(row)
+            self.totals_stored.add(row["symbol"])
+        await session.commit()
+        return written
+
+    def chain_totals_one(self, symbol: str, session_date: date, quoted_at: datetime) -> Any:
+        assert session_date == FRIDAY
+        assert not self.session.in_tx, "a database connection was held during the full-chain fetch"
+        self.totals_fetched.append(symbol)
+        self.calls.append(f"totals:{symbol}")
+        outcome = self.totals_outcomes.get(symbol, "ok")
+        if isinstance(outcome, list):
+            outcome = outcome.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        if outcome != "ok":
+            return outcome, None
+        return "ok", {"symbol": symbol, "trade_date": FRIDAY, "call_open_interest": 10, "put_open_interest": 9}
 
 
 class YFRateLimitError(Exception):
@@ -106,6 +141,10 @@ def world(monkeypatch: pytest.MonkeyPatch) -> _World:
     monkeypatch.setattr(snaps, "snapshot_one", w.snapshot_one)
     monkeypatch.setattr(snaps.options_chain, "risk_free_rate", lambda: (0.04, False))
     monkeypatch.setattr(snaps, "_sleep", w.sleep)
+    monkeypatch.setattr(settings_module.settings, "OPTIONS_FULL_CHAIN_SYMBOLS", "")
+    monkeypatch.setattr(snaps.store, "stored_totals", w.stored_totals)
+    monkeypatch.setattr(snaps.store, "insert_totals", w.insert_totals)
+    monkeypatch.setattr(snaps, "chain_totals_one", w.chain_totals_one)
     return w
 
 
@@ -335,3 +374,112 @@ async def test_a_delisted_ticker_is_named_not_found(world: _World) -> None:
     result = await _run(world)
     assert [(f.symbol, f.reason) for f in result.failed] == [("SPY", "not_found")]
     assert result.written == ["QQQ", "NVDA"]
+
+
+# --- Full-chain open interest totals (PR 4) ---------------------------------
+
+
+@pytest.fixture
+def full_chain(world: _World, monkeypatch: pytest.MonkeyPatch) -> _World:
+    monkeypatch.setattr(settings_module.settings, "OPTIONS_FULL_CHAIN_SYMBOLS", "SPY,NVDA")
+    return world
+
+
+async def test_totals_follow_every_snapshot_for_the_configured_tickers(full_chain: _World) -> None:
+    run = await _run(full_chain)
+    assert run.status == "ok"
+    assert run.written == ["QQQ", "SPY", "NVDA"]
+    assert run.totals_written == ["SPY", "NVDA"]
+    assert [r["symbol"] for r in full_chain.totals_inserted] == ["SPY", "NVDA"]
+    # The snapshots never wait on the slower full-chain reads.
+    assert full_chain.calls == ["snapshot:QQQ", "snapshot:SPY", "snapshot:NVDA", "totals:SPY", "totals:NVDA"]
+
+
+async def test_stored_totals_are_not_read_again(full_chain: _World) -> None:
+    full_chain.totals_stored = {"SPY"}
+    run = await _run(full_chain)
+    assert run.totals_skipped == ["SPY"]
+    assert full_chain.totals_fetched == ["NVDA"]
+
+
+async def test_a_session_with_everything_stored_is_no_new_session(full_chain: _World) -> None:
+    full_chain.stored = {"QQQ", "SPY", "NVDA"}
+    full_chain.totals_stored = {"SPY", "NVDA"}
+    run = await _run(full_chain)
+    assert run.status == "no_new_session"
+    assert full_chain.fetched == [] and full_chain.totals_fetched == []
+
+
+async def test_the_retry_run_fills_totals_the_first_run_missed(full_chain: _World) -> None:
+    full_chain.stored = {"QQQ", "SPY", "NVDA"}
+    full_chain.totals_stored = {"SPY"}
+    run = await _run(full_chain)
+    assert run.status == "ok"
+    assert full_chain.fetched == []
+    assert run.totals_written == ["NVDA"]
+
+
+async def test_a_totals_failure_is_named_and_the_snapshots_stand(full_chain: _World) -> None:
+    full_chain.totals_outcomes["SPY"] = RuntimeError("Yahoo answered nonsense")
+    run = await _run(full_chain)
+    assert run.written == ["QQQ", "SPY", "NVDA"]
+    assert run.totals_written == ["NVDA"]
+    assert [(f.symbol, f.reason) for f in run.failed] == [("SPY", "totals: RuntimeError")]
+    assert run.missing == []
+
+
+async def test_totals_share_the_runs_throttle_pause(full_chain: _World) -> None:
+    full_chain.totals_outcomes["SPY"] = [YFRateLimitError(), YFRateLimitError()]
+    run = await _run(full_chain)
+    assert full_chain.sleeps == [snaps.RATE_LIMIT_PAUSE_SECONDS]
+    assert run.totals_deferred == ["SPY", "NVDA"]
+
+
+async def test_totals_wait_for_the_retry_when_the_budget_is_spent(
+    full_chain: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Three snapshot checks fit; by the first totals check the budget is gone.
+    ticks = iter([0.0, 1.0, 2.0, 3.0, snaps.TIME_BUDGET_SECONDS + 1, snaps.TIME_BUDGET_SECONDS + 2, snaps.TIME_BUDGET_SECONDS + 3])
+    monkeypatch.setattr(snaps, "_clock", lambda: next(ticks))
+    run = await _run(full_chain)
+    assert run.written == ["QQQ", "SPY", "NVDA"]
+    assert run.totals_deferred == ["SPY", "NVDA"]
+    assert full_chain.totals_fetched == []
+
+
+async def test_no_full_chain_tickers_means_no_totals(world: _World) -> None:
+    run = await _run(world)
+    assert run.totals_written == [] and world.totals_fetched == []
+
+
+def test_chain_totals_sum_every_expiry_listed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services.options_chain import ChainFetch, ExpiryQuotes, Quote
+
+    listed = (date(2026, 11, 16), date(2026, 11, 20), date(2027, 1, 15))
+    asked: list[list[date]] = []
+
+    def quotes(oi: int, vol: int) -> tuple[Quote, ...]:
+        return (Quote(100.0, 1.0, 1.1, vol, oi, True), Quote(105.0, 0.5, 0.6, vol, oi, False))
+
+    def fetch(symbol: str, pick: Any, **kwargs: Any) -> ChainFetch:
+        chosen = list(pick(listed, {}))
+        asked.append(chosen)
+        assert kwargs.get("read_calendar") is False
+        chains = {d: ExpiryQuotes(d, quotes(10 * (i + 1), 1), quotes(5 * (i + 1), 2)) for i, d in enumerate(chosen) if i < 2}
+        return ChainFetch(symbol=symbol, spot=100.0, market_time=0, dividend_yield=0.0, expiries=listed, chains=chains, closes=())
+
+    monkeypatch.setattr(snaps.options_chain, "fetch_chain", fetch)
+    status, row = snaps.chain_totals_one("SPY", FRIDAY, mc.session_close(FRIDAY))
+    assert asked == [list(listed)]
+    assert status == "ok" and row is not None
+    # Two contracts a side in each expiry read, adjusted ones counted too.
+    assert (row["call_open_interest"], row["put_open_interest"]) == (2 * (10 + 20), 2 * (5 + 10))
+    assert (row["call_volume"], row["put_volume"]) == (4, 8)
+    assert (row["expiries"], row["listed"]) == (2, 3)
+    assert row["trade_date"] == FRIDAY
+
+
+def test_chain_totals_of_a_ticker_without_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(snaps.options_chain, "fetch_chain", lambda *_a, **_k: None)
+    assert snaps.chain_totals_one("BRK-A", FRIDAY, mc.session_close(FRIDAY)) == ("no_options", None)
+

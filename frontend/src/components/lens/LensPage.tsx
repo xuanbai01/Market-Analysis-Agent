@@ -15,9 +15,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 
 import { fetchLens } from "../../lib/api";
-import { formatClaimValue } from "../../lib/format";
 import { companiesInYear, companyColor, firstReported, pct, usdBillions } from "../../lib/lens";
 import type { LensReport } from "../../lib/schemas";
+import { CitedPoints } from "../CitedPoints";
 import { ErrorBanner } from "../ErrorBanner";
 import { AmountBars } from "./AmountBars";
 import { DistributionChart } from "./DistributionChart";
@@ -95,31 +95,7 @@ function Narrative({ report }: { report: LensReport }) {
         <p className="font-mono text-[10px] text-strata-muted">AI-written from the computed figures · every point cites them</p>
       </header>
       <p className="text-lg font-medium leading-snug text-strata-hi">{narrative.headline}</p>
-      <ul className="mt-4 space-y-3">
-        {narrative.points.map((point, i) => (
-          <li key={i}>
-            <p className="text-sm leading-relaxed text-strata-fg">{point.text}</p>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {point.claim_refs.map((ref) => {
-                const fact = report.facts[ref.index];
-                if (!fact) return null;
-                const value = formatClaimValue(fact.value, fact.unit);
-                return (
-                  <span
-                    key={ref.index}
-                    data-testid="lens-evidence"
-                    title={`${fact.description} = ${value} · ${fact.source.tool}`}
-                    className="flex max-w-full items-baseline gap-1.5 rounded border border-strata-border bg-strata-raise px-1.5 py-0.5 font-mono text-[10px]"
-                  >
-                    <span className="text-strata-hi">{value}</span>
-                    <span className="max-w-[14rem] truncate text-strata-muted">{fact.description}</span>
-                  </span>
-                );
-              })}
-            </div>
-          </li>
-        ))}
-      </ul>
+      <CitedPoints points={narrative.points} facts={report.facts} evidenceTestId="lens-evidence" />
     </section>
   );
 }

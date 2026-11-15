@@ -10,7 +10,14 @@ import {
   parseJsonAndValidate,
   parseRetryAfter,
 } from "./api";
-import { type ExpiryChain, ExpiryChainSchema, type OptionsReport, OptionsReportSchema } from "./options-schemas";
+import {
+  type ExpiryChain,
+  ExpiryChainSchema,
+  type OptionsRead,
+  OptionsReadSchema,
+  type OptionsReport,
+  OptionsReportSchema,
+} from "./options-schemas";
 
 async function getJson<T>(path: string, parse: (resp: Response) => Promise<T>): Promise<T> {
   const resp = await fetch(`${BACKEND_URL}${path}`, { headers: { ...authHeaders() } });
@@ -36,4 +43,10 @@ export function fetchOptionsChain(symbol: string, expiry: string): Promise<Expir
   return getJson(`/v1/options/${ticker}/chain/${encodeURIComponent(expiry)}`, (resp) =>
     parseJsonAndValidate(resp, ExpiryChainSchema),
   );
+}
+
+/** The cited AI read of the current report: written once per set of quotes. */
+export function fetchOptionsRead(symbol: string): Promise<OptionsRead> {
+  const ticker = encodeURIComponent(symbol.toUpperCase());
+  return getJson(`/v1/options/${ticker}/read`, (resp) => parseJsonAndValidate(resp, OptionsReadSchema));
 }

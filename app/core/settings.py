@@ -1,7 +1,9 @@
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+OWNER_KEY_MIN_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -80,7 +82,7 @@ class Settings(BaseSettings):
     # in for genuinely new (symbol, focus) combinations or
     # ?refresh=true calls. Set to 0 to disable rate limiting entirely
     # (useful for tests and single-user dev). In-memory token bucket
-    # keyed on X-Forwarded-For (when present) or direct connection IP.
+    # keyed on Fly-Client-IP (when it parses) or the connection's peer.
     RESEARCH_RATE_LIMIT_PER_HOUR: int = 3
     # Shared-password gate for /v1/research/* (Phase 3.0). When this
     # value is empty, the auth dependency is a pass-through — local dev
@@ -95,20 +97,22 @@ class Settings(BaseSettings):
     # The owner's second key (ADR 0009, amended 2026-11-15): routes under
     # /v1/owner hold the owner's own account data and need it in an
     # ``X-Owner-Key`` header on top of the shared secret, which is also a
-    # GitHub Actions secret. Empty: those routes don't exist (404), local
-    # dev included. A Fly secret; the owner keeps it in their password
-    # manager.
+    # GitHub Actions secret. Empty: those routes answer 404, local dev
+    # included. Set, it must be at least 32 characters and differ from the
+    # shared secret, or the app won't start. A Fly secret; the owner keeps
+    # it in their password manager.
     OWNER_KEY: SecretStr = SecretStr("")
-    # Wrong owner keys one IP may send per hour before it's locked out,
-    # the right key included, until a try refills.
-    OWNER_KEY_FAILURES_PER_HOUR: int = 10
+    # Wrong owner keys one caller (an IPv6 one by its /64) may send per hour
+    # before it's locked out, the right key included, until a try refills.
+    # There is no off switch: 1 to 100.
+    OWNER_KEY_FAILURES_PER_HOUR: int = Field(default=10, ge=1, le=100)
     # CORS allowlist origin for the frontend (Phase 3.0). When empty,
     # CORS middleware is not installed (same-origin only). When set,
     # exactly one origin is allowlisted (e.g.
     # ``https://market-agent.vercel.app``) — never ``*`` because the
     # frontend sends an Authorization header which CORS treats as a
     # credential-adjacent surface. Allow-methods is GET/POST/OPTIONS,
-    # allow-headers is Authorization/Content-Type, allow-credentials
+    # allow-headers is Authorization/Content-Type/X-Owner-Key, allow-credentials
     # is False (we use bearer tokens, not cookies).
     FRONTEND_ORIGIN: str = ""
     # Public read-only demo (app/services/demo.py). A comma-separated
@@ -155,6 +159,18 @@ class Settings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    @model_validator(mode="after")
+    def _owner_key_is_strong(self) -> "Settings":
+        """Past the shared secret, the owner key is all that guards the
+        owner's account, and the lockout resets with each machine: a short
+        key, or the shared secret again, would leave it guessable."""
+        key = self.OWNER_KEY.get_secret_value()
+        if key and len(key) < OWNER_KEY_MIN_LENGTH:
+            raise ValueError(f"OWNER_KEY must be at least {OWNER_KEY_MIN_LENGTH} characters (docs/deployment.md §10)")
+        if key and key == self.BACKEND_SHARED_SECRET:
+            raise ValueError("OWNER_KEY must differ from the shared secret")
+        return self
 
 
 settings = Settings()

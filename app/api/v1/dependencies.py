@@ -21,6 +21,7 @@ import hmac
 import ipaddress
 import logging
 import math
+import secrets
 from collections.abc import AsyncGenerator
 
 from fastapi import Depends, Header, HTTPException, Request
@@ -173,17 +174,37 @@ async def enforce_options_read_rate_limit(request: Request) -> None:
 
 
 OWNER_HEADER = "X-Owner-Key"
-# Wrong owner keys per IP: a bucket that only a wrong key takes from, and
-# that is checked before any key is compared, so a locked-out address can't
-# keep guessing (the right key waits too).
+# Wrong owner keys per caller. Each request takes a try before its key is
+# compared and a right key gives it back, so a burst of guesses gets no more
+# than the tries left, and a locked-out caller can't keep guessing (the
+# right key waits too). In memory: per machine, and a restart clears it.
 _OWNER_FAILURES: TokenBucket | None = None
+# Log lines name a caller by a keyed hash, never by address. The key is new
+# each boot, so a name only links lines from one machine's run.
+_CALLER_NAME_KEY = secrets.token_bytes(16)
 
 
 def _owner_failures() -> TokenBucket:
     global _OWNER_FAILURES
     if _OWNER_FAILURES is None:
-        _OWNER_FAILURES = TokenBucket(capacity=max(settings.OWNER_KEY_FAILURES_PER_HOUR, 0), window_seconds=3600.0)
+        _OWNER_FAILURES = TokenBucket(capacity=settings.OWNER_KEY_FAILURES_PER_HOUR, window_seconds=3600.0)
     return _OWNER_FAILURES
+
+
+def _owner_caller(request: Request) -> str:
+    """The lockout's key: the caller's address, an IPv6 one by its /64, the
+    block one subscriber is usually given (else each address would get its
+    own tries)."""
+    address = _client_ip(request)
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return address
+    return str(ipaddress.ip_network(f"{ip}/64", strict=False)) if ip.version == 6 else address
+
+
+def _caller_name(caller: str) -> str:
+    return hmac.new(_CALLER_NAME_KEY, caller.encode("utf-8"), "sha256").hexdigest()[:10]
 
 
 def _locked_out(retry_after: float) -> HTTPException:
@@ -204,25 +225,29 @@ async def require_owner(
     secret and ``X-Owner-Key: <OWNER_KEY>``.
 
     The shared secret is also a GitHub Actions secret, so it alone must not
-    open the owner's account data. With no owner key configured the routes
-    don't exist (404), even in local dev where the shared secret is off. A
-    missing or wrong key is a 403, and takes one of the address's hourly
-    tries; with none left, every request from it is a 429 until one
-    refills. The comparison is constant-time on bytes (a non-ASCII value is
-    just wrong), and the key is never logged.
+    open the owner's account data. With no owner key configured, a caller
+    past the shared secret gets 404, even in local dev where the shared
+    secret is off. A missing or wrong key is a 403 and uses up one of the
+    caller's hourly tries; with none left, every request from it is a 429
+    until one refills. The comparison is constant-time on bytes (a
+    non-ASCII value is just wrong). Refusals and lockouts are logged by a
+    keyed hash of the caller, never the key or the address.
     """
     expected = settings.OWNER_KEY.get_secret_value()
     if not expected:
         raise HTTPException(status_code=404, detail="Not Found")
     bucket = _owner_failures()
-    address = _client_ip(request)
-    allowed, retry_after = await bucket.peek(address)
+    caller = _owner_caller(request)
+    allowed, retry_after = await bucket.take(caller)
     if not allowed:
         raise _locked_out(retry_after)
     if owner_key is not None and hmac.compare_digest(owner_key.encode("utf-8"), expected.encode("utf-8")):
+        await bucket.give_back(caller)
         return
-    await bucket.take(address)
-    logger.warning("owner key refused: %s", "missing" if not owner_key else "wrong")
+    name = _caller_name(caller)
+    logger.warning("owner key refused (%s): caller %s", "missing" if not owner_key else "wrong", name)
+    if not (await bucket.peek(caller))[0]:
+        logger.warning("owner key: caller %s is locked out for now", name)
     raise HTTPException(status_code=403, detail="This needs the owner key.")
 
 

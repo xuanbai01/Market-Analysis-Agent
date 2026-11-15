@@ -76,6 +76,7 @@ export function LoginScreen({ onAuthenticated }: Props) {
   return (
     <div className="flex min-h-full items-center justify-center bg-strata-canvas p-6">
       <form
+        method="post"
         onSubmit={handleSubmit}
         className="w-full max-w-sm space-y-4 rounded-lg border border-strata-border bg-strata-surface p-6"
       >

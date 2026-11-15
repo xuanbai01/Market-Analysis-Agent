@@ -26,7 +26,7 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 
 - Router → Service → (Agent / DB) separation. Business logic never lives in route handlers where it can be bypassed.
 - Immutable audit records: ingested market bars and news items should be append-only (use a ts-indexed table; supersede, don't update).
-- Rate-limit LLM-backed endpoints, and anything that fans out to a provider: an options page build (about a dozen Yahoo calls) is limited per IP on cache misses (`OPTIONS_RATE_LIMIT_PER_HOUR`, 60); cached reports are free.
+- Rate-limit LLM-backed endpoints, and anything that fans out to a provider: an options page build (about a dozen Yahoo calls) is limited per IP on cache misses (`OPTIONS_RATE_LIMIT_PER_HOUR`, 60); cached reports are free. The options read is a model call, limited per IP when no read of the same quotes is cached (`OPTIONS_READ_RATE_LIMIT_PER_HOUR`, 20); its prompt holds the validated ticker, the quote time and computed claims, nothing a caller typed.
 - Rate-limit LLM-backed endpoints. `/v1/research/{symbol}` has a per-IP limit on fresh reports (default 3/h; 30/h in production while the owner is the only user — lower it before sharing the URL).
 
 ## A05 — Security Misconfiguration

@@ -86,9 +86,14 @@ What free data allows, checked 2026-11-14:
    automation token waits for collaborators.
 5. **Analysis, not advice.** The page shows what option prices imply
    (expected moves, IV against realized volatility, term structure, skew,
-   earnings moves, and later a strategy payoff builder with risk-neutral
-   probabilities). It never ranks or recommends a trade, and says the
-   probabilities are risk-neutral and the data delayed.
+   earnings moves, a strategy payoff builder with risk-neutral
+   probabilities, and a cited AI read). It never ranks or recommends a
+   trade, and says the probabilities are risk-neutral and the data delayed.
+   The read (`GET /v1/options/{symbol}/read`) is written from the report's
+   claims only, comparisons carry their direction in words computed in code
+   (ADR 0007), the prompt forbids advice and forecasts, and code drops any
+   point quoting a number no claim shows. One read per set of quotes; a read
+   the model has to write is limited per IP (`OPTIONS_READ_RATE_LIMIT_PER_HOUR`).
 
 ## Consequences
 

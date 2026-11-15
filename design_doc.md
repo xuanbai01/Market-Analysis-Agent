@@ -202,7 +202,7 @@ Real auth and per-user cost caps land only when there are real users.
 
 **Insider activity (done, 2026-11-13).** Officer and director trades from Form 4s, holders apart, on their own card.
 
-**Options analysis (in progress, 2026-11-15; [ADR 0008](docs/adr/0008-options-from-free-snapshots.md)).** The owner trades directional options and spreads. Free yfinance chains, our own IVs, a separate `/options/:ticker` page, and a daily IV snapshot (started first, because history can't be fetched later) for IV percentile and rank. The snapshot (#109), the report API (#110), the `/options/:ticker` page (#111) and a strategy builder are in; a cited read follows. Plan in [tasks/todo.md](tasks/todo.md).
+**Options analysis (2026-11-15; [ADR 0008](docs/adr/0008-options-from-free-snapshots.md)).** The owner trades directional options and spreads. Free yfinance chains, our own IVs, a separate `/options/:ticker` page, and a daily IV snapshot (started first, because history can't be fetched later) for IV percentile and rank. The snapshot (#109), the report API (#110), the `/options/:ticker` page (#111), a strategy builder (#113) and a cited AI read are in: the plan's five PRs. Plan in [tasks/todo.md](tasks/todo.md).
 
 **Next:** README screenshots (owner). A compare narrative (4.6.B) waits until Compare gets used.
 

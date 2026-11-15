@@ -142,9 +142,11 @@ describe("positioning charts", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("marks max pain on the open interest chart", () => {
+  it("marks max pain on the open interest chart, with a line that draws", () => {
     render(<OpenInterestChart chain={CHAIN} spot={162.85} />);
-    expect(screen.getByTestId("options-oi-max-pain")).toHaveTextContent("max pain $167.50");
+    const mark = screen.getByTestId("options-oi-max-pain");
+    expect(mark).toHaveTextContent("max pain $167.50");
+    expect(mark.querySelector("line")?.getAttribute("stroke")).toMatch(/^#[0-9a-f]{6}$/i);
   });
 
   it("lists each expiry read with its max pain against the price", () => {

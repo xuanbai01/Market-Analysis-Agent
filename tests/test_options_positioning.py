@@ -139,6 +139,7 @@ def test_exposure_rows_are_limited_to_the_strikes_shown() -> None:
     assert p.call_open_interest == 30
 
 
-def test_the_assumption_is_stated() -> None:
+def test_the_assumption_is_stated_for_gamma_and_delta_is_the_options_own() -> None:
     p = op.positioning(chain({100.0: 10}, {}), smile(), spot=100.0)
     assert "dealer" in p.assumption.lower()
+    assert "delta exposure is the open options' own delta" in p.assumption.lower()

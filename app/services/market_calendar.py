@@ -2,7 +2,7 @@
 NYSE sessions, for option IVs measured to the minute (ADR 0008).
 
 An option's time to expiry runs from the moment its quotes were made to
-16:00 ET on the expiry date. Outside market hours that moment is the last
+the close on the expiry date. Outside market hours that moment is the last
 close, not the clock: measured from a Saturday, a 7-day option would look
 6 days long and its IV about 8% too high. Sessions (not calendar days)
 count the days that carry variance, for the earnings event move.
@@ -12,8 +12,10 @@ King Jr. Day, Washington's Birthday, Good Friday, Memorial Day,
 Juneteenth, Independence Day, Labor Day, Thanksgiving and Christmas. A
 holiday on a Saturday is observed the Friday before, on a Sunday the
 Monday after, except New Year's Day on a Saturday, which isn't observed.
-Early closes (1 pm) are treated as full sessions; three hours on an
-expiry weeks away moves an IV by a rounding error.
+Three sessions close at 1 pm: 3 July, the day after Thanksgiving and
+Christmas Eve, each when it is a session. Their quotes are the 1 pm
+close's, and an option expiring on one has three hours less to run (on a
+weekly, about 2% of its time).
 
 No dependency: the rules are a few lines, and a calendar package would go
 into the Dockerfile pin list for this alone.
@@ -28,6 +30,7 @@ from zoneinfo import ZoneInfo
 ET = ZoneInfo("America/New_York")
 OPEN = time(9, 30)
 CLOSE = time(16, 0)
+EARLY_CLOSE = time(13, 0)
 # Yahoo's option quotes trail the market by about 15 minutes.
 QUOTE_DELAY = timedelta(minutes=15)
 # After the close, delayed quotes are still arriving until about 16:15.
@@ -89,6 +92,15 @@ def holidays(year: int) -> frozenset[date]:
     return frozenset(days)
 
 
+@lru_cache(maxsize=16)
+def early_closes(year: int) -> frozenset[date]:
+    """The 1 pm closes: 3 July, the day after Thanksgiving and Christmas
+    Eve, each when it is a session (not a weekend or the observed holiday)."""
+    day_after_thanksgiving = _nth_weekday(year, 11, _THURSDAY, 4) + timedelta(days=1)
+    candidates = (date(year, 7, 3), day_after_thanksgiving, date(year, 12, 24))
+    return frozenset(day for day in candidates if is_session(day))
+
+
 def is_session(day: date) -> bool:
     return day.weekday() < _SATURDAY and day not in holidays(day.year)
 
@@ -123,7 +135,8 @@ def session_open(day: date) -> datetime:
 
 
 def session_close(day: date) -> datetime:
-    return datetime.combine(day, CLOSE, tzinfo=ET)
+    close = EARLY_CLOSE if day in early_closes(day.year) else CLOSE
+    return datetime.combine(day, close, tzinfo=ET)
 
 
 def market_open(now: datetime) -> bool:
@@ -160,7 +173,7 @@ def is_close(quoted_at: datetime) -> bool:
 
 
 def years_to_expiry(quoted_at: datetime, expiry: date) -> float:
-    """Years (of 365 days) from the quote time to 16:00 ET on ``expiry``."""
+    """Years (of 365 days) from the quote time to the close on ``expiry``."""
     return (session_close(expiry) - quoted_at).total_seconds() / _YEAR
 
 

@@ -145,3 +145,21 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **First data** after Monday 2026-11-16's run. Options chunk 19.6 KB gz (near its ~20 KB budget). From #122's review: an expiry with no open interest shows no net gamma (it showed $0), and the across-expiries sentence counts the expiries with open interest. 1777 backend / 822 frontend tests.
   - **Review follow-up (#123's and #124's AI reviews):** a stored totals row is never updated, so a short read waits once. An expiry counts as read only with both sides quoted; the cron's first run leaves a read short an expiry (or with none read) to its night run, which stores what it reads with the count of expiries read (`KEEP_SHORT_READ_AFTER`, 3.5 h after the close), so a ticker Yahoo always reads short still gets its row and the page says how many expiries it covers. A ticker with listed expiries but none read is `totals: unread`, not `no_options`; one with no options is named (`totals: no_options`) instead of dropped. The workflow's snapshot "failed" column no longer counts totals failures, which get their own count on the totals line. A short read no longer falls off the deferred list when the throttle or the budget stops the rest. 999,600 contracts read "1.00M", not "1000K".
   - **The page and a short read (#124's AI review):** a session the night run stored short would draw as a drop in open interest beside whole reads. The "change since" now runs from the first whole read, and a short latest session gives no change and says why ("The change is left out: this session's read was short", no date, so it can't read as open interest standing still); the lines draw whole reads only and the panel counts any session left out. Options chunk 19.7 KB gz, 825 frontend tests.
+- **The owner key (2026-11-15, ADR 0009 amended):** the first step of the owner's positions page and encrypted trade copy. The owner chose an encrypted copy in Neon and a key their password manager syncs between their two PCs.
+  - **The gate:** routes under `/v1/owner` take `require_owner`: the shared secret, then `X-Owner-Key`.
+    - **Why:** the shared secret is also a GitHub Actions secret, so it alone must not open the owner's account.
+    - **Responses:** with `OWNER_KEY` unset the routes answer 404, local dev included. A missing or wrong key is a 403.
+    - **Lockout:** ten wrong keys an hour lock an address out, the right key included. Each request takes a try before its key is compared and a right key gives it back (`TokenBucket.give_back`); `peek` only decides when to log a lockout.
+    - **CORS** allows the header. The first route, `GET /v1/owner/status`, says whether tastytrade is configured.
+  - **Password managers:** the sign-in form gets a fixed hidden username, so Chrome, Edge, Bitwarden or 1Password can save the shared secret under a name and sync it. The owner pages' unlock form will do the same.
+  - **Setup:** docs/deployment.md §10 makes and imports the key.
+  - **From the security review** (no high or medium findings):
+    - each request takes a try before its key is compared and a right key gives it back, so a burst of guesses can't slip past one check;
+    - IPv6 callers count by their /64, and an IPv4 address written as IPv6 by its IPv4 form (#126's AI review);
+    - `TokenBucket` prunes at most every 30 s, so many unrefilled keys can't cost every request a full scan (this covers the open demo route too);
+    - refusals and lockouts are logged under a keyed hash of the caller;
+    - the app won't start with a key under 32 characters or equal to the shared secret, and the tries per hour are bounded 1 to 100;
+    - the routes are left out of the OpenAPI schema;
+    - a test fails if any router other than the owner's imports tastytrade, or a service that does;
+    - the sign-in form posts.
+

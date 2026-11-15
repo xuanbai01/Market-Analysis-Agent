@@ -76,6 +76,7 @@ export function LoginScreen({ onAuthenticated }: Props) {
   return (
     <div className="flex min-h-full items-center justify-center bg-strata-canvas p-6">
       <form
+        method="post"
         onSubmit={handleSubmit}
         className="w-full max-w-sm space-y-4 rounded-lg border border-strata-border bg-strata-surface p-6"
       >
@@ -88,10 +89,16 @@ export function LoginScreen({ onAuthenticated }: Props) {
           </p>
         </div>
 
+        {/* A password-only form has no username, so a password manager
+            can't tell this secret from another; a fixed, hidden one lets
+            Chrome, Edge, Bitwarden or 1Password save it and sync it to
+            the owner's other PCs. */}
+        <input type="text" name="username" autoComplete="username" value="market-agent" readOnly hidden />
         <label className="block">
           <span className="text-sm font-medium text-strata-fg">Password</span>
           <input
             type="password"
+            name="password"
             autoFocus
             autoComplete="current-password"
             value={secret}

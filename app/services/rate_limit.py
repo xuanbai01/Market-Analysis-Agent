@@ -67,11 +67,15 @@ class TokenBucket:
         # key → (tokens_remaining, last_access_monotonic)
         self._buckets: dict[str, tuple[float, float]] = {}
         self._lock = asyncio.Lock()
+        self._pruned_at = float("-inf")
 
     # Past this many keys, a take() first drops the buckets that have
     # refilled: a full bucket holds no state, so memory follows recent
-    # callers rather than every caller ever seen.
+    # callers rather than every caller ever seen. At most once every
+    # PRUNE_EVERY_SECONDS: with many keys none of which has refilled, a
+    # scan on every take would cost each request the whole dict.
     PRUNE_AT = 1024
+    PRUNE_EVERY_SECONDS = 30.0
 
     def _prune(self, now: float) -> None:
         full = [
@@ -80,6 +84,31 @@ class TokenBucket:
         ]
         for key in full:
             del self._buckets[key]
+
+    async def give_back(self, key: str) -> None:
+        """Return a token ``take`` took, for a request that turned out not
+        to count. Never past capacity; a full bucket stores nothing."""
+        async with self._lock:
+            now = self._time()
+            tokens, last = self._buckets.get(key, (float(self._capacity), now))
+            tokens = tokens + (now - last) * self._refill_rate + 1.0
+            if tokens >= self._capacity:
+                self._buckets.pop(key, None)
+            else:
+                self._buckets[key] = (tokens, now)
+
+    async def peek(self, key: str) -> tuple[bool, float]:
+        """Whether a ``take`` for ``key`` would pass now, as ``(allowed,
+        retry_after_seconds)``, without taking a token or storing a key."""
+        async with self._lock:
+            now = self._time()
+            tokens, last = self._buckets.get(key, (float(self._capacity), now))
+            tokens = min(float(self._capacity), tokens + (now - last) * self._refill_rate)
+            if tokens >= 1.0:
+                return True, 0.0
+            if self._refill_rate <= 0:
+                return False, float("inf")
+            return False, (1.0 - tokens) / self._refill_rate
 
     async def take(self, key: str) -> tuple[bool, float]:
         """Try to consume one token for ``key``.
@@ -91,8 +120,9 @@ class TokenBucket:
         """
         async with self._lock:
             now = self._time()
-            if len(self._buckets) >= self.PRUNE_AT:
+            if len(self._buckets) >= self.PRUNE_AT and now - self._pruned_at >= self.PRUNE_EVERY_SECONDS:
                 self._prune(now)
+                self._pruned_at = now
             tokens, last = self._buckets.get(
                 key, (float(self._capacity), now)
             )

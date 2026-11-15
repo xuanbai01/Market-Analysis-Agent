@@ -49,6 +49,17 @@ describe("ExpirySection", () => {
     expect((screen.getByTestId("options-expiry-select") as HTMLSelectElement).value).toBe(CHAIN.expiry);
   });
 
+  it("builds strategies on the expiry shown, and starts over when it changes", async () => {
+    const other = { ...CHAIN, expiry: "2026-12-18", forward: 140, rows: CHAIN.rows.map((r) => ({ ...r })) };
+    vi.mocked(fetchOptionsChain).mockResolvedValue(other);
+    renderSection();
+    const panel = screen.getByTestId("options-strategy-panel");
+    expect(within(panel).getByTestId("strategy-leg-strike")).toHaveValue("165");
+    fireEvent.change(select(), { target: { value: "2026-12-18" } });
+    await screen.findByText("Strategy, Dec 18, 2026 expiry");
+    expect(within(screen.getByTestId("options-strategy-panel")).getByTestId("strategy-leg-strike")).toHaveValue("140");
+  });
+
   it("dims a side with no usable quote", () => {
     const rows = CHAIN.rows.map((r, i) => (i === 0 ? { ...r, call_usable: false, call_iv: null } : r));
     renderSection(section({ ...CHAIN, rows }));

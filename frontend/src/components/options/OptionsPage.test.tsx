@@ -48,7 +48,7 @@ describe("OptionsPage", () => {
     expect(screen.getByText("NVIDIA Corporation")).toBeInTheDocument();
     expect(screen.getByTestId("options-asof")).toHaveTextContent(/last close/i);
     expect(screen.getByTestId("options-tiles")).toHaveTextContent("59.5%");
-    for (const id of ["options-cone", "options-term", "options-earnings", "options-expiry-section"]) {
+    for (const id of ["options-cone", "options-term", "options-earnings", "options-expiry-section", "options-strategy-panel"]) {
       expect(screen.getByTestId(id)).toBeInTheDocument();
     }
     expect(screen.getByTestId("options-disclaimer")).toHaveTextContent(/not advice/i);

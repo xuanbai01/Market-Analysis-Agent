@@ -89,6 +89,7 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
   - An access token must be header-safe before it's used: h11 quotes an illegal header value in its error. As a backstop, the log formatter masks `Bearer <token>`.
   - websockets' frame log, which would print the DXLink AUTH frame, is held at WARNING.
   - Tests feed distinctive secrets through every path and fail if one reaches an `app.*` log line.
+- **The owner's positions** (`owner_positions`) log counts only: accounts, legs, underlyings, rows not analysed. Account numbers never leave the module (accounts are numbered 1, 2, ...), and a tastytrade-supplied account number that isn't letters and digits is dropped before it could reach a path. The route answers `Cache-Control: no-store`, so no browser or proxy keeps a copy.
 - **tastytrade's data is shown to no third party** (its Open API terms §8(4) and §8(6)), and a Claude Code session is one. So `tastytrade_probe` and any check by Claude print metadata only: ages, counts, field names, yes/no comparisons. The owner compares values in tastytrade's own app.
 - **An unhandled error tells the caller nothing about the server.** The 500 body carries a reference id; the exception goes to the log under that id (`app/core/errors.py`). It used to carry `str(exc)`, which on an open route can hand a stranger a SQL fragment or a hostname.
 

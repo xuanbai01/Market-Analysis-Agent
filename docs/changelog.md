@@ -162,4 +162,10 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - the routes are left out of the OpenAPI schema;
     - a test fails if any router other than the owner's imports tastytrade, or a service that does;
     - the sign-in form posts.
+- **The owner's positions, live (2026-11-15, ADR 0009 amended):** `GET /v1/owner/positions`, behind the owner key, for the positions page to come.
+  - **What it reads:** the owner's accounts (an hour in memory) and each account's positions from tastytrade. Equity options are parsed from their OCC symbols, a malformed one is refused rather than guessed, and stocks become stock legs. A contract with a multiplier other than 100 or a digit in its root is flagged adjusted. Futures and unreadable rows are listed as not analysed.
+  - **Live quotes:** tastytrade's REST quotes, 100 symbols a call: bid, ask, mark, IV and the Greeks per share, with each quote's time. A leg tastytrade sends no quote for has none; no figure is made up.
+  - **The answer:** grouped by underlying, stock legs included, with our dashed ticker for links (BRK/B is BRK-B). It's cached 15 s, so a refresh is free. When tastytrade fails, the last copy is served marked stale, or a 503 with the reason when there's none. `Cache-Control: no-store`.
+  - **Never stored, never in a prompt:** accounts are numbered, never named, and a test feeds distinctive account numbers through every path and fails if one reaches the response or a log line. An account number that isn't letters and digits is dropped before it could reach a path.
+  - **The probe** now answers whether quote IVs read as fractions (yes or no, with counts), which the page relies on.
 

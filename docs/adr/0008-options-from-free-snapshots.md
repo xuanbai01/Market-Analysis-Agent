@@ -72,8 +72,10 @@ What free data allows, checked 2026-11-14:
 3. **One daily job, not a scheduler.** A GitHub Actions cron calls
    `POST /v1/options/snapshots` after each US close, with a retry run later
    the same night. The run is idempotent (`ON CONFLICT DO NOTHING` on
-   symbol and trading date, the first good row wins) and takes the trading
-   date from the data, not the server clock. ADR 0003 cut Celery, Redis and
+   symbol and trading date, the first good row wins). A row is keyed on
+   the last completed session by the NYSE calendar, never the server's
+   time zone (production runs in UTC); the underlying's own last-print
+   date goes into the row's detail, so a stale quote shows. ADR 0003 cut Celery, Redis and
    the 15-minute firehose; one daily call needs none of them.
 4. **The cron uses the existing shared secret,** stored as a GitHub Actions
    secret. Every route still depends on `require_shared_secret`; a narrower

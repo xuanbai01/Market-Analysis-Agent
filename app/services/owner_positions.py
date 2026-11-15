@@ -237,12 +237,18 @@ def _live_quote(item: dict[str, Any]) -> LiveQuote:
     )
 
 
+# A 4xx that isn't about the request's symbols: a stale sign-in, a throttle.
+_NOT_ABOUT_THE_SYMBOLS = frozenset({401, 429})
+
+
 def _refused(exc: Exception) -> bool:
-    """tastytrade refused the request itself (a 4xx it won't retry): asking
-    for less may work. Anything else (a 429, a 5xx, no answer) fails the read."""
-    return isinstance(exc, tt.TastytradeNotFound) or (
-        isinstance(exc, tt.TastytradeUnavailable) and exc.status is not None and 400 <= exc.status < 500
-    )
+    """tastytrade refused the request itself (a 4xx about what was asked):
+    asking for less may work. Anything else (a 401, a 429, a 5xx, no answer)
+    fails the read."""
+    if isinstance(exc, tt.TastytradeNotFound):
+        return True
+    status = exc.status if isinstance(exc, tt.TastytradeUnavailable) else None
+    return status is not None and 400 <= status < 500 and status not in _NOT_ABOUT_THE_SYMBOLS
 
 
 async def _quote_batch(kind: str, batch: list[str], quotes: dict[str, LiveQuote]) -> bool:

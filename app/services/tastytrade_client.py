@@ -97,8 +97,9 @@ _ACCOUNT_IN_PATH = re.compile(r"(/accounts/)[^/?#]+")
 
 class TastytradeUnavailable(Exception):
     """Not configured, the sign-in was refused, or tastytrade didn't answer.
-    ``status`` is the HTTP status when tastytrade answered a request with a
-    refusal it won't retry (a 4xx other than 401 and 429), else None."""
+    ``status`` is the HTTP status of an error answer the client gave up on
+    (``tastytrade answered N``); None for everything else, retries that ran
+    out included."""
 
     def __init__(self, reason: str, *, status: int | None = None) -> None:
         super().__init__(reason)

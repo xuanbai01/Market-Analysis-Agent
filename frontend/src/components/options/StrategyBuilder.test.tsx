@@ -79,6 +79,19 @@ describe("StrategyBuilder", () => {
     expect(screen.queryByTestId("strategy-payoff-mid")).toBeNull();
   });
 
+  it("says why there's no probability on an expiry with no time left", () => {
+    render(<StrategyBuilder chain={{ ...CHAIN, days: 0 }} />);
+    expect(screen.getByTestId("strategy-no-smile")).toHaveTextContent(/no time left/i);
+  });
+
+  it("names a leg with no bid as having no mid", () => {
+    const rows = CHAIN.rows.map((r) => (r.strike === 165 ? { ...r, call_bid: 0 } : r));
+    render(<StrategyBuilder chain={{ ...CHAIN, rows }} />);
+    fireEvent.change(screen.getByTestId("strategy-leg-strike"), { target: { value: "165" } });
+    expect(screen.getByTestId("strategy-unpriced")).toHaveTextContent(/no bid/i);
+    expect(row("Net")).toHaveTextContent(/Debit \$/); // still bought at the offer
+  });
+
   it("draws no one-sigma band without an IV", () => {
     render(<StrategyBuilder chain={{ ...CHAIN, atm_iv: null, smile: [] }} />);
     expect(screen.queryByTestId("strategy-payoff-band")).toBeNull();
@@ -89,7 +102,7 @@ describe("StrategyBuilder", () => {
     const rows = CHAIN.rows.map((r) => ({ ...r, put_ask: 0, put_bid: 0 }));
     render(<StrategyBuilder chain={{ ...CHAIN, rows }} />);
     fireEvent.click(screen.getByRole("button", { name: "Bull put spread" }));
-    expect(screen.getByTestId("strategy-unavailable")).toBeInTheDocument();
+    expect(screen.getByTestId("strategy-unavailable")).toHaveTextContent(/not enough quoted strikes/i);
     expect(screen.queryByTestId("strategy-summary")).toBeNull();
   });
 

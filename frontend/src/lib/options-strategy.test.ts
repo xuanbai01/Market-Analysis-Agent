@@ -110,6 +110,8 @@ describe("prices", () => {
     expect(premium({ bid: 0.4, ask: 0 }, 1, "natural")).toBeNull();
     expect(premium({ bid: 0, ask: 0 }, -1, "natural")).toBeNull(); // no quote at all
     expect(premium({ bid: 0, ask: 0.05 }, -1, "natural")).toBe(0); // nobody bids
+    expect(premium({ bid: 0, ask: 0.4 }, 1, "mid")).toBeNull(); // no bid: no mid to mark
+    expect(premium({ bid: 0, ask: 0.4 }, 1, "natural")).toBe(0.4);
   });
 });
 
@@ -119,6 +121,15 @@ describe("smileOf", () => {
     const smile = smileOf({ ...CHAIN, smile: [...CHAIN.smile, { ...point, iv: point.iv + 0.02, side: "call" }] })!;
     expect(smile.points).toHaveLength(CHAIN.smile.length);
     expect(smile.points.find(([x]) => x === point.log_moneyness)![1]).toBeCloseTo(point.iv + 0.01);
+  });
+});
+
+describe("a smile with no volatility", () => {
+  it("gives a certain answer, not NaN", () => {
+    const dead: Smile = { forward: 100, years: 0.1, points: [[0, 0]] };
+    expect(probAbove(dead, 90)).toBe(1);
+    expect(probAbove(dead, 110)).toBe(0);
+    expect(Number.isNaN(probProfit([{ kind: "call", side: 1, strike: 100, premium: 1 }], dead))).toBe(false);
   });
 });
 

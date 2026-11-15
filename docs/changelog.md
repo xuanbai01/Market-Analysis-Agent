@@ -208,5 +208,9 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **The normal CDF keeps its digits in the tails** (Numerical Recipes' erfc, error under 1.2e-7 of the value). Its error had been absolute, so the golden check allowed an error larger than a far out-of-the-money price and a tail priced at 0 passed. Black-76 is now held to Python within 1e-5 of each price.
     - **No bare "Dec 11: "** when a chain has no max pain.
     - **A view served the old copy** (Yahoo down) is recorded too.
+  - **From #128's fourth AI review** (lows only):
+    - **Sessions left count today's** while the market hasn't opened, so a check before the open has the right window for the past-moves share.
+    - **One holding without a live figure no longer blanks every total.** The tiles add what they can and name what they leave out.
+    - **A leg sent without its close** gets 4 pm in New York, daylight time included, rather than 21:00 UTC.
   - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 

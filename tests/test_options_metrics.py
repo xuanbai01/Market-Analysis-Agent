@@ -97,6 +97,18 @@ def test_a_dense_chain_spreads_its_strikes_across_the_wings() -> None:
     assert result.skew25 is not None
 
 
+def test_a_high_dividend_forward_still_comes_from_parity() -> None:
+    """DeepSeek on PR 109: checked against spot carried at the rate alone,
+    a 15% yield 98 days out sits 4% low and would fall back for no reason."""
+    expiry, yield_ = date(2027, 2, 19), 0.15
+    years = mc.years_to_expiry(QUOTED_AT, expiry)
+    forward = SPOT * math.exp((RATE - yield_) * years)
+    chain = _chain(expiry, _flat(0.25), forward=forward)
+    smile = metrics.smile(chain, SPOT, QUOTED_AT, RATE, yield_)
+    assert smile is not None and smile.forward_from_parity is True
+    assert smile.forward == pytest.approx(forward, rel=1e-4)
+
+
 def test_a_forward_far_from_spot_falls_back_and_says_so() -> None:
     """Quotes whose parity forward is 10% off spot are stale or broken."""
     chain = _chain(EXP_20, _flat(0.25), forward=110.0)

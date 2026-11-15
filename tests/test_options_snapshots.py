@@ -3,6 +3,8 @@ which tickers, when it writes nothing, and how one failure is contained."""
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -60,7 +62,10 @@ class _World:
         await session.commit()
         return written
 
-    def snapshot_one(self, symbol: str, quoted_at: datetime, rate: float, rate_assumed: bool) -> Any:
+    def snapshot_one(
+        self, symbol: str, session_date: date, quoted_at: datetime, rate: float, rate_assumed: bool
+    ) -> Any:
+        assert session_date == FRIDAY
         assert not self.session.in_tx, "a database connection was held during the Yahoo fetch"
         assert quoted_at == mc.session_close(FRIDAY)
         self.fetched.append(symbol)
@@ -90,7 +95,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> _World:
     monkeypatch.setattr(snaps.store, "tracked_symbols", w.tracked_symbols)
     monkeypatch.setattr(snaps.store, "insert_snapshot", w.insert_snapshot)
     monkeypatch.setattr(snaps, "snapshot_one", w.snapshot_one)
-    monkeypatch.setattr(snaps, "risk_free_rate", lambda: (0.04, False))
+    monkeypatch.setattr(snaps.options_chain, "risk_free_rate", lambda: (0.04, False))
     monkeypatch.setattr(snaps, "_sleep", w.sleep)
     return w
 
@@ -187,7 +192,7 @@ async def test_the_run_reads_the_rate_once(world: _World, monkeypatch: pytest.Mo
         calls.append(1)
         return 0.041, True
 
-    monkeypatch.setattr(snaps, "risk_free_rate", rate)
+    monkeypatch.setattr(snaps.options_chain, "risk_free_rate", rate)
     await _run(world)
     assert calls == [1]
 
@@ -197,14 +202,59 @@ def test_rate_limit_errors_are_recognised_by_name() -> None:
     assert not snaps.is_rate_limit(RuntimeError("Too Many Requests"))
 
 
-async def test_the_run_never_blocks_the_event_loop(world: _World) -> None:
-    """The fetch runs on the options thread, so the loop keeps serving."""
-    loop_ticks: list[int] = []
+async def test_the_run_never_blocks_the_event_loop(world: _World, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fetch runs on the options thread, so the loop keeps serving
+    while it's in progress. (DeepSeek on PR 109: the first version of this
+    test passed with the fetch called inline.)"""
+    fetching = threading.Event()
+    seen_mid_fetch: list[bool] = []
+    real = world.snapshot_one
+
+    def slow(*args: Any) -> Any:
+        fetching.set()
+        time.sleep(0.05)
+        fetching.clear()
+        return real(*args)
+
+    monkeypatch.setattr(snaps, "snapshot_one", slow)
+    done = asyncio.Event()
 
     async def heartbeat() -> None:
-        for _ in range(3):
-            loop_ticks.append(1)
-            await asyncio.sleep(0)
+        while not done.is_set():
+            seen_mid_fetch.append(fetching.is_set())
+            await asyncio.sleep(0.005)
 
-    await asyncio.gather(_run(world), heartbeat())
-    assert len(loop_ticks) == 3
+    async def run() -> None:
+        await _run(world)
+        done.set()
+
+    await asyncio.gather(run(), heartbeat())
+    assert any(seen_mid_fetch), "the event loop never ran while a fetch was in progress"
+
+
+def test_a_ticker_is_keyed_on_the_session_not_its_last_print(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DeepSeek on PR 109: a thin name whose last underlying print was
+    Thursday would be keyed on Thursday on a Friday run, collide, and
+    leave Friday unwritten. The row takes the session's date; the print's
+    own date goes into the detail."""
+    from app.services import options_metrics as om
+    from app.services.options_chain import ChainFetch
+
+    thursday = datetime(2026, 11, 12, 21, tzinfo=UTC)
+    fetched = ChainFetch(
+        symbol="THIN", spot=10.0, market_time=int(thursday.timestamp()), dividend_yield=0.0,
+        expiries=(), chains={}, closes=(),
+    )
+    canned = om.SnapshotMetrics(
+        status="ok", iv30=0.4, iv30_extrapolated=False, iv90=None, iv90_extrapolated=False, skew25=None,
+        rv20=None, rv60=None, call_open_interest=0, put_open_interest=0, call_volume=0, put_volume=0,
+        detail={"method_version": 1, "expiries": []},
+    )
+    monkeypatch.setattr(snaps.options_chain, "fetch_chain", lambda *_a: fetched)
+    monkeypatch.setattr(snaps.om, "snapshot_metrics", lambda *_a, **_k: canned)
+
+    status, row = snaps.snapshot_one("THIN", FRIDAY, mc.session_close(FRIDAY), 0.04, False)
+
+    assert status == "ok" and row is not None
+    assert row["trade_date"] == FRIDAY
+    assert row["detail"]["underlying_date"] == "2026-11-12"

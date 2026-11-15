@@ -71,7 +71,7 @@ async def test_the_route_writes_rows_end_to_end(
     """Yahoo faked; the route, the run and the table are real."""
     monkeypatch.setattr(settings_module.settings, "OPTIONS_SNAPSHOT_SYMBOLS", "SPY,QQQ")
     monkeypatch.setattr(settings_module.settings, "BACKEND_SHARED_SECRET", "")
-    monkeypatch.setattr(snaps, "risk_free_rate", lambda: (0.04, False))
+    monkeypatch.setattr(snaps.options_chain, "risk_free_rate", lambda: (0.04, False))
     monkeypatch.setattr(snaps, "snapshot_one", lambda symbol, *_a: ("ok", _row(symbol)))
     monkeypatch.setattr(snaps, "_now", lambda: datetime(2026, 11, 14, 17, tzinfo=UTC))
 

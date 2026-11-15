@@ -32,12 +32,14 @@ def is_partial(info: dict[str, Any]) -> bool:
 
 
 def read_info(symbol: str, ticker: Any, fresh_ticker: Callable[[], Any]) -> dict[str, Any]:
-    """``ticker.info``; if that was cut short, the same with the gaps
+    """``ticker.info``; if that was cut short, the same with its gaps
     filled from a second read on ``fresh_ticker()`` (a Ticker caches its
-    info, so a retry needs a new one)."""
+    info, so a retry needs a new one). Fields the first answer had keep
+    its values; only the missing ones come from the second."""
     info = _info(ticker)
     if not is_partial(info):
         return info
     logger.info("yahoo info for %s came back without %s; reading it again", symbol, PARTIAL_MARKER)
     retry = _info(fresh_ticker())
-    return {**info, **{key: value for key, value in retry.items() if value is not None}}
+    gaps = {key: value for key, value in retry.items() if value is not None and info.get(key) is None}
+    return {**info, **gaps}

@@ -50,6 +50,9 @@ const POSITIONS: OwnerPositions = OwnerPositionsSchema.parse({
   unanalysed: [{ account: 1, instrument_type: "Future", symbol: "/ESZ6", quantity: 1 }],
 });
 
+// The fixtures' expiries are in December 2026: the page reads the clock.
+const NOW = new Date("2026-11-16T15:00:10Z");
+
 let client: QueryClient;
 
 function renderPage() {
@@ -64,6 +67,8 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
   vi.mocked(fetchOptionsReport).mockImplementation(async (s) => (s === "NVDA" ? REPORT : Promise.reject(new ApiError({ status: 404, title: "no" }))));
   vi.mocked(fetchOptionsChain).mockImplementation(async (s) => (s === "NVDA" ? REPORT.chain! : Promise.reject(new ApiError({ status: 404, title: "no" }))));
   vi.spyOn(api, "fetchMarketPrices").mockImplementation(async (ticker) => ({
@@ -72,6 +77,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   clearOwnerKey();
   vi.mocked(fetchOwnerPositions).mockReset();
   vi.restoreAllMocks();
@@ -116,6 +122,18 @@ describe("PositionsPage", () => {
     const spy = await screen.findAllByTestId("position-group");
     // The fixture's options routes only know NVDA: SPY's card says so.
     await waitFor(() => expect(within(spy[1]).getByTestId("position-context-missing")).toHaveTextContent(/SPY.s option data couldn.t be read/));
+  });
+
+  it("keeps its untracked reads out of the options page's cache", async () => {
+    // Under the options page's keys, a visit there inside the staleTime
+    // would be served this copy and never reach the server: no view recorded.
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerPositions).mockResolvedValue(POSITIONS);
+    renderPage();
+    const [nvda] = await screen.findAllByTestId("position-group");
+    await waitFor(() => expect(within(nvda).getByTestId("position-market")).toHaveTextContent(/not a forecast/));
+    expect(client.getQueryData(["options", "NVDA"])).toBeUndefined();
+    expect(client.getQueryData(["options-chain", "NVDA", "2026-12-11"])).toBeUndefined();
   });
 
   it("forgets a key the server refuses and asks again", async () => {

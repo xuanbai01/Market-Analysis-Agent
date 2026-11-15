@@ -113,7 +113,13 @@ describe("profit and loss", () => {
 
   it("finds a long call's breakeven at strike plus premium", () => {
     const [be] = breakevens(group([option("call", 200, 1, 2.5)]), MARKET);
-    expect(be).toBeCloseTo(202.5, 1);
+    expect(be).toBeCloseTo(202.5, 6);
+  });
+
+  it("finds a breakeven however far it is from the price", () => {
+    // Stock bought years ago at a twentieth of today's price, a call sold on it.
+    expect(breakevens(group([stock(100, 10), option("call", 200, -1, 4)]), MARKET)).toEqual([expect.closeTo(6, 6)]);
+    expect(breakevens(group([option("call", 200, 1, 700)]), MARKET)).toEqual([expect.closeTo(900, 6)]);
   });
 
   it("values a later leg at the first expiry, not at its own", () => {
@@ -153,6 +159,17 @@ describe("what the market prices", () => {
   it("covers a covered call too", () => {
     const chance = profitChance(group([stock(100, 150), option("call", 200, -1, 4)]), smile, MARKET)!;
     expect(chance).toBeGreaterThan(0.9); // bought far below the market
+  });
+
+  it("isn't 0% for stock bought at a fraction of today's price", () => {
+    // Its breakeven is below a fifth of the price: profitable almost anywhere.
+    const chance = profitChance(group([stock(100, 10), option("call", 200, -1, 4)]), smile, MARKET)!;
+    expect(chance).toBeGreaterThan(0.999);
+  });
+
+  it("isn't given when a leg can't be valued", () => {
+    const g = group([option("call", 200, 1, 2.5), option("put", 190, 1, 2, { expiry: null })]);
+    expect(profitChance(g, smile, MARKET)).toBeNull();
   });
 
   it("isn't given for a spread across expiries", () => {

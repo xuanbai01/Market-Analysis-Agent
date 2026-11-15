@@ -36,13 +36,14 @@ describe("OptionsPage", () => {
     renderPage();
     expect(screen.getByTestId("options-loading")).toBeInTheDocument();
     release(REPORT);
-    await screen.findByTestId("options-title");
+    await screen.findByTestId("options-asof");
   });
 
   it("asks for the upper-cased ticker and draws the report", async () => {
     vi.mocked(fetchOptionsReport).mockResolvedValue(REPORT);
     renderPage();
-    expect(await screen.findByTestId("options-title")).toHaveTextContent("NVDA options");
+    await screen.findByTestId("options-asof"); // the title shows before the data; this waits for it
+    expect(screen.getByTestId("options-title")).toHaveTextContent("NVDA options");
     expect(fetchOptionsReport).toHaveBeenCalledWith("NVDA");
     expect(screen.getByText("NVIDIA Corporation")).toBeInTheDocument();
     expect(screen.getByTestId("options-asof")).toHaveTextContent(/last close/i);

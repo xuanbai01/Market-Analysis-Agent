@@ -479,7 +479,7 @@ async def test_rate_limit_allows_up_to_capacity(
 
     for i in range(3):
         resp = await research_client.post(
-            "/v1/research/AAPL", headers={"x-forwarded-for": "10.0.0.1"}
+            "/v1/research/AAPL", headers={"fly-client-ip": "10.0.0.1"}
         )
         assert resp.status_code == 200, f"request {i}: {resp.json()}"
 
@@ -492,7 +492,7 @@ async def test_rate_limit_returns_429_with_retry_after(
     _enable_rate_limit(monkeypatch, capacity=2)
     _patch_orchestrator(monkeypatch, _stub_report())
 
-    headers = {"x-forwarded-for": "10.0.0.2"}
+    headers = {"fly-client-ip": "10.0.0.2"}
     for _ in range(2):
         resp = await research_client.post("/v1/research/AAPL", headers=headers)
         assert resp.status_code == 200
@@ -521,17 +521,17 @@ async def test_rate_limit_independent_per_ip(
 
     # IP-A burns its one token.
     resp = await research_client.post(
-        "/v1/research/AAPL", headers={"x-forwarded-for": "10.0.0.10"}
+        "/v1/research/AAPL", headers={"fly-client-ip": "10.0.0.10"}
     )
     assert resp.status_code == 200
     resp = await research_client.post(
-        "/v1/research/AAPL", headers={"x-forwarded-for": "10.0.0.10"}
+        "/v1/research/AAPL", headers={"fly-client-ip": "10.0.0.10"}
     )
     assert resp.status_code == 429
 
     # IP-B has its own untouched bucket.
     resp = await research_client.post(
-        "/v1/research/AAPL", headers={"x-forwarded-for": "10.0.0.20"}
+        "/v1/research/AAPL", headers={"fly-client-ip": "10.0.0.20"}
     )
     assert resp.status_code == 200
 
@@ -548,35 +548,38 @@ async def test_rate_limit_disabled_when_setting_is_zero(
     """
     _patch_orchestrator(monkeypatch, _stub_report())
 
-    headers = {"x-forwarded-for": "10.0.0.30"}
+    headers = {"fly-client-ip": "10.0.0.30"}
     for _ in range(10):
         resp = await research_client.post("/v1/research/AAPL", headers=headers)
         assert resp.status_code == 200
 
 
-async def test_rate_limit_uses_first_x_forwarded_for_hop(
+async def test_a_forged_x_forwarded_for_gets_no_fresh_bucket(
     research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Multi-hop XFF: only the first IP (originating client) is the key.
-
-    Without this, two users behind the same Fly proxy would share a
-    bucket because all requests would carry the same proxy IP last.
-    """
+    """Fly appends to X-Forwarded-For and keeps whatever the client wrote
+    first, so a new value per request would be a new bucket. The limit
+    keys on Fly-Client-IP, which Fly sets itself (security review, #114)."""
     _enable_rate_limit(monkeypatch, capacity=1)
     _patch_orchestrator(monkeypatch, _stub_report())
 
-    # Two requests with the same originating IP but different proxy
-    # chains — second one must 429 (same client, draining same bucket).
-    chain_a = "10.0.0.40, 198.51.100.1"
-    chain_b = "10.0.0.40, 198.51.100.2"
-    resp = await research_client.post(
-        "/v1/research/AAPL", headers={"x-forwarded-for": chain_a}
-    )
-    assert resp.status_code == 200
-    resp = await research_client.post(
-        "/v1/research/AAPL", headers={"x-forwarded-for": chain_b}
-    )
-    assert resp.status_code == 429
+    first = {"fly-client-ip": "10.0.0.40", "x-forwarded-for": "203.0.113.1"}
+    forged = {"fly-client-ip": "10.0.0.40", "x-forwarded-for": "203.0.113.2"}
+    assert (await research_client.post("/v1/research/AAPL", headers=first)).status_code == 200
+    assert (await research_client.post("/v1/research/AAPL", headers=forged)).status_code == 429
+
+
+async def test_a_header_that_is_not_an_ip_is_not_a_key(
+    research_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-IP value would let anyone mint keys (memory) and buckets; it
+    falls back to the socket's peer."""
+    _enable_rate_limit(monkeypatch, capacity=1)
+    _patch_orchestrator(monkeypatch, _stub_report())
+
+    a = await research_client.post("/v1/research/AAPL", headers={"fly-client-ip": "not-an-ip-1"})
+    b = await research_client.post("/v1/research/AAPL", headers={"fly-client-ip": "not-an-ip-2"})
+    assert (a.status_code, b.status_code) == (200, 429)
 
 
 async def test_rate_limit_runs_after_cache_miss_only(
@@ -594,7 +597,7 @@ async def test_rate_limit_runs_after_cache_miss_only(
     orch_calls = _patch_orchestrator(monkeypatch, _stub_report())
     cache_upserts = _patch_cache_upsert(monkeypatch)
 
-    headers = {"x-forwarded-for": "10.0.0.50"}
+    headers = {"fly-client-ip": "10.0.0.50"}
     # Burn the one token.
     await research_client.post("/v1/research/AAPL", headers=headers)
     # The 2nd request is rate-limited at the post-cache gate.
@@ -623,7 +626,7 @@ async def test_cache_hits_do_not_consume_rate_limit_tokens(
     orch_calls = _patch_orchestrator(monkeypatch, _stub_report())
     upserts = _patch_cache_upsert(monkeypatch)
 
-    headers = {"x-forwarded-for": "10.0.0.60"}
+    headers = {"fly-client-ip": "10.0.0.60"}
     for _ in range(10):
         resp = await research_client.post("/v1/research/AAPL", headers=headers)
         assert resp.status_code == 200
@@ -645,7 +648,7 @@ async def test_refresh_true_consumes_rate_limit_token(
     _patch_orchestrator(monkeypatch, _stub_report())
     _patch_cache_upsert(monkeypatch)
 
-    headers = {"x-forwarded-for": "10.0.0.70"}
+    headers = {"fly-client-ip": "10.0.0.70"}
     for _ in range(2):
         resp = await research_client.post(
             "/v1/research/AAPL?refresh=true", headers=headers
@@ -711,7 +714,7 @@ async def test_outdated_report_is_served_when_the_rate_limit_is_spent(
     _patch_cache_lookup(monkeypatch, returns=old)
     orch_calls = _patch_orchestrator(monkeypatch, _stub_report())
     _patch_cache_upsert(monkeypatch)
-    headers = {"x-forwarded-for": "10.0.0.90"}
+    headers = {"fly-client-ip": "10.0.0.90"}
 
     first = await research_client.post("/v1/research/AAPL", headers=headers)
     second = await research_client.post("/v1/research/MSFT", headers=headers)

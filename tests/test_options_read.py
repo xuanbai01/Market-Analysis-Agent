@@ -166,3 +166,40 @@ async def test_has_read_follows_the_cached_report(fake_llm: _Llm, monkeypatch: p
 def test_a_read_round_trips_as_json() -> None:
     read = OptionsRead(symbol="NVDA", quoted_at=CLOSE, at_close=True, headline="x", points=[], claims=[], generated_at=NOW)
     assert OptionsRead.model_validate_json(read.model_dump_json()) == read
+
+
+async def test_concurrent_visits_share_one_model_call_and_leave_no_lock(fake_llm: _Llm, monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    _serve(monkeypatch, _report())
+    reads = await asyncio.gather(*(reader.get_read(None, "NVDA", now=NOW) for _ in range(3)))  # type: ignore[arg-type]
+    assert len(fake_llm.prompts) == 1 and all(r is reads[0] for r in reads)
+    assert reader._locks == {} and reader._waiting == {}
+
+
+async def test_after_a_failure_waiting_visits_try_one_at_a_time(fake_llm: _Llm, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Security review (#114): the holder used to drop the lock while
+    others waited, so a new visit could call the model alongside them."""
+    import asyncio
+
+    _serve(monkeypatch, _report())
+    fake_llm.draft = RuntimeError("provider down")
+    running = [0]
+    most = [0]
+    real = fake_llm.synth_call
+
+    async def counted(**kwargs: Any) -> Any:
+        running[0] += 1
+        most[0] = max(most[0], running[0])
+        await asyncio.sleep(0)
+        try:
+            return await real(**kwargs)
+        finally:
+            running[0] -= 1
+
+    monkeypatch.setattr(reader.llm, "synth_call", counted)
+    results = await asyncio.gather(*(reader.get_read(None, "NVDA", now=NOW) for _ in range(3)), return_exceptions=True)  # type: ignore[arg-type]
+    assert all(isinstance(r, reader.ReadUnavailable) for r in results)
+    assert most[0] == 1
+    assert reader._locks == {} and reader._waiting == {}
+

@@ -335,5 +335,12 @@ def test_labels_can_come_from_other_claims_than_the_figures() -> None:
     assert rt.unbacked_numbers("IV30 is 59.46%", figures, labels=FACTS) == [59.46]
 
 
+def test_a_number_with_a_unit_is_a_figure_not_a_label() -> None:
+    """ "30" names IV30's horizon; "a 30% move" is a figure no claim shows."""
+    assert rt.unbacked_numbers("options price a 30% move", [FACTS[0]], labels=FACTS) == [30.0]
+    assert rt.unbacked_numbers("up 8 pts", [FACTS[0]], labels=FACTS) == [8.0]
+    assert rt.unbacked_numbers("IV30 over 30 days", [FACTS[0]], labels=FACTS) == []
+
+
 def test_a_claim_without_a_number_backs_nothing() -> None:
     assert rt.unbacked_numbers("Up 12%.", [claim("Business description", "Makes chips.")]) == [12.0]

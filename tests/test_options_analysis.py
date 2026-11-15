@@ -163,7 +163,7 @@ def test_comparisons_state_their_direction_in_words() -> None:
     term = by_name["IV90 below IV30: the term structure slopes down, longer expiries price less volatility"]
     assert term.value == pytest.approx(-0.03) and term.unit == "percentage_points"
     assert "Put/call open interest, expiries read: more calls open than puts" in by_name
-    move = by_name["Implied earnings move above the average move after the last 2 reports"]
+    move = by_name["Implied earnings move above the average absolute move after the last 2 reports"]
     assert move.value == pytest.approx(0.02) and move.unit == "percentage_points"
 
 
@@ -173,7 +173,7 @@ def test_the_other_directions_and_a_level_term_structure() -> None:
     assert "IV90 level with IV30: the term structure is flat" in by_name
     assert "25-delta skew, expiry nearest 30 days: calls carry higher IV than puts" in by_name
     assert "Put/call open interest, expiries read: as many puts open as calls" in by_name
-    assert "Implied earnings move below the average move after the last 1 report" in by_name
+    assert "Implied earnings move below the average absolute move after the last 1 report" in by_name
 
 
 def test_no_put_open_interest_is_more_calls_not_a_tie() -> None:

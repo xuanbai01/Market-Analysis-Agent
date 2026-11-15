@@ -71,6 +71,14 @@ describe("OptionsReadCard", () => {
     expect(await screen.findByTestId("options-read-unavailable")).toHaveTextContent(/no read/i);
   });
 
+  it("makes up no wait when the server gives none", async () => {
+    vi.mocked(fetchOptionsRead).mockRejectedValue(new ApiError({ status: 429, title: "Too many" }));
+    renderCard();
+    const note = await screen.findByTestId("options-read-unavailable");
+    expect(note).toHaveTextContent(/try again later/i);
+    expect(note.textContent).not.toMatch(/\d+ minutes/);
+  });
+
   it("sends a stale sign-in back to the sign-in page", async () => {
     vi.mocked(fetchOptionsRead).mockRejectedValue(new ApiError({ status: 401, title: "Unauthorized" }));
     renderCard();

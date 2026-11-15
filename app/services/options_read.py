@@ -178,10 +178,12 @@ async def write_read(report: OptionsReport, now: datetime) -> OptionsRead | None
     if stray := research_thesis.unbacked_numbers(headline, report.claims):
         logger.warning("options read for %s: the headline quotes %s, which no fact shows", report.symbol, stray)
         return None
+    # Resolve and check every drafted point, then keep the first five: a
+    # dropped point makes room for the next.
     points = research_thesis.resolve_points(
-        draft.points, ids, MAX_POINTS, {READ_SECTION: report.claims}, max_refs=None
+        draft.points, ids, len(draft.points), {READ_SECTION: report.claims}, max_refs=None
     )
-    points = _backed(points, report)
+    points = _backed(points, report)[:MAX_POINTS]
     if not points:
         logger.warning("options read for %s: none of %d drafted points survived", report.symbol, len(draft.points))
         return None

@@ -134,14 +134,14 @@ def _parts(
     }
     if fetched is None:
         return empty
-    spot = fetched.spot if fetched.spot > 0 else next((c for _d, c in reversed(fetched.closes)), None)
+    spot = fetched.spot if fetched.spot > 0 else None
     metrics = om.snapshot_metrics(fetched, quoted_at, rate, rate_assumed=rate_assumed, smiles=smiles)
     default = oa.default_smile(smiles)
     put_call_oi, put_call_volume = oa.put_call_ratios(fetched.chains.values())
     earnings = None
     if schedule is not None:
         event = event_move(smiles, quoted_at, reaction, estimated=fetched.earnings_estimated)
-        past = past_moves(schedule.past, fetched.closes)
+        past = past_moves(schedule.past, om.completed_closes(fetched.closes, quoted_at))
         earnings = oa.earnings_block(schedule, event, past, spot, estimated=fetched.earnings_estimated)
     return {
         **empty,
@@ -156,7 +156,9 @@ def _parts(
         "rv60": metrics.rv60,
         "put_call_open_interest": put_call_oi,
         "put_call_volume": put_call_volume,
-        "expiries": [oa.expiry_summary(fetched.chains[s.expiry], s, reaction, quoted_at) for s in smiles],
+        "expiries": [
+            oa.expiry_summary(fetched.chains[s.expiry], s, oa.upcoming(reaction, quoted_at), quoted_at) for s in smiles
+        ],
         "listed_expiries": list(fetched.expiries),
         "chain": oa.expiry_chain(fetched.chains[default.expiry], default) if default else None,
         "earnings": earnings,
@@ -175,7 +177,7 @@ def build(symbol: str, now: datetime) -> _Built:
             found["schedule"] = schedule
             if schedule.next is not None:
                 found["reaction"] = reaction_sessions(schedule.next.when.date(), schedule.next.timing)
-        return oa.report_expiries(listed, quoted_at, found["reaction"])
+        return oa.report_expiries(listed, quoted_at, oa.upcoming(found["reaction"], quoted_at))
 
     cpu_started = time.thread_time()
     not_found = False

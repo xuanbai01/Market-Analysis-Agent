@@ -105,6 +105,7 @@ def _quotes(frame: Any) -> tuple[Quote, ...]:
             regular=size == _REGULAR,
         )
         for strike, bid, ask, volume, open_interest, size in rows
+        if _number(strike) > 0  # no strike, no option: ln(K/F) would fail later
     )
 
 
@@ -163,9 +164,12 @@ def _fetch_yfinance_chain(
     # Today, not the last print's date: a thin name last traded days ago
     # would keep an earnings date that has passed.
     today = datetime.now(mc.ET).date()
+    # No regularMarketPrice (a halted or new listing): the last close stands
+    # in, before any smile is built, so every forward check has a spot.
+    price = _number(underlying.get("regularMarketPrice"))
     return ChainFetch(
         symbol=symbol,
-        spot=_number(underlying.get("regularMarketPrice")),
+        spot=price if price > 0 else (closes[-1][1] if closes else 0.0),
         market_time=market_time,
         dividend_yield=_dividend_yield(underlying),
         expiries=listed,

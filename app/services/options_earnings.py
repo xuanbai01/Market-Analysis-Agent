@@ -77,8 +77,10 @@ def event_move(
     if last <= today:
         return _refused("the report has already traded")
 
-    def sessions(s: Smile) -> int:
-        return mc.sessions_between(today, s.expiry)
+    left = mc.session_left(quoted_at)  # inside a session, the rest of today carries variance too
+
+    def sessions(s: Smile) -> float:
+        return mc.sessions_between(today, s.expiry) + left
 
     def variance(s: Smile) -> float:
         return s.atm_vol * s.atm_vol * s.years

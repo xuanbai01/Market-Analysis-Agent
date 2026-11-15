@@ -260,6 +260,15 @@ _PUT_CALL = {
 _EARNINGS_WAY = {1: "above", -1: "below", 0: "level with"}
 
 
+def upcoming(reaction: tuple[date, date] | None, quoted_at: datetime) -> tuple[date, date] | None:
+    """The report's reaction sessions while it is still ahead of the quotes;
+    None once its last reaction session has begun (the schedule is cached a
+    day, and Yahoo is slow to mark a report as reported)."""
+    if reaction is None or reaction[1] <= quoted_at.astimezone(mc.ET).date():
+        return None
+    return reaction
+
+
 def _direction(x: float, places: int) -> int:
     """The sign of ``x`` as displayed: 0 when it rounds to zero."""
     shown = round(x, places)
@@ -313,12 +322,13 @@ def claims(
                          "why the expiries can't separate the report from other days"))
     if earnings is not None and earnings.past:
         n = len(earnings.past)
-        rows.append((f"Average absolute move after the last {n} reports",
+        last_n = f"the last {n} reports" if n > 1 else "the last report"
+        rows.append((f"Average absolute move after {last_n}",
                      earnings.past_mean_abs, "fraction", "mean |ln(close after ÷ close before)|"))
         priced_gap = _gap(earnings.implied_move, earnings.past_mean_abs)
         if priced_gap is not None:
             way = _EARNINGS_WAY[_direction(priced_gap, points)]
-            rows.append((f"Implied earnings move {way} the average absolute move after the last {n} report{'s' if n > 1 else ''}",
+            rows.append((f"Implied earnings move {way} the average absolute move after {last_n}",
                          priced_gap, "percentage_points", "implied earnings move − average absolute move"))
     if history.percentile is not None:
         rows.append((f"IV30 percentile over {min(history.sessions, HISTORY_WINDOW)} stored sessions",

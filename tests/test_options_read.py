@@ -72,6 +72,7 @@ def test_the_ids_in_the_test_drafts_are_the_ones_meant() -> None:
     assert ids["O2"].startswith("Implied volatility, 90 days")
     assert ids["O5"].startswith("IV30 above realized volatility")
     assert ids["O6"].startswith("IV90 below IV30")
+    assert ids["O7"].startswith("25-delta skew") and "puts carry higher" in ids["O7"]
 
 
 async def test_a_read_cites_the_reports_claims(fake_llm: _Llm) -> None:
@@ -114,10 +115,11 @@ async def test_a_point_quoting_a_figure_it_does_not_cite_is_dropped(fake_llm: _L
     [
         "IV30 is 59.46%, below realized volatility by 2.46 points.",  # the claim says above
         "IV90 is 55.00%, 4.46 points under IV30: the term structure slopes up.",  # it slopes down
+        "Calls carry higher IV than puts, a skew of 2.69 points.",  # puts carry higher
     ],
 )
 async def test_a_point_that_turns_its_claims_direction_round_is_dropped(fake_llm: _Llm, text: str) -> None:
-    ids = ["O1", "O5"] if "realized" in text else ["O2", "O6"]
+    ids = ["O1", "O5"] if "realized" in text else ["O7"] if "skew" in text else ["O2", "O6"]
     fake_llm.draft = _draft(ABOVE, (text, ids))
     read = await reader.write_read(_report(), NOW)
     assert read is not None and len(read.points) == 1

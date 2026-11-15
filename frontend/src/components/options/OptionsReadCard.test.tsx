@@ -64,7 +64,9 @@ describe("OptionsReadCard", () => {
   it("says when the read limit is reached, and when no read could be written", async () => {
     vi.mocked(fetchOptionsRead).mockRejectedValue(new ApiError({ status: 429, title: "Too many", retryAfterSeconds: 600 }));
     const { unmount } = renderCard();
-    expect(await screen.findByTestId("options-read-unavailable")).toHaveTextContent(/10 minutes/);
+    const limited = await screen.findByTestId("options-read-unavailable");
+    expect(limited).toHaveTextContent(/10 minutes/);
+    expect(limited).toHaveTextContent(/hourly limit/i); // the lookup limit or the read limit: either can answer
     unmount();
     vi.mocked(fetchOptionsRead).mockRejectedValue(new ApiError({ status: 503, title: "No read" }));
     renderCard();

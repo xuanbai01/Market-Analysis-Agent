@@ -43,6 +43,7 @@ class _FakeTicker:
         self._underlying = underlying
         self._calendar = calendar if calendar is not None else {}
         self.chain_calls: list[str | None] = []
+        self.half_empty: set[str] = set()
 
     @property
     def calendar(self) -> Any:
@@ -54,6 +55,8 @@ class _FakeTicker:
         self.chain_calls.append(date)
         if not self._expiries:
             return SimpleNamespace(calls=None, puts=None, underlying=None)
+        if date in self.half_empty:
+            return SimpleNamespace(calls=_frame([(100.0, 2.0, 2.1, 1, 1, "REGULAR")]), puts=None, underlying=None)
         calls = _frame([(100.0, 2.0, 2.1, None, 10, "REGULAR"), (105.0, 0.5, 0.6, 7, 20, "REGULAR")])
         puts = _frame([(95.0, 0.4, 0.5, 3, 5, "REGULAR"), (100.0, 1.9, 2.0, 1, 4, "ADJUSTED")])
         return SimpleNamespace(calls=calls, puts=puts, underlying=self._underlying)
@@ -177,3 +180,12 @@ def test_a_fund_has_no_earnings_and_its_calendar_is_not_read(monkeypatch: pytest
     _install(monkeypatch, _FakeTicker(["2026-11-16"], etf, {"Earnings Date": [date(2027, 1, 28)]}))
     fetched = oc.fetch_chain("QQQ", lambda listed: listed)
     assert fetched is not None and fetched.next_earnings is None
+
+
+def test_an_expiry_missing_one_side_is_dropped_not_the_ticker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DeepSeek on PR 109: puts None raised AttributeError and lost the day."""
+    ticker = _FakeTicker(["2026-11-16", "2026-12-18"], _UNDERLYING)
+    ticker.half_empty = {"2026-12-18"}
+    _install(monkeypatch, ticker)
+    fetched = oc.fetch_chain("AAPL", lambda listed: listed)
+    assert fetched is not None and sorted(fetched.chains) == [date(2026, 11, 16)]

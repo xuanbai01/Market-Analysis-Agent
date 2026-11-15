@@ -19,13 +19,16 @@ FRIDAY = date(2026, 11, 13)
 
 
 class _Session:
-    """Tracks whether a transaction (so a pooled connection) is open."""
+    """Tracks whether a transaction (so a pooled connection) is open, and
+    whether a failed statement left it needing a rollback."""
 
     def __init__(self) -> None:
         self.in_tx = False
+        self.needs_rollback = False
 
     async def rollback(self) -> None:
         self.in_tx = False
+        self.needs_rollback = False
 
     async def commit(self) -> None:
         self.in_tx = False
@@ -42,6 +45,7 @@ class _World:
         self.fetched: list[str] = []
         self.outcomes: dict[str, Any] = {}  # symbol -> status, or an exception (or a list of them)
         self.sleeps: list[float] = []
+        self.bad_rows: set[str] = set()
 
     async def stored_symbols(self, session: _Session, trade_date: date) -> set[str]:
         session.in_tx = True
@@ -53,8 +57,13 @@ class _World:
         return list(self.tracked)
 
     async def insert_snapshot(self, session: _Session, row: dict[str, Any]) -> bool:
-        # Like the real store: each write commits on its own.
+        # Like the real store: each write commits on its own, and a failed
+        # statement leaves the session unusable until it rolls back.
+        assert not session.needs_rollback, "PendingRollbackError"
         session.in_tx = True
+        if row["symbol"] in self.bad_rows:
+            session.needs_rollback = True
+            raise ValueError("Postgres rejected the row")
         written = row["symbol"] not in self.stored
         if written:
             self.inserted.append(row)
@@ -258,3 +267,35 @@ def test_a_ticker_is_keyed_on_the_session_not_its_last_print(monkeypatch: pytest
     assert status == "ok" and row is not None
     assert row["trade_date"] == FRIDAY
     assert row["detail"]["underlying_date"] == "2026-11-12"
+
+
+async def test_a_failed_insert_does_not_lose_the_rest_of_the_day(world: _World) -> None:
+    """DeepSeek on PR 109: a failed statement left the session needing a
+    rollback, and every later ticker's insert failed with it."""
+    world.bad_rows = {"SPY"}
+    result = await _run(world)
+    assert result.written == ["QQQ", "NVDA"]
+    assert [(f.symbol, f.reason) for f in result.failed] == [("SPY", "ValueError")]
+
+
+def test_a_missing_spot_falls_back_to_the_last_close(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DeepSeek on PR 109: no regularMarketPrice stored a $0 spot forever."""
+    from app.services import options_metrics as om
+    from app.services.options_chain import ChainFetch
+
+    fetched = ChainFetch(
+        symbol="NEW", spot=0.0, market_time=0, dividend_yield=0.0, expiries=(), chains={},
+        closes=((date(2026, 11, 12), 41.0), (FRIDAY, 42.5)),
+    )
+    canned = om.SnapshotMetrics(
+        status="ok", iv30=0.4, iv30_extrapolated=False, iv90=None, iv90_extrapolated=False, skew25=None,
+        rv20=None, rv60=None, call_open_interest=0, put_open_interest=0, call_volume=0, put_volume=0,
+        detail={"method_version": 1, "expiries": []},
+    )
+    monkeypatch.setattr(snaps.options_chain, "fetch_chain", lambda *_a: fetched)
+    monkeypatch.setattr(snaps.om, "snapshot_metrics", lambda *_a, **_k: canned)
+
+    status, row = snaps.snapshot_one("NEW", FRIDAY, mc.session_close(FRIDAY), 0.04, False)
+
+    assert status == "ok" and row is not None and row["spot"] == 42.5
+

@@ -198,3 +198,14 @@ def test_the_detail_keeps_the_raw_quotes_to_recompute_from() -> None:
     expiry = detail["expiries"][0]
     assert expiry["expiry"] == EXP_20.isoformat()
     assert expiry["quotes"] and len(expiry["quotes"][0]) == 9  # strike, call bid/ask, put bid/ask, OI, volume
+
+
+def test_a_chain_without_a_30_day_figure_is_not_a_snapshot() -> None:
+    """DeepSeek on PR 109: written with IV30 null, the row would stand for
+    the day and the night's retry would skip it. Only far expiries priced
+    here (63 and 98 days), so there is no IV30 and nothing to store."""
+    far1, far2 = date(2027, 1, 15), date(2027, 2, 19)
+    fetched = _fetch({far1: _chain(far1, _flat(0.25)), far2: _chain(far2, _flat(0.25))})
+    result = metrics.snapshot_metrics(fetched, QUOTED_AT, RATE)
+    assert result.iv30 is None
+    assert result.status == "no_usable_quotes"

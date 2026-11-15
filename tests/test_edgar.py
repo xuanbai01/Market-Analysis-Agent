@@ -360,7 +360,12 @@ async def test_cache_hit_reflected_in_observability(
             "AAPL", form_type="10-K", recent_n=1, provider="fake"
         )
 
-    rec = next(r for r in caplog.records if r.name == "app.external")
+    # _seed logs its own call too; read the one under test.
+    rec = next(
+        r
+        for r in caplog.records
+        if r.name == "app.external" and r.service_id == "fake.edgar"
+    )
     assert rec.output_summary["cache_hits"] == 1
     assert rec.output_summary["filing_count"] == 1
 

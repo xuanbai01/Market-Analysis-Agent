@@ -174,11 +174,40 @@ async def test_the_route_serves_the_live_chain_to_the_owner_only(account: _Tasty
     resp = await _get(path, owner)
     assert resp.status_code == 200 and resp.headers["Cache-Control"] == "no-store"
     assert resp.json()["chain"]["expiry"] == EXPIRY.isoformat()
-    assert (await _get("/v1/owner/options/SPY/live/2026-12-19", owner)).status_code == 404
-    assert (await _get(f"/v1/owner/options/not!a!ticker/live/{EXPIRY}", owner)).status_code == 422
+    # Not a 404: the page reads a 404 from an owner route as "no owner key
+    # on the server" and would forget the key (PR B's security review).
+    unlisted = await _get("/v1/owner/options/SPY/live/2026-12-19", owner)
+    assert unlisted.status_code == 422 and "lists no SPY options" in unlisted.json()["title"]
+    for bad in ("not!a!ticker", "A-B-C", "A.", "BF.B.C", "A--B"):
+        assert (await _get(f"/v1/owner/options/{bad}/live/{EXPIRY}", owner)).status_code == 422, bad
 
 
 async def test_the_route_is_a_503_with_the_reason(account: _Tastytrade, owner: dict[str, str]) -> None:
     account.fail = tt.TastytradeUnavailable("tastytrade answered 503")
     resp = await _get(f"/v1/owner/options/SPY/live/{EXPIRY}", owner)
     assert resp.status_code == 503 and "503" in resp.json()["title"]
+
+
+async def test_the_chains_kept_are_few_and_fresh(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A chain is big; only the last few, and only for CHAIN_SECONDS."""
+    monkeypatch.setattr(lc, "MAX_CHAINS", 3)
+    for symbol in ("A", "B", "C", "D"):
+        lc._remember_chain(symbol, [])
+    assert list(lc._chains) == ["B", "C", "D"]
+    account.clock[0] += lc.CHAIN_SECONDS + 1  # type: ignore[attr-defined]
+    lc._remember_chain("E", [])
+    assert list(lc._chains) == ["E"]
+
+
+async def test_a_build_that_runs_too_long_says_so(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    async def slow(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        await asyncio.sleep(1)
+        return {}
+
+    monkeypatch.setattr(lc.tt, "get", slow)
+    monkeypatch.setattr(lc, "BUILD_SECONDS", 0.01)
+    with pytest.raises(lc.LiveChainUnavailable, match="too long"):
+        await lc.live_chain("SPY", EXPIRY)
+

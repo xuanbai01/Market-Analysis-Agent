@@ -209,6 +209,15 @@ describe("ExpirySection live quotes", () => {
     expect(screen.getAllByText((text) => text.includes(delayedForward)).length).toBeGreaterThan(0);
   });
 
+  it("keeps the key when tastytrade doesn't list the expiry", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 422, title: "tastytrade lists no NVDA options expiring 2026-12-11." }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/lists no NVDA options/));
+    expect(getOwnerKey()).toBe("k".repeat(40));
+  });
+
   it("forgets a refused owner key", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 403, title: "This needs the owner key." }));

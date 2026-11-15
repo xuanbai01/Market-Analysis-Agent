@@ -278,7 +278,12 @@ function change(now: number, then: number): string {
   return `${gap > 0 ? "up" : "down"} ${pct(Math.abs(gap))}`;
 }
 
-/** The latest whole-chain totals, and how they moved since the first stored. */
+/** A session whose read covered every listed expiry. The night run stores a
+ *  short read rather than lose the day, and beside whole reads it would look
+ *  like open interest falling, so changes and lines use whole reads only. */
+export const wholeRead = (h: OpenInterestTotal): boolean => h.expiries >= h.listed;
+
+/** The latest whole-chain totals, and how they moved since the first whole read. */
 export function openInterestHistorySentence(history: OpenInterestTotal[]): Sentence | null {
   const last = history[history.length - 1];
   if (!last) return null;
@@ -292,13 +297,16 @@ export function openInterestHistorySentence(history: OpenInterestTotal[]): Sente
   ];
   if (last.call > 0) parts.push(" (put/call ", { strong: (last.put / last.call).toFixed(2) }, ")");
   const first = history[0];
-  if (history.length > 1 && first.call > 0 && first.put > 0) {
+  const base = history.slice(0, -1).find(wholeRead);
+  if (base && !wholeRead(last)) {
+    parts.push(". The change is left out: this session's read was short.");
+  } else if (base && base.call > 0 && base.put > 0) {
     parts.push(
       "; calls ",
-      { strong: change(last.call, first.call) },
+      { strong: change(last.call, base.call) },
       " and puts ",
-      { strong: change(last.put, first.put) },
-      ` since ${dateLabel(first.date)}.`,
+      { strong: change(last.put, base.put) },
+      ` since ${dateLabel(base.date)}.`,
     );
   } else {
     parts.push(`. Recorded daily from ${dateLabel(first.date)}.`);

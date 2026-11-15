@@ -13,8 +13,10 @@
 #
 # Needs the repository variable API_BASE_URL (https://market-analysis-agent.fly.dev)
 # and the secret BACKEND_SHARED_SECRET (the API's shared secret; docs/deployment.md).
-# The job fails when the market was open, or when more than half of the
-# tickers failed or were deferred; the step summary lists what happened.
+# The job fails when the market was open, or when fewer than half of the
+# tickers due that day were written, for any reason (failed, deferred, or
+# Yahoo returning no usable quotes): a quiet day lost is the failure this
+# table can't afford. The step summary lists what happened.
 
 name: IV Snapshot
 
@@ -75,7 +77,8 @@ jobs:
             echo "::error::The market was open; the run stored nothing."
             exit 1
           fi
-          if [ "$status" = "ok" ] && [ $((2 * (failed + deferred))) -gt "$targets" ]; then
-            echo "::error::More than half of the tickers failed or were deferred."
+          due=$((targets - skipped))
+          if [ "$status" = "ok" ] && [ "$due" -gt 0 ] && [ $((2 * written)) -lt "$due" ]; then
+            echo "::error::Only $written of the $due tickers due today were written."
             exit 1
           fi

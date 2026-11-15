@@ -115,6 +115,11 @@ describe("EarningsMoves", () => {
     expect(screen.getAllByTestId("options-earnings-bar")).toHaveLength(8);
   });
 
+  it("names one past report in the singular", () => {
+    render(<EarningsMoves earnings={{ ...EARNINGS, past: EARNINGS.past.slice(0, 1), past_mean_abs: 0.05 }} />);
+    expect(screen.getByTestId("options-earnings-summary")).toHaveTextContent("The last report moved");
+  });
+
   it("draws nothing with no report and no history", () => {
     const { container } = render(
       <EarningsMoves earnings={{ ...EARNINGS, next_date: null, implied_move: null, past: [], refused: "no earnings date" }} />,

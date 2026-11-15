@@ -124,6 +124,35 @@ describe("smileOf", () => {
   });
 });
 
+describe("a smile with one noisy quote", () => {
+  // $1 strikes around 100, 30 days, a flat 30% smile but one point 1.5
+  // vol points high: what a 25%-of-mid spread allows (edge-case review).
+  const points = (bump: number): [number, number][] =>
+    Array.from({ length: 41 }, (_, i) => {
+      const x = Math.log((80 + i) / 100);
+      return [x, i === 23 ? 0.3 + bump : 0.3];
+    });
+  const noisy: Smile = { forward: 100, years: 30 / 365, points: points(0.015) };
+  const clean: Smile = { forward: 100, years: 30 / 365, points: points(0) };
+
+  it("keeps the chance of ending above a strike falling as the strike rises", () => {
+    let previous = 1;
+    for (let k = 90; k <= 110; k += 0.25) {
+      const p = probAbove(noisy, k);
+      expect(p).toBeLessThanOrEqual(previous + 1e-12);
+      previous = p;
+    }
+  });
+
+  it("moves a narrow spread's probability of profit by little", () => {
+    const bearCall: PricedLeg[] = [
+      { kind: "call", side: -1, strike: 102, premium: 1.2 },
+      { kind: "call", side: 1, strike: 104, premium: 0.6 },
+    ];
+    expect(Math.abs(probProfit(bearCall, noisy) - probProfit(bearCall, clean))).toBeLessThan(0.03);
+  });
+});
+
 describe("a smile with no volatility", () => {
   it("gives a certain answer, not NaN", () => {
     const dead: Smile = { forward: 100, years: 0.1, points: [[0, 0]] };

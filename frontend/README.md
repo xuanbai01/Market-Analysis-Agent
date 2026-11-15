@@ -41,7 +41,7 @@ CI runs lint, typecheck, test and build on every PR.
 
 ## Bundle budget
 
-The main chunk must stay under **100 KB gzipped**; it is 90.56 KB (2026-11-15). Every route except `/` and `/login` is lazy-loaded into its own chunk: dashboard 26.9 KB, demo shell + index 1.8 KB, compare 6.6 KB, lens 4.4 KB (+ 0.8 KB index), options 12.5 KB and positions 8.6 KB, both on an 8.5 KB chunk they share (the options schemas, fetchers, strategy math and chart kit; Vite names it after `useSignOutOn401`), search modal 1.3 KB. There is no charting library; charts are hand-rolled SVG. These sizes are kept only here. Check them with `npm run build` before adding a dependency.
+The main chunk must stay under **100 KB gzipped**; it is 90.58 KB (2026-11-15). Every route except `/` and `/login` is lazy-loaded into its own chunk: dashboard 26.9 KB, demo shell + index 1.8 KB, compare 6.6 KB, lens 4.4 KB (+ 0.8 KB index), options 12.5 KB and positions 9.0 KB, both on an 8.5 KB chunk they share (the options schemas, fetchers, strategy math and chart kit; Vite names it after `useSignOutOn401`), search modal 1.3 KB. There is no charting library; charts are hand-rolled SVG. These sizes are kept only here. Check them with `npm run build` before adding a dependency.
 
 ## Layout
 

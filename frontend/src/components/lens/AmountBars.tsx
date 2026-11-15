@@ -6,7 +6,7 @@
  */
 import { useState } from "react";
 
-import { companiesInYear, companyColor, usdBillions } from "../../lib/lens";
+import { billionTickLabels, companiesInYear, companyColor, usdBillions } from "../../lib/lens";
 import type { LensReport } from "../../lib/schemas";
 import { useMeasuredWidth } from "../../lib/use-measured-width";
 import { niceTicks } from "../MultiLine";
@@ -31,6 +31,7 @@ export function AmountBars({ report, height = 240 }: Props) {
 
   const totals = years.map((_, i) => companies.reduce((sum, c) => sum + (c.points[i]?.value ?? 0), 0));
   const ticks = niceTicks(0, Math.max(...totals), 4);
+  const tickLabels = billionTickLabels(ticks);
   const yMax = ticks[ticks.length - 1] || 1;
   const W = Math.max(MIN_WIDTH, measured ?? FALLBACK_WIDTH);
   const innerW = W - PAD.left - PAD.right;
@@ -51,11 +52,11 @@ export function AmountBars({ report, height = 240 }: Props) {
         aria-label={`Total ${metric.short} by year, ${usdBillions(totals[0])} in CY${years[0]} to ${usdBillions(totals[totals.length - 1])} in CY${years[years.length - 1]}.`}
         onMouseLeave={() => setHover(null)}
       >
-        {ticks.map((t) => (
+        {ticks.map((t, k) => (
           <g key={t}>
             <line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} stroke="#1f2630" strokeWidth={1} />
             <text x={PAD.left - 8} y={y(t) + 4} textAnchor="end" fontSize={11} fill="#8892a0" fontFamily="JetBrains Mono, monospace">
-              {t === 0 ? "$0" : `$${Math.round(t / 1e9)}B`}
+              {tickLabels[k]}
             </text>
           </g>
         ))}

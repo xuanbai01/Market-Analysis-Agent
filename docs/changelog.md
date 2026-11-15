@@ -193,6 +193,15 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Blocked storage:** the key lasts the page in memory when storage refuses it.
     - **No list of holdings:** the options report and chain routes take `track=false`, so the holdings aren't recorded as option-page views.
     - **The fake backend** can't open real routes, spend a key or reach a database.
+  - **From #128's AI review:**
+    - a holding whose option data can't be read says so on its card, instead of dropping the chance of profit and max pain quietly;
+    - an options-page view after the positions page's untracked read is still recorded (the cached copy records it once);
+    - the first expiry is taken by date.
+  - **From #128's second AI review:**
+    - **The chance of profit read 0% for stock bought far below today's price.** Breakevens were searched only between a fifth of the price and four times it, and a covered call on shares bought at a twentieth of today's price breaks even below that. Options that expire together have a payoff that bends only at the strikes, so their breakevens are now found exactly, as the strategy builder finds them. A leg that can't be valued gives no chance, not 0%.
+    - **The positions page's reads have query keys of their own.** Under the options page's keys, a visit there within five minutes was served the untracked copy from the browser and never reached the server, so no view was recorded.
+    - **The server records a view that waited on the lock** while the untracked build ran. A report with no usable options records none, whoever built it.
+    - **The page's test pins the clock,** since its fixtures' expiries pass in December.
   - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 - **The owner's trade copy, encrypted (2026-11-15, ADR 0009 amended):** the owner asked for a copy of their trades that both of their PCs can reach, and chose an encrypted copy in Neon.
   - **The vault:** `owner_vault` seals each transaction with AES-256-GCM under `OWNER_VAULT_KEY` (32 random bytes, a Fly secret), with a fresh nonce and the transaction id as associated data. The app won't start with a malformed key or one equal to another key. `cryptography` 50.0.2 is pinned in `pyproject.toml` and the Dockerfile.

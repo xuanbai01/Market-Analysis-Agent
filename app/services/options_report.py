@@ -79,6 +79,9 @@ class _Entry:
     report: OptionsReport
     built: _Built
     expires_at: float
+    # Whether nothing is left to record: a build for the positions page
+    # records no view, and a report with no usable options never needs one.
+    tracked: bool = True
 
 
 _cache: OrderedDict[str, _Entry] = OrderedDict()
@@ -233,6 +236,16 @@ async def _assemble(session: AsyncSession, built: _Built, now: datetime, track: 
     return OptionsReport(**parts, history=history, open_interest_history=totals, claims=claims, generated_at=now)
 
 
+async def _record_view(session: AsyncSession, symbol: str, now: datetime, entry: _Entry) -> None:
+    """A view served from a copy the positions page built untracked: recorded
+    now, so that page can't swallow the options page's view."""
+    try:
+        await store.touch_tracked(session, symbol, now)
+        entry.tracked = True
+    except Exception:
+        logger.exception("options view for %s not recorded", symbol)
+
+
 async def get_report(
     session: AsyncSession, symbol: str, *, now: datetime | None = None, track: bool = True
 ) -> OptionsReport:
@@ -242,7 +255,7 @@ async def get_report(
     those would store a list of the holdings."""
     entry = _fresh(symbol)
     if entry is not None:
-        return entry.report
+        return await _served(session, symbol, now, track, entry)
     lock = _locks.setdefault(symbol, asyncio.Lock())
     try:
         async with lock:
@@ -252,10 +265,19 @@ async def get_report(
             _locks.pop(symbol, None)  # a symbol that failed leaves no lock behind
 
 
+async def _served(
+    session: AsyncSession, symbol: str, now: datetime | None, track: bool, entry: _Entry
+) -> OptionsReport:
+    """The cached copy, recording the view if its build didn't."""
+    if track and not entry.tracked:
+        await _record_view(session, symbol, now or _now(), entry)
+    return entry.report
+
+
 async def _get_report_locked(session: AsyncSession, symbol: str, now: datetime | None, track: bool) -> OptionsReport:
     entry = _fresh(symbol)
-    if entry is not None:
-        return entry.report
+    if entry is not None:  # built while this request waited
+        return await _served(session, symbol, now, track, entry)
     now = now or _now()
     try:
         built = await options_chain.on_options_thread(build, symbol, now)
@@ -270,7 +292,8 @@ async def _get_report_locked(session: AsyncSession, symbol: str, now: datetime |
         return stale.report
     report = await _assemble(session, built, now, track)
     ttl = NO_OPTIONS_TTL_SECONDS if report.status == "no_options" else CACHE_TTL_SECONDS
-    _remember(symbol, _Entry(report, built, _clock() + ttl))
+    # A report with no usable options records no view, whoever asks.
+    _remember(symbol, _Entry(report, built, _clock() + ttl, tracked=track or report.status != "ok"))
     return report
 
 

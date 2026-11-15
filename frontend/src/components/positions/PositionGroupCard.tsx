@@ -10,7 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
-import { fetchMarketPrices } from "../../lib/api";
+import { ApiError, fetchMarketPrices } from "../../lib/api";
 import { fetchOptionsChain, fetchOptionsReport } from "../../lib/options-api";
 import { smileOf } from "../../lib/options-strategy";
 import { dateLabel, maxPainSentence, strikeLabel } from "../../lib/options-text";
@@ -117,18 +117,22 @@ function Line({ sentence, testId }: { sentence: ReturnType<typeof marketSentence
   );
 }
 
+const UNTRACKED = "untracked";
+
 export function PositionGroupCard({ group, now }: { group: PositionGroup; now: Date }) {
   const expiry = firstExpiry(group);
   const hasOptions = expiry !== null;
+  // Keys of its own: under the options page's, a visit there would be
+  // served this untracked copy and never record the view.
   const report = useQuery({
-    queryKey: ["options", group.symbol],
+    queryKey: ["options", group.symbol, UNTRACKED],
     queryFn: () => fetchOptionsReport(group.symbol, { track: false }), // a holding isn't a view
     staleTime: FIVE_MINUTES,
     enabled: hasOptions,
     retry: false,
   });
   const chain = useQuery({
-    queryKey: ["options-chain", group.symbol, expiry],
+    queryKey: ["options-chain", group.symbol, expiry, UNTRACKED],
     queryFn: () => fetchOptionsChain(group.symbol, expiry as string, { track: false }),
     staleTime: FIVE_MINUTES,
     enabled: hasOptions,
@@ -159,6 +163,8 @@ export function PositionGroupCard({ group, now }: { group: PositionGroup; now: D
   const closes = prices.data?.prices.map((p) => p.close) ?? [];
   const daysLeft = expiry ? Math.max(0, Math.floor(yearsTo(expiry, now) * 365)) : 0;
   const spread = group.expiries.length > 1;
+  // A route that failed leaves gaps in the card: say so rather than drop them quietly.
+  const contextError = [report.error, chain.error].find((e) => e && !(e instanceof ApiError && e.status === 401));
 
   return (
     <section data-testid="position-group" className="mb-6 min-w-0 rounded-md border border-strata-border bg-strata-surface p-5">
@@ -194,6 +200,12 @@ export function PositionGroupCard({ group, now }: { group: PositionGroup; now: D
         </div>
       )}
       <div className="mt-4 space-y-2">
+        {contextError && (
+          <p data-testid="position-context-missing" className="text-xs text-strata-dim">
+            {group.underlying}&rsquo;s option data couldn&rsquo;t be read (
+            {contextError instanceof ApiError ? contextError.title : "no answer"}), so the chance of profit, max pain and the walls are left out.
+          </p>
+        )}
         {market && <Line sentence={marketSentence(smile ? profitChance(group, smile, market) : null, expiry, spread)} testId="position-market" />}
         {market && expiry && <Line sentence={historySentence(group.underlying, historicalShare(group, closes, sessions, market), sessions)} testId="position-history" />}
         <Line sentence={earningsSentence(group.underlying, report.data?.earnings ?? null, expiry)} testId="position-earnings" />

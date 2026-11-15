@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-04-29
 **Deciders:** xuanbai01
+**Partly superseded by:** [ADR 0008](0008-options-from-free-snapshots.md), which takes `compute_options` off the deferred list (2026-11-15).
 **Refines:** [ADR 0003](0003-pivot-equity-research.md) — same product (AI Equity Research Assistant), same product scope, but a deliberate choice about *what shape the report takes* now that we've shipped a v1 of it and dogfooded several names.
 
 ## Context

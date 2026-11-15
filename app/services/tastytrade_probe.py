@@ -57,7 +57,8 @@ class ProbeError(Exception):
 
 _OWN_ERRORS = (ProbeError, tt.TastytradeUnavailable, tt.TastytradeNotFound, dxlink.DxlinkError)
 _ACCOUNT_NUMBER = re.compile(r"[A-Z0-9]+")
-_ACCOUNT_IN_SCOPE = re.compile(r"^(accounts:)[^:]*(:|$)")
+_KNOWN_SCOPES = frozenset({"read", "trade", "openid"})
+_ACCOUNT_SCOPE = re.compile(r"accounts:[^:\s]+:([a-z-]+)")
 
 METRICS_SYMBOLS = ("QQQ", "SPY", "NVDA")
 CHAIN_SYMBOL = "SPY"
@@ -132,8 +133,19 @@ def _date(value: Any) -> date | None:
 
 
 def shown_scopes(scopes: frozenset[str]) -> list[str]:
-    """Scopes to print, each account number masked (``accounts:***:owner``)."""
-    return sorted(_ACCOUNT_IN_SCOPE.sub(r"\1***\2", s) for s in scopes)
+    """Scopes to print: the known ones as they are, an account scope as
+    ``accounts:***:<authority>``, anything else as ``<other scope>``, so no
+    shape of answer can print an account number."""
+    shown = []
+    for scope in scopes:
+        account = _ACCOUNT_SCOPE.fullmatch(scope)
+        if scope in _KNOWN_SCOPES:
+            shown.append(scope)
+        elif account:
+            shown.append(f"accounts:***:{account.group(1)}")
+        else:
+            shown.append("<other scope>")
+    return sorted(shown)
 
 
 def nearest_expiry(expirations: list[dict[str, Any]], today: date, target_days: int = TARGET_DAYS) -> dict[str, Any] | None:

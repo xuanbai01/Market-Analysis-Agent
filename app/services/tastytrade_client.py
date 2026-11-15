@@ -70,8 +70,11 @@ _TRADE_SCOPE = "trade"
 _READ_ONLY_SCOPES = frozenset({"read", "openid"})
 # tastytrade adds one scope per account the grant reaches, with the owner's
 # authority on it ("accounts:5wt00001:owner"). It names the accounts a token
-# may reach; acting on them still takes the ``trade`` scope.
-_ACCOUNT_SCOPE = re.compile(r"accounts:[a-z0-9]+:[a-z-]+")
+# may reach; acting on them still takes the ``trade`` scope. Only the
+# authorities seen or plainly read-only are accepted; any other (one that
+# names trading, say) is unknown and refused.
+ACCOUNT_AUTHORITIES = ("owner", "read-only")
+_ACCOUNT_SCOPE = re.compile(rf"accounts:[a-z0-9]+:(?:{'|'.join(ACCOUNT_AUTHORITIES)})")
 # What a bearer token may hold: anything else could break a header and
 # end up quoted in a transport error's message.
 _TOKEN_CHARS = re.compile(r"[A-Za-z0-9._~+/=-]+")

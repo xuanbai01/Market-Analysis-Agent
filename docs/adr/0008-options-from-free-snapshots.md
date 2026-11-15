@@ -65,7 +65,11 @@ What free data allows, checked 2026-11-14:
    Yahoo's: Black-76 on a forward taken from put-call parity (which absorbs
    discrete dividends and the quote delay), out-of-the-money side per strike,
    time to expiry measured to the minute from the quote time (the last
-   close outside market hours), NYSE sessions from a rule-based calendar.
+   close outside market hours) to the expiry's close, NYSE sessions from a
+   rule-based calendar (holidays, and the 1 pm closes on 3 July, the day
+   after Thanksgiving and Christmas Eve). Version 2 of the method
+   (2026-11-16) added those half days; the one session stored under
+   version 1 (2026-11-13) is not ranked with it.
    The method has a `method_version` stored on every snapshot row, and the
    raw near-money quotes are stored beside the derived figures, so a later
    method can be recomputed over the whole history.

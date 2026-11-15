@@ -194,4 +194,13 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **No list of holdings:** the options report and chain routes take `track=false`, so the holdings aren't recorded as option-page views.
     - **The fake backend** can't open real routes, spend a key or reach a database.
   - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
+- **The owner's trade copy, encrypted (2026-11-15, ADR 0009 amended):** the owner asked for a copy of their trades that both of their PCs can reach, and chose an encrypted copy in Neon.
+  - **The vault:** `owner_vault` seals each transaction with AES-256-GCM under `OWNER_VAULT_KEY` (32 random bytes, a Fly secret), with a fresh nonce and the transaction id as associated data. The app won't start with a malformed key or one equal to another key. `cryptography` 50.0.2 is pinned in `pyproject.toml` and the Dockerfile.
+  - **The table:** `owner_transactions` (migration 0006) holds only the id and an estimated-fee flag in the clear. Rows are written once; the one update is a row stored with estimated fees taking the final ones.
+  - **The sync:** `owner_trades.sync`, at most once a minute. It reads each account's transactions from a week before the newest stored, every page (2,000 a page), and holds no database connection during the fetch. It keeps a listed set of fields plus the account's 1-based number, never the account number.
+  - **The routes:**
+    - `GET /v1/owner/trades` syncs, then lists newest first, with money in positive, money out negative, and fees totalled. When tastytrade is down it serves the copy as it stands, with the reason. Without the key it's a 503.
+    - `GET /v1/owner/trades.csv` downloads the copy, with formula-like text defused.
+  - **The page:** `/trades`, behind the owner key: a table filterable by underlying, the sync's status, Download CSV, in memory only. There's a sidebar link beside Positions.
+  - **Setup:** docs/deployment.md §11 makes the key.
 

@@ -30,6 +30,12 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 
 ## A02 — Cryptographic Failures
 
+- **The owner's trade copy is encrypted at rest in the app,** not only by Neon (ADR 0009, amended; `app/services/owner_vault.py`).
+  - **The cipher:** each transaction is sealed with AES-256-GCM under `OWNER_VAULT_KEY` (a Fly secret, 32 random bytes), with a fresh 12-byte nonce. The transaction id is the associated data, so a ciphertext copied onto another row doesn't open.
+  - **In the clear:** only the id and an estimated-fee flag. Each stored payload keeps the account's 1-based number, never the account number.
+  - **Without the key:** nothing is stored, and the routes answer 503.
+  - **Who can read it:** Neon and its backups hold ciphertext only. Someone who got into Fly would have the key, but they'd already have the tastytrade grant there.
+  - **The CSV download** prefixes text a spreadsheet would run as a formula with `'` (OWASP CSV injection).
 - When auth lands: JWTs signed with HS256 (or stronger); secret lives in `DATABASE_URL`-style env vars only.
 - Passwords (if we go that route): hash with bcrypt or argon2. Never log or store plaintext.
 - TLS everywhere in staging and prod. Local dev over http is fine.

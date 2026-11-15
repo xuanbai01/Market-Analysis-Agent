@@ -18,7 +18,7 @@ The owner pages answer 404 until this is set.
 
 ## 3. Set the trade-copy key (after PR 4 is merged)
 
-- [ ] **Run the PowerShell steps** that PR 4 adds to docs/deployment.md, to set `OWNER_VAULT_KEY`.
+- [ ] **Run the PowerShell steps** in [docs/deployment.md §11](../docs/deployment.md) to set `OWNER_VAULT_KEY`.
 - [ ] **Save that key in your password manager too.** If it's lost, the stored copy can't be read, but tastytrade still has your full history, so the copy can be rebuilt with a new key.
 - [ ] **Open `/trades` once** to fill the copy, then check its count against tastytrade's history.
 

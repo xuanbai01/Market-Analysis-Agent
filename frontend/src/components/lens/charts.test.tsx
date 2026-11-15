@@ -6,7 +6,7 @@ import { DistributionChart } from "./DistributionChart";
 import type { LensReport } from "../../lib/schemas";
 import { LENS, SBC_METRIC } from "./fixture";
 
-/** LENS with every intensity and amount multiplied by `f`. */
+/** LENS with every amount, intensity and stat multiplied by `f`. */
 function scaled(f: number): LensReport {
   return {
     ...LENS,
@@ -18,7 +18,15 @@ function scaled(f: number): LensReport {
         intensity: p.intensity === null ? null : p.intensity * f,
       })),
     })),
-    stats: LENS.stats.map((s) => ({ ...s, p75: s.p75 * f })),
+    stats: LENS.stats.map((s) => ({
+      ...s,
+      median: s.median * f,
+      p25: s.p25 * f,
+      p75: s.p75 * f,
+      low: s.low * f,
+      high: s.high * f,
+      total: s.total * f,
+    })),
   };
 }
 
@@ -52,7 +60,7 @@ describe("DistributionChart", () => {
     // Highest intensity 12%: niceTicks steps by 2.5%, and the SBC lens read
     // "0%, 3%, 5%, 8%, 10%, 13%".
     const { container } = render(<DistributionChart report={scaled(0.48)} />);
-    expect(svgTexts(container, /%$/)).toEqual(["0.0%", "2.5%", "5.0%", "7.5%", "10.0%", "12.5%"]);
+    expect(svgTexts(container, /%$/)).toEqual(["0%", "2.5%", "5%", "7.5%", "10%", "12.5%"]);
   });
 
   it("ranks every company on hover, with the median and band", () => {
@@ -74,7 +82,7 @@ describe("AmountBars", () => {
 
   it("labels a $2.5B step exactly instead of rounding it", () => {
     const { container } = render(<AmountBars report={scaled(0.18)} />); // largest year $9.5B
-    expect(svgTexts(container, /^\$/)).toEqual(["$0", "$2.5B", "$5.0B", "$7.5B", "$10.0B"]);
+    expect(svgTexts(container, /^\$/)).toEqual(["$0", "$2.5B", "$5B", "$7.5B", "$10B"]);
   });
 
   it("lists each company's spend on hover, largest first", () => {

@@ -414,3 +414,14 @@ async def test_a_feed_that_never_goes_quiet_still_ends(monkeypatch: pytest.Monke
     finally:
         task.cancel()
     assert history.complete is False
+
+
+async def test_a_history_the_server_cut_short_is_not_complete(server: FakeServer) -> None:
+    sym = "SPY{=1d}"
+    server.on_subscribe = [
+        ["Candle", candle_row(sym, "2026-11-13", 603.0) + candle_row(sym, "2026-11-12", 602.0, flags=dxlink.SNAPSHOT_SNIP)],
+    ]
+    history = await dxlink.fetch_candles("SPY", "1d", datetime(2005, 1, 1, tzinfo=UTC))
+    assert [c.close for c in history.candles] == [602.0, 603.0]
+    assert history.complete is False
+    assert history.snipped is True

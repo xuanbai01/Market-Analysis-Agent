@@ -266,3 +266,33 @@ def test_field_names_name_a_non_object_only_by_type() -> None:
     assert probe.field_names({"b": 1, "a": 2}) == ["a", "b"]
     assert probe.field_names(["603.21"]) == "<list>"
     assert probe.field_names("1.2345") == "<str>"
+
+
+def test_a_nan_quote_from_yahoo_is_missing_not_outside() -> None:
+    nan = float("nan")
+    assert probe.spread_check(1.3, nan, nan) is None
+    assert probe.spread_check(nan, 1.2, 1.5) is None
+    assert probe.spread_check(1.3, 1.2, float("inf")) is None
+
+
+def test_a_snipped_history_says_so() -> None:
+    candle = dxlink.Candle(datetime(2020, 1, 2, tzinfo=UTC), 1.0, 1.0, 1.0, 1.0, 1.0, None, None)
+    text = probe.describe_candles(dxlink.CandleHistory(candles=(candle,), complete=False, snipped=True))
+    assert "complete=False, cut short by the server" in text
+    assert "cut short" not in probe.describe_candles(dxlink.CandleHistory(candles=(candle,), complete=True))
+
+
+async def test_strikes_without_streamer_symbols_are_reported_not_guessed(
+    monkeypatch: pytest.MonkeyPatch, run: list[str]
+) -> None:
+    async def no_streamers(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        if path == "/option-chains/SPY/nested":
+            strikes = [{k: v for k, v in s.items() if not k.endswith("streamer-symbol")} for s in STRIKES]
+            return {"data": {"items": [{"expirations": [{"expiration-date": EXPIRY, "strikes": strikes}]}]}}
+        return await fake_get(path, params, op=op)
+
+    monkeypatch.setattr(tt, "get", no_streamers)
+    await probe.main(run.append)
+    report = "\n".join(run)
+    assert "no near-money call with a streamer symbol: option candles not asked" in report
+    assert "failed: ProbeError: no near-money call with a streamer symbol" in report

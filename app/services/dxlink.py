@@ -11,8 +11,9 @@ keepalive timeout, so no keepalive is sent. One session at a time per
 machine (tastytrade allows five).
 
 A candle history arrives newest first, the last row flagged
-``SNAPSHOT_END`` (or ``SNAPSHOT_SNIP`` when the server cut it short);
-live updates follow and are not read. tastytrade documents ``fromTime``
+``SNAPSHOT_END``, or ``SNAPSHOT_SNIP`` when the server cut it short (then
+the history is ``snipped`` and not ``complete``); live updates follow and
+are not read. tastytrade documents ``fromTime``
 in seconds and dxFeed's own APIs take milliseconds, so
 ``fetch_candles`` sends seconds unless told otherwise; the probe
 (``tastytrade_probe``) checks which one DXLink honours.
@@ -124,7 +125,8 @@ class Candle:
 @dataclass(frozen=True)
 class CandleHistory:
     candles: tuple[Candle, ...]  # oldest first
-    complete: bool  # the server marked the snapshot's end
+    complete: bool  # the server marked the snapshot's end (SNAPSHOT_END)
+    snipped: bool = False  # the server cut the history short (SNAPSHOT_SNIP)
 
 
 class _NoRedirects(_ws_connect):
@@ -381,23 +383,28 @@ async def fetch_candles(symbol: str, period: str, from_time: datetime, *, time_u
     stamp = from_time.timestamp()
     from_value = int(stamp * 1000) if time_unit_ms else int(stamp)
     by_time: dict[datetime, Candle] = {}
+    snipped = False
 
     def on_event(event: dict[str, Any]) -> bool | None:
+        nonlocal snipped
         if event.get("eventSymbol") != candle_symbol:
             return None
         flags = int(event.get("eventFlags") or 0)
         candle = _candle(event)
         if candle is not None and not flags & REMOVE_EVENT:
             by_time[candle.time] = candle
-        if flags & (SNAPSHOT_END | SNAPSHOT_SNIP):
+        if flags & SNAPSHOT_SNIP:  # cut short: what came is all, but not the whole history
+            snipped = True
+            return False
+        if flags & SNAPSHOT_END:
             return True
         return False if len(by_time) >= MAX_CANDLES else None
 
     summary = {"symbol": candle_symbol, "from": from_time.date().isoformat(), "unit": "ms" if time_unit_ms else "s"}
     with log_external_call("dxlink.candles", summary) as call:
         complete = await _run("Candle", [{"type": "Candle", "symbol": candle_symbol, "fromTime": from_value}], on_event)
-        call.record_output({"candles": len(by_time), "complete": complete})
-    return CandleHistory(candles=tuple(by_time[t] for t in sorted(by_time)), complete=complete)
+        call.record_output({"candles": len(by_time), "complete": complete, "snipped": snipped})
+    return CandleHistory(candles=tuple(by_time[t] for t in sorted(by_time)), complete=complete, snipped=snipped)
 
 
 async def fetch_once(event_type: str, symbols: Sequence[str]) -> dict[str, dict[str, Any]]:

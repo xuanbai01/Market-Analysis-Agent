@@ -31,6 +31,7 @@ Never imported by the app.
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 import statistics
 from collections.abc import Awaitable, Callable
@@ -125,19 +126,22 @@ def near_money(strikes: list[dict[str, Any]], spot: float, n: int = NEAR_MONEY_S
 
 def describe_candles(history: dxlink.CandleHistory) -> str:
     candles = history.candles
+    ending = f"complete={history.complete}" + (", cut short by the server" if history.snipped else "")
     if not candles:
-        return f"none (complete={history.complete})"
+        return f"none ({ending})"
     with_iv = sum(1 for c in candles if c.imp_volatility is not None)
     with_oi = sum(1 for c in candles if c.open_interest is not None)
     return (
         f"{len(candles)} candles, {candles[0].time.date()} to {candles[-1].time.date()}, "
-        f"complete={history.complete}, with IV {with_iv}/{len(candles)}, with open interest {with_oi}/{len(candles)}"
+        f"{ending}, with IV {with_iv}/{len(candles)}, with open interest {with_oi}/{len(candles)}"
     )
 
 
 def spread_check(mid: float | None, bid: float | None, ask: float | None) -> bool | None:
-    """Whether ``mid`` lies inside the bid–ask; None when a side is missing."""
-    if mid is None or bid is None or ask is None or ask <= 0:
+    """Whether ``mid`` lies inside the bid–ask; None when a side is missing
+    (yfinance leaves an unquoted strike's bid and ask NaN)."""
+    values = (mid, bid, ask)
+    if any(v is None or not math.isfinite(v) for v in values) or ask <= 0:
         return None
     return bid <= mid <= ask
 
@@ -297,14 +301,27 @@ async def probe_candles(say: Say, pick: ChainPick | None, now: datetime) -> None
     say(f"  SPY daily from {DAILY_FROM.date()}, fromTime in milliseconds: {describe_candles(daily_ms)}")
     hourly = await dxlink.fetch_candles("SPY", "1h", now - timedelta(days=730))
     say(f"  SPY hourly, two years asked: {describe_candles(hourly)}")
-    if pick is not None and pick.strikes:
-        streamer = field(pick.strikes[0], "call-streamer-symbol")
-        option = await dxlink.fetch_candles(streamer, "1d", now - timedelta(days=180))
-        say(f"  a near-money SPY call, daily, 180 days asked: {describe_candles(option)}")
+    streamer = None if pick is None else call_streamer(pick)
+    if streamer is None:
+        say("  no near-money call with a streamer symbol: option candles not asked")
+        return
+    option = await dxlink.fetch_candles(streamer, "1d", now - timedelta(days=180))
+    say(f"  a near-money SPY call, daily, 180 days asked: {describe_candles(option)}")
+
+
+def call_streamer(pick: ChainPick) -> str | None:
+    """The streamer symbol of the nearest-the-money call that has one."""
+    for strike in pick.strikes:
+        symbol = field(strike, "call-streamer-symbol")
+        if isinstance(symbol, str) and symbol:
+            return symbol
+    return None
 
 
 async def probe_option_events(say: Say, pick: ChainPick) -> None:
-    streamer = field(pick.strikes[0], "call-streamer-symbol")
+    streamer = call_streamer(pick)
+    if streamer is None:
+        raise ProbeError("no near-money call with a streamer symbol")
     for event_type in ("Summary", "Greeks"):
         events = await dxlink.fetch_once(event_type, [streamer])
         event = events.get(streamer)

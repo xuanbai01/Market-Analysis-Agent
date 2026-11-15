@@ -65,15 +65,23 @@ tastytrade's Open API is free to account holders. We read its docs and its Open 
    - Probes and checks print metadata only: ages, counts, date ranges, field names, and yes/no comparisons computed in code.
    - The owner compares values in tastytrade's own app. `app/services/tastytrade_probe.py` is built that way, and a test feeds it distinctive values and fails if one reaches its report.
 3. **Read only.**
-   - Every token refresh asks for `scope=read`, and an access token that comes back able to trade is refused.
+   - Every token refresh asks for `scope=read`. An access token is used only when what it may do is known and holds nothing beyond `read` and `openid`. The answer's `scope` field or the token's own claim says so, and either one saying `trade` is enough to refuse it.
+   - A read-only access token doesn't make the stored refresh token read-only. The probe checks the grant itself: one sign-in that doesn't narrow the scope, its token dropped unused. If the grant can trade, the owner replaces it with a read-only one.
    - Apart from the sign-in POST, the client makes GET calls only, to paths on an allowlist with no order path.
    - Tests check the module's source for any other write call, and every request a session makes.
 4. **The credential.**
    - The client ID, client secret and refresh token are Fly secrets; empty values turn tastytrade off.
    - They are never logged, and account numbers are masked in logs.
-   - A refused sign-in pauses all calls for an hour, since repeated failed logins block the server's IP for about 8 hours.
+   - Every failed sign-in is remembered, so neither waiting callers nor later ones sign in again at once. Repeated failed logins block the server's IP for about 8 hours.
+     - A refusal (a 4xx other than 429) pauses all calls for an hour.
+     - Anything else pauses them for a minute, or for the server's Retry-After.
+   - The API address is one of tastytrade's two, so a typo can't send the refresh token anywhere else.
    - If the token leaks, delete the grant on my.tastytrade.com and create a new one.
-5. **DXLink connects only to a dxFeed websocket over TLS.** The address arrives with the quote token, and anything else is refused.
+5. **DXLink connects only to tastytrade's feed host** (`tasty-openapi-ws.dxfeed.com`), over TLS on port 443.
+   - The address arrives with the quote token. One with credentials, a query or a fragment in it is refused.
+   - No redirect is followed.
+   - Messages are capped at 4 MiB and not compressed, and a fetch keeps at most 100,000 events and 20,000 candles.
+   - A server error is reported by its known code only.
 6. **The owner's own trades** may be read and analysed. They still stay out of the database (at first) and out of any prompt.
 7. **The order of work:**
    - **PR A:** connect, then probe what the account gets.

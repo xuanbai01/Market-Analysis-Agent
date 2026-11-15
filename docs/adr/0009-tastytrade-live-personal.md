@@ -65,7 +65,7 @@ tastytrade's Open API is free to account holders. We read its docs and its Open 
    - Probes and checks print metadata only: ages, counts, date ranges, field names, and yes/no comparisons computed in code.
    - The owner compares values in tastytrade's own app. `app/services/tastytrade_probe.py` is built that way, and a test feeds it distinctive values and fails if one reaches its report.
 3. **Read only.**
-   - Every token refresh asks for `scope=read`. An access token is used only when what it may do is known and holds nothing beyond `read` and `openid`. The answer's `scope` field or the token's own claim says so, and either one saying `trade` is enough to refuse it.
+   - Every token refresh asks for `scope=read`. An access token is used only when what it may do is known: `read`, perhaps `openid`, and one `accounts:<number>:<authority>` scope per account it reaches (tastytrade adds these; acting on an account still takes `trade`). Anything else is refused. The answer's `scope` field or the token's own claim says so, and either one saying `trade` is enough to refuse it.
    - A read-only access token doesn't make the stored refresh token read-only. The probe checks the grant itself: one sign-in that doesn't narrow the scope, its token dropped unused. If the grant can trade, the owner replaces it with a read-only one.
    - Apart from the sign-in POST, the client makes GET calls only, to paths on an allowlist with no order path.
    - Tests check the module's source for any other write call, and every request a session makes.

@@ -300,6 +300,8 @@ def test_the_feed_address_of_tastytrade_is_accepted() -> None:
     assert dxlink.is_feed_url("wss://tasty-openapi-ws.dxfeed.com/realtime")
     assert dxlink.is_feed_url("wss://tasty-openapi-ws.dxfeed.com:443/realtime")
     assert dxlink.is_feed_url("wss://TASTY-OPENAPI-WS.DXFEED.COM/realtime")  # hostnames compare lowercased
+    assert dxlink.is_feed_url("wss://tasty-openapi-dxlink-md-ws.dxfeed.com/realtime")  # what the account was given
+    assert not dxlink.is_feed_url("wss://tasty-openapi-dxlink-md-ws.dxfeed.com.evil.example/realtime")
 
 
 def test_a_redirect_is_never_followed() -> None:

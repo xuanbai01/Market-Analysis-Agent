@@ -69,6 +69,8 @@ class _FakeTicker:
 
     def history(self, period: str, auto_adjust: bool = True) -> pd.DataFrame:
         self.history_periods.append(period)
+        if self.unknown == "no columns":
+            return pd.DataFrame()
         if self.unknown:
             return pd.DataFrame({"Close": []})
         index = pd.DatetimeIndex(
@@ -242,3 +244,13 @@ def test_the_calendar_can_be_left_unread(monkeypatch: pytest.MonkeyPatch) -> Non
     _install(monkeypatch, _FakeTicker(["2026-11-16"], _UNDERLYING, {"Earnings Date": [date(2027, 1, 28)]}))
     fetched = oc.fetch_chain("AAPL", lambda listed, _quote: listed, read_calendar=False)
     assert fetched is not None and fetched.next_earnings is None
+
+
+def test_a_frame_without_columns_is_not_found_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DeepSeek on PR 110: ["Close"] on a column-less frame raised KeyError (a 503)."""
+    ticker = _FakeTicker([], None)
+    ticker.unknown = "no columns"  # type: ignore[assignment]
+    _install(monkeypatch, ticker)
+    with pytest.raises(oc.SymbolNotFound):
+        oc.fetch_chain("ZZZZQ", lambda listed, _quote: listed)
+

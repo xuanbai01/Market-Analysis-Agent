@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Sequence
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from app.schemas.options import (
     ChainRow,
@@ -82,11 +82,6 @@ def report_expiries(
     return sorted(picked)
 
 
-def _quoted_day(s: Smile) -> date:
-    """The ET date of the quote time, recovered from the smile's expiry and T."""
-    return (mc.session_close(s.expiry) - timedelta(days=s.years * _YEAR_DAYS)).astimezone(mc.ET).date()
-
-
 def _totals(chain: ExpiryQuotes) -> tuple[int, int, int, int]:
     return (
         sum(q.open_interest for q in chain.calls),
@@ -96,7 +91,9 @@ def _totals(chain: ExpiryQuotes) -> tuple[int, int, int, int]:
     )
 
 
-def expiry_summary(chain: ExpiryQuotes, s: Smile, reaction: tuple[date, date] | None) -> ExpirySummary:
+def expiry_summary(
+    chain: ExpiryQuotes, s: Smile, reaction: tuple[date, date] | None, quoted_at: datetime
+) -> ExpirySummary:
     spread = s.atm_vol * math.sqrt(s.years)
     calls = {q.strike: q for q in chain.calls if usable(q)}
     puts = {q.strike: q for q in chain.puts if usable(q)}
@@ -105,7 +102,7 @@ def expiry_summary(chain: ExpiryQuotes, s: Smile, reaction: tuple[date, date] | 
     return ExpirySummary(
         expiry=s.expiry,
         days=s.days,
-        sessions=mc.sessions_between(_quoted_day(s), s.expiry),
+        sessions=mc.sessions_between(quoted_at.astimezone(mc.ET).date(), s.expiry),
         forward=s.forward,
         forward_from_parity=s.forward_from_parity,
         atm_iv=s.atm_vol,

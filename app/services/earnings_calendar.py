@@ -163,9 +163,12 @@ def announcements(earnings_dates: Any) -> list[Announcement]:
     found = []
     for idx, row in earnings_dates.iterrows():
         try:
-            when = idx.to_pydatetime().astimezone(mc.ET)
+            raw = idx.to_pydatetime()
         except (AttributeError, ValueError):
             continue
+        # A naive time is New York's: astimezone would take the machine's
+        # zone (UTC on Fly) and turn a 16:00 report into "during".
+        when = raw.replace(tzinfo=mc.ET) if raw.tzinfo is None else raw.astimezone(mc.ET)
         found.append(Announcement(when, timing_of(when), safe_float(row.get("Reported EPS")) is not None))
     return sorted(found, key=lambda a: a.when)
 

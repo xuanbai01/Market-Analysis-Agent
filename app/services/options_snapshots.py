@@ -198,6 +198,10 @@ async def _run(session: AsyncSession, now: datetime) -> SnapshotRun:
                 paused = True
                 await _sleep(RATE_LIMIT_PAUSE_SECONDS)
                 continue  # the same ticker once more
+            if isinstance(exc, options_chain.SymbolNotFound):
+                failed.append(FailedTicker(symbol=symbol, reason="not_found"))  # delisted or misspelt
+                i += 1
+                continue
             logger.exception("IV snapshot failed for %s", symbol)
             # A failed statement leaves the session needing a rollback; without
             # it every later ticker's insert would fail too.

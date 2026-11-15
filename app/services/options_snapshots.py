@@ -23,10 +23,8 @@ import asyncio
 import logging
 import re
 import time
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, TypeVar
+from typing import Any
 
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +36,7 @@ from app.services import market_calendar as mc
 from app.services import options_chain
 from app.services import options_metrics as om
 from app.services import options_snapshot_store as store
+from app.services.options_chain import on_options_thread as _on_options_thread
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +47,6 @@ RATE_LIMIT_PAUSE_SECONDS = 30
 _SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 _RATE_LIMIT_ERRORS = frozenset({"YFRateLimitError"})
 
-_OPTIONS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="options")
 _run_lock = asyncio.Lock()
 
 # Swapped in tests.
@@ -60,15 +58,8 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-_T = TypeVar("_T")
-
-
 class SnapshotRunning(Exception):
     """Another run is in progress in this process."""
-
-
-async def _on_options_thread(fn: Callable[..., _T], *args: Any) -> _T:
-    return await asyncio.get_running_loop().run_in_executor(_OPTIONS_EXECUTOR, fn, *args)
 
 
 def parse_symbols(raw: str) -> list[str]:
@@ -103,7 +94,7 @@ def snapshot_one(
     into the detail."""
     cpu_started = time.thread_time()
     with log_external_call("yfinance.options", {"symbol": symbol, "purpose": "snapshot"}) as call:
-        fetched = options_chain.fetch_chain(symbol, lambda listed: om.snapshot_expiries(listed, quoted_at))
+        fetched = options_chain.fetch_chain(symbol, lambda listed, _quote: om.snapshot_expiries(listed, quoted_at))
         metrics = om.snapshot_metrics(fetched, quoted_at, rate, rate_assumed=rate_assumed) if fetched else None
         call.record_output({
             "status": metrics.status if metrics else "no_options",
@@ -207,6 +198,10 @@ async def _run(session: AsyncSession, now: datetime) -> SnapshotRun:
                 paused = True
                 await _sleep(RATE_LIMIT_PAUSE_SECONDS)
                 continue  # the same ticker once more
+            if isinstance(exc, options_chain.SymbolNotFound):
+                failed.append(FailedTicker(symbol=symbol, reason="not_found"))  # delisted or misspelt
+                i += 1
+                continue
             logger.exception("IV snapshot failed for %s", symbol)
             # A failed statement leaves the session needing a rollback; without
             # it every later ticker's insert would fail too.

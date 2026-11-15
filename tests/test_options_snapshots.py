@@ -325,3 +325,12 @@ async def test_nothing_missing_when_every_configured_ticker_is_stored(world: _Wo
     result = await _run(world)
     assert result.missing == []
 
+
+async def test_a_delisted_ticker_is_named_not_found(world: _World) -> None:
+    """DeepSeek on PR 110: fetch_chain raises SymbolNotFound now."""
+    from app.services.options_chain import SymbolNotFound
+
+    world.outcomes = {"SPY": SymbolNotFound("SPY")}
+    result = await _run(world)
+    assert [(f.symbol, f.reason) for f in result.failed] == [("SPY", "not_found")]
+    assert result.written == ["QQQ", "NVDA"]

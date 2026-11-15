@@ -83,3 +83,21 @@ async def test_the_route_writes_rows_end_to_end(
     assert again.json()["status"] == "no_new_session"
     rows = (await db_session.execute(select(OptionIvSnapshot.symbol))).scalars().all()
     assert sorted(rows) == ["QQQ", "SPY"]
+
+
+async def test_iv30_history_reads_one_method_oldest_first(db_session: AsyncSession) -> None:
+    """Rows of another method version are left out: the rank compares like with like."""
+    await store.insert_snapshot(db_session, _row("SPY", FRIDAY - timedelta(days=1), iv30=0.14))
+    await store.insert_snapshot(db_session, _row("SPY", FRIDAY, iv30=0.15))
+    await store.insert_snapshot(db_session, {**_row("SPY", FRIDAY - timedelta(days=2), iv30=0.99), "method_version": 2})
+    await store.insert_snapshot(db_session, {**_row("SPY", FRIDAY - timedelta(days=3)), "iv30": None})
+    await store.insert_snapshot(db_session, _row("QQQ", FRIDAY, iv30=0.25))
+    assert await store.iv30_history(db_session, "SPY", 1) == [(FRIDAY - timedelta(days=1), 0.14), (FRIDAY, 0.15)]
+
+
+async def test_touch_tracked_upserts_the_last_view(db_session: AsyncSession) -> None:
+    first, later = datetime(2026, 11, 14, tzinfo=UTC), datetime(2026, 11, 15, tzinfo=UTC)
+    await store.touch_tracked(db_session, "AAPL", first)
+    await store.touch_tracked(db_session, "AAPL", later)
+    rows = (await db_session.execute(select(OptionsTracked))).scalars().all()
+    assert [(r.symbol, r.last_viewed) for r in rows] == [("AAPL", later)]

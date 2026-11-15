@@ -13,13 +13,15 @@ it was junk (up to 154%), so every IV is computed from bid and ask in
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any
+from typing import Any, TypeVar
 
 from app.services import market_calendar as mc
 
@@ -29,7 +31,7 @@ logger = logging.getLogger(__name__)
 # moves a 30-day IV by a few hundredths of a point.
 ASSUMED_RATE = 0.04
 RATE_TTL_SECONDS = 12 * 3600
-HISTORY_PERIOD = "6mo"
+HISTORY_PERIOD = "6mo"  # the snapshot's realized vol; the page asks for 2y (past reports)
 _REGULAR = "REGULAR"
 # Only a stock has earnings; Yahoo answers a fund's calendar with a 404
 # that yfinance logs as an error.
@@ -69,10 +71,18 @@ class ChainFetch:
     chains: dict[date, ExpiryQuotes]  # the picked ones
     closes: tuple[tuple[date, float], ...]  # daily closes, oldest first
     next_earnings: date | None = None  # from Yahoo's calendar; None for a fund
+    name: str | None = None
+    quote_type: str | None = None  # "EQUITY", "ETF"...
+    earnings_estimated: bool = False  # Yahoo marks the next report date as an estimate
 
 
-# Which listed expiries to fetch, given all of them.
-ExpiryPicker = Callable[[tuple[date, ...]], Sequence[date]]
+class SymbolNotFound(Exception):
+    """Yahoo lists neither options nor prices for the symbol."""
+
+
+# Which listed expiries to fetch, given all of them and the underlying's
+# quote (the page reads a stock's earnings schedule before choosing).
+ExpiryPicker = Callable[[tuple[date, ...], dict[str, Any]], Sequence[date]]
 
 
 def _number(value: Any) -> float:
@@ -121,23 +131,29 @@ def _dividend_yield(underlying: dict[str, Any]) -> float:
     return value / 100 if value > 1 else value
 
 
-def _fetch_yfinance_chain(symbol: str, pick: ExpiryPicker) -> ChainFetch | None:
+def _fetch_yfinance_chain(
+    symbol: str, pick: ExpiryPicker, history_period: str, read_calendar: bool
+) -> ChainFetch | None:
     import yfinance  # noqa: PLC0415  -- lazy: tests swap in a fake module
 
     ticker = yfinance.Ticker(symbol)
     front = ticker.option_chain()
     if front.calls is None:
-        return None  # no listed options (or a symbol Yahoo doesn't know)
+        # No listed options, or a symbol Yahoo doesn't know: prices tell them apart.
+        prices = ticker.history(period="5d", auto_adjust=True)
+        if "Close" not in prices or prices["Close"].dropna().empty:
+            raise SymbolNotFound(symbol)
+        return None
     underlying = front.underlying or {}
     listed = tuple(sorted(date.fromisoformat(e) for e in ticker.options))
     chains: dict[date, ExpiryQuotes] = {}
-    for expiry in pick(listed):
+    for expiry in pick(listed, underlying):
         if expiry not in listed or expiry in chains:
             continue
         chain = front if expiry == listed[0] else ticker.option_chain(expiry.isoformat())
         if chain.calls is not None and chain.puts is not None:  # one side missing: drop the expiry
             chains[expiry] = ExpiryQuotes(expiry, _quotes(chain.calls), _quotes(chain.puts))
-    history = ticker.history(period=HISTORY_PERIOD, auto_adjust=True)
+    history = ticker.history(period=history_period, auto_adjust=True)
     closes = tuple(
         (day, _number(close))
         for day, close in zip(history.index.date, history["Close"].tolist(), strict=False)
@@ -155,18 +171,42 @@ def _fetch_yfinance_chain(symbol: str, pick: ExpiryPicker) -> ChainFetch | None:
         expiries=listed,
         chains=chains,
         closes=closes,
-        next_earnings=_next_earnings(ticker, today) if underlying.get("quoteType") == _EQUITY else None,
+        next_earnings=(
+            _next_earnings(ticker, today) if read_calendar and underlying.get("quoteType") == _EQUITY else None
+        ),
+        name=underlying.get("longName") or underlying.get("shortName"),
+        quote_type=underlying.get("quoteType"),
+        earnings_estimated=bool(underlying.get("isEarningsDateEstimate")),
     )
 
 
-ChainProvider = Callable[[str, ExpiryPicker], "ChainFetch | None"]
+ChainProvider = Callable[[str, ExpiryPicker, str, bool], "ChainFetch | None"]
 PROVIDERS: dict[str, ChainProvider] = {"yfinance": _fetch_yfinance_chain}
 
 
-def fetch_chain(symbol: str, pick: ExpiryPicker, *, provider: str = "yfinance") -> ChainFetch | None:
+def fetch_chain(
+    symbol: str,
+    pick: ExpiryPicker,
+    *,
+    history_period: str = HISTORY_PERIOD,
+    read_calendar: bool = True,
+    provider: str = "yfinance",
+) -> ChainFetch | None:
     """The chains of ``symbol`` for the expiries ``pick`` chooses; None
-    when the symbol lists no options. Blocking."""
-    return PROVIDERS[provider](symbol, pick)
+    when the symbol lists no options; ``SymbolNotFound`` when Yahoo knows
+    no such symbol. ``read_calendar=False`` skips the earnings-calendar
+    call (the page has the schedule). Blocking."""
+    return PROVIDERS[provider](symbol, pick, history_period, read_calendar)
+
+
+# Every options fetch and computation runs on this one thread: off the
+# event loop, and one Yahoo call at a time (the page and the daily run).
+_OPTIONS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="options")
+_T = TypeVar("_T")
+
+
+async def on_options_thread(fn: Callable[..., _T], *args: Any) -> _T:
+    return await asyncio.get_running_loop().run_in_executor(_OPTIONS_EXECUTOR, fn, *args)
 
 
 def _fetch_yfinance_irx() -> float | None:

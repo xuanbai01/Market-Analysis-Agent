@@ -10,7 +10,7 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Options analysis, PR1 (start collecting)** in review on `feature/options-snapshots`: ADR 0008, the daily IV snapshot (table, `POST /v1/options/snapshots`, GitHub Actions cron) for QQQ, SPY and NVDA. Plan below.
+- **Options analysis, PR2 (report API)** in review on `feature/options-report`. PR1 (the daily IV snapshot) merged as #109 and is collecting QQQ, SPY and NVDA. Plan below.
 
 ## Plan — after Phase 5 (2026-11-13)
 
@@ -74,8 +74,8 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 
 **Goal:** serve the owner's options workflow (directional buys, verticals, iron condors) from free yfinance chains, on a separate `/options/:ticker` page. No free source keeps option IV history, so a daily snapshot starts first: every day missed is lost. One PR each, in order; each merged on the owner's go-ahead.
 
-- [ ] **PR1 — start collecting** *(branch `feature/options-snapshots`)*: `market_calendar`, `options_math`, `options_chain`, `options_metrics` (method version 1), migration 0004, `options_snapshots`, `POST /v1/options/snapshots`, `.github/workflows/iv-snapshot.yml`, `OPTIONS_SNAPSHOT_SYMBOLS=QQQ,SPY,NVDA`. Owner: set the `API_BASE_URL` variable and the `BACKEND_SHARED_SECRET` secret on GitHub (docs/deployment.md §8). Done when a manual run writes rows, IV30 is within about 2 points of a broker's, a weekend run reports `no_new_session`, and two scheduled sessions land.
-- [ ] **PR2 — report API**: split `earnings_calendar.py` out of `earnings.py` (announcement times, before/after the open); `options_analysis` (term structure, expected-move cone, earnings event move from bracketing expiries, past earnings moves, open interest by strike, put/call ratios, claims with units); `GET /v1/options/{symbol}` (≤ 30 KB, 15-minute cache, per-symbol lock, rate limit on misses) and `GET /v1/options/{symbol}/chain/{expiry}`; IV percentile from 63 sessions, rank from 126; `options_tracked` written on a successful view.
+- [x] **PR1 — start collecting** *(#109)*: `market_calendar`, `options_math`, `options_chain`, `options_metrics` (method version 1), migration 0004, `options_snapshots`, `POST /v1/options/snapshots`, `.github/workflows/iv-snapshot.yml`, `OPTIONS_SNAPSHOT_SYMBOLS=QQQ,SPY,NVDA`. Owner: set the `API_BASE_URL` variable and the `BACKEND_SHARED_SECRET` secret on GitHub (docs/deployment.md §8). Done when a manual run writes rows, IV30 is within about 2 points of a broker's, a weekend run reports `no_new_session`, and two scheduled sessions land.
+- [x] **PR2 — report API** *(branch `feature/options-report`, in review)*: split `earnings_calendar.py` out of `earnings.py` (announcement times, before/after the open); `options_analysis` (term structure, expected-move cone, earnings event move from bracketing expiries, past earnings moves, open interest by strike, put/call ratios, claims with units); `GET /v1/options/{symbol}` (≤ 30 KB, 15-minute cache, per-symbol lock, rate limit on misses) and `GET /v1/options/{symbol}/chain/{expiry}`; IV percentile from 63 sessions, rank from 126; `options_tracked` written on a successful view.
 - [ ] **PR3 — the page** `/options/:ticker` (lazy, not in the demo): expected-move cone, term structure by days to expiry, smile, open interest by strike, implied vs past earnings moves, chain table; a link on the symbol page.
 - [ ] **PR4 — strategy builder**: long call/put, verticals, iron condor; payoff, breakevens, max profit/loss, risk-neutral probability of profit at mid and at the natural price. Templates only, never ranked.
 - [ ] **PR5 — cited AI read** on the page (claims → `synth_call` → `resolve_points(max_refs=None)`), cached per session; no advice, forecasts or strategy suggestions.

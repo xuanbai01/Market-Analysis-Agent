@@ -54,6 +54,8 @@ _GATED_CALLS: list[tuple[str, str, dict[str, Any] | None]] = [
     ("POST", "/v1/news/ingest", None),
     ("POST", "/v1/symbols", {"symbol": "AAPL", "name": "Apple Inc."}),
     ("POST", "/v1/options/snapshots", None),
+    ("GET", "/v1/options/SPY", None),
+    ("GET", "/v1/options/SPY/chain/2026-12-18", None),
 ]
 
 # Write-method routes deliberately left ungated, each with its reason.
@@ -105,8 +107,22 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
             no_options=[], no_usable_quotes=[], failed=[], deferred=[], duration_ms=0.0,
         )
 
+    async def _options_report(_session: Any, symbol: str) -> Any:
+        from tests.test_options_routes import _report
+
+        return _report(symbol)
+
+    async def _options_chain(_session: Any, _symbol: str, expiry: Any) -> Any:
+        from app.schemas.options import ExpiryChain
+
+        return ExpiryChain(expiry=expiry, days=30.0, forward=1.0, atm_iv=None, smile=[], rows=[], open_interest=[])
+
     app.dependency_overrides[get_session] = _session
     monkeypatch.setattr(options_router, "run_snapshots", _snapshots)
+    monkeypatch.setattr(options_router, "get_report", _options_report)
+    monkeypatch.setattr(options_router, "get_chain", _options_chain)
+    monkeypatch.setattr(options_router, "is_fresh", lambda _s: True)
+    monkeypatch.setattr(options_router, "has_chain", lambda _s, _e: True)
     monkeypatch.setattr(market_router, "get_prices_with_cache", _prices)
     monkeypatch.setattr(market_router, "ingest_market_data", _ingest)
     monkeypatch.setattr(market_router, "get_market_overview", _overview)

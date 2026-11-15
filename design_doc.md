@@ -114,7 +114,7 @@ Tools live in `app/services/`. Each is a focused async function; sync providers 
 | `xbrl.annual_series` | SEC company-concept API (tags merged per year, CY frames) | Lenses |
 | `fetch_annual_history` | SEC XBRL annual facts, split-adjusted with yfinance splits; ten years of closes | Quality (ten-year per-share growth), Valuation (P/E, P/S and P/FCF at each fiscal year-end) |
 | `fetch_insider_activity` | SEC Form 4s, last six months (company's own filings only) | Insider Activity |
-| `options_chain.fetch_chain` + `options_metrics` | yfinance option chains (one call gives the expiries, the front chain and spot), `^IRX` for the rate; our own Black-76 IVs from bid/ask | Daily IV snapshot (`option_iv_snapshots`); the options page (in progress, ADR 0008) |
+| `options_chain.fetch_chain` + `options_metrics` / `options_analysis` / `options_earnings` | yfinance option chains (one call gives the expiries, the front chain and spot), `^IRX` for the rate, the earnings schedule (`earnings_calendar`); our own Black-76 IVs from bid/ask | Daily IV snapshot (`option_iv_snapshots`); `GET /v1/options/{symbol}` (term structure, expected-move cone, implied earnings move, past report moves, chain, IV percentile) |
 | `parse_filing` (13F), `compute_technicals` | Phase 2 parser, RSI/SMA | not on the dashboard today |
 
 **Derived claims** (`app/services/research_derived.py`, ADR 0007) are computed in code and added to sections with source `computed.analytics`: year-over-year margin and per-share changes between named quarters, TTM FCF margin and yield, FCF ÷ net income, payout, shareholder yield, dividend coverage, capex intensity, SBC ÷ FCF, net debt ÷ operating cash flow, premium or discount to the peer median, the median of each year-end multiple and today's premium or discount to it, implied EPS growth, beat streak, latest surprise vs average. Banks skip FCF, capex, gross margin and net debt. These give the model comparisons to argue from without ever computing a number itself.
@@ -149,7 +149,7 @@ Non-negotiable; every PR is held to them.
 | Market | `GET /v1/market/{symbol}/prices?range=`, `GET /v1/market/overview`, `POST /v1/market/ingest` | bearer |
 | Market (Phase 1 reads) | `GET /v1/market/{symbol}`, `GET /v1/market/{symbol}/history` | bearer |
 | Lenses | `GET /v1/lens`, `GET /v1/lens/{id}` | bearer |
-| Options | `POST /v1/options/snapshots` (the daily cron's target) | bearer |
+| Options | `GET /v1/options/{symbol}`, `GET /v1/options/{symbol}/chain/{expiry}`, `POST /v1/options/snapshots` (the daily cron's target) | bearer; page builds rate-limited per IP |
 | Demo | `GET /v1/demo`, `/v1/demo/research/{symbol}`, `/v1/demo/market/{symbol}/prices` | **open by design**: stored data for `DEMO_SYMBOLS` only, never generates |
 | Symbols / News | `GET /v1/symbols`, `GET /v1/news`, `GET /v1/news/{id}`, `POST /v1/symbols`, `POST /v1/news/ingest` | bearer |
 
@@ -202,7 +202,7 @@ Real auth and per-user cost caps land only when there are real users.
 
 **Insider activity (done, 2026-11-13).** Officer and director trades from Form 4s, holders apart, on their own card.
 
-**Options analysis (in progress, 2026-11-15; [ADR 0008](docs/adr/0008-options-from-free-snapshots.md)).** The owner trades directional options and spreads. Free yfinance chains, our own IVs, a separate `/options/:ticker` page, and a daily IV snapshot (started first, because history can't be fetched later) for IV percentile and rank. Five PRs; plan in [tasks/todo.md](tasks/todo.md).
+**Options analysis (in progress, 2026-11-15; [ADR 0008](docs/adr/0008-options-from-free-snapshots.md)).** The owner trades directional options and spreads. Free yfinance chains, our own IVs, a separate `/options/:ticker` page, and a daily IV snapshot (started first, because history can't be fetched later) for IV percentile and rank. The snapshot (#109) and the report API are in; the page, a strategy builder and a cited read follow. Plan in [tasks/todo.md](tasks/todo.md).
 
 **Next:** README screenshots (owner). A compare narrative (4.6.B) waits until Compare gets used.
 

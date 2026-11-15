@@ -51,17 +51,18 @@ from typing import Any
 
 from app.core.observability import log_external_call
 from app.schemas.research import Claim, ClaimHistoryPoint, ClaimUnit, ClaimValue, Source
+from app.services.earnings_calendar import (
+    get_earnings_dates,
+    next_report_date,
+    next_scheduled_row,
+)
+from app.services.earnings_calendar import safe_attr as _safe_attr
+from app.services.earnings_calendar import safe_float as _safe_float
 
 # How far back to keep in ``Claim.history``. yfinance can return more
 # than this; we cap so the chart stays readable and JSONB cache rows
 # don't bloat unnecessarily.
 HISTORY_LIMIT_QUARTERS: int = 20
-
-# How many rows to ask yfinance for. We pad above ``HISTORY_LIMIT_QUARTERS``
-# because ``get_earnings_dates`` returns past + scheduled-future rows
-# in one frame; future rows have NaN ``Reported EPS`` and we filter them
-# out before slicing.
-EARNINGS_DATES_FETCH_LIMIT: int = 24
 
 
 # ── Stable claim contract ─────────────────────────────────────────────
@@ -163,48 +164,6 @@ EarningsProvider = Callable[
 
 
 # ── yfinance provider ─────────────────────────────────────────────────
-
-
-def _safe_attr(ticker: Any, name: str) -> Any:
-    """Return ``ticker.<name>`` or None if access raises (yfinance is flaky)."""
-    try:
-        return getattr(ticker, name, None)
-    except Exception:  # noqa: BLE001 — yfinance lookups occasionally throw
-        return None
-
-
-def _safe_float(value: Any) -> float | None:
-    """Coerce to float, return None on NaN / non-numeric / None."""
-    if value is None:
-        return None
-    try:
-        import pandas as pd  # noqa: PLC0415
-
-        if pd.isna(value):
-            return None
-    except ImportError:
-        pass
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _get_earnings_dates(ticker: Any) -> Any:
-    """Fetch ~24 rows of earnings dates with one HTTP call.
-
-    Prefers ``get_earnings_dates(limit=24)`` (the wider-history method);
-    falls back to the ``earnings_dates`` property on yfinance versions
-    that don't expose the method. Returns None on any failure — the
-    caller treats None as "no history available".
-    """
-    method = getattr(ticker, "get_earnings_dates", None)
-    if callable(method):
-        try:
-            return method(limit=EARNINGS_DATES_FETCH_LIMIT)
-        except Exception:  # noqa: BLE001
-            pass
-    return _safe_attr(ticker, "earnings_dates")
 
 
 def report_period(report_date: Any) -> str:
@@ -321,50 +280,6 @@ def _surprise_for_row(row: Any, has_surprise_col: bool) -> float | None:
     return None
 
 
-def _calendar_date(calendar: Any) -> str | None:
-    """``calendar["Earnings Date"]`` as an ISO date. yfinance returns a
-    list or a single date."""
-    if not isinstance(calendar, dict):
-        return None
-    raw_date = calendar.get("Earnings Date")
-    if isinstance(raw_date, list):
-        raw_date = raw_date[0] if raw_date else None
-    if raw_date is None:
-        return None
-    try:
-        return raw_date.isoformat()
-    except AttributeError:
-        return str(raw_date)
-
-
-def _next_scheduled_row(
-    earnings_dates: Any, after: str | None
-) -> tuple[str | None, float | None]:
-    """The earliest scheduled row (no Reported EPS yet) dated after the
-    latest report: ``(iso_date, eps_estimate)``. yfinance mixes these
-    future rows into ``earnings_dates``."""
-    if earnings_dates is None or getattr(earnings_dates, "empty", True):
-        return None, None
-    if "Reported EPS" not in earnings_dates.columns:
-        return None, None
-
-    import pandas as pd  # noqa: PLC0415
-
-    best: tuple[str, float | None] | None = None
-    for idx, row in earnings_dates.iterrows():
-        if not pd.isna(row.get("Reported EPS")):
-            continue
-        try:
-            day = idx.date().isoformat()
-        except AttributeError:
-            continue
-        if after is not None and day <= after:
-            continue
-        if best is None or day < best[0]:
-            best = (day, _safe_float(row.get("EPS Estimate")))
-    return best if best is not None else (None, None)
-
-
 def _extract_forward(
     earnings_estimate: Any,
     calendar: Any,
@@ -399,12 +314,8 @@ def _extract_forward(
         out["next.eps_estimate"] = _safe_float(row.get("avg"))
         out["next.revenue_estimate"] = _safe_float(row.get("revenueAvg"))
 
-    cal_date = _calendar_date(calendar)
-    if cal_date is not None and latest_report_date is not None and cal_date <= latest_report_date:
-        cal_date = None
-    scheduled_date, scheduled_estimate = _next_scheduled_row(earnings_dates, latest_report_date)
-
-    out["next.report_date"] = cal_date or scheduled_date
+    _scheduled_date, scheduled_estimate = next_scheduled_row(earnings_dates, latest_report_date)
+    out["next.report_date"] = next_report_date(calendar, earnings_dates, latest_report_date)
     if out["next.eps_estimate"] is None:
         out["next.eps_estimate"] = scheduled_estimate
     return out
@@ -421,7 +332,7 @@ def _fetch_yfinance_earnings(
     import yfinance  # noqa: PLC0415
 
     ticker = yfinance.Ticker(symbol)
-    earnings_dates = _get_earnings_dates(ticker)
+    earnings_dates = get_earnings_dates(ticker)
     earnings_estimate = _safe_attr(ticker, "earnings_estimate")
     calendar = _safe_attr(ticker, "calendar")
 

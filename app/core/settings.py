@@ -115,6 +115,10 @@ class Settings(BaseSettings):
     # ADR 0008) always records, comma-separated. Symbols whose options page
     # was opened recently are added to these, up to 30 in all.
     OPTIONS_SNAPSHOT_SYMBOLS: str = ""
+    # Options page builds (cache misses) one IP may start per hour: each is
+    # about a dozen Yahoo calls, and Yahoo throttling would hit every
+    # yfinance tool. Cached reports are free. 0 disables the limit.
+    OPTIONS_RATE_LIMIT_PER_HOUR: int = 60
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

@@ -234,6 +234,42 @@ def earnings_block(
     )
 
 
+# Comparison claims say which way they go, in words code picks (ADR 0007):
+# the read copies the words instead of reading a sign. Keyed by the
+# direction at display precision (+1, −1, 0).
+_VS_REALIZED = {
+    1: "IV30 above realized volatility (20 sessions): options price more movement than the stock has shown",
+    -1: "IV30 below realized volatility (20 sessions): options price less movement than the stock has shown",
+    0: "IV30 level with realized volatility (20 sessions): options price as much movement as the stock has shown",
+}
+_TERM = {
+    1: "IV90 above IV30: the term structure slopes up, longer expiries price more volatility",
+    -1: "IV90 below IV30: the term structure slopes down, longer expiries price less volatility",
+    0: "IV90 level with IV30: the term structure is flat",
+}
+_SKEW = {
+    1: "25-delta skew, expiry nearest 30 days: puts carry higher IV than calls",
+    -1: "25-delta skew, expiry nearest 30 days: calls carry higher IV than puts",
+    0: "25-delta skew, expiry nearest 30 days: puts and calls carry the same IV",
+}
+_PUT_CALL = {
+    1: "Put/call open interest, expiries read: more puts open than calls",
+    -1: "Put/call open interest, expiries read: more calls open than puts",
+    0: "Put/call open interest, expiries read: as many puts open as calls",
+}
+_EARNINGS_WAY = {1: "above", -1: "below", 0: "level with"}
+
+
+def _direction(x: float, places: int) -> int:
+    """The sign of ``x`` as displayed: 0 when it rounds to zero."""
+    shown = round(x, places)
+    return (shown > 0) - (shown < 0)
+
+
+def _gap(a: float | None, b: float | None) -> float | None:
+    return None if a is None or b is None else a - b
+
+
 def claims(
     *,
     iv30: float | None,
@@ -247,18 +283,20 @@ def claims(
     history: IvHistory,
     at: datetime,
 ) -> list[Claim]:
-    """The headline figures as claims (unit and source each), for the
-    page's chips and, later, its cited read."""
+    """The headline figures and comparisons as claims (unit and source
+    each), the facts the page's cited read is written from."""
+    points = 4  # percentage points show two decimals: a fraction to 4 places
+    iv_gap, term = _gap(iv30, rv20), _gap(iv90, iv30)
     rows: list[tuple[str, float | None, ClaimUnit, str]] = [
         ("Implied volatility, 30 days (IV30)", iv30, "fraction", "total variance between the expiries around 30 days"),
         ("Implied volatility, 90 days (IV90)", iv90, "fraction", "total variance between the expiries around 90 days"),
         ("Realized volatility, 20 sessions", rv20, "fraction", "close-to-close, zero mean, ×252"),
         ("Realized volatility, 60 sessions", rv60, "fraction", "close-to-close, zero mean, ×252"),
-        ("IV30 minus realized volatility (20 sessions)", None if iv30 is None or rv20 is None else iv30 - rv20,
-         "percentage_points", "IV30 − RV20"),
-        ("25-delta skew, expiry nearest 30 days (put IV minus call IV)", skew25, "percentage_points",
+        (_VS_REALIZED[_direction(iv_gap or 0.0, points)], iv_gap, "percentage_points", "IV30 − RV20"),
+        (_TERM[_direction(term or 0.0, points)], term, "percentage_points", "IV90 − IV30"),
+        (_SKEW[_direction(skew25 or 0.0, points)], skew25, "percentage_points",
          "IV at the 25-delta put strike − IV at the 25-delta call strike"),
-        ("Put/call open interest, expiries read", put_call_oi, "ratio", "Σ put OI ÷ Σ call OI"),
+        (_PUT_CALL[_direction((put_call_oi or 1.0) - 1.0, 2)], put_call_oi, "ratio", "Σ put OI ÷ Σ call OI"),
     ]
     if default is not None:
         rows.append((f"Expected move to {default.expiry.isoformat()} (one standard deviation)",
@@ -267,8 +305,14 @@ def claims(
         rows.append((f"Implied earnings move, report on {earnings.next_date.isoformat()} (expected absolute move)",
                      earnings.implied_move, "fraction", "√(2/π) × the report's σ, from the expiries around it"))
     if earnings is not None and earnings.past:
-        rows.append((f"Average absolute move after the last {len(earnings.past)} reports",
+        n = len(earnings.past)
+        rows.append((f"Average absolute move after the last {n} reports",
                      earnings.past_mean_abs, "fraction", "mean |ln(close after ÷ close before)|"))
+        priced_gap = _gap(earnings.implied_move, earnings.past_mean_abs)
+        if priced_gap is not None:
+            way = _EARNINGS_WAY[_direction(priced_gap, points)]
+            rows.append((f"Implied earnings move {way} the average move after the last {n} report{'s' if n > 1 else ''}",
+                         priced_gap, "percentage_points", "implied earnings move − average absolute move"))
     if history.percentile is not None:
         rows.append((f"IV30 percentile over {min(history.sessions, HISTORY_WINDOW)} stored sessions",
                      history.percentile, "percent", "share of stored daily IV30s at or below today's"))

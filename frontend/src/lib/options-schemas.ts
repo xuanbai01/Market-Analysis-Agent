@@ -31,6 +31,8 @@ export const ExpirySummarySchema = z.object({
   call_volume: Num,
   put_volume: Num,
   includes_earnings: z.boolean().default(false),
+  max_pain: MaybeNum.default(null),
+  net_gex: MaybeNum.default(null),
 });
 export type ExpirySummary = z.infer<typeof ExpirySummarySchema>;
 
@@ -64,6 +66,34 @@ export type ChainRow = z.infer<typeof ChainRowSchema>;
 export const OpenInterestPointSchema = z.object({ strike: Num, call: Num, put: Num });
 export type OpenInterestPoint = z.infer<typeof OpenInterestPointSchema>;
 
+export const TopContractSchema = z.object({ strike: Num, side: z.enum(["call", "put"]), open_interest: Num });
+export type TopContract = z.infer<typeof TopContractSchema>;
+
+export const StrikeExposureSchema = z.object({ strike: Num, gex: Num, dex: Num });
+export type StrikeExposure = z.infer<typeof StrikeExposureSchema>;
+
+/** Where one expiry's open interest sits (options_positioning). Exposures
+ * are dollars per 1% move, under the dealer assumption it states. */
+export const PositioningSchema = z.object({
+  call_open_interest: Num,
+  put_open_interest: Num,
+  put_call: MaybeNum,
+  top: z.array(TopContractSchema).default([]),
+  max_pain: MaybeNum,
+  exposure: z.array(StrikeExposureSchema).default([]),
+  call_gex: Num,
+  put_gex: Num,
+  net_gex: Num,
+  call_dex: Num,
+  put_dex: Num,
+  net_dex: Num,
+  call_wall: MaybeNum,
+  put_wall: MaybeNum,
+  gamma_flip: MaybeNum,
+  assumption: z.string(),
+});
+export type Positioning = z.infer<typeof PositioningSchema>;
+
 export const ExpiryChainSchema = z.object({
   expiry: z.string(),
   days: Num,
@@ -72,6 +102,7 @@ export const ExpiryChainSchema = z.object({
   smile: z.array(SmilePointSchema).default([]),
   rows: z.array(ChainRowSchema).default([]),
   open_interest: z.array(OpenInterestPointSchema).default([]),
+  positioning: PositioningSchema.nullable().default(null),
 });
 export type ExpiryChain = z.infer<typeof ExpiryChainSchema>;
 

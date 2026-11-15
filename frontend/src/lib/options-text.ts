@@ -6,7 +6,7 @@
  *
  * A sentence is a list of segments: plain text, or a figure to set in bold.
  */
-import type { EarningsBlock, ExpiryChain, ExpirySummary } from "./options-schemas";
+import type { EarningsBlock, ExpiryChain, ExpirySummary, Positioning, TopContract } from "./options-schemas";
 
 export type Segment = string | { strong: string };
 export type Sentence = Segment[];
@@ -181,6 +181,105 @@ export function earningsSentence(earnings: EarningsBlock): Sentence | null {
   return parts;
 }
 
+/** Dollars in short form: "$48.9M", "−$17.0M", "$950K", "$2.40B". */
+export function compactUsd(v: number): string {
+  const sign = v < 0 ? "−" : "";
+  const a = Math.abs(v);
+  if (a >= 1e9) return `${sign}$${(a / 1e9).toFixed(2)}B`;
+  if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(1)}M`;
+  if (a >= 1e3) return `${sign}$${(a / 1e3).toFixed(0)}K`;
+  return `${sign}$${a.toFixed(0)}`;
+}
+
+/** "$200", "$162.5". */
+export function strikeLabel(k: number): string {
+  return Number.isInteger(k) ? `$${k}` : `$${Number(k.toFixed(2))}`;
+}
+
+/** "Nov 16 $200 call". */
+export function contractLabel(expiryIso: string, c: TopContract): string {
+  return `${dateLabel(expiryIso)} ${strikeLabel(c.strike)} ${c.side}`;
+}
+
+/** "2.9% above", "1.2% below", "at": a level against the price. */
+function versus(level: number, price: number): string {
+  const gap = level / price - 1;
+  if (Math.abs(gap) < 0.0005) return "at";
+  return `${pct(Math.abs(gap))} ${gap > 0 ? "above" : "below"}`;
+}
+
+/** The expiry's open interest: totals, the ratio and the largest contract. */
+export function positioningSentence(p: Positioning, expiryIso: string): Sentence | null {
+  if (p.call_open_interest + p.put_open_interest === 0) return null;
+  const parts: Sentence = [
+    `${dateLabel(expiryIso)}: `,
+    { strong: `${count(p.call_open_interest)} calls` },
+    " and ",
+    { strong: `${count(p.put_open_interest)} puts` },
+    " open",
+  ];
+  if (p.put_call !== null) parts.push(" (put/call ", { strong: p.put_call.toFixed(2) }, ")");
+  const top = p.top[0];
+  if (top) parts.push("; the largest is the ", { strong: `${strikeLabel(top.strike)} ${top.side} (${count(top.open_interest)})` });
+  parts.push(".");
+  return parts;
+}
+
+/** Max pain against the price. */
+export function maxPainSentence(p: Positioning, price: number | null): Sentence | null {
+  if (p.max_pain === null) return null;
+  const parts: Sentence = ["Max pain is ", { strong: usd(p.max_pain) }];
+  if (price !== null && price > 0) parts.push(", ", { strong: versus(p.max_pain, price) }, " the price");
+  parts.push(": the settle that would leave the most open contracts worthless.");
+  return parts;
+}
+
+/** Net gamma exposure, and what its sign means under the dealer assumption. */
+export function gammaSentence(p: Positioning): Sentence | null {
+  if (p.call_open_interest + p.put_open_interest === 0) return null;
+  const parts: Sentence = ["Net gamma exposure is ", { strong: `${compactUsd(p.net_gex)} per 1% move` }];
+  if (Math.abs(p.net_gex) < 1) {
+    parts.push(": calls and puts about offset.");
+  } else {
+    parts.push(
+      p.net_gex > 0
+        ? ": if dealers hold the other side as assumed, their hedging would damp moves"
+        : ": if dealers hold the other side as assumed, their hedging would add to moves",
+    );
+    parts.push(p.gamma_flip !== null ? "; it changes sign near " : ".");
+    if (p.gamma_flip !== null) parts.push({ strong: usd(p.gamma_flip) }, ".");
+  }
+  return parts;
+}
+
+/** Net delta exposure: which side's delta outweighs. */
+export function deltaSentence(p: Positioning): Sentence | null {
+  if (p.call_open_interest + p.put_open_interest === 0) return null;
+  return [
+    "Net delta exposure is ",
+    { strong: `${compactUsd(p.net_dex)} per 1% move` },
+    p.net_dex >= 0 ? ": calls' delta outweighs puts'." : ": puts' delta outweighs calls'.",
+  ];
+}
+
+/** Max pain across the expiries read: its lowest and highest. */
+export function acrossSentence(expiries: ExpirySummary[]): Sentence | null {
+  const priced = expiries.filter((e): e is ExpirySummary & { max_pain: number } => e.max_pain !== null);
+  if (priced.length < 2) return null;
+  const low = priced.reduce((a, b) => (b.max_pain < a.max_pain ? b : a));
+  const high = priced.reduce((a, b) => (b.max_pain > a.max_pain ? b : a));
+  if (low.max_pain === high.max_pain) {
+    return ["Max pain is ", { strong: usd(low.max_pain) }, ` at all ${priced.length} expiries read.`];
+  }
+  return [
+    "Max pain runs from ",
+    { strong: usd(low.max_pain) },
+    ` (${dateLabel(low.expiry)}) to `,
+    { strong: usd(high.max_pain) },
+    ` (${dateLabel(high.expiry)}) across the ${priced.length} expiries read.`,
+  ];
+}
+
 /** What each figure on the page means, for the ⓘ beside it. */
 export const GLOSSARY = {
   spot: "The underlying's price the option quotes go with: the last close Yahoo reports outside market hours, the 15-minute-delayed price during them. Feeds can differ by a few cents on a close.",
@@ -193,5 +292,14 @@ export const GLOSSARY = {
   term: "At-the-money implied volatility by days to expiry. An expiry holding the next earnings report is hollow: the report adds a jump to its IV.",
   earnings: "The move options price for the next report, from the expiries around it, beside the stock's actual moves after past reports.",
   smile: "Implied volatility by strike for one expiry, from the out-of-the-money side: puts below the forward, calls above.",
-  openInterest: "Contracts open at each strike, calls above the line and puts below; the dashed line is the price.",
+  openInterest: "Contracts open at each strike, calls above the line and puts below; the dashed lines are the price and max pain.",
+  topOpenInterest: "The contracts with the most open interest in this expiry, largest first.",
+  maxPain:
+    "The settle price, among the listed strikes, that would leave option holders the least. Widely watched; it describes where open interest sits, not where the price will go.",
+  gamma:
+    "Gamma exposure: how many dollars dealers' hedges would change for a 1% move in the stock, if dealers are long the calls and short the puts customers hold opposite them (the common assumption; real positions aren't public). Positive: their hedging damps moves; negative: it adds to them. Each bar is the net at a strike. The call and put walls are the strikes with the most call and put gamma exposure; the gamma flip is where the net changes sign as the price moves, each strike's IV held.",
+  delta:
+    "Delta exposure: the dollar change in the open options' value for a 1% move in the stock, under the same assumption. Some sites quote total dollar delta under this name, 100 times larger.",
+  acrossExpiries:
+    "Each expiry the page reads: its max pain and how far that is from the price, its net gamma exposure, and its put/call open interest.",
 } as const;

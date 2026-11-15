@@ -160,7 +160,7 @@ def _parts(
             oa.expiry_summary(fetched.chains[s.expiry], s, oa.upcoming(reaction, quoted_at), quoted_at) for s in smiles
         ],
         "listed_expiries": list(fetched.expiries),
-        "chain": oa.expiry_chain(fetched.chains[default.expiry], default) if default else None,
+        "chain": oa.expiry_chain(fetched.chains[default.expiry], default, spot) if default else None,
         "earnings": earnings,
     }
 
@@ -292,4 +292,4 @@ async def get_chain(
                 if expiry in built.fetched.chains or expiry in built.unusable:
                     raise NoUsableQuotes(expiry)
                 s = await options_chain.on_options_thread(_fetch_expiry, symbol, expiry, built)
-    return await options_chain.on_options_thread(oa.expiry_chain, built.fetched.chains[expiry], s)
+    return await options_chain.on_options_thread(oa.expiry_chain, built.fetched.chains[expiry], s, built.fetched.spot)

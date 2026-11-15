@@ -149,6 +149,8 @@ async def test_quote_token_is_read_once_and_cached(quote_tokens: list[str]) -> N
         "wss://localhost\x00.tasty-openapi-ws.dxfeed.com/realtime",
         "wss://evil.example\uff0e.tasty-openapi-ws.dxfeed.com/realtime",
         "wss://tasty-openapi-ws.dxfeed.com:notaport/realtime",
+        "wss://[zz]/realtime",
+        "wss://[::1]/realtime",
     ],
 )
 async def test_a_feed_address_off_dxfeed_is_refused(

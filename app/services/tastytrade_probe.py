@@ -47,6 +47,10 @@ from app.services import tastytrade_client as tt
 Say = Callable[[str], None]
 
 
+def _now() -> datetime:  # swapped in tests
+    return datetime.now(UTC)
+
+
 class ProbeError(Exception):
     """An answer the probe can't read; its message is the probe's own."""
 
@@ -107,16 +111,25 @@ def age_seconds(stamp: Any, now: datetime) -> float | None:
         then = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
     except ValueError:
         return None
+    if then.tzinfo is None:  # a time with no zone can't be aged
+        return None
     return (now - then).total_seconds()
 
 
+def _date(value: Any) -> date | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def nearest_expiry(expirations: list[dict[str, Any]], today: date, target_days: int = TARGET_DAYS) -> dict[str, Any] | None:
-    dated = [e for e in expirations if isinstance(field(e, "expiration-date"), str)]
-    return min(
-        dated,
-        key=lambda e: abs((date.fromisoformat(field(e, "expiration-date")) - today).days - target_days),
-        default=None,
-    )
+    """The expiry nearest ``target_days`` out; one whose date doesn't read is skipped."""
+    dated = [(day, e) for e in expirations if isinstance(e, dict) and (day := _date(field(e, "expiration-date")))]
+    best = min(dated, key=lambda pair: abs((pair[0] - today).days - target_days), default=None)
+    return None if best is None else best[1]
 
 
 def near_money(strikes: list[dict[str, Any]], spot: float, n: int = NEAR_MONEY_STRIKES) -> list[dict[str, Any]]:
@@ -370,7 +383,7 @@ async def probe_account(say: Say) -> None:
 
 
 async def main(say: Say = print) -> None:
-    now = datetime.now(UTC)
+    now = _now()
     say(f"tastytrade probe, {now.astimezone(mc.ET):%Y-%m-%d %H:%M} ET; configured: {tt.is_configured()}")
     await _section(say, "The grant", lambda: probe_grant(say))
     await _section(say, "Quote token", lambda: probe_quote_token(say))

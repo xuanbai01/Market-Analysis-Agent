@@ -1,0 +1,81 @@
+# Daily IV snapshot (ADR 0008).
+#
+# After each US close, asks the API to store each tracked ticker's option
+# IV figures for the day: no free source has IV history, so this table is
+# it, and a day missed is gone. A second run later the same night fills
+# any gap; both are idempotent, and a weekend or holiday run stores
+# nothing ("no_new_session").
+#
+# Times are UTC and off the hour (GitHub delays or drops schedules at :00):
+#   22:17 Mon-Fri = 17:17 ET in winter, 18:17 in summer;
+#   00:47 Tue-Sat = 19:47 / 20:47 ET the same evening.
+# Run it by hand with:  gh workflow run iv-snapshot.yml
+#
+# Needs the repository variable API_BASE_URL (https://market-analysis-agent.fly.dev)
+# and the secret BACKEND_SHARED_SECRET (the API's shared secret; docs/deployment.md).
+# The job fails when the market was open, or when more than half of the
+# tickers failed or were deferred; the step summary lists what happened.
+
+name: IV Snapshot
+
+on:
+  schedule:
+    - cron: "17 22 * * 1-5"
+    - cron: "47 0 * * 2-6"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: iv-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      API_BASE_URL: ${{ vars.API_BASE_URL }}
+      BACKEND_SHARED_SECRET: ${{ secrets.BACKEND_SHARED_SECRET }}
+    steps:
+      - name: Check the configuration
+        run: |
+          if [ -z "$API_BASE_URL" ] || [ -z "$BACKEND_SHARED_SECRET" ]; then
+            echo "::error::Set the API_BASE_URL repository variable and the BACKEND_SHARED_SECRET secret (docs/deployment.md)."
+            exit 1
+          fi
+
+      # Fly stops the machine when idle and Neon suspends the database; the
+      # health check wakes both before the real call.
+      - name: Wake the API and the database
+        run: curl -fsS --retry 6 --retry-connrefused --retry-delay 5 --max-time 30 "$API_BASE_URL/v1/health" > /dev/null
+
+      - name: Take the snapshots
+        run: |
+          curl -fsS --retry 2 --retry-delay 20 --max-time 600 -X POST \
+            -H "Authorization: Bearer $BACKEND_SHARED_SECRET" \
+            "$API_BASE_URL/v1/options/snapshots" -o run.json
+
+      - name: Check the run
+        run: |
+          jq . run.json
+          status=$(jq -r .status run.json)
+          count() { jq "[.$1[]] | length" run.json; }
+          targets=$(count targets); written=$(count written); skipped=$(count skipped)
+          failed=$(count failed); deferred=$(count deferred)
+          no_options=$(count no_options); no_quotes=$(count no_usable_quotes)
+          {
+            echo "### IV snapshot: $status ($(jq -r '.session_date // "no session"' run.json))"
+            echo ""
+            echo "| targets | written | already stored | failed | deferred | no options | no usable quotes |"
+            echo "|---|---|---|---|---|---|---|"
+            echo "| $targets | $written | $skipped | $failed | $deferred | $no_options | $no_quotes |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" = "market_open" ]; then
+            echo "::error::The market was open; the run stored nothing."
+            exit 1
+          fi
+          if [ "$status" = "ok" ] && [ $((2 * (failed + deferred))) -gt "$targets" ]; then
+            echo "::error::More than half of the tickers failed or were deferred."
+            exit 1
+          fi

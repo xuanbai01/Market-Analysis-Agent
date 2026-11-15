@@ -8,8 +8,8 @@ The method, which every stored row is tagged with (``METHOD_VERSION``):
 - **Forward:** from put-call parity, F = K + (C − P) / DF, the median over
   the three strikes where call and put are closest in price. It carries
   the dividends and the quote delay. Off by more than 3% from spot carried
-  at the rate, the quotes are stale or broken and the forward falls back
-  to spot carried at the rate less the trailing dividend yield (flagged).
+  at the rate less the trailing dividend yield, the quotes are stale or
+  broken and the forward falls back to that carry (flagged).
 - **Smile:** Black-76 IVs from the out-of-the-money side (puts below the
   forward, calls above), where American early exercise is negligible,
   for the strikes within 2.5 ATM standard deviations (at most 25).
@@ -88,9 +88,10 @@ def _forward(
     parity = statistics.median(estimates) if estimates else None
     if spot <= 0:
         return (parity, True) if parity else None
-    if parity and abs(parity / (spot * math.exp(rate * years)) - 1) <= FORWARD_TOLERANCE:
+    carry = spot * math.exp((rate - dividend_yield) * years)
+    if parity and abs(parity / carry - 1) <= FORWARD_TOLERANCE:
         return parity, True
-    return spot * math.exp((rate - dividend_yield) * years), False
+    return carry, False
 
 
 def _raw_rows(chain: ExpiryQuotes, strikes: Iterable[float]) -> tuple[tuple[float, ...], ...]:

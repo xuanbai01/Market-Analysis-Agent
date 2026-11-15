@@ -1,0 +1,172 @@
+"""
+Yahoo's option chains, read into plain values (ADR 0008).
+
+One ``option_chain()`` call with no date returns the list of expiries,
+the front expiry's chain and the underlying quote; every other expiry is
+one more call, so callers pick only the expiries they need. Daily closes
+come along for realized volatility. Everything here is blocking (yfinance
+is), and callers run it on the options thread.
+
+Yahoo's own ``impliedVolatility`` column is not read: on illiquid strikes
+it was junk (up to 154%), so every IV is computed from bid and ask in
+``options_metrics``.
+"""
+from __future__ import annotations
+
+import logging
+import math
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from datetime import date
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# The 13-week Treasury bill yield when ^IRX can't be read. A wrong rate
+# moves a 30-day IV by a few hundredths of a point.
+ASSUMED_RATE = 0.04
+RATE_TTL_SECONDS = 12 * 3600
+HISTORY_PERIOD = "6mo"
+_REGULAR = "REGULAR"
+
+
+@dataclass(frozen=True)
+class Quote:
+    strike: float
+    bid: float
+    ask: float
+    volume: int
+    open_interest: int
+    # False for an adjusted contract (after a split or merger), whose
+    # deliverable isn't 100 shares; those never price an IV.
+    regular: bool
+
+    @property
+    def mid(self) -> float:
+        return (self.bid + self.ask) / 2
+
+
+@dataclass(frozen=True)
+class ExpiryQuotes:
+    expiry: date
+    calls: tuple[Quote, ...]
+    puts: tuple[Quote, ...]
+
+
+@dataclass(frozen=True)
+class ChainFetch:
+    symbol: str
+    spot: float
+    market_time: int  # epoch seconds of the underlying quote
+    dividend_yield: float  # trailing, as a fraction; only for the forward's fallback
+    expiries: tuple[date, ...]  # every expiry Yahoo lists
+    chains: dict[date, ExpiryQuotes]  # the picked ones
+    closes: tuple[tuple[date, float], ...]  # daily closes, oldest first
+
+
+# Which listed expiries to fetch, given all of them.
+ExpiryPicker = Callable[[tuple[date, ...]], Sequence[date]]
+
+
+def _number(value: Any) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return number if math.isfinite(number) else 0.0
+
+
+def _quotes(frame: Any) -> tuple[Quote, ...]:
+    rows = frame[["strike", "bid", "ask", "volume", "openInterest", "contractSize"]].to_numpy().tolist()
+    return tuple(
+        Quote(
+            strike=_number(strike),
+            bid=_number(bid),
+            ask=_number(ask),
+            volume=int(_number(volume)),
+            open_interest=int(_number(open_interest)),
+            regular=size == _REGULAR,
+        )
+        for strike, bid, ask, volume, open_interest, size in rows
+    )
+
+
+def _fetch_yfinance_chain(symbol: str, pick: ExpiryPicker) -> ChainFetch | None:
+    import yfinance  # noqa: PLC0415  -- lazy: tests swap in a fake module
+
+    ticker = yfinance.Ticker(symbol)
+    front = ticker.option_chain()
+    if front.calls is None:
+        return None  # no listed options (or a symbol Yahoo doesn't know)
+    underlying = front.underlying or {}
+    listed = tuple(sorted(date.fromisoformat(e) for e in ticker.options))
+    chains: dict[date, ExpiryQuotes] = {}
+    for expiry in pick(listed):
+        if expiry not in listed or expiry in chains:
+            continue
+        chain = front if expiry == listed[0] else ticker.option_chain(expiry.isoformat())
+        if chain.calls is not None:
+            chains[expiry] = ExpiryQuotes(expiry, _quotes(chain.calls), _quotes(chain.puts))
+    history = ticker.history(period=HISTORY_PERIOD, auto_adjust=True)
+    closes = tuple(
+        (day, _number(close))
+        for day, close in zip(history.index.date, history["Close"].tolist(), strict=False)
+        if _number(close) > 0
+    )
+    return ChainFetch(
+        symbol=symbol,
+        spot=_number(underlying.get("regularMarketPrice")),
+        market_time=int(_number(underlying.get("regularMarketTime"))),
+        dividend_yield=_number(underlying.get("trailingAnnualDividendYield")),
+        expiries=listed,
+        chains=chains,
+        closes=closes,
+    )
+
+
+ChainProvider = Callable[[str, ExpiryPicker], "ChainFetch | None"]
+PROVIDERS: dict[str, ChainProvider] = {"yfinance": _fetch_yfinance_chain}
+
+
+def fetch_chain(symbol: str, pick: ExpiryPicker, *, provider: str = "yfinance") -> ChainFetch | None:
+    """The chains of ``symbol`` for the expiries ``pick`` chooses; None
+    when the symbol lists no options. Blocking."""
+    return PROVIDERS[provider](symbol, pick)
+
+
+def _fetch_yfinance_irx() -> float | None:
+    import yfinance  # noqa: PLC0415
+
+    closes = yfinance.Ticker("^IRX").history(period="5d")["Close"].dropna().tolist()
+    return float(closes[-1]) if closes else None
+
+
+# Swapped in tests.
+fetch_irx: Callable[[], float | None] = _fetch_yfinance_irx
+
+_rate_cache: tuple[float, float] | None = None  # (rate, expires_at monotonic)
+
+
+def clear_rate_cache() -> None:
+    global _rate_cache
+    _rate_cache = None
+
+
+def risk_free_rate() -> tuple[float, bool]:
+    """(rate, assumed): the 13-week T-bill yield from ^IRX as a fraction,
+    cached for 12 hours, or ``ASSUMED_RATE`` with assumed=True when it
+    can't be read. Blocking."""
+    global _rate_cache
+    now = time.monotonic()
+    if _rate_cache is not None and _rate_cache[1] > now:
+        return _rate_cache[0], False
+    try:
+        percent = fetch_irx()
+    except Exception:
+        logger.warning("could not read ^IRX; assuming a %.2f rate", ASSUMED_RATE, exc_info=True)
+        percent = None
+    if percent is None or not 0 <= percent < 25:
+        return ASSUMED_RATE, True
+    _rate_cache = (percent / 100, now + RATE_TTL_SECONDS)
+    return percent / 100, False

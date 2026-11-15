@@ -31,6 +31,9 @@ ASSUMED_RATE = 0.04
 RATE_TTL_SECONDS = 12 * 3600
 HISTORY_PERIOD = "6mo"
 _REGULAR = "REGULAR"
+# Only a stock has earnings; Yahoo answers a fund's calendar with a 404
+# that yfinance logs as an error.
+_EQUITY = "EQUITY"
 
 
 @dataclass(frozen=True)
@@ -140,7 +143,7 @@ def _fetch_yfinance_chain(symbol: str, pick: ExpiryPicker) -> ChainFetch | None:
         expiries=listed,
         chains=chains,
         closes=closes,
-        next_earnings=_next_earnings(ticker, today),
+        next_earnings=_next_earnings(ticker, today) if underlying.get("quoteType") == _EQUITY else None,
     )
 
 

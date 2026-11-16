@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
 import { fetchOptionsChain } from "../../lib/options-api";
-import { OptionsReportSchema } from "../../lib/options-schemas";
+import { OptionsReportSchema, PositioningSchema } from "../../lib/options-schemas";
 import { clearOwnerKey, getOwnerKey, setOwnerKey } from "../../lib/owner";
 import { fetchLiveChain } from "../../lib/owner-api";
 import { ExpirySection } from "./ExpirySection";
@@ -267,6 +267,36 @@ describe("ExpirySection live quotes", () => {
     await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/lists no NVDA options/));
     expect(screen.getByTestId("options-live-status")).toHaveTextContent("expiring 2026-12-11. Showing the delayed chain."); // one full stop
     expect(getOwnerKey()).toBe("k".repeat(40));
+  });
+
+  it("keeps the key on a 404 from the live read", async () => {
+    // A 404 there can't be told from a route the backend doesn't have yet (a
+    // deploy in flight): only a 403 says the key is wrong (#130's AI review).
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 404, title: "Not Found" }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live quotes unavailable: Not Found/));
+    expect(getOwnerKey()).toBe("k".repeat(40));
+  });
+
+  it("draws open interest and positioning from the whole delayed chain while live", async () => {
+    // Live quotes cover the strikes near the price; open interest is the
+    // day's figure, so the whole chain's walls and max pain stand (#130's AI review).
+    const positioning = (maxPain: number) =>
+      PositioningSchema.parse({
+        call_open_interest: 1000, put_open_interest: 800, put_call: 0.8, max_pain: maxPain, call_gex: 1, put_gex: -1, net_gex: 0,
+        call_dex: 1, put_dex: -1, net_dex: 0, call_wall: 175, put_wall: 150, gamma_flip: null, assumption: "Dealers long calls, short puts.",
+      });
+    const delayed = { ...CHAIN, positioning: positioning(161) };
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue({ ...LIVE, chain: { ...LIVE.chain, positioning: positioning(999) } });
+    renderSection(section(delayed));
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live · tastytrade/));
+    expect(screen.getAllByText(/forward \$163\.90/).length).toBeGreaterThan(0); // the live chain is drawn
+    expect(screen.queryAllByText(/\$999/)).toHaveLength(0);
+    expect(screen.getAllByText(/\$161/).length).toBeGreaterThan(0);
   });
 
   it("forgets a refused owner key", async () => {

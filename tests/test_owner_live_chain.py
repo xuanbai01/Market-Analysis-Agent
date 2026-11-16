@@ -285,3 +285,19 @@ async def test_a_chain_is_kept_as_plain_rows(account: _Tastytrade) -> None:
     rows = kept[EXPIRY.isoformat()]
     assert len(rows) == len(STRIKES) and all(isinstance(r, tuple) and len(r) == 3 for r in rows)
 
+
+async def test_a_chain_is_read_into_rows_off_the_event_loop(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    """SPY's or SPX's nested chain is tens of thousands of strikes: turned
+    into rows on the options thread, not the event loop (#130's AI review)."""
+    import threading
+
+    rows = lc._rows
+    threads: list[bool] = []
+
+    def recording(expiration: dict[str, Any]) -> list[tuple[float, str, str]]:
+        threads.append(threading.current_thread() is threading.main_thread())
+        return rows(expiration)
+
+    monkeypatch.setattr(lc, "_rows", recording)
+    await lc.live_chain("SPY", EXPIRY)
+    assert threads and not any(threads)

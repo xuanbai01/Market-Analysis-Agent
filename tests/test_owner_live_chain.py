@@ -320,3 +320,30 @@ async def test_an_expiry_that_has_closed_is_not_priced(account: _Tastytrade, mon
     with pytest.raises(lc.NotListed):
         await lc.live_chain("SPY", EXPIRY)
 
+
+async def test_a_contract_filed_under_another_strike_is_dropped(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A strike row whose contract says another strike would shift the smile:
+    dropped (#130's AI review)."""
+    plain = account.get
+
+    async def get(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        answer = await plain(path, params, op=op)
+        if path == "/option-chains/SPY/nested":
+            strikes = answer["data"]["items"][0]["expirations"][0]["strikes"]
+            strikes[0] = {**strikes[0], "strike-price": f"{STRIKES[0] + 1:.1f}"}  # files the first contract a dollar off
+        return answer
+
+    monkeypatch.setattr(lc.tt, "get", get)
+    chain = (await lc.live_chain("SPY", EXPIRY)).chain
+    assert STRIKES[0] + 1 not in [row.strike for row in chain.rows]
+
+
+async def test_a_symbol_tastytrade_lists_no_options_for_is_not_listed(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Not a provider outage: no options for it (#130's AI review)."""
+    async def get(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        raise tt.TastytradeNotFound(path)
+
+    monkeypatch.setattr(lc.tt, "get", get)
+    with pytest.raises(lc.NotListed):
+        await lc.live_chain("SPY", EXPIRY)
+

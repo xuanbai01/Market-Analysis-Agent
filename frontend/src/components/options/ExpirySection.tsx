@@ -142,7 +142,7 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
                 <>Live · tastytrade · quotes {quoteAge(liveChain.updated_at)} old · shown to you only</>
               ) : liveQuery.error && !liveRefused ? (
                 <span className="text-strata-neg">
-                  Live quotes unavailable: {liveQuery.error instanceof ApiError ? liveQuery.error.title : "tastytrade didn't answer"}. Showing the delayed chain.
+                  Live quotes unavailable: {liveQuery.error instanceof ApiError ? liveQuery.error.title.replace(/\.$/, "") : "tastytrade didn't answer"}. Showing the delayed chain.
                 </span>
               ) : (
                 "Reading tastytrade's quotes…"

@@ -39,7 +39,10 @@ function saveBlob(blob: Blob, name: string): void {
   const link = document.createElement("a");
   link.href = url;
   link.download = name;
+  // Clicked while in the page: some browsers ignore a detached link.
+  document.body.appendChild(link);
   link.click();
+  link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000); // revoked at once, Safari can cancel the save
 }
 
@@ -117,7 +120,11 @@ function Trades({ ownerKey }: { ownerKey: string }) {
         </p>
       )}
       {query.error && !unauthorized && !refused && vaultError === null && <ErrorBanner error={query.error} />}
-      {query.data && trades.length === 0 && <p data-testid="trades-empty" className="mt-6 text-sm text-strata-dim">No trades yet.</p>}
+      {query.data && trades.length === 0 && (
+        <p data-testid="trades-empty" className="mt-6 text-sm text-strata-dim">
+          {query.data.synced ? "No trades yet." : "Nothing is stored yet, and tastytrade couldn't be read this visit."}
+        </p>
+      )}
       {underlyings.length > 1 && (
         <label className="mb-3 flex items-center gap-2 font-mono text-[11px] text-strata-dim">
           Underlying

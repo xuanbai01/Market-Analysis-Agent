@@ -288,4 +288,9 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **The CSV download's failures count like the list's:** a 401 signs out, and a refused key is forgotten.
     - **CLAUDE.md's "never store it"** points to the trade copy, the one exception.
     - **Not changed:** the vault key is compared with the shared secret correctly, since that secret is a plain string.
+  - **From #129's ninth AI review:**
+    - **The CSV link is clicked while in the page**, since some browsers ignore a detached one.
+    - **An empty copy with tastytrade unreachable** says so, rather than "No trades yet".
+    - **An amount with no credit or debit** shows no figure rather than a guessed sign.
+    - **Not changed:** the 503's title carries the route's detail, so "the key isn't set" is recognised.
 

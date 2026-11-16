@@ -293,8 +293,16 @@ async def _sync(session: AsyncSession) -> SyncResult:
 
 
 def _signed(amount: Any, effect: Any) -> float | None:
+    """Money in positive, out negative; which way isn't guessed for an amount
+    without a credit or debit."""
     number = owner_positions.finite_number(amount)
-    return None if number is None else (-number if effect == "Debit" else number)
+    if number is None:
+        return None
+    if effect == "Debit":
+        return -abs(number)
+    if effect == "Credit":
+        return abs(number)
+    return 0.0 if number == 0 else None
 
 
 def _text(value: Any) -> str | None:

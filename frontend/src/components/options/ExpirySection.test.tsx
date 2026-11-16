@@ -330,6 +330,18 @@ describe("ExpirySection live quotes", () => {
     expect(screen.getByTestId("options-oi-missing")).toHaveTextContent(/open interest comes with the delayed chain/i);
   });
 
+  it("says it's reading open interest while the delayed chain is on its way", async () => {
+    const other = REPORT.listed_expiries.find((d) => d !== CHAIN.expiry)!;
+    vi.mocked(fetchOptionsChain).mockReturnValue(new Promise(() => {})); // never answers in this test
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue({ ...LIVE, expiry: other, chain: { ...LIVE.chain, expiry: other } });
+    renderSection();
+    fireEvent.change(screen.getByTestId("options-expiry-select"), { target: { value: other } });
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live · tastytrade/));
+    expect(screen.getByTestId("options-oi-missing")).toHaveTextContent(/Reading the day's open interest/);
+  });
+
   it("labels open interest as the day's figures while live", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchLiveChain).mockResolvedValue(LIVE);

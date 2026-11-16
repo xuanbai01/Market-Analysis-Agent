@@ -10,6 +10,7 @@ import json
 import logging
 import re
 from collections.abc import Callable
+from typing import Any
 
 import httpx
 import pytest
@@ -597,3 +598,24 @@ async def test_other_scopes_are_refused_and_named_without_the_account(
     assert fake.gets == []
     assert "5wt12345" not in str(raised.value)
     assert all("5wt12345" not in r.getMessage() for r in caplog.records)
+
+
+async def test_a_large_answer_is_parsed_off_the_event_loop(fake: FakeTastytrade, clock: FakeClock, monkeypatch: pytest.MonkeyPatch) -> None:
+    """SPX's nested chain is megabytes of JSON: parsed on a thread, not the
+    loop every request waits on (#130's AI review). A small answer isn't."""
+    import threading
+
+    threads: list[bool] = []
+    parse = tt._json
+
+    def recording(response: httpx.Response) -> Any:
+        threads.append(threading.current_thread() is threading.main_thread())
+        return parse(response)
+
+    monkeypatch.setattr(tt, "_json", recording)
+    big = {"data": {"items": [{"symbol": "SPY", "pad": "x" * tt.LARGE_BODY_BYTES}]}}
+    fake.get_responses = [httpx.Response(200, json=big), httpx.Response(200, json={"data": {"items": []}})]
+    assert (await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics"))["data"]["items"][0]["symbol"] == "SPY"
+    await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
+    assert threads == [False, True]
+

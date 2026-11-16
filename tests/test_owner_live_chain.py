@@ -365,3 +365,29 @@ async def test_an_unlisted_expiry_reads_the_chain_again_at_most_once_a_minute(ac
         await lc.live_chain("SPY", later)
     assert sum(1 for path, _ in account.calls if path == "/option-chains/SPY/nested") == 2  # one fresh look
 
+
+async def test_a_strike_without_a_quote_isnt_drawn_at_zero(account: _Tastytrade) -> None:
+    """A contract tastytrade sends no quote for isn't a $0.00 row (#130's AI review)."""
+    for kind in ("C", "P"):
+        del account.quotes[_occ(kind, STRIKES[-1])]
+    chain = (await lc.live_chain("SPY", EXPIRY)).chain
+    assert STRIKES[-1] not in [row.strike for row in chain.rows]
+
+
+async def test_an_expiry_date_sent_with_a_time_still_reads(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    plain = account.get
+
+    async def get(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        answer = await plain(path, params, op=op)
+        if path == "/option-chains/SPY/nested":
+            answer["data"]["items"][0]["expirations"][0]["expiration-date"] = f"{EXPIRY.isoformat()}T20:00:00.000+00:00"
+        return answer
+
+    monkeypatch.setattr(lc.tt, "get", get)
+    assert (await lc.live_chain("SPY", EXPIRY)).expiry == EXPIRY
+
+
+def test_few_chains_are_kept() -> None:
+    """An SPX-sized chain keeps about 5.7 MB (measured with tracemalloc): four at most."""
+    assert lc.MAX_CHAINS == 4
+

@@ -67,8 +67,11 @@ def _now() -> datetime:
 
 _chains: OrderedDict[str, tuple[float, list[dict[str, Any]]]] = OrderedDict()
 _live: dict[tuple[str, date], tuple[float, LiveChain]] = {}
-# One build at a time per symbol and expiry; others don't wait on it.
+# One build at a time per symbol and expiry; others don't wait on it. A
+# lock stays while anyone holds or waits on it (counted: asyncio marks a
+# lock free before the waiter it wakes has taken it).
 _locks: dict[tuple[str, date], asyncio.Lock] = {}
+_users: dict[tuple[str, date], int] = {}
 
 
 def reset() -> None:
@@ -76,6 +79,7 @@ def reset() -> None:
     _chains.clear()
     _live.clear()
     _locks.clear()
+    _users.clear()
 
 
 def _remember_chain(symbol: str, expirations: list[dict[str, Any]]) -> None:
@@ -183,10 +187,11 @@ async def _build(symbol: str, expiry: date) -> LiveChain:
         raise NotListed(expiry)
     underlying = _tastytrade_symbol(symbol)
     equity = (await _quotes("equity", [underlying])).get(underlying, {})
-    cached = options_report.cached_underlying(symbol)
-    spot = finite_number(field_of(equity, "mark")) or finite_number(field_of(equity, "mid")) or (cached[0] if cached else None)
+    # tastytrade's own price only: Yahoo's delayed one isn't passed off as live.
+    spot = finite_number(field_of(equity, "mark")) or finite_number(field_of(equity, "mid"))
     if spot is None or spot <= 0:
         raise LiveChainUnavailable("tastytrade sent no price for the underlying")
+    cached = options_report.cached_underlying(symbol)  # the dividend yield only
     near = sorted(strikes, key=lambda s: abs(s[0] - spot))[: 2 * STRIKES_EACH_SIDE]
     near.sort()
     quotes = await _quotes("equity-option", [s for _, call, put in near for s in (call, put)])
@@ -218,8 +223,10 @@ async def live_chain(symbol: str, expiry: date) -> LiveChain:
         raise LiveChainUnavailable("tastytrade isn't set up on the server")
     key = (symbol, expiry)
     _forget_old_quotes()
+    _users[key] = _users.get(key, 0) + 1
+    lock = _locks.setdefault(key, asyncio.Lock())
     try:
-        async with asyncio.timeout(BUILD_SECONDS), _locks.setdefault(key, asyncio.Lock()):
+        async with asyncio.timeout(BUILD_SECONDS), lock:
             cached = _live.get(key)
             if cached is not None and _clock() - cached[0] < CACHE_SECONDS:
                 return cached[1]
@@ -229,6 +236,7 @@ async def live_chain(symbol: str, expiry: date) -> LiveChain:
     except (tt.TastytradeUnavailable, tt.TastytradeNotFound, TimeoutError) as exc:
         raise LiveChainUnavailable(failure_reason(exc)) from exc
     finally:
-        lock = _locks.get(key)
-        if lock is not None and not lock.locked():
-            _locks.pop(key, None)  # no lock left behind per expiry ever asked
+        _users[key] -= 1
+        if _users[key] == 0:  # no lock left behind per expiry ever asked
+            del _users[key]
+            _locks.pop(key, None)

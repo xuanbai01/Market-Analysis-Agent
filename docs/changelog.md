@@ -310,5 +310,12 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - the chains kept are capped;
     - builds lock per symbol and expiry, with a deadline.
   - **The fake backend** answers a made-up NVDA chain to look at the switch.
+  - **From #130's AI review:**
+    - **One build per expiry, really.** asyncio marks a lock free before the waiter it wakes has taken it, so a lock dropped then let a third read build alongside, after a failed build. Locks are now counted while held or waited on.
+    - **No live price, no live chain.** Yahoo's delayed price was used when tastytrade sent none, under the "Live" label. The chain now says tastytrade sent no price.
+    - **A later read that fails drops back to the delayed chain** with the reason, rather than leaving the last live copy on screen.
+    - **No quote time reads "quote time unknown"**, not "quotes of unknown age old".
+    - **The warm cache the live chain reads is tested** with a real build in it.
+    - **Not changed:** a wrong-shaped answer is already a 503 with the reason, since `items_of` raises `TastytradeUnavailable`.
   - **`/positions` stays current while open** (#128's last AI review): it reads again every 15 s while the tab shows, matching the server's copy, and quote ages tick every 5 s between reads. A tab left open no longer freezes at "10s ago".
 

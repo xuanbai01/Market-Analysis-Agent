@@ -63,8 +63,7 @@ const strike = (k: number) => (Number.isInteger(k) ? k.toFixed(0) : k.toFixed(2)
 const LIVE_REFRESH_MS = 15_000;
 
 /** "3s", "2m": how long ago tastytrade's newest quote was. */
-function quoteAge(updatedAt: string | null): string {
-  if (!updatedAt) return "of unknown age";
+function quoteAge(updatedAt: string): string {
   const seconds = Math.max(0, Math.round((Date.now() - new Date(updatedAt).getTime()) / 1000));
   return seconds < 90 ? `${seconds}s` : seconds < 5400 ? `${Math.round(seconds / 60)}m` : `${Math.round(seconds / 3600)}h`;
 }
@@ -101,7 +100,9 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
   useEffect(() => {
     if (liveRefused) clearOwnerKey();
   }, [liveRefused]);
-  const liveChain = liveOn ? (liveQuery.data ?? null) : null;
+  // A failed read drops back to the delayed chain: TanStack keeps the last
+  // live copy, which mustn't stay on screen as if it were live.
+  const liveChain = liveOn && !liveQuery.isError ? (liveQuery.data ?? null) : null;
   const chain = liveChain?.chain ?? delayed;
   const price = liveChain?.spot ?? spot;
 
@@ -139,7 +140,7 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
           {liveOn && (
             <p data-testid="options-live-status" className="mb-2 font-mono text-[11px] text-strata-muted">
               {liveChain ? (
-                <>Live · tastytrade · quotes {quoteAge(liveChain.updated_at)} old · shown to you only</>
+                <>Live · tastytrade · {liveChain.updated_at ? `quotes ${quoteAge(liveChain.updated_at)} old` : "quote time unknown"} · shown to you only</>
               ) : liveQuery.error && !liveRefused ? (
                 <span className="text-strata-neg">
                   Live quotes unavailable: {liveQuery.error instanceof ApiError ? liveQuery.error.title.replace(/\.$/, "") : "tastytrade didn't answer"}. Showing the delayed chain.

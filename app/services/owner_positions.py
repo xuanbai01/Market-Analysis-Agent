@@ -352,7 +352,9 @@ async def _build() -> OwnerPositions:
         "owner positions: %d accounts, %d legs, %d underlyings, %d not analysed%s",
         read, len(legs), len(groups), len(unanalysed), ", cut off" if truncated else "",
     )
-    return OwnerPositions(as_of=_now(), accounts=read, groups=groups, unanalysed=unanalysed, truncated=truncated)
+    now = _now()
+    return OwnerPositions(as_of=now, priced_at=mc.live_quote_time(now), accounts=read, groups=groups,
+                          unanalysed=unanalysed, truncated=truncated)
 
 
 async def get_positions() -> OwnerPositions:

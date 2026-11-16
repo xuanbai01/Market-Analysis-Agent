@@ -122,7 +122,19 @@ const UNTRACKED = "untracked";
  * spends one of the IP's options lookups an hour (60). */
 export const MAX_CONTEXT = 10;
 
-export function PositionGroupCard({ group, now, withContext }: { group: PositionGroup; now: Date; withContext: boolean }) {
+/** ``now`` ticks the quote ages; ``valuedAt`` is when the legs are valued
+ * from (the close the marks are from, outside a session). */
+export function PositionGroupCard({
+  group,
+  now,
+  valuedAt,
+  withContext,
+}: {
+  group: PositionGroup;
+  now: Date;
+  valuedAt: Date;
+  withContext: boolean;
+}) {
   const expiry = firstExpiry(group);
   const hasOptions = expiry !== null;
   const reads = hasOptions && withContext;
@@ -158,15 +170,15 @@ export function PositionGroupCard({ group, now, withContext }: { group: Position
   const chainData = chain.data ?? null;
   const carry =
     chainData && yahooSpot && chainData.days > 0 ? Math.log(chainData.forward / yahooSpot) / (chainData.days / 365) : rate;
-  const market: Market | null = spot === null ? null : { spot, rate, carry, now };
+  const market: Market | null = spot === null ? null : { spot, rate, carry, now: valuedAt };
   const value = markValue(group);
   const cost = costBasis(group);
   const g = spot === null ? null : greeks(group, spot);
   const smile = chainData ? smileOf(chainData) : null;
-  const sigma = chainData?.atm_iv && expiry ? chainData.atm_iv * Math.sqrt(yearsTo(expiry, now, group.legs)) : null;
-  const sessions = expiry ? sessionsUntil(expiry, now, group.legs) : 0;
+  const sigma = chainData?.atm_iv && expiry ? chainData.atm_iv * Math.sqrt(yearsTo(expiry, valuedAt, group.legs)) : null;
+  const sessions = expiry ? sessionsUntil(expiry, valuedAt, group.legs) : 0;
   const closes = prices.data?.prices.map((p) => p.close) ?? [];
-  const daysLeft = expiry ? Math.max(0, Math.floor(yearsTo(expiry, now, group.legs) * 365)) : 0;
+  const daysLeft = expiry ? Math.max(0, Math.floor(yearsTo(expiry, valuedAt, group.legs) * 365)) : 0;
   const spread = group.expiries.length > 1;
   const maxPain = chainData?.positioning ? maxPainSentence(chainData.positioning, spot) : null;
   // A route that failed leaves gaps in the card: say so rather than drop them quietly.

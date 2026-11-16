@@ -63,6 +63,8 @@ export const UnanalysedPositionSchema = z.object({
 
 export const OwnerPositionsSchema = z.object({
   as_of: z.string(),
+  // When tastytrade's marks were made: as_of in a session, else the last close.
+  priced_at: z.string().nullable().default(null),
   accounts: z.number(),
   groups: z.array(PositionGroupSchema).default([]),
   unanalysed: z.array(UnanalysedPositionSchema).default([]),

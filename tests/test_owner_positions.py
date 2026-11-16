@@ -649,3 +649,24 @@ async def test_a_quotes_answer_of_the_wrong_shape_fails_the_read(account: _Tasty
     monkeypatch.setattr(op.tt, "get", odd)
     with pytest.raises(op.PositionsUnavailable, match="readable"):
         await op.get_positions()
+
+
+@pytest.mark.parametrize(
+    ("now", "priced"),
+    [
+        # In a session tastytrade's marks are now's.
+        (datetime(2026, 11, 16, 15, 0, tzinfo=UTC), datetime(2026, 11, 16, 15, 0, tzinfo=UTC)),
+        # On a weekend they are Friday's close: time to expiry runs from there.
+        (datetime(2026, 11, 15, 1, 0, tzinfo=UTC), datetime(2026, 11, 13, 21, 0, tzinfo=UTC)),
+        # Before the open, the last close.
+        (datetime(2026, 11, 16, 13, 0, tzinfo=UTC), datetime(2026, 11, 13, 21, 0, tzinfo=UTC)),
+    ],
+)
+async def test_positions_say_when_their_marks_were_made(
+    account: _Tastytrade, monkeypatch: pytest.MonkeyPatch, now: datetime, priced: datetime
+) -> None:
+    account.positions[ACCOUNT] = [_position("NVDA", "Equity", "10", "Long", average="150.25")]
+    account.quotes = {"NVDA": _quote("NVDA", 162.9)}
+    monkeypatch.setattr(op, "_now", lambda: now)
+    result = await op.get_positions()
+    assert result.priced_at == priced

@@ -126,6 +126,13 @@ describe("TradesPage", () => {
     expect(getOwnerKey()).toBeNull();
   });
 
+  it("doesn't call an unreachable copy empty", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerTrades).mockResolvedValue({ trades: [], synced: false, reason: "tastytrade didn't answer" });
+    renderPage();
+    expect(await screen.findByTestId("trades-empty")).toHaveTextContent("Nothing is stored yet, and tastytrade couldn't be read this visit.");
+  });
+
   it("downloads the CSV with the owner key", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
@@ -133,10 +140,18 @@ describe("TradesPage", () => {
     const created = vi.fn(() => "blob:x");
     const revoked = vi.fn();
     Object.assign(URL, { createObjectURL: created, revokeObjectURL: revoked });
+    // The link is clicked while in the page: some browsers ignore a detached one.
+    const attached: boolean[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      attached.push(document.body.contains(this));
+    });
     renderPage();
     vi.useFakeTimers({ shouldAdvanceTime: true });
     fireEvent.click(await screen.findByRole("button", { name: "Download CSV" }));
     await waitFor(() => expect(created).toHaveBeenCalled());
+    expect(attached).toEqual([true]);
+    expect(document.querySelector('a[download="trades.csv"]')).toBeNull(); // and taken out after
+    click.mockRestore();
     expect(revoked).not.toHaveBeenCalled(); // not at once: Safari would cancel the save
     vi.advanceTimersByTime(1000);
     expect(revoked).toHaveBeenCalledWith("blob:x");

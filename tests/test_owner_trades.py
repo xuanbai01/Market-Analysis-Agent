@@ -460,3 +460,9 @@ async def test_a_sync_cut_short_is_not_reported_as_done(world: _World, monkeypat
     with pytest.raises(ot.SyncFailed, match="cut short"):
         await _sync(world)
 
+
+def test_an_amount_without_a_credit_or_debit_is_no_figure() -> None:
+    """Which way money went isn't guessed (#129's ninth AI review)."""
+    assert ot._signed("120.5", "Debit") == -120.5 and ot._signed("120.5", "Credit") == 120.5
+    assert ot._signed("0", "None") == 0.0
+    assert ot._signed("120.5", None) is None and ot._signed("120.5", "None") is None

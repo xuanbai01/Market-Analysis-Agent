@@ -44,7 +44,9 @@ CHAIN_SECONDS = 600.0  # a chain's strikes change rarely
 # An expiry not in the kept chain sends one fresh read at most this often
 # (Live polls every 15 s; SPY's chain is tens of thousands of strikes).
 CHAIN_RECHECK_SECONDS = 60.0
-MAX_CHAINS = 10  # a chain is big (every expiry's strikes): only the last few are kept
+# A chain is every expiry's strikes: an SPX-sized one keeps about 5.7 MB
+# (tracemalloc, strings included), so only the last few are kept.
+MAX_CHAINS = 4
 BUILD_SECONDS = 30.0
 STRIKES_EACH_SIDE = 40
 QUOTE_BATCH = 100
@@ -151,6 +153,14 @@ async def _expirations(symbol: str, *, fresh: bool = False) -> Chain:
     return chain
 
 
+def _is_day(text: str) -> bool:
+    try:
+        date.fromisoformat(text)
+    except ValueError:
+        return False
+    return True
+
+
 def _compact(payload: Any) -> Chain:
     """tastytrade's nested chain as plain rows by expiry, standard
     deliverables only. CPU: run on the options thread."""
@@ -162,8 +172,8 @@ def _compact(payload: Any) -> Chain:
         found = field_of(item, "expirations")
         for expiration in found if isinstance(found, list) else []:
             day = field_of(expiration, "expiration-date") if isinstance(expiration, dict) else None
-            if isinstance(day, str):
-                chain.setdefault(day, []).extend(_rows(expiration))
+            if isinstance(day, str) and _is_day(day[:10]):  # a date, or one sent with its time
+                chain.setdefault(day[:10], []).extend(_rows(expiration))
     return chain
 
 
@@ -247,6 +257,8 @@ async def _build(symbol: str, expiry: date) -> LiveChain:
     near = sorted(strikes, key=lambda s: abs(s[0] - spot))[: 2 * STRIKES_EACH_SIDE]
     near.sort()
     quotes = await _quotes("equity-option", [s for _, call, put in near for s in (call, put)])
+    # A strike tastytrade sent no quote for isn't a $0.00 row.
+    near = [(k, call, put) for k, call, put in near if call in quotes and put in quotes]
     chain = ExpiryQuotes(
         expiry=expiry,
         calls=tuple(_quote(k, quotes.get(call)) for k, call, _ in near),

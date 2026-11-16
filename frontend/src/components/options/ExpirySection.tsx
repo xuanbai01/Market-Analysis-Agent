@@ -186,8 +186,9 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
                   </ChartBlock>
                 ) : (
                   <p data-testid="options-oi-missing" className="self-center text-sm text-strata-dim">
-                    Open interest comes with the delayed chain, which couldn&rsquo;t be read for this expiry: the live quotes cover only
-                    the strikes near the price.
+                    {query.isFetching
+                      ? "Reading the day's open interest from the delayed chain…"
+                      : "Open interest comes with the delayed chain, which couldn't be read for this expiry: the live quotes cover only the strikes near the price."}
                   </p>
                 )}
               </div>

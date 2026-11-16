@@ -361,5 +361,14 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Not changed:**
       - `BRK/B` is tastytrade's own equity symbol, as for the chain.
       - A stray 404 on the chain is checked again within a minute.
+  - **From #130's tenth AI review:**
+    - **Memory, measured:** an SPX-sized chain (80 expiries × 300 strikes, 2.2 MB of JSON) keeps 5.7 MB as rows, strings included (tracemalloc), and peaks at 11.6 MB while parsing. Four chains are kept now, not ten.
+    - **An answer over 256 KB is parsed off the event loop** (`tastytrade_client.LARGE_BODY_BYTES`). An SPX chain is about 9 ms of CPU, roughly 145 ms on Fly's shared core.
+    - **A strike tastytrade sends no quote for is left out**, not drawn as $0.00.
+    - **An expiry date sent with its time still reads.**
+    - **While the delayed chain is on its way,** the open-interest panel says it's reading, not that the read failed.
+    - **Not changed:**
+      - The positions page's timer test restores the clock in `afterEach`.
+      - The live route sits behind the owner key with no per-IP limit, as before.
   - **`/positions` stays current while open** (#128's last AI review): it reads again every 15 s while the tab shows, matching the server's copy, and quote ages tick every 5 s between reads. A tab left open no longer freezes at "10s ago".
 

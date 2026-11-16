@@ -274,4 +274,8 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **A sync past its deadline says "the update took too long"**, since the deadline covers the database's part too, not only tastytrade's.
     - **The concurrency test now interleaves**, so it fails without the sync's lock.
     - **Not changed:** the CSV download can't save an error body, because the fetch throws on any non-2xx before reading it. `uv.lock` is in the diff.
+  - **From #129's sixth AI review:**
+    - **The stored rows are read out of the session before it's let go**, so finding the newest date decrypts with no database connection held.
+    - **A page count under 1** counts as no count, so the read goes on while pages are full.
+    - **Not changed:** the real client takes the query parameters, and `/accounts/{n}/transactions` is on its allowlist. `tests/test_tastytrade_client.py` covers both.
 

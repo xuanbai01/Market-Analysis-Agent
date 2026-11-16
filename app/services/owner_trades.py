@@ -119,6 +119,21 @@ def _sealed(tid: int, item: dict[str, Any], account: int, numbers: dict[str, int
     }
 
 
+@dataclass(frozen=True)
+class _Stored:
+    """A stored row's columns, read out of the session so it can be let go."""
+
+    id: int
+    key_version: int
+    nonce: bytes
+    ciphertext: bytes
+    estimated_fee: bool
+
+
+def _detached(rows: list[Any]) -> list[_Stored]:
+    return [_Stored(r.id, r.key_version, r.nonce, r.ciphertext, r.estimated_fee) for r in rows]
+
+
 def _opened(rows: list[Any]) -> list[tuple[int, dict[str, Any]]]:
     """Every stored row, opened. CPU work: callers run it off the event loop."""
     return [
@@ -157,12 +172,13 @@ async def _transactions(number: str, start: date | None) -> list[dict[str, Any]]
 
 
 def _whole(value: Any) -> int | None:
-    """A count tastytrade sent, as a number (2 or 2.0) or as digits."""
+    """A page count tastytrade sent, as a number (2 or 2.0) or as digits;
+    none under 1, so a garbled count falls back to reading on while pages are full."""
     if isinstance(value, str) and value.isascii() and value.isdigit():
-        return int(value)
-    if isinstance(value, float) and value.is_integer() and value >= 0:
-        return int(value)
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
+        value = int(value)
+    elif isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
 
 
 async def sync(session: AsyncSession) -> SyncResult:
@@ -220,11 +236,11 @@ def _stamp() -> None:
 
 async def _sync(session: AsyncSession) -> SyncResult:
     global _full_read_at
-    rows = await store.stored(session)
+    rows = _detached(await store.stored(session))
+    await session.rollback()  # no connection held while the copy is decrypted or tastytrade read
     known = {row.id: row.estimated_fee for row in rows}
     full = _full_read_at is None or _clock() - _full_read_at >= FULL_READ_EVERY_SECONDS
     latest = None if full else _latest_date([payload for _, payload in await asyncio.to_thread(_opened, rows)])
-    await session.rollback()  # no connection held while tastytrade is read
     start = latest - timedelta(days=OVERLAP_DAYS) if latest else None
     to_add: list[tuple[int, dict[str, Any], int]] = []
     to_replace: list[tuple[int, dict[str, Any], int]] = []

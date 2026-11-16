@@ -95,6 +95,9 @@ _ALLOWED = re.compile(
 # An answer bigger than this is parsed off the event loop (CPU on Fly's shared core).
 LARGE_BODY_BYTES = 256 * 1024
 _ACCOUNT_IN_PATH = re.compile(r"(/accounts/)[^/?#]+")
+# The ticker in a chain's or a company's path: the owner's choice, like a
+# quote's symbols (#140's security review).
+_SYMBOL_IN_PATH = re.compile(r"(/option-chains/|/earnings-reports/|/dividends/)[^/?#]+")
 
 
 class TastytradeUnavailable(Exception):
@@ -148,7 +151,7 @@ def symbol_path(symbol: str) -> str:
 
 
 def _masked(path: str) -> str:
-    return _ACCOUNT_IN_PATH.sub(r"\1***", path)
+    return _SYMBOL_IN_PATH.sub(r"\1***", _ACCOUNT_IN_PATH.sub(r"\1***", path))
 
 
 def _summary(params: dict[str, Any] | None) -> dict[str, Any]:

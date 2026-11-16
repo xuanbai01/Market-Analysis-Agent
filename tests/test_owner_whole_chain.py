@@ -240,3 +240,99 @@ async def test_the_route_is_a_503_with_the_reason(account: _Account, owner: dict
     account.feed_fail = dxlink.DxlinkError("the feed refused the subscription")
     resp = await _get("/v1/owner/options/XYZ/chain", owner)
     assert resp.status_code == 503 and "feed" in resp.json()["title"]
+
+
+async def test_a_first_expiry_bigger_than_one_read_keeps_its_nearest_strikes(
+    account: _Account, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #140's review: it read as "no options" when the nearest expiry alone
+    # held more contracts than MAX_OPTIONS.
+    monkeypatch.setattr(wc, "MAX_OPTIONS", 6)  # three strikes, both sides
+    whole = await wc.whole_chain("XYZ")
+    assert [e.expiry for e in whole.expiries] == EXPIRIES[:1] and whole.capped is True
+    assert account.asked == [("Quote", 6), ("Summary", 6)]
+
+
+
+# ── from #140's security reviews ───────────────────────────────────────
+
+
+async def test_the_contracts_asked_for_are_named_from_their_checked_occ_symbols(account: _Account) -> None:
+    asked: list[str] = []
+    original = account.fetch_once
+
+    async def recording(event_type: str, symbols: list[str]) -> dict[str, dict[str, Any]]:
+        asked.extend(symbols)
+        return await original(event_type, symbols)
+
+    wc.dxlink.fetch_once = recording  # type: ignore[assignment]
+    await wc.whole_chain("XYZ")
+    assert asked and all(name.startswith(".XYZ") and "{" not in name and "," not in name for name in asked)
+
+
+async def test_an_absurd_open_interest_is_no_figure_not_a_500(account: _Account) -> None:
+    for name in list(account.summaries)[:4]:
+        account.summaries[name] = {"eventSymbol": name, "openInterest": 1e308}
+    whole = await wc.whole_chain("XYZ")
+    assert whole.positioning.call_open_interest < 10_000_000
+
+
+@pytest.mark.parametrize("stamp", [1e17, 4102444800000 * 10])  # past year 9999; far in the future
+async def test_a_quote_time_that_isnt_one_is_left_out(account: _Account, stamp: float) -> None:
+    for quote in account.quotes.values():
+        quote["bidTime"] = quote["askTime"] = stamp
+    assert (await wc.whole_chain("XYZ")).updated_at is None
+
+
+async def test_a_feed_that_sends_no_quotes_is_unavailable_not_an_empty_chain(account: _Account) -> None:
+    account.quotes = {}
+    with pytest.raises(wc.WholeChainUnavailable, match="no quotes"):
+        await wc.whole_chain("XYZ")
+    assert not wc._kept
+
+
+async def test_one_whole_chain_is_built_at_a_time(account: _Account, monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    running, most = [0], [0]
+    original = account.fetch_once
+
+    async def slow(event_type: str, symbols: list[str]) -> dict[str, dict[str, Any]]:
+        running[0] += 1
+        most[0] = max(most[0], running[0])
+        await asyncio.sleep(0.05)
+        running[0] -= 1
+        return await original(event_type, symbols)
+
+    monkeypatch.setattr(wc.dxlink, "fetch_once", slow)
+    lc._remember_chain("XYZ.B", (await lc.expirations("XYZ")))  # a second symbol with the same chain
+    await asyncio.gather(wc.whole_chain("XYZ"), wc.whole_chain("XYZ.B"), return_exceptions=True)
+    assert most[0] == 1
+
+
+async def test_logs_hold_counts_not_the_ticker(account: _Account, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    with caplog.at_level(logging.DEBUG, logger="app"):
+        await wc.whole_chain("XYZ")
+    for record in (r for r in caplog.records if r.name.startswith("app")):
+        text = record.getMessage() + str(getattr(record, "input_summary", "")) + str(getattr(record, "output_summary", ""))
+        assert "XYZ" not in text
+
+
+async def test_a_deadline_hit_is_logged_without_the_symbol(
+    account: _Account, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import asyncio
+    import logging
+
+    async def stuck(*args: Any) -> dict[str, Any]:
+        await asyncio.sleep(10)
+        return {}
+
+    monkeypatch.setattr(wc.dxlink, "fetch_once", stuck)
+    monkeypatch.setattr(wc, "BUILD_SECONDS", 0.05)
+    with caplog.at_level(logging.WARNING, logger="app"), pytest.raises(wc.WholeChainUnavailable):
+        await wc.whole_chain("XYZ")
+    messages = [r.getMessage() for r in caplog.records if r.name.startswith("app")]
+    assert any("gave up" in m for m in messages) and not any("XYZ" in m for m in messages)

@@ -88,6 +88,7 @@ tastytrade's Open API is free to account holders. We read its docs and its Open 
    - **PR B:** live quotes on the options page, behind the owner key (`/v1/owner/options/{symbol}/live/{expiry}`).
    - **PR C:** market history, live, behind the owner key (`/v1/owner/options/{symbol}/history`): ten years of daily IV and realized volatility from candles, and today's IV rank and percentile.
    - **PR D:** a trade journal, computed from the trade copy on each visit and never stored on its own.
+   - **Options PR 5, every expiry live** (2026-11-16, `/v1/owner/options/{symbol}/chain`): one underlying's chain out to four months, strikes within 15%, at most 6,000 contracts. It's read only when the owner presses the button, never in the background, and never stored. That keeps it clear of the terms' §8(3) on collecting large cross-sections of the market.
 
    The probe's answers (real-time or not, candle depth, IV in candles, option candles) decide what B and C build.
 

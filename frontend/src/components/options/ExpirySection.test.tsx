@@ -314,6 +314,31 @@ describe("ExpirySection live quotes", () => {
     expect(screen.getAllByText(/\$161/).length).toBeGreaterThan(0);
   });
 
+  it("says open interest is the day's while live, and draws none from the live strikes alone", async () => {
+    // Open interest comes only from the whole delayed chain: when that read
+    // fails for a picked expiry, the panel says so rather than counting the
+    // 80 live strikes (#130's AI review).
+    const other = REPORT.listed_expiries.find((d) => d !== CHAIN.expiry)!;
+    vi.mocked(fetchOptionsChain).mockRejectedValue(new ApiError({ status: 503, title: "Yahoo didn't answer" }));
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue({ ...LIVE, expiry: other, chain: { ...LIVE.chain, expiry: other } });
+    renderSection();
+    fireEvent.change(screen.getByTestId("options-expiry-select"), { target: { value: other } });
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live · tastytrade/));
+    expect(screen.queryByTestId("options-oi-block")).toBeNull();
+    expect(screen.getByTestId("options-oi-missing")).toHaveTextContent(/open interest comes with the delayed chain/i);
+  });
+
+  it("labels open interest as the day's figures while live", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue(LIVE);
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live · tastytrade/));
+    expect(screen.getByTestId("options-oi-block")).toHaveTextContent(/the day's figures, delayed/);
+  });
+
   it("forgets a refused owner key", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 403, title: "This needs the owner key." }));

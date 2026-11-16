@@ -13,21 +13,26 @@ export function wholeChainSentence(w: WholeChain): Sentence | null {
   const p = w.positioning;
   if (w.expiries.length === 0 || p.call_open_interest + p.put_open_interest === 0) return null;
   const last = w.expiries[w.expiries.length - 1].expiry;
+  // "read", not "every": an expiry left out is named in the notes below.
   const parts: Sentence = [
-    "Every expiry to ",
+    { strong: w.expiries.length === 1 ? "1 expiry" : `${w.expiries.length} expiries` },
+    " read, out to ",
     { strong: dateLabel(last) },
-    ` (${w.expiries.length === 1 ? "1 expiry" : `${w.expiries.length} expiries`}, strikes within ${pct(w.strike_range)} of the price): `,
+    ` (strikes within ${pct(w.strike_range)} of the price): `,
     { strong: `${count(p.call_open_interest)} calls` },
     " and ",
     { strong: `${count(p.put_open_interest)} puts` },
     " open",
   ];
   if (p.put_call !== null) parts.push(" (put/call ", { strong: p.put_call.toFixed(2) }, ")");
-  if (p.call_wall !== null || p.put_wall !== null) {
-    parts.push("; the chain's");
-    if (p.call_wall !== null) parts.push(" call wall is ", { strong: strikeLabel(p.call_wall) });
-    if (p.call_wall !== null && p.put_wall !== null) parts.push(" and its");
-    if (p.put_wall !== null) parts.push(" put wall ", { strong: strikeLabel(p.put_wall) });
+  if (p.call_wall !== null && p.put_wall !== null) {
+    parts.push("; the chain's call wall is ", { strong: strikeLabel(p.call_wall) }, " and its put wall ", {
+      strong: strikeLabel(p.put_wall),
+    });
+  } else if (p.call_wall !== null) {
+    parts.push("; the chain's call wall is ", { strong: strikeLabel(p.call_wall) });
+  } else if (p.put_wall !== null) {
+    parts.push("; the chain's put wall is ", { strong: strikeLabel(p.put_wall) });
   }
   parts.push(".");
   return parts;

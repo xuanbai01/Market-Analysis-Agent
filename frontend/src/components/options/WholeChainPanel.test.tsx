@@ -70,7 +70,7 @@ describe("WholeChainPanel", () => {
     expect(screen.getByTestId("options-whole-chain-panel")).toBeInTheDocument();
     expect(fetchWholeChain).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("options-whole-chain-read"));
-    expect(await screen.findByTestId("options-whole-chain-panel-summary")).toHaveTextContent(/^Every expiry to /);
+    expect(await screen.findByTestId("options-whole-chain-panel-summary")).toHaveTextContent(/ expir(y|ies) read, out to /);
     expect(fetchWholeChain).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("options-whole-chain-source")).toHaveTextContent(/990\s+contracts · shown to you only, never stored/);
     expect(screen.getByTestId("options-whole-chain-read")).toHaveTextContent("Read again");

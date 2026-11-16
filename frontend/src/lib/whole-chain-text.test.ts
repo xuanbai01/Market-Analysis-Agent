@@ -29,9 +29,22 @@ const text = (s: ReturnType<typeof wholeChainSentence>) =>
 describe("wholeChainSentence", () => {
   it("says what the read covers, the open interest and the chain's walls", () => {
     expect(text(wholeChainSentence(chain()))).toBe(
-      "Every expiry to Mar 19 (3 expiries, strikes within 15% of the price): 1,200,000 calls and 1,800,000 puts open " +
+      "3 expiries read, out to Mar 19 (strikes within 15% of the price): 1,200,000 calls and 1,800,000 puts open " +
         "(put/call 1.50); the chain's call wall is $700 and its put wall $650.",
     );
+  });
+
+  it("says each wall whole when the chain has only one", () => {
+    const callOnly = chain();
+    callOnly.positioning = { ...callOnly.positioning, put_wall: null };
+    expect(text(wholeChainSentence(callOnly))).toContain("; the chain's call wall is $700.");
+    const putOnly = chain();
+    putOnly.positioning = { ...putOnly.positioning, call_wall: null };
+    expect(text(wholeChainSentence(putOnly))).toContain("; the chain's put wall is $650.");
+  });
+
+  it("counts one expiry as one", () => {
+    expect(text(wholeChainSentence(chain({ expiries: chain().expiries.slice(0, 1) })))).toMatch(/^1 expiry read, out to Nov 20/);
   });
 
   it("has nothing to say without open interest", () => {

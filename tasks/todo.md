@@ -10,9 +10,8 @@ Active sprint for the Market Analysis Agent.
 
 ## In progress
 
-- **Options page: clarity and positioning** (plan below), PR 2 on `feature/options-clarity`.
-- **tastytrade, PR A** merged (#116); its review follow-up is on `fix/tastytrade-probe-robustness`. The Fly secrets are set; the probe runs during Monday's session. PR B (#130) and PR D (#131) are merged; the owner's own steps are in `tasks/owner-todo.md`. Plan below.
-- **Options analysis:** the plan's five PRs and the edge-case review are merged (#109–#115). Follow-ups below.
+- **Overnight 2026-11-16** (the owner asleep, and asked Claude to decide): small fixes (#137), then tastytrade PR C (IV history, live), then options PR 5 (every expiry, live). Plans below.
+- **tastytrade PR A** is code-complete (#116–#119). Still open: the probe during a session, for real-time quote ages. PR B (#130) and PR D (#131) are merged; the owner's own steps are in `tasks/owner-todo.md`.
 
 ## Plan — after Phase 5 (2026-11-13)
 
@@ -90,19 +89,19 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 
 - [ ] **Measure it after about five feature PRs:** run `python scripts/ai_review_stats.py --since 135` and compare with #128–#131. Tokens and real problems found per PR are the figures that compare; what to watch for is in docs/workflow.md §8. Report to the owner.
 - [ ] **Lows left from #135's reviews:** a full review run again keeps the earlier findings in its state, so answered ones stay listed (capped at 60). A failed thinking request's tokens aren't counted.
-- [ ] **The positions page measures time to expiry from the clock** (#134's review). Outside a session it should run from the last close, as the options code does (`market_calendar`): a weekend understates a leg's time value in the what-if and payoff.
+- [x] **The positions page measures time to expiry from the clock** (#134's review; fixed in #137: the server sends `priced_at`). Outside a session it should run from the last close, as the options code does (`market_calendar`): a weekend understates a leg's time value in the what-if and payoff.
 
 ## Plan — a clearer options page, and positioning views (2026-11-15)
 
 **Goal:** the owner finds `/options/:ticker` harder to read than OptionCharts, and the gap is mostly presentation. Each OptionCharts chart has a plain title, one sentence with the key numbers, a stats table, the price marked, and expiry labels with days and weekly/monthly. It also has positioning views we lack (largest open interest, max pain, gamma and delta exposure with walls), all computable by our code from Yahoo's chains and our IVs. Rules: code computes every figure, there are no sentiment labels, the GEX/DEX assumption is stated on the page, and the AI read is unchanged for now. One PR each, in order, before tastytrade PR B:
 
 - [x] ~~**PR 1: the official close as the spot**~~ *(#120, closed)*: Yahoo's daily history close equals its price (NVDA Nov 13: both $162.85; another vendor shows $162.92), so there is nothing to switch to.
-- [ ] **PR 2: clarity pass (frontend)** *(branch `feature/options-clarity`)*: each panel's takeaway sentence, stats and ⓘ; the expiry picker's days and weekly/monthly (`expiryKind`); the price labelled on the open interest chart; the AI read showing each figure once (chips folded behind "Sources").
-- [ ] **PR 3: positioning (`options_positioning.py`)** *(branch `feature/options-positioning`)*:
+- [x] **PR 2: clarity pass (frontend)** *(#121)*: each panel's takeaway sentence, stats and ⓘ; the expiry picker's days and weekly/monthly (`expiryKind`); the price labelled on the open interest chart; the AI read showing each figure once (chips folded behind "Sources").
+- [x] **PR 3: positioning (`options_positioning.py`)** *(#122)*:
   - per expiry: call/put totals, the top 10 open interest contracts, max pain, GEX and DEX by strike, net GEX/DEX, the call and put walls, the gamma flip (`options_math.gamma76`/`delta76`);
   - max pain and net GEX for every expiry the report reads;
   - charts and an across-expiries table.
-- [ ] **PR 4: whole-chain open interest for QQQ, SPY and NVDA** *(branch `feature/options-oi-history`)*. The owner chose this over charting the snapshot's rolling 30/90-day window, which jumps as expiries roll. It adds `option_oi_totals` (migration 0005) and a second phase of the daily run (`OPTIONS_FULL_CHAIN_SYMBOLS`, best-effort), and the page charts it once two sessions exist.
+- [x] **PR 4: whole-chain open interest for QQQ, SPY and NVDA** *(#123, review follow-ups #124, #125)*. The owner chose this over charting the snapshot's rolling 30/90-day window, which jumps as expiries roll. It adds `option_oi_totals` (migration 0005) and a second phase of the daily run (`OPTIONS_FULL_CHAIN_SYMBOLS`, best-effort), and the page charts it once two sessions exist.
 - [ ] **PR 5 (with tastytrade PR B): every expiry, live.** Open interest by expiry, max pain and GEX across the whole chain from DXLink. Owner only, never stored.
 
 ## Plan — the owner's positions and an encrypted trade copy (2026-11-15, ADR 0009 amended)

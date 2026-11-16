@@ -77,6 +77,10 @@ class UnanalysedPosition(BaseModel):
 
 class OwnerPositions(BaseModel):
     as_of: datetime
+    # When tastytrade's marks were made: ``as_of`` during a session, else the
+    # last close (market_calendar.live_quote_time). Time to expiry runs from
+    # here, so a weekend doesn't take two days off every option.
+    priced_at: datetime | None = None
     # Accounts whose positions were read (legs keep their place in the list).
     accounts: int
     groups: list[PositionGroup]

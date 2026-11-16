@@ -20,6 +20,7 @@ import {
   profitChance,
   sessionsUntil,
   valueAt,
+  valuedAt,
 } from "./positions-math";
 
 const NOW = new Date("2026-11-16T15:00:00Z"); // a Monday, in the session
@@ -222,5 +223,23 @@ describe("what history shows", () => {
     expect(sessionsUntil("2026-11-20", preMarket, [])).toBe(5);
     expect(sessionsUntil("2026-11-20", NOW, [])).toBe(4); // 10 am: today's is under way
     expect(sessionsUntil("2026-11-20", new Date("2026-11-15T23:00:00Z"), [])).toBe(5); // a Sunday evening
+  });
+});
+
+describe("valuedAt", () => {
+  const now = new Date("2026-11-15T01:00:00Z");
+
+  it("values from the last close when the marks are the close's (a weekend)", () => {
+    // Without it, a Saturday took two days off every option's time to expiry.
+    expect(valuedAt(now, "2026-11-13T21:00:00Z", "2026-11-15T00:59:58Z").toISOString()).toBe("2026-11-13T21:00:00.000Z");
+  });
+
+  it("values from the clock while the marks are live (a session)", () => {
+    const live = new Date("2026-11-16T15:00:05Z");
+    expect(valuedAt(live, "2026-11-16T15:00:00Z", "2026-11-16T15:00:00Z")).toBe(live);
+  });
+
+  it("values from the clock when the server doesn't say", () => {
+    expect(valuedAt(now, null, "2026-11-15T00:59:58Z")).toBe(now);
   });
 });

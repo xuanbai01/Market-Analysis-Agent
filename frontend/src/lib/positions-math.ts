@@ -268,6 +268,16 @@ export function profitChance(group: PositionGroup, smile: Smile, market: Market)
   return Math.min(1, Math.max(0, chance));
 }
 
+/** When the page values the legs from: the clock while tastytrade's marks
+ * are live (``priced_at`` is the read's own time), else the close the marks
+ * are from (the server's ``priced_at``). On a weekend, valuing from the clock
+ * took two days off every option's time to expiry. */
+export function valuedAt(now: Date, pricedAt: string | null, asOf: string): Date {
+  if (pricedAt === null) return now;
+  const priced = new Date(pricedAt);
+  return priced.getTime() < new Date(asOf).getTime() ? priced : now;
+}
+
 /** Whole trading sessions from ``now`` to the expiry's close (weekdays;
  * holidays aside): today's counts while the market hasn't opened. */
 export function sessionsUntil(expiry: string, now: Date, legs: PositionLeg[]): number {

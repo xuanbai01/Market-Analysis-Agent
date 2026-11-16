@@ -464,3 +464,8 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **Countable replies:** lows are numbered on from the others, and replies carry `Held:` and `Didn't hold:` lines.
   - **The stats script:** `scripts/ai_review_stats.py` reads all three, plus the changelog's `missed by #NNN's review` tags, and prints each PR beside the old review on #128–#131.
   - **When:** after about five feature PRs, with what to watch for in docs/workflow.md §8.
+- **Positions valued from the marks' time (2026-11-16):** outside a session the positions page took time to expiry from the clock, though tastytrade's marks are the last close's. On a weekend that took two days off every option, understating time value in the what-if and the payoff (#134's review).
+  - **The server:** `GET /v1/owner/positions` now says when the marks were made (`priced_at`, from `market_calendar.live_quote_time`): the read's own time in a session, else the last close.
+  - **The page:** it values the legs from there (`positions-math.valuedAt`), while quote ages keep ticking from the clock.
+  - **The plan:** stale entries tidied: options PRs 2–4 were merged as #121–#125.
+

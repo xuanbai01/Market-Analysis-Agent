@@ -14,7 +14,7 @@ import { clearOwnerKey, useOwnerKey } from "../../lib/owner";
 import { useNow } from "../../lib/use-now";
 import { fetchOwnerPositions, isOwnerKeyRefused } from "../../lib/owner-api";
 import type { OwnerPositions, PositionGroup } from "../../lib/owner-schemas";
-import { type Greeks, greeks } from "../../lib/positions-math";
+import { type Greeks, greeks, valuedAt } from "../../lib/positions-math";
 import { signedUsd } from "../../lib/positions-text";
 import { ErrorBanner } from "../ErrorBanner";
 import { useSignOutOn401 } from "../options/useSignOutOn401";
@@ -83,6 +83,8 @@ function Positions({ ownerKey }: { ownerKey: string }) {
   }, [refused]);
   const positions = query.data;
   const now = useNow(FIVE_SECONDS); // quote ages keep counting between reads
+  // Outside a session the marks are the last close's: value from there.
+  const valued = positions ? valuedAt(now, positions.priced_at, positions.as_of) : now;
   const t = positions ? totals(positions) : null;
   const dash = (v: number | null) => (v === null ? "—" : signedUsd(v));
 
@@ -119,7 +121,7 @@ function Positions({ ownerKey }: { ownerKey: string }) {
         <p data-testid="positions-empty" className="mt-6 text-sm text-strata-dim">No open positions.</p>
       )}
       {positions?.groups.map((group, i) => (
-        <PositionGroupCard key={group.underlying} group={group} now={now} withContext={i < MAX_CONTEXT} />
+        <PositionGroupCard key={group.underlying} group={group} now={now} valuedAt={valued} withContext={i < MAX_CONTEXT} />
       ))}
       {positions && positions.unanalysed.length > 0 && (
         <section data-testid="positions-unanalysed" className="mb-6 rounded-md border border-strata-border bg-strata-surface p-5">

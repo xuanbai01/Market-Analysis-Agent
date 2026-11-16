@@ -414,3 +414,25 @@ async def test_a_deadline_hit_is_logged_without_the_symbol(
 def test_a_timestamp_comes_back_in_utc() -> None:
     assert ih.metrics_of({"implied-volatility-updated-at": "2026-11-14T15:59:00-05:00"}).updated_at == datetime(
         2026, 11, 14, 20, 59, tzinfo=UTC)
+
+
+async def test_each_form_of_a_share_class_is_answered_as_asked(account: _Tastytrade) -> None:
+    # One copy for both, but each answer names the ticker asked for (#138's fix round).
+    assert (await ih.iv_history("BRK-B")).symbol == "BRK-B"
+    assert (await ih.iv_history("brk.b")).symbol == "BRK.B"
+    assert len(account.candle_asks) == 1
+
+
+async def test_a_feed_that_fails_first_gives_its_own_reason(
+    account: _Tastytrade, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The candles failing while the metrics hang is the feed's failure, not a timeout.
+    async def hanging(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        await asyncio.sleep(10)
+        return {}
+
+    monkeypatch.setattr(ih.tt, "get", hanging)
+    account.candle_fail = dxlink.DxlinkError("the feed refused the subscription")
+    monkeypatch.setattr(ih, "BUILD_SECONDS", 2.0)
+    with pytest.raises(ih.IvHistoryUnavailable, match="feed"):
+        await ih.iv_history("NVDA")

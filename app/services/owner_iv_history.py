@@ -199,7 +199,13 @@ async def _both(wanted: str, since: datetime) -> tuple[Any, dxlink.CandleHistory
     machine's one DXLink session for nothing."""
     tasks = (asyncio.create_task(_metrics(wanted)), asyncio.create_task(dxlink.fetch_candles(wanted, "d", since)))
     try:
-        return await tasks[0], await tasks[1]
+        # Whichever fails first gives the reason: a feed that refused at once
+        # isn't "took too long" because the metrics were still waiting.
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+        failed = next((t.exception() for t in done if not t.cancelled() and t.exception() is not None), None)
+        if failed is not None:
+            raise failed
+        return tasks[0].result(), tasks[1].result()
     except BaseException:
         for task in tasks:
             task.cancel()
@@ -255,10 +261,12 @@ async def iv_history(symbol: str) -> IvHistory:
         async with asyncio.timeout(BUILD_SECONDS), lock:
             kept = _kept.get(key)
             if kept is not None and _clock() - kept[0] < CACHE_SECONDS:
-                return kept[1]
-            built = await _build(key)
-            _keep(key, built)
-            return built
+                built = kept[1]
+            else:
+                built = await _build(key)
+                _keep(key, built)
+        # One copy for BRK-B and BRK.B; each answer names the ticker asked for.
+        return built.model_copy(update={"symbol": symbol.upper()})
     except TimeoutError as exc:
         logger.warning("owner iv history: gave up after %.0f s", BUILD_SECONDS)  # no symbol
         raise IvHistoryUnavailable(failure_reason(exc)) from exc

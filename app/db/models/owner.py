@@ -10,7 +10,7 @@ See ``alembic/versions/0006_owner_transactions.py`` for the DDL.
 """
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Boolean, LargeBinary, SmallInteger
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, LargeBinary, SmallInteger
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.models.base import Base
@@ -18,6 +18,8 @@ from app.db.models.base import Base
 
 class OwnerTransaction(Base):
     __tablename__ = "owner_transactions"
+    # The migration's check, here too: tests build their tables from the models.
+    __table_args__ = (CheckConstraint("octet_length(nonce) = 12", name="owner_transactions_nonce_length"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)

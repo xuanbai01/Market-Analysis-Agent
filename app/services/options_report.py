@@ -297,7 +297,7 @@ async def _get_report_locked(session: AsyncSession, symbol: str, now: datetime |
             raise
         logger.exception("options for %s failed; serving the copy from before", symbol)
         stale.expires_at = _clock() + RETRY_AFTER_FAILURE_SECONDS
-        return stale.report
+        return await _served(session, symbol, now, track, stale)
     report = await _assemble(session, built, now, track)
     ttl = NO_OPTIONS_TTL_SECONDS if report.status == "no_options" else CACHE_TTL_SECONDS
     # A report with no usable options records no view, whoever asks.

@@ -34,6 +34,7 @@ from app.schemas.owner import (
     PositionLeg,
     UnanalysedPosition,
 )
+from app.services import market_calendar as mc
 from app.services import tastytrade_client as tt
 
 logger = logging.getLogger(__name__)
@@ -208,6 +209,7 @@ def _read(item: dict[str, Any], account: int) -> _Leg | UnanalysedPosition | Non
     return _Leg(underlying, PositionLeg(
         account=account, kind=occ.kind, symbol=symbol, expiry=occ.expiry, strike=occ.strike,
         quantity=quantity, multiplier=multiplier, average_open=average, adjusted=adjusted,
+        expires_at=mc.session_close(occ.expiry),
     ))
 
 

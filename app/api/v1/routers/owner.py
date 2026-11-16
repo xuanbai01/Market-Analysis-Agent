@@ -13,8 +13,8 @@ from app.api.v1.dependencies import get_session, require_owner
 from app.schemas.owner import LiveChain, OwnerPositions, OwnerStatus, OwnerTrades
 from app.services import owner_vault, tastytrade_client
 from app.services.owner_live_chain import LiveChainUnavailable, NotListed, live_chain
-from app.services.owner_positions import PositionsUnavailable, failure_reason, get_positions
-from app.services.owner_trades import csv_text, list_trades, sync
+from app.services.owner_positions import PositionsUnavailable, get_positions
+from app.services.owner_trades import SyncFailed, csv_text, list_trades, sync
 
 OWNER_PREFIX = "/owner"
 # Tighter than the options routes': one class separator at most, so the
@@ -50,8 +50,8 @@ async def owner_trades(session: AsyncSession = Depends(get_session)) -> OwnerTra
         await sync(session)
     except owner_vault.VaultUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except (tastytrade_client.TastytradeUnavailable, tastytrade_client.TastytradeNotFound) as exc:
-        synced, reason = False, failure_reason(exc)
+    except SyncFailed as exc:
+        synced, reason = False, str(exc)
     try:
         trades = await list_trades(session)
     except owner_vault.VaultUnavailable as exc:

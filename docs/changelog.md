@@ -202,10 +202,36 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **The positions page's reads have query keys of their own.** Under the options page's keys, a visit there within five minutes was served the untracked copy from the browser and never reached the server, so no view was recorded.
     - **The server records a view that waited on the lock** while the untracked build ran. A report with no usable options records none, whoever built it.
     - **The page's test pins the clock,** since its fixtures' expiries pass in December.
+  - **From #128's third AI review:**
+    - **Option context for the first 10 underlyings only,** as the plan said and the page didn't: each cold report or chain read spends one of the IP's 60 options lookups an hour, so a big portfolio could have spent them all in one load. The rest say why they show no context. The held expiry's chain waits for the report, which often read that expiry already, so it costs nothing.
+    - **Each option leg says when its expiry closes** (`expires_at`, from `market_calendar.session_close`): the page had used 21:00 UTC for every expiry, an hour late in summer and three hours late on half days, so a position on the day after Thanksgiving still had time value after the close.
+    - **The normal CDF keeps its digits in the tails** (Numerical Recipes' erfc, error under 1.2e-7 of the value). Its error had been absolute, so the golden check allowed an error larger than a far out-of-the-money price and a tail priced at 0 passed. Black-76 is now held to Python within 1e-5 of each price.
+    - **No bare "Dec 11: "** when a chain has no max pain.
+    - **A view served the old copy** (Yahoo down) is recorded too.
+  - **From #128's fourth AI review** (lows only):
+    - **Sessions left count today's** while the market hasn't opened, so a check before the open has the right window for the past-moves share.
+    - **One holding without a live figure no longer blanks every total.** The tiles add what they can and name what they leave out.
+    - **A leg sent without its close** gets 4 pm in New York, daylight time included, rather than 21:00 UTC.
+  - **From #128's fifth AI review:**
+    - **A report on the expiry day after the close** no longer counts as before the expiry. The card uses the report's reaction session, as the options page does.
+    - **The tiles say what's missing:** a live price or delta, theta or vega.
+    - **Not changed:**
+      - The chain route reads any listed expiry on demand, not only those the report read, so a held expiry far from the report's targets still gets its chain.
+      - Recording a view twice is harmless, since it's an upsert.
+  - **From #128's sixth AI review:**
+    - **"Moves like −0 shares" is gone:** the share counts are rounded before their sign is taken.
+    - **Not changed:**
+      - A report with no options never records a view, so marking its copy as having none to record loses nothing; once the symbol has options, the new build records the view.
+      - `probAbove` takes a strike and converts it to moneyness itself.
+      - A holding with no live price has no delta in the totals, and is named.
+  - **From #128's seventh AI review:**
+    - **The past-moves line names the span its closes cover** ("Over the last 3 years") instead of always saying five years: a stock listed lately has less.
+    - **A mark of 0** (a halted stock) counts as no price, and the card falls back to the report's.
+    - **Not changed:** a what-if below 1% IV is priced at 1%, and a failed price read leaves out the past-moves line without a note.
   - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 - **The owner's trade copy, encrypted (2026-11-15, ADR 0009 amended):** the owner asked for a copy of their trades that both of their PCs can reach, and chose an encrypted copy in Neon.
   - **The vault:** `owner_vault` seals each transaction with AES-256-GCM under `OWNER_VAULT_KEY` (32 random bytes, a Fly secret), with a fresh nonce and the transaction id as associated data. The app won't start with a malformed key or one equal to another key. `cryptography` 50.0.2 is pinned in `pyproject.toml` and the Dockerfile.
-  - **The table:** `owner_transactions` (migration 0006) holds only the id and an estimated-fee flag in the clear. Rows are written once; the one update is a row stored with estimated fees taking the final ones.
+  - **The table:** `owner_transactions` (migration 0006) holds only the id, the key version and an estimated-fee flag in the clear, all three bound to the ciphertext. Rows are written once; the one update is a row stored with estimated fees taking the final ones.
   - **The sync:** `owner_trades.sync`, at most once a minute. It reads each account's transactions from a week before the newest stored, every page (2,000 a page), and holds no database connection during the fetch. It keeps a listed set of fields plus the account's 1-based number, never the account number.
   - **The routes:**
     - `GET /v1/owner/trades` syncs, then lists newest first, with money in positive, money out negative, and fees totalled. When tastytrade is down it serves the copy as it stands, with the reason. Without the key it's a 503.
@@ -214,13 +240,62 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **Setup:** docs/deployment.md §11 makes the key.
   - **From the security review** (one medium each from two reviewers, both fixed):
     - **A bad key's start-up error** would have quoted the settings' values, a slice of the tastytrade refresh token included, into Fly's log. Settings now hide their input in errors.
-    - **A first sync over about 5,400 transactions** would have broken Postgres's parameter limit on every visit. Inserts now go 1,000 rows at a time.
+    - **A first sync over about 6,550 transactions** would have broken Postgres's parameter limit on every visit. Inserts now go 1,000 rows at a time.
     - **The vault:** the associated data now binds the key version and the estimated-fee flag too, a row under another version is refused, and a damaged row is the vault's error rather than a 500. The unused clear `stored_at` column is gone, and a CHECK holds the nonce's length.
     - **Syncs:** one at a time, a failed sync spaced like a good one, a 120 s deadline, decryption off the event loop, and a closed account skipped.
     - **Account numbers in free text** are replaced by "account N" before sealing.
     - **The CSV** defuses a formula behind leading spaces or a newline.
     - **The page** shows the server's reason when the copy doesn't open, and revokes the download's address a moment later (at once, Safari can cancel the save).
     - **Both key recipes** warn about Windows clipboard history.
+  - **From #129's AI review:**
+    - **A sync that hit its 120 s deadline was a 500.** It's now a failed sync like tastytrade being down: the copy is served with the reason, after the session is rolled back.
+    - **A visit inside the minute after a failed sync was told the copy was updated.** It's now told the last update failed, until a sync works.
+    - **The CSV route lists without syncing**, so with no key and nothing stored it answered an empty CSV. Listing now refuses without the key (503).
+    - **A fractional share** shows as it is in the table, as it does in the CSV.
+  - **From #129's second AI review:**
+    - **The week read back missed what tastytrade posts late under an older date**, and a new account's history. A sync reads the whole history first in each process and once a day.
+    - **An id sent as digits** is still an id, so rows aren't dropped.
+    - **A fee credited back** lowers the fees instead of adding to them.
+    - **The table's net** is shown to the cent, like the fees beside it.
+    - **Not changed:** a row that fails its GCM check still fails the list with a 503. That's the sign of a wrong key or tampering, and it should be loud; §11 says how to start the copy again.
+  - **From #129's third AI review:**
+    - **Sealing runs off the event loop.** A first sync seals the whole history, and on Fly's shared CPU that would have held up every other request.
+    - **A database failure mid-write** (Neon dropping the connection) was a 500. It's now a failed sync, so the stored copy is shown with "the copy couldn't be updated" and the error is logged.
+    - **A page count sent as digits** is read. A history longer than 25 pages logs a warning.
+    - **A trade without a time** sorts by its date.
+    - **The model carries the migration's nonce-length check**, so test databases built from the models enforce it too.
+    - **Not changed:** a full read after a restart. It costs one tastytrade page per 2,000 transactions and decrypts nothing, which is cheaper than the incremental read for this account.
+  - **From #129's fourth AI review:**
+    - **A failed sync's log line names the error's type only**, not its text, which could carry an account path.
+    - **Not changed:** past 50,000 transactions or 10 accounts the copy stops short, with a warning in the log. That's far beyond this account.
+  - **From #129's fifth AI review:**
+    - **A page count sent as 2.0, or not at all,** no longer stops the read after the first page. Without a count, a full page means read on.
+    - **Fees are rounded off float noise**, so the CSV writes 1.14, not 1.1400000000000001.
+    - **A sync past its deadline says "the update took too long"**, since the deadline covers the database's part too, not only tastytrade's.
+    - **The concurrency test now interleaves**, so it fails without the sync's lock.
+    - **Not changed:** the CSV download can't save an error body, because the fetch throws on any non-2xx before reading it. `uv.lock` is in the diff.
+  - **From #129's sixth AI review:**
+    - **The stored rows are read out of the session before it's let go**, so finding the newest date decrypts with no database connection held.
+    - **A page count under 1** counts as no count, so the read goes on while pages are full.
+    - **Not changed:** the real client takes the query parameters, and `/accounts/{n}/transactions` is on its allowlist. `tests/test_tastytrade_client.py` covers both.
+  - **From #129's seventh AI review:**
+    - **A whole read asks from 2000-01-01**, so no default window on tastytrade's side can leave the oldest trades out.
+    - **The listing lets its connection go before decrypting.**
+    - **An estimated-fee flag sent as "true"** is read.
+    - **Accounts past the cap of 10 are logged**, by count.
+  - **From #129's eighth AI review:**
+    - **A sync cut short** (the visit closed mid-write) is reported as cut short for its minute, not as done.
+    - **The CSV download's failures count like the list's:** a 401 signs out, and a refused key is forgotten.
+    - **CLAUDE.md's "never store it"** points to the trade copy, the one exception.
+    - **Not changed:** the vault key is compared with the shared secret correctly, since that secret is a plain string.
+  - **From #129's ninth AI review:**
+    - **The CSV link is clicked while in the page**, since some browsers ignore a detached one.
+    - **An empty copy with tastytrade unreachable** says so, rather than "No trades yet".
+    - **An amount with no credit or debit** shows no figure rather than a guessed sign.
+    - **Not changed:** the 503's title carries the route's detail, so "the key isn't set" is recognised.
+  - **From #129's tenth AI review:**
+    - **The chunked-insert test writes 7,000 rows (35,000 parameters).** The 6,000 it wrote fit in one statement, so it would have passed without chunking. The limit is about 6,550 transactions, not 5,400.
+    - **Not changed:** the client turns its own timeouts into `TastytradeUnavailable`, so a bare `TimeoutError` can only be the sync's deadline.
 - **Live quotes on the options page (2026-11-15, tastytrade PR B, ADR 0009):** with the owner key, the options page's expiry section has a Live switch.
   - **The route:** `GET /v1/owner/options/{symbol}/live/{expiry}` (`owner_live_chain`).
     - **Strikes:** read from tastytrade's nested chain. Only standard deliverables count, and an OCC symbol is checked before it reaches a query. The last 10 chains are kept 10 minutes.

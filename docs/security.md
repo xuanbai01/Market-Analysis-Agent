@@ -41,7 +41,7 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
   - **In the clear:** only the id, the key version and the flag. The ciphertext's length shows roughly how long each record is.
   - **Account numbers:** each stored payload keeps the account's 1-based number, never the account number, and free text has any account number replaced by "account N" before sealing. Labels follow the account's place in tastytrade's list, so they would shift if that order changed. That's moot with the owner's one account.
   - **Writes:** inserts go 1,000 rows a statement, under Postgres's parameter limit.
-  - **Syncs:** one runs at a time, at most once a minute (a failed one counts too), and gives up after 120 s. Decryption runs off the event loop.
+  - **Syncs:** one runs at a time, at most once a minute (a failed one counts too, and a visit inside that minute is told it failed), and gives up after 120 s, rolling back. Decryption runs off the event loop.
   - **Without the key:** nothing is stored, and the routes answer 503.
   - **Who can read it:** Neon and its backups hold ciphertext only. Someone who got into Fly would have the key, but they'd already have the tastytrade grant there.
   - **The CSV download** prefixes text a spreadsheet would run as a formula with `'` (OWASP CSV injection), including one behind leading spaces or a newline.

@@ -58,11 +58,20 @@ describe("TradesPage", () => {
     const rows = table.querySelectorAll("tbody tr");
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent("Buy to Close");
-    expect(rows[0]).toHaveTextContent("−$121");
-    expect(rows[1]).toHaveTextContent("+$479");
+    expect(rows[0]).toHaveTextContent("−$121.10"); // to the cent, like the fees beside it
+    expect(rows[1]).toHaveTextContent("+$478.86");
     expect(screen.getByTestId("trades-status")).toHaveTextContent("3 trades · a copy stored encrypted");
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "SPY" } });
     expect(table.querySelectorAll("tbody tr")).toHaveLength(1);
+  });
+
+  it("shows a fractional quantity as it is, as the CSV does", async () => {
+    setOwnerKey("k".repeat(40));
+    const half = { ...TRADES.trades[2], id: 9, symbol: "SPY", quantity: 0.5 };
+    vi.mocked(fetchOwnerTrades).mockResolvedValue({ ...TRADES, trades: [half] });
+    renderPage();
+    const table = await screen.findByTestId("trades-table");
+    expect(table.querySelector("tbody tr")).toHaveTextContent(/SPY\s*0\.5/);
   });
 
   it("says when the copy couldn't be updated, and why", async () => {
@@ -96,6 +105,34 @@ describe("TradesPage", () => {
     await waitFor(() => expect(client.getQueryData(["owner-trades"])).toBeUndefined());
   });
 
+  it("signs out on a 401 from the download, as the list does", async () => {
+    localStorage.setItem("market-agent.auth-token", "stale");
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
+    vi.mocked(fetchOwnerTradesCsv).mockRejectedValue(new ApiError({ status: 401, title: "Sign in again." }));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Download CSV" }));
+    await waitFor(() => expect(localStorage.getItem("market-agent.auth-token")).toBeNull());
+    expect(getOwnerKey()).toBeNull(); // signing out clears the owner key too
+  });
+
+  it("forgets a key the download is refused with", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
+    vi.mocked(fetchOwnerTradesCsv).mockRejectedValue(new ApiError({ status: 403, title: "This needs the owner key." }));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Download CSV" }));
+    expect(await screen.findByTestId("owner-unlock")).toBeInTheDocument();
+    expect(getOwnerKey()).toBeNull();
+  });
+
+  it("doesn't call an unreachable copy empty", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerTrades).mockResolvedValue({ trades: [], synced: false, reason: "tastytrade didn't answer" });
+    renderPage();
+    expect(await screen.findByTestId("trades-empty")).toHaveTextContent("Nothing is stored yet, and tastytrade couldn't be read this visit.");
+  });
+
   it("downloads the CSV with the owner key", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
@@ -103,10 +140,18 @@ describe("TradesPage", () => {
     const created = vi.fn(() => "blob:x");
     const revoked = vi.fn();
     Object.assign(URL, { createObjectURL: created, revokeObjectURL: revoked });
+    // The link is clicked while in the page: some browsers ignore a detached one.
+    const attached: boolean[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      attached.push(document.body.contains(this));
+    });
     renderPage();
     vi.useFakeTimers({ shouldAdvanceTime: true });
     fireEvent.click(await screen.findByRole("button", { name: "Download CSV" }));
     await waitFor(() => expect(created).toHaveBeenCalled());
+    expect(attached).toEqual([true]);
+    expect(document.querySelector('a[download="trades.csv"]')).toBeNull(); // and taken out after
+    click.mockRestore();
     expect(revoked).not.toHaveBeenCalled(); // not at once: Safari would cancel the save
     vi.advanceTimersByTime(1000);
     expect(revoked).toHaveBeenCalledWith("blob:x");

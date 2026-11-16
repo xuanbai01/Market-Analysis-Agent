@@ -19,7 +19,7 @@ const text = (s: Sentence | null) => (s === null ? null : s.map((p) => (typeof p
 
 const call: PositionLeg = {
   account: 1, kind: "call", symbol: "NVDA  261218C00200000", expiry: "2026-12-18", strike: 200, quantity: -2, multiplier: 100,
-  average_open: 4.1, adjusted: false, quote: null,
+  average_open: 4.1, adjusted: false, expires_at: null, quote: null,
 };
 const shares: PositionLeg = { ...call, kind: "stock", symbol: "NVDA", expiry: null, strike: null, quantity: 200, multiplier: 1, average_open: 150 };
 const group: PositionGroup = { underlying: "NVDA", symbol: "NVDA", quote: null, expiries: ["2026-12-18"], legs: [shares, call] };
@@ -49,6 +49,10 @@ describe("position words", () => {
       "Moves like **138 shares**: **+$225** for a 1% rise, which itself changes by **−8 shares** per 1%. A day passing: **+$20**. IV one point higher: **−$50**.",
     );
     expect(greeksSentence({ deltaShares: null, deltaDollars: null, gammaShares: null, thetaDay: null, vegaPoint: null })).toBeNull();
+    // Rounded first, then signed: no "−0".
+    expect(text(greeksSentence({ deltaShares: -0.4, deltaDollars: -0.6, gammaShares: null, thetaDay: null, vegaPoint: null }))).toMatch(/^Moves like \*\*0 shares\*\*/);
+    expect(text(greeksSentence({ deltaShares: -42.6, deltaDollars: -70, gammaShares: null, thetaDay: null, vegaPoint: null }))).toMatch(/^Moves like \*\*−43 shares\*\*/);
+    expect(text(greeksSentence({ deltaShares: 10, deltaDollars: 16, gammaShares: -0.5, thetaDay: null, vegaPoint: null }))).not.toMatch(/changes by/);
   });
 
   it("words a what-if", () => {
@@ -65,7 +69,9 @@ describe("position words", () => {
       "Option prices put the chance this is in profit at **Dec 18**'s close at **43%**: what the market implies, not a forecast.",
     );
     expect(text(marketSentence(null, null, true))).toMatch(/no single chance of profit for a spread across expiries/);
-    expect(text(historySentence("NVDA", { share: 0.381, windows: 1234 }, 23))).toBe(
+    expect(text(historySentence("NVDA", { share: 0.4, windows: 500, years: 2.9 }, 23))).toMatch(/^Over the last 3 years,/);
+    expect(text(historySentence("NVDA", { share: 0.4, windows: 100, years: 0.6 }, 23))).toMatch(/^Over the last 7 months,/);
+    expect(text(historySentence("NVDA", { share: 0.381, windows: 1234, years: 4.98 }, 23))).toBe(
       "Over the last 5 years, NVDA's moves across 23 sessions would have left it in profit **38%** of the time (1,234 windows): past moves, not a forecast.",
     );
     expect(historySentence("NVDA", null, 23)).toBeNull();
@@ -81,6 +87,11 @@ describe("position words", () => {
       "NVDA reports on **Nov 19**, before this position's first expiry: options imply a **±7.1%** move for it; the last 1 moved **6.2%** on average.",
     );
     expect(earningsSentence("NVDA", earnings, "2026-11-18")).toBeNull();
+    // On the expiry day: after the close, the position has expired before the market trades on it.
+    const afterClose = { ...earnings, next_timing: "after_close", reaction_date: "2026-11-20" } as EarningsBlock;
+    expect(earningsSentence("NVDA", afterClose, "2026-11-19")).toBeNull();
+    const beforeOpen = { ...earnings, next_timing: "before_open", reaction_date: "2026-11-19" } as EarningsBlock;
+    expect(earningsSentence("NVDA", beforeOpen, "2026-11-19")).not.toBeNull();
     expect(text(earningsSentence("NVDA", { ...earnings, implied_move: null, refused: "the expiries are too far" }, "2026-12-18"))).toMatch(
       /\(no implied move: the expiries are too far\)/,
     );

@@ -29,7 +29,7 @@ const MARKET: Market = { spot: 200, rate: 0.04, carry: 0.04, now: NOW };
 
 function option(kind: "call" | "put", strike: number, quantity: number, average: number, extra: Partial<PositionLeg> = {}): PositionLeg {
   return {
-    account: 1, kind, symbol: `X ${kind} ${strike}`, expiry: EXPIRY, strike, quantity, multiplier: 100, average_open: average,
+    account: 1, kind, symbol: `X ${kind} ${strike}`, expiry: EXPIRY, expires_at: null, strike, quantity, multiplier: 100, average_open: average,
     adjusted: false,
     quote: { bid: null, ask: null, mark: average, iv: 0.4, delta: kind === "call" ? 0.5 : -0.5, gamma: 0.02, theta: -0.1, vega: 0.25, updated_at: null },
     ...extra,
@@ -37,7 +37,7 @@ function option(kind: "call" | "put", strike: number, quantity: number, average:
 }
 
 function stock(quantity: number, average: number): PositionLeg {
-  return { account: 1, kind: "stock", symbol: "X", expiry: null, strike: null, quantity, multiplier: 1, average_open: average, adjusted: false, quote: null };
+  return { account: 1, kind: "stock", symbol: "X", expiry: null, expires_at: null, strike: null, quantity, multiplier: 1, average_open: average, adjusted: false, quote: null };
 }
 
 function group(legs: PositionLeg[]): PositionGroup {
@@ -46,10 +46,12 @@ function group(legs: PositionLeg[]): PositionGroup {
 }
 
 describe("Black-76, held to Python (tests/test_options_strategy_golden.py)", () => {
-  it("prices to within the normal CDF's own error", () => {
+  it("prices to a small fraction of the price, far out of the money too", () => {
+    // An error bounded by the strike's size let a tail priced at 0 pass
+    // (#128's AI review): the CDF's error is relative now, so the test is too.
     for (const c of GOLDEN.black76) {
       const price = black76(c.forward, c.strike, c.years, c.vol, c.discount, c.call);
-      expect(Math.abs(price - c.price)).toBeLessThan(2e-7 * (c.forward + c.strike));
+      expect(Math.abs(price - c.price)).toBeLessThanOrEqual(1e-5 * c.price + 1e-12 * (c.forward + c.strike));
     }
   });
 
@@ -63,7 +65,7 @@ describe("Black-76, held to Python (tests/test_options_strategy_golden.py)", () 
 describe("a position's value", () => {
   it("values an option at expiry at its intrinsic value and a share at the price", () => {
     const call = option("call", 190, 1, 5);
-    expect(legValue(call, 205, expiryClose(EXPIRY), 0, MARKET)).toBe(15);
+    expect(legValue(call, 205, expiryClose(EXPIRY, [call]), 0, MARKET)).toBe(15);
     expect(legValue(stock(10, 150), 205, NOW, 0, MARKET)).toBe(205);
   });
 
@@ -100,7 +102,7 @@ describe("profit and loss", () => {
 
   it("in a what-if that runs to expiry is the expiry P&L at that price", () => {
     const call = group([option("call", 200, 1, 2.5)]);
-    const days = (expiryClose(EXPIRY).getTime() - NOW.getTime()) / 86_400_000;
+    const days = (expiryClose(EXPIRY, []).getTime() - NOW.getTime()) / 86_400_000;
     expect(pnlInScenario(call, { move: 0.05, ivShift: 0, days }, MARKET)).toBeCloseTo(pnlAtExpiry(call, 210, MARKET)!, 6);
   });
 
@@ -109,6 +111,19 @@ describe("profit and loss", () => {
     const now = pnlInScenario(call, NO_CHANGE, MARKET)!;
     expect(pnlInScenario(call, { ...NO_CHANGE, ivShift: 0.1 }, MARKET)!).toBeGreaterThan(now);
     expect(pnlInScenario(call, { ...NO_CHANGE, days: 10 }, MARKET)!).toBeLessThan(now);
+  });
+
+  it("falls back to 4 pm in New York for a leg sent without its close, in summer too", () => {
+    expect(expiryClose("2027-06-18", [])).toEqual(new Date("2027-06-18T20:00:00Z"));
+    expect(expiryClose("2026-12-18", [])).toEqual(new Date("2026-12-18T21:00:00Z"));
+  });
+
+  it("values a leg to its expiry's close, which is 1 pm on a half day", () => {
+    const halfDay = option("call", 200, 1, 2.5, { expiry: "2026-11-27", expires_at: "2026-11-27T18:00:00Z" });
+    const after = new Date("2026-11-27T19:00:00Z"); // 2 pm in New York: that session is over
+    expect(expiryClose("2026-11-27", [halfDay])).toEqual(new Date("2026-11-27T18:00:00Z"));
+    expect(legValue(halfDay, 205, after, 0, MARKET)).toBe(5);
+    expect(sessionsUntil("2026-11-27", new Date("2026-11-27T19:00:00Z"), [halfDay])).toBe(0);
   });
 
   it("finds a long call's breakeven at strike plus premium", () => {
@@ -181,9 +196,11 @@ describe("what history shows", () => {
   it("counts the windows whose move would have paid", () => {
     const flat = Array.from({ length: 60 }, () => 100);
     const result = historicalShare(group([option("call", 200, 1, 2.5)]), flat, 10, MARKET);
-    expect(result).toEqual({ share: 0, windows: 50 }); // no move: the premium is lost every time
+    expect(result).toEqual({ share: 0, windows: 50, years: 59 / 252 }); // no move: the premium is lost every time
     const doubling = Array.from({ length: 60 }, (_, i) => 100 * 1.02 ** i);
     expect(historicalShare(group([option("call", 200, 1, 2.5)]), doubling, 10, MARKET)?.share).toBe(1);
+    // The span the closes cover, for the sentence: a stock listed lately has less than five years.
+    expect(historicalShare(group([option("call", 200, 1, 2.5)]), flat, 10, MARKET)?.years).toBeCloseTo((flat.length - 1) / 252, 9);
   });
 
   it("says nothing from too few windows", () => {
@@ -196,7 +213,14 @@ describe("what history shows", () => {
   });
 
   it("counts the sessions left, weekends out", () => {
-    expect(sessionsUntil("2026-11-20", NOW)).toBe(4);
-    expect(sessionsUntil("2026-11-23", NOW)).toBe(5);
+    expect(sessionsUntil("2026-11-20", NOW, [])).toBe(4);
+    expect(sessionsUntil("2026-11-23", NOW, [])).toBe(5);
+  });
+
+  it("counts today's session while the market hasn't opened", () => {
+    const preMarket = new Date("2026-11-16T12:00:00Z"); // 7 am in New York, a Monday
+    expect(sessionsUntil("2026-11-20", preMarket, [])).toBe(5);
+    expect(sessionsUntil("2026-11-20", NOW, [])).toBe(4); // 10 am: today's is under way
+    expect(sessionsUntil("2026-11-20", new Date("2026-11-15T23:00:00Z"), [])).toBe(5); // a Sunday evening
   });
 });

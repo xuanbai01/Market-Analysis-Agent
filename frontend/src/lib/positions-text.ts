@@ -55,15 +55,17 @@ export function groupSentence(group: PositionGroup, value: number | null, cost: 
 /** The Greeks as P&L: per 1% move, per day, per IV point. */
 export function greeksSentence(g: Greeks): Sentence | null {
   if (g.deltaShares === null || g.deltaDollars === null) return null;
+  const shares = Math.round(g.deltaShares); // signed after rounding: no "−0"
   const parts: Sentence = [
     "Moves like ",
-    { strong: `${g.deltaShares < 0 ? "−" : ""}${count(Math.round(g.deltaShares))} shares` },
+    { strong: `${shares < 0 ? "−" : ""}${count(shares)} shares` },
     ": ",
     { strong: signedUsd(g.deltaDollars) },
     " for a 1% rise",
   ];
-  if (g.gammaShares !== null && Math.abs(g.gammaShares) >= 0.5) {
-    parts.push(", which itself changes by ", { strong: `${g.gammaShares < 0 ? "−" : "+"}${count(Math.round(g.gammaShares))} shares` }, " per 1%");
+  const gamma = g.gammaShares === null ? 0 : Math.round(g.gammaShares);
+  if (gamma !== 0) {
+    parts.push(", which itself changes by ", { strong: `${gamma < 0 ? "−" : "+"}${count(gamma)} shares` }, " per 1%");
   }
   parts.push(".");
   if (g.thetaDay !== null) parts.push(" A day passing: ", { strong: signedUsd(g.thetaDay) }, ".");
@@ -105,10 +107,24 @@ export function marketSentence(chance: number | null, expiry: string | null, spr
 }
 
 /** How often history's moves would have paid, labelled for what it is. */
-export function historySentence(symbol: string, result: { share: number; windows: number } | null, sessions: number): Sentence | null {
+/** "5 years", "1 year", "7 months". */
+function span(years: number): string {
+  if (years >= 1) {
+    const n = Math.round(years);
+    return `${n} year${n === 1 ? "" : "s"}`;
+  }
+  const months = Math.max(1, Math.round(years * 12));
+  return `${months} month${months === 1 ? "" : "s"}`;
+}
+
+export function historySentence(
+  symbol: string,
+  result: { share: number; windows: number; years: number } | null,
+  sessions: number,
+): Sentence | null {
   if (result === null) return null;
   return [
-    `Over the last 5 years, ${symbol}'s moves across ${sessions} session${sessions === 1 ? "" : "s"} would have left it in profit `,
+    `Over the last ${span(result.years)}, ${symbol}'s moves across ${sessions} session${sessions === 1 ? "" : "s"} would have left it in profit `,
     { strong: pct(result.share, 0) },
     ` of the time (${result.windows.toLocaleString("en-US")} windows): past moves, not a forecast.`,
   ];
@@ -116,7 +132,9 @@ export function historySentence(symbol: string, result: { share: number; windows
 
 /** The next report, when it falls before the position's first expiry. */
 export function earningsSentence(symbol: string, earnings: EarningsBlock | null, firstExpiry: string | null): Sentence | null {
-  if (!earnings?.next_date || firstExpiry === null || earnings.next_date > firstExpiry) return null;
+  // The first session that trades on it: a report after the expiry day's close comes too late.
+  const reacts = earnings?.reaction_date ?? earnings?.next_date;
+  if (!earnings?.next_date || !reacts || firstExpiry === null || reacts > firstExpiry) return null;
   const parts: Sentence = [`${symbol} reports on `, { strong: dateLabel(earnings.next_date) }, ", before this position's first expiry"];
   if (earnings.implied_move !== null) parts.push(": options imply a ", { strong: `±${pct(earnings.implied_move)}` }, " move for it");
   else if (earnings.refused) parts.push(` (no implied move: ${earnings.refused})`);

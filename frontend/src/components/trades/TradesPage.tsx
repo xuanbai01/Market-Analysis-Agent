@@ -14,7 +14,6 @@ import { ApiError } from "../../lib/api";
 import { clearOwnerKey, useOwnerKey } from "../../lib/owner";
 import { fetchOwnerTrades, fetchOwnerTradesCsv, isOwnerKeyRefused } from "../../lib/owner-api";
 import type { OwnerTrade } from "../../lib/owner-schemas";
-import { signedUsd } from "../../lib/positions-text";
 import { ErrorBanner } from "../ErrorBanner";
 import { useSignOutOn401 } from "../options/useSignOutOn401";
 import { OwnerUnlock } from "../owner/OwnerUnlock";
@@ -27,13 +26,23 @@ function when(trade: OwnerTrade): string {
 }
 
 const num = (v: number | null, digits = 2) => (v === null ? "—" : v.toFixed(digits));
+// To the cent, like the fees beside it: two nets a few cents apart don't read alike.
+const cents = (v: number) => {
+  const sign = v > 0.004 ? "+" : v < -0.004 ? "−" : "";
+  return `${sign}$${Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+// As many decimals as it has, up to 4: a fractional share isn't rounded to a whole one.
+const quantity = (v: number | null) => (v === null ? "—" : v.toLocaleString("en-US", { maximumFractionDigits: 4 }));
 
 function saveBlob(blob: Blob, name: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = name;
+  // Clicked while in the page: some browsers ignore a detached link.
+  document.body.appendChild(link);
   link.click();
+  link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000); // revoked at once, Safari can cancel the save
 }
 
@@ -44,14 +53,17 @@ function Trades({ ownerKey }: { ownerKey: string }) {
     gcTime: 0, // gone from memory as soon as nothing shows it
     retry: false,
   });
-  const unauthorized = useSignOutOn401(query.error);
-  const refused = isOwnerKeyRefused(query.error);
-  useEffect(() => {
-    if (refused) clearOwnerKey();
-  }, [refused]);
   const [underlying, setUnderlying] = useState(ALL);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  // The download's failure counts like the list's: a 401 signs out, a refused key is forgotten.
+  const [downloadFailure, setDownloadFailure] = useState<unknown>(null);
+  const failure = query.error ?? downloadFailure;
+  const unauthorized = useSignOutOn401(failure);
+  const refused = isOwnerKeyRefused(failure);
+  useEffect(() => {
+    if (refused) clearOwnerKey();
+  }, [refused]);
   const trades = useMemo(() => query.data?.trades ?? [], [query.data]);
   const underlyings = useMemo(() => [...new Set(trades.map((t) => t.underlying).filter((u): u is string => !!u))].sort(), [trades]);
   const shown = underlying === ALL ? trades : trades.filter((t) => t.underlying === underlying);
@@ -61,9 +73,11 @@ function Trades({ ownerKey }: { ownerKey: string }) {
   async function download() {
     setDownloading(true);
     setDownloadError(null);
+    setDownloadFailure(null);
     try {
       saveBlob(await fetchOwnerTradesCsv(ownerKey), "trades.csv");
     } catch (err) {
+      setDownloadFailure(err);
       setDownloadError(err instanceof ApiError ? err.title : "Couldn't download the CSV.");
     } finally {
       setDownloading(false);
@@ -106,7 +120,11 @@ function Trades({ ownerKey }: { ownerKey: string }) {
         </p>
       )}
       {query.error && !unauthorized && !refused && vaultError === null && <ErrorBanner error={query.error} />}
-      {query.data && trades.length === 0 && <p data-testid="trades-empty" className="mt-6 text-sm text-strata-dim">No trades yet.</p>}
+      {query.data && trades.length === 0 && (
+        <p data-testid="trades-empty" className="mt-6 text-sm text-strata-dim">
+          {query.data.synced ? "No trades yet." : "Nothing is stored yet, and tastytrade couldn't be read this visit."}
+        </p>
+      )}
       {underlyings.length > 1 && (
         <label className="mb-3 flex items-center gap-2 font-mono text-[11px] text-strata-dim">
           Underlying
@@ -142,11 +160,11 @@ function Trades({ ownerKey }: { ownerKey: string }) {
                   <td className="px-3 py-1.5 text-strata-dim">{when(t)}</td>
                   <td className="px-3 py-1.5">{t.action ?? t.sub_type ?? t.type ?? "—"}</td>
                   <td className="px-3 py-1.5">{t.symbol ?? t.underlying ?? "—"}</td>
-                  <td className="px-3 py-1.5 text-right">{num(t.quantity, 0)}</td>
+                  <td className="px-3 py-1.5 text-right">{quantity(t.quantity)}</td>
                   <td className="px-3 py-1.5 text-right">{num(t.price)}</td>
                   <td className="px-3 py-1.5 text-right text-strata-dim">{t.fees ? t.fees.toFixed(2) : "—"}</td>
                   <td className={`px-3 py-1.5 text-right ${t.net_value === null ? "" : t.net_value >= 0 ? "text-strata-pos" : "text-strata-neg"}`}>
-                    {t.net_value === null ? "—" : signedUsd(t.net_value)}
+                    {t.net_value === null ? "—" : cents(t.net_value)}
                   </td>
                 </tr>
               ))}

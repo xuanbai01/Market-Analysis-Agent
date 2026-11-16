@@ -510,4 +510,18 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Bad values:** an absurd open interest is no figure (in the live chain too), a quote time that isn't one is ignored, and a feed that sends no quotes is a 503, not an empty chain.
     - **The ticker** is upper-cased for the caches, and masked in the client's log of chain and earnings paths.
     - **Too big:** a nearest expiry bigger than one read keeps its nearest strikes, instead of reading as "no options".
+- **Every expiry, live: the panel (2026-11-16, options PR 5):** the options page has an "Every expiry · tastytrade live" panel with the owner key (`WholeChainPanel`, `lib/whole-chain-text.ts`).
+  - **On demand:** it reads `/v1/owner/options/{symbol}/chain` only when its button is pressed, since a read asks tastytrade for thousands of contracts. "Read again" asks again after that.
+  - **What it shows:**
+    - a sentence on the chain's open interest, put/call ratio and walls;
+    - the chain's net gamma and where it flips (`gammaSentence`);
+    - gamma exposure by strike across every expiry, the options page's `ExposureChart`, with the dealer assumption;
+    - each expiry's row in the across-expiries table;
+    - notes on what was left out (an expiry without quotes, the read capped, contracts that sent nothing);
+    - the source line.
+  - **Errors:** a 422 says there are no options; a 503 gives the reason; only a 403 forgets the key.
+  - **Memory:** the figures leave with the page.
+  - **Overnight:** it shows when Yahoo's chain is one-sided, as the IV history does.
+  - **The fake backend** has a five-expiry NVDA chain and a made-up DXLink.
+  - **Sizes:** main chunk 90.74 KB gz, options 15.1 KB.
 

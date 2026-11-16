@@ -106,6 +106,39 @@ def test_a_quote_time_says_whether_it_is_a_close(now: datetime, expected: bool) 
     assert mc.is_close(mc.quote_time(now)) is expected
 
 
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        (et(2026, 11, 16, 11), et(2026, 11, 16, 11)),  # market hours: now, not 15 minutes ago
+        (et(2026, 11, 16, 9, 30), et(2026, 11, 16, 9, 30)),  # the open
+        (et(2026, 11, 16, 9, 31), et(2026, 11, 16, 9, 31)),  # not the last close: these quotes aren't delayed
+        (et(2026, 11, 16, 15, 59), et(2026, 11, 16, 15, 59)),
+        (et(2026, 11, 16, 16, 10), et(2026, 11, 16, 16)),  # after the close: today's close
+        (et(2026, 11, 16, 20), et(2026, 11, 16, 16)),
+        (et(2026, 11, 16, 9, 29), et(2026, 11, 13, 16)),  # before the open: Friday's close
+        (et(2026, 11, 16, 4), et(2026, 11, 13, 16)),  # pre-market
+        (et(2026, 11, 14, 12), et(2026, 11, 13, 16)),  # Saturday
+        (et(2026, 11, 15, 23), et(2026, 11, 13, 16)),  # Sunday night
+        (et(2026, 11, 26, 12), et(2026, 11, 25, 16)),  # Thanksgiving
+        (et(2026, 11, 27, 12, 30), et(2026, 11, 27, 12, 30)),  # a half day, in session
+        (et(2026, 11, 27, 13, 5), et(2026, 11, 27, 13)),  # after its 1 pm close
+    ],
+)
+def test_a_live_quote_time_is_now_in_a_session(now: datetime, expected: datetime) -> None:
+    """tastytrade's quotes are real time: made now while a session trades,
+    at the last close otherwise. Yahoo's 15-minute delay isn't theirs."""
+    assert mc.live_quote_time(now) == expected
+
+
+def test_a_live_quote_time_after_the_close_is_a_close() -> None:
+    assert mc.is_close(mc.live_quote_time(et(2026, 11, 16, 16, 5)))
+    assert not mc.is_close(mc.live_quote_time(et(2026, 11, 16, 15, 59)))
+
+
+def test_a_live_quote_time_reads_any_timezone() -> None:
+    assert mc.live_quote_time(datetime(2026, 11, 16, 15, tzinfo=UTC)) == et(2026, 11, 16, 10)
+
+
 def test_quote_time_reads_any_timezone() -> None:
     utc_saturday = datetime(2026, 11, 14, 17, tzinfo=UTC)
     assert mc.quote_time(utc_saturday) == et(2026, 11, 13, 16)

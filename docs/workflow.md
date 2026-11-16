@@ -29,6 +29,7 @@
 - Diff behavior between `main` and your changes when relevant.
 - Ask yourself: "Would a staff engineer approve this?"
 - Run tests, check logs, demonstrate correctness.
+- Run `/pre-pr-check` over your diff before opening a PR: it checks for the defect kinds the AI review in CI kept finding.
 
 ### 5. Demand Elegance (Balanced)
 

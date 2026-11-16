@@ -87,7 +87,7 @@ tastytrade's Open API is free to account holders. We read its docs and its Open 
    - **PR A:** connect, then probe what the account gets.
    - **PR B:** live quotes on the options page, behind the owner key (`/v1/owner/options/{symbol}/live/{expiry}`).
    - **PR C:** market history, live.
-   - **PR D:** a trade journal.
+   - **PR D:** a trade journal, computed from the trade copy on each visit and never stored on its own.
 
    The probe's answers (real-time or not, candle depth, IV in candles, option candles) decide what B and C build.
 

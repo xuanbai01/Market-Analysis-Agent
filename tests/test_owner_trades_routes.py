@@ -76,6 +76,26 @@ async def test_the_trades_are_synced_then_listed(client: tuple[AsyncClient, _Cal
     assert resp.headers["Cache-Control"] == "no-store"
 
 
+async def test_the_trades_come_with_their_journal(client: tuple[AsyncClient, _Calls], monkeypatch: pytest.MonkeyPatch) -> None:
+    """The journal is read from the same copy on each visit (PR D)."""
+    ac, _calls = client
+    rows = [
+        OwnerTrade(id=1, account=1, executed_at="2026-10-01T15:00:00+00:00", action="Sell to Open", symbol="NVDA  261218C00175000",
+                   underlying="NVDA", instrument_type="Equity Option", quantity=1, net_value=480.0, order_id=10),
+        OwnerTrade(id=2, account=1, executed_at="2026-10-21T15:00:00+00:00", action="Buy to Close", symbol="NVDA  261218C00175000",
+                   underlying="NVDA", instrument_type="Equity Option", quantity=1, net_value=-200.0, order_id=11),
+    ]
+
+    async def list_trades(_session: Any) -> list[OwnerTrade]:
+        return rows
+
+    monkeypatch.setattr(owner_router, "list_trades", list_trades)
+    journal = (await ac.get("/v1/owner/trades")).json()["journal"]
+    (position,) = journal["positions"]
+    assert (position["structure"], position["status"], position["realized"]) == ("short call", "closed", 280.0)
+    assert journal["totals"]["realized"] == 280.0
+
+
 async def test_with_tastytrade_down_the_copy_stands_and_says_why(client: tuple[AsyncClient, _Calls]) -> None:
     ac, calls = client
     calls.sync_fail = SyncFailed("tastytrade took too long to answer")

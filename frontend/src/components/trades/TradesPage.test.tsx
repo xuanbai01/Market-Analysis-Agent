@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -22,7 +22,32 @@ const TRADES: OwnerTrades = OwnerTradesSchema.parse({
     { id: 2, account: 1, executed_at: "2026-10-01T15:30:00Z", action: "Sell to Open", symbol: "NVDA  261218C00175000", underlying: "NVDA", quantity: 1, price: 4.8, fees: 1.14, net_value: 478.86 },
     { id: 1, account: 1, executed_at: "2026-09-01T15:30:00Z", action: "Buy to Open", symbol: "SPY   261218P00640000", underlying: "SPY", quantity: 2, price: 6.1, fees: 2.2, net_value: -1222.2 },
   ],
+  journal: {
+    positions: [
+      {
+        id: "order-1", account: 1, underlying: "SPY", structure: "long put", status: "open", opened_at: "2026-09-01T15:30:00+00:00",
+        legs: [{ symbol: "SPY   261218P00640000", kind: "put", expiry: "2026-12-18", strike: 640, quantity: 2, closed: 0 }],
+        open_cash: -1222.2, fees: 2.2, transactions: [1],
+      },
+      {
+        id: "order-2", account: 1, underlying: "NVDA", structure: "short call", status: "closed", ended_by: "closed",
+        opened_at: "2026-10-01T15:30:00+00:00", closed_at: "2026-11-13T15:30:00+00:00", days_held: 43,
+        legs: [{ symbol: "NVDA  261218C00175000", kind: "call", expiry: "2026-12-18", strike: 175, quantity: -1, closed: 1 }],
+        open_cash: 478.86, close_cash: -121.1, fees: 2.24, realized: 357.76, transactions: [2, 3],
+      },
+    ],
+    months: [{ month: "2026-11", realized: 357.76 }],
+    underlyings: [{ underlying: "NVDA", realized: 357.76 }],
+    totals: { realized: 357.76, closed: 1, profitable: 1, average_days: 43, fees: 2.24 }, // the closed position's own
+    unmatched: [{ id: 99, date: "2026-08-01", symbol: "NVDA", reason: "nothing open to close: it may come from before the copy starts" }],
+  },
 });
+
+/** The transactions table sits on its own tab; the journal opens first. */
+async function showTransactions() {
+  fireEvent.click(await screen.findByTestId("trades-tab-transactions"));
+  return screen.getByTestId("trades-table");
+}
 
 let client: QueryClient;
 
@@ -54,15 +79,84 @@ describe("TradesPage", () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
     renderPage();
-    const table = await screen.findByTestId("trades-table");
+    const table = await showTransactions();
     const rows = table.querySelectorAll("tbody tr");
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent("Buy to Close");
     expect(rows[0]).toHaveTextContent("−$121.10"); // to the cent, like the fees beside it
     expect(rows[1]).toHaveTextContent("+$478.86");
     expect(screen.getByTestId("trades-status")).toHaveTextContent("3 trades · a copy stored encrypted");
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "SPY" } });
+    fireEvent.change(screen.getByTestId("trades-underlying-filter"), { target: { value: "SPY" } });
     expect(table.querySelectorAll("tbody tr")).toHaveLength(1);
+  });
+
+  it("opens on the journal: what closed, the months, the positions", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
+    renderPage();
+    expect(await screen.findByTestId("journal-summary")).toHaveTextContent(
+      "1 position closed, 1 at a profit (100%), held 43 days on average. Realized: +$358 after $2 in fees.",
+    );
+    expect(screen.getAllByTestId("realized-bar")).toHaveLength(1);
+    const rows = screen.getAllByTestId("journal-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("NVDA"); // newest opened first
+    expect(rows[0]).toHaveTextContent("short call");
+    expect(rows[0]).toHaveTextContent("closed");
+    expect(rows[0]).toHaveTextContent("43 days");
+    expect(rows[0]).toHaveTextContent("+$357.76");
+    expect(rows[1]).toHaveTextContent("open");
+    expect(screen.queryByTestId("trades-table")).toBeNull();
+  });
+
+  it("opens a position to its legs and the fills behind it", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
+    renderPage();
+    const [nvda] = await screen.findAllByTestId("journal-row");
+    fireEvent.click(within(nvda).getByRole("button", { name: /NVDA short call/ }));
+    const detail = screen.getByTestId("journal-detail");
+    expect(detail).toHaveTextContent("1 short Dec 18 $175 call");
+    expect(detail).toHaveTextContent("Sell to Open");
+    expect(detail).toHaveTextContent("Buy to Close");
+  });
+
+  it("filters the journal by open or closed, and by underlying", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
+    renderPage();
+    await screen.findAllByTestId("journal-row");
+    fireEvent.change(screen.getByTestId("journal-status-filter"), { target: { value: "open" } });
+    expect(screen.getAllByTestId("journal-row")).toHaveLength(1);
+    expect(screen.getByTestId("journal-row")).toHaveTextContent("SPY");
+    fireEvent.change(screen.getByTestId("journal-status-filter"), { target: { value: "all" } });
+    fireEvent.change(screen.getByTestId("trades-underlying-filter"), { target: { value: "NVDA" } });
+    expect(screen.getAllByTestId("journal-row")).toHaveLength(1);
+    expect(screen.getByTestId("journal-row")).toHaveTextContent("NVDA");
+  });
+
+  it("says the summary and chart cover every underlying when one is picked", async () => {
+    // The filter narrows the table; the sentence and bars stay whole, and say
+    // so, with the picked underlying's own realized figure (#131's AI review).
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
+    renderPage();
+    await screen.findAllByTestId("journal-row");
+    expect(screen.queryByTestId("journal-underlying-total")).toBeNull();
+    fireEvent.change(screen.getByTestId("trades-underlying-filter"), { target: { value: "NVDA" } });
+    expect(screen.getByTestId("journal-underlying-total")).toHaveTextContent("NVDA: +$358 realized");
+    expect(screen.getByTestId("journal-summary")).toHaveTextContent(/^All underlyings:/);
+    fireEvent.change(screen.getByTestId("trades-underlying-filter"), { target: { value: "SPY" } });
+    expect(screen.getByTestId("journal-underlying-total")).toHaveTextContent("SPY: nothing realized yet");
+  });
+
+  it("names what couldn't be matched", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
+    renderPage();
+    const note = await screen.findByTestId("journal-unmatched");
+    expect(note).toHaveTextContent("1 transaction isn't in the journal");
+    expect(note).toHaveTextContent("nothing open to close");
   });
 
   it("shows a fractional quantity as it is, as the CSV does", async () => {
@@ -70,7 +164,7 @@ describe("TradesPage", () => {
     const half = { ...TRADES.trades[2], id: 9, symbol: "SPY", quantity: 0.5 };
     vi.mocked(fetchOwnerTrades).mockResolvedValue({ ...TRADES, trades: [half] });
     renderPage();
-    const table = await screen.findByTestId("trades-table");
+    const table = await showTransactions();
     expect(table.querySelector("tbody tr")).toHaveTextContent(/SPY\s*0\.5/);
   });
 
@@ -128,7 +222,7 @@ describe("TradesPage", () => {
 
   it("doesn't call an unreachable copy empty", async () => {
     setOwnerKey("k".repeat(40));
-    vi.mocked(fetchOwnerTrades).mockResolvedValue({ trades: [], synced: false, reason: "tastytrade didn't answer" });
+    vi.mocked(fetchOwnerTrades).mockResolvedValue(OwnerTradesSchema.parse({ trades: [], synced: false, reason: "tastytrade didn't answer" }));
     renderPage();
     expect(await screen.findByTestId("trades-empty")).toHaveTextContent("Nothing is stored yet, and tastytrade couldn't be read this visit.");
   });

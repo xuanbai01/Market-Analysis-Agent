@@ -2,7 +2,8 @@
  * /trades — the owner's tastytrade transactions from the encrypted copy
  * (ADR 0009, amended), behind the owner key. Each visit syncs the copy
  * first; when tastytrade can't be reached the copy is shown as it stands,
- * saying why. A CSV of the copy downloads from here.
+ * saying why. Two tabs: the journal (the trades read as positions, PR D)
+ * and the transactions themselves. A CSV of the copy downloads from here.
  *
  * The trades live in this page's memory only (never persisted, gone when
  * the page or the key goes) and never reach a prompt.
@@ -13,26 +14,18 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../lib/api";
 import { clearOwnerKey, useOwnerKey } from "../../lib/owner";
 import { fetchOwnerTrades, fetchOwnerTradesCsv, isOwnerKeyRefused } from "../../lib/owner-api";
-import type { OwnerTrade } from "../../lib/owner-schemas";
+import { cents, num, quantity, tradeTime } from "../../lib/trades-format";
 import { ErrorBanner } from "../ErrorBanner";
 import { useSignOutOn401 } from "../options/useSignOutOn401";
 import { OwnerUnlock } from "../owner/OwnerUnlock";
+import { JournalView } from "./JournalView";
 
 const ALL = "";
-
-function when(trade: OwnerTrade): string {
-  if (trade.executed_at) return new Date(trade.executed_at).toLocaleString();
-  return trade.date ?? "—";
-}
-
-const num = (v: number | null, digits = 2) => (v === null ? "—" : v.toFixed(digits));
-// To the cent, like the fees beside it: two nets a few cents apart don't read alike.
-const cents = (v: number) => {
-  const sign = v > 0.004 ? "+" : v < -0.004 ? "−" : "";
-  return `${sign}$${Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
-// As many decimals as it has, up to 4: a fractional share isn't rounded to a whole one.
-const quantity = (v: number | null) => (v === null ? "—" : v.toLocaleString("en-US", { maximumFractionDigits: 4 }));
+type Tab = "journal" | "transactions";
+const TABS: { id: Tab; label: string }[] = [
+  { id: "journal", label: "Journal" },
+  { id: "transactions", label: "Transactions" },
+];
 
 function saveBlob(blob: Blob, name: string): void {
   const url = URL.createObjectURL(blob);
@@ -54,6 +47,7 @@ function Trades({ ownerKey }: { ownerKey: string }) {
     retry: false,
   });
   const [underlying, setUnderlying] = useState(ALL);
+  const [tab, setTab] = useState<Tab>("journal");
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   // The download's failure counts like the list's: a 401 signs out, a refused key is forgotten.
@@ -125,10 +119,28 @@ function Trades({ ownerKey }: { ownerKey: string }) {
           {query.data.synced ? "No trades yet." : "Nothing is stored yet, and tastytrade couldn't be read this visit."}
         </p>
       )}
+      {trades.length > 0 && (
+        <div role="tablist" className="mb-4 flex gap-1 border-b border-strata-border font-mono text-[11px]">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              data-testid={`trades-tab-${t.id}`}
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={`-mb-px border-b-2 px-3 py-1.5 ${tab === t.id ? "border-strata-highlight text-strata-hi" : "border-transparent text-strata-dim hover:text-strata-hi"}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
       {underlyings.length > 1 && (
         <label className="mb-3 flex items-center gap-2 font-mono text-[11px] text-strata-dim">
           Underlying
           <select
+            data-testid="trades-underlying-filter"
             value={underlying}
             onChange={(e) => setUnderlying(e.target.value)}
             className="rounded border border-strata-border bg-strata-raise px-2 py-1 text-strata-hi"
@@ -140,7 +152,10 @@ function Trades({ ownerKey }: { ownerKey: string }) {
           </select>
         </label>
       )}
-      {shown.length > 0 && (
+      {tab === "journal" && query.data && trades.length > 0 && (
+        <JournalView journal={query.data.journal} trades={trades} underlying={underlying} />
+      )}
+      {tab === "transactions" && shown.length > 0 && (
         <div className="overflow-x-auto rounded-md border border-strata-border bg-strata-surface">
           <table className="w-full min-w-[720px] font-mono text-xs" data-testid="trades-table">
             <thead className="text-left text-[10px] uppercase tracking-kicker text-strata-muted">
@@ -157,7 +172,7 @@ function Trades({ ownerKey }: { ownerKey: string }) {
             <tbody>
               {shown.map((t) => (
                 <tr key={t.id} className="border-t border-strata-line text-strata-fg" title={t.description ?? undefined}>
-                  <td className="px-3 py-1.5 text-strata-dim">{when(t)}</td>
+                  <td className="px-3 py-1.5 text-strata-dim">{tradeTime(t)}</td>
                   <td className="px-3 py-1.5">{t.action ?? t.sub_type ?? t.type ?? "—"}</td>
                   <td className="px-3 py-1.5">{t.symbol ?? t.underlying ?? "—"}</td>
                   <td className="px-3 py-1.5 text-right">{quantity(t.quantity)}</td>

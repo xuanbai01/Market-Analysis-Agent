@@ -371,4 +371,54 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
       - The positions page's timer test restores the clock in `afterEach`.
       - The live route sits behind the owner key with no per-IP limit, as before.
   - **`/positions` stays current while open** (#128's last AI review): it reads again every 15 s while the tab shows, matching the server's copy, and quote ages tick every 5 s between reads. A tab left open no longer freezes at "10s ago".
+- **The trade journal (2026-11-16, tastytrade PR D, ADR 0009):** `/trades` reads the owner's trades as positions.
+  - **`trade_journal`:** pure, computed from the trade copy on each visit, never stored.
+    - **Matching:** FIFO lots per account and contract; "to Open" opens, "to Close" closes the oldest lots, a plain Buy or Sell closes first and opens the rest; each fill's net value (fees in) split by quantity.
+    - **Positions:** every lot one order opened, named from its legs (`trade_structures`: verticals, calendars and diagonals, straddles and strangles, butterflies, iron condors and butterflies, covered calls; else "custom, N legs").
+    - **Endings:** closed, expired, assigned, exercised, or mixed. An assignment closes the option at no cash (its premium stays with it) and delivers stock as a position of its own, linked to the option's.
+    - **Rolls:** an order that closes one position and opens another on the same underlying links the two.
+    - **Not guessed:** a close with nothing open, an action with no buy or sell (a split: that contract's later P&L isn't computed), an option symbol that doesn't read; each is listed with the reason. A reversal and the fill it cancels leave the matching.
+    - **Totals:** realized by month closed and by underlying, positions closed and how many at a profit, days held, fees.
+  - **The route:** `GET /v1/owner/trades` carries `journal`, built off the event loop; the trades now keep their order and reversal ids.
+  - **The page:** a Journal tab (the default) beside Transactions: a sentence on what closed, realized P&L by month (hand-rolled SVG bars from one zero line, gains and losses in the pos and neg tokens, hover for the figure), the positions newest first with how each stands or ended, filterable by open or closed and by underlying, each opening to its legs, origin, rolls and fills, and what isn't matched.
+  - **The fake backend** serves a made-up history (an expiry, a vertical, an assignment, a roll, an open put, a close with nothing to match).
+  - **From #131's AI review:**
+    - **A closed position without a computed P&L** (after a split) is counted apart (`unpriced`), not as closed at $0. It used to pull the share at a profit down.
+    - **The fees beside the realized P&L are the closed parts' own.** They used to include an open position's entry fees.
+    - **Stock delivered a session after its assignment** still links to the option: the latest assignment on that underlying on or before its date.
+    - **A close reaches the lot it closes wherever it's queued**, not only at the front.
+  - **From #131's second AI review:**
+    - **A close bigger than what's open** lists only the rest ("2 of 5 had nothing open to close"), not the whole fill.
+    - **The realized figure says what's in it.** It includes partly closed positions (`partly`), and the sentence now names them.
+    - **An expiry, assignment or exercise sent without a buy or sell** still closes what's open.
+    - **A partly closed position has no `closed_at`.**
+    - **Not changed:** two puts on one underlying assigned the same day deliver one stock position, linked to one of them.
+  - **From #131's third AI review:**
+    - **The totals hold only what the positions show.** Each position keeps its closed parts, and only positions with a computed P&L add to the months, underlyings, realized total and fees. A part sold before a split used to stay in the months while its position showed none.
+    - **A cash-settled exercise with no cash on its fill isn't guessed.** The settlement was booked apart, so its P&L isn't computed, with a note. One whose fill carries the cash counts.
+    - **A roll that closes two positions links both** to the one it opened.
+  - **From #131's fourth AI review:**
+    - **Shares delivered with no buy or sell open by their cash** (paying for them is buying). They used to be dropped, and the ticker's later P&L was flagged as not computed. Only a split or symbol change flags a contract now.
+    - **Positions are keyed by account and order**, so one order number in two accounts makes two positions.
+    - **Futures and anything else that isn't equity or an equity option** are listed as not modelled, not read as stock.
+    - **Not changed:** realized P&L sums tastytrade's net values, which include fees (210 − 1.10 = 208.90). The owner checks a few against tastytrade's own figures.
+  - **From #131's fifth AI review:**
+    - **A partly closed position without a computed P&L counts as unpriced**, so the sentence doesn't say nothing closed.
+    - **With an underlying picked**, the page gives that underlying's realized figure, and the sentence and chart say they cover every underlying.
+    - **Delivered stock is keyed by account too**, and links to an option in the same account.
+  - **From #131's sixth AI review:**
+    - **The high:** shares delivered with no buy or sell, beside shares already held, were read as a close of the held ones, which would have booked a phantom loss. Delivered shares now go by their cash. Closing what's open applies only to an option's expiry, assignment or exercise.
+    - **An option's expiry with nothing open** says "nothing open to close", not "not modelled".
+    - **Only a symbol shaped like a ticker counts as stock**, so an unreadable option symbol without an instrument type is listed, not held as shares.
+  - **From #131's seventh AI review:**
+    - **A close is booked to its trading day.** A fill at 8 pm New York on Oct 31 is November in UTC. Its month and the days held follow the transaction date.
+    - **A butterfly with uneven wings is named broken-wing.**
+    - **Not changed:**
+      - A delivery that buys shares while the account is short them covers the short, as the account itself nets it. "Never a close" above means shares held long.
+      - `value` is on every trade, signed like the net value.
+      - `parse_occ` raises only `ValueError`.
+  - **From #131's eighth AI review:**
+    - **The dates shown are the trading days** (`opened_on`, `closed_on`): the Opened column and "opened Oct 31" in a roll or assignment link, as days held already were.
+    - **The status filter reads "Open or partly closed"**, which is what it shows.
+    - **Not changed:** an expiry sent without an action, with a long and a short lot of one contract both open. That's a state tastytrade nets away.
 

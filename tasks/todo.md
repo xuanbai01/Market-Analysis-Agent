@@ -137,7 +137,7 @@ So nothing from tastytrade is stored, sent to a prompt or shown in the demo. The
     - **D:** the journal can show each trade's contract path from candles.
 - [ ] **PR B — live quotes on the options page** *(branch `feature/live-quotes`)*: `GET /v1/owner/options/{symbol}/live/{expiry}`, behind the owner key (tastytrade's data is the owner's alone), cached 10 s; strikes from tastytrade's nested chain, bids, asks, volume and open interest from its quotes; our IVs from live mids; a Live switch on the expiry, refreshed every 15 s; the builder prices at live bid/ask. 422 for an unlisted expiry, since the page reads a 404 as a refused key.
 - [ ] **PR C — market history, live:** `GET /v1/options/{symbol}/history` (market metrics; daily candles, with IV if they carry it); a "History · tastytrade" panel.
-- [ ] **PR D — the owner's trades:** `trade_journal` (orders to strategies, FIFO opens and closes, expirations and assignments, fees); `GET /v1/trades`; a lazy `/trades` page. Fetched on demand, account numbers masked, no advice.
+- [ ] **PR D — the trade journal** *(branch `feature/trade-journal`)*: `trade_journal` (FIFO lots per account and contract, positions by opening order, structures named from legs, expirations, assignments and exercises, rolls, realized P&L with fees, unmatched rows with the reason), served with `GET /v1/owner/trades`; a Journal tab on `/trades`.
 
 ## Handoff — pickup notes (2026-11-13)
 

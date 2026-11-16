@@ -28,7 +28,7 @@ function count(v: number): string {
 }
 
 /** "2 short Dec 18 $200 calls", "1 long Jan 15 $650 put", "200 shares", "50 shares short". */
-export function legLabel(leg: PositionLeg): string {
+export function legLabel(leg: Pick<PositionLeg, "kind" | "quantity" | "expiry" | "strike"> & { adjusted?: boolean }): string {
   const n = Math.abs(leg.quantity);
   if (leg.kind === "stock") return `${count(n)} share${n === 1 ? "" : "s"}${leg.quantity < 0 ? " short" : ""}`;
   const side = leg.quantity < 0 ? "short" : "long";

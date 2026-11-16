@@ -1,10 +1,12 @@
 """Dev only: the API with a made-up tastytrade account, for looking at the
-owner pages (``/positions``) without the owner's data (ADR 0009: a Claude
-session must not see it).
+owner pages (``/positions``, ``/trades``) without the owner's data (ADR 0009:
+a Claude session must not see it).
 
 Runs the real app on 127.0.0.1:8000, with tastytrade's answers taken from
 fixtures below (a covered call on NVDA and a long SPY put, nothing anyone
-holds). Whatever ``.env`` says, it runs with a throwaway shared secret and
+holds), and ``/trades`` from a made-up history (an expiry, a vertical, an
+assignment, a roll, an open put, a close with nothing to match) in place of
+the encrypted copy. Whatever ``.env`` says, it runs with a throwaway shared secret and
 owner key, no LLM, news, FRED or tastytrade keys, and a database address
 nothing listens on, so it can't spend, write anywhere or reach the real
 account; it refuses to start on Fly. Option chains and prices come from
@@ -51,7 +53,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import uvicorn  # noqa: E402
 
 from app.api.v1.routers import market as market_router  # noqa: E402
+from app.api.v1.routers import owner as owner_router  # noqa: E402
 from app.main import app  # noqa: E402
+from app.schemas.owner import OwnerTrade  # noqa: E402
 from app.services import tastytrade_client as tt  # noqa: E402
 
 ACCOUNT = "FAKE0001"
@@ -134,7 +138,48 @@ async def prices_from_yahoo(_session: Any, symbol: str, range_: str) -> dict[str
     return {"ticker": symbol, "range": range_, "prices": points, "latest": {**last, "delta_abs": 0.0, "delta_pct": 0.0}}
 
 
+def _trade(
+    tid: int, day: str, action: str, symbol: str, qty: float, net: float, *, order: int | None = None,
+    sub: str | None = None, underlying: str | None = None, fees: float = 0.0,
+) -> OwnerTrade:
+    stock = " " not in symbol
+    return OwnerTrade(
+        id=tid, account=1, executed_at=f"{day}T15:{tid % 60:02d}:00+00:00", date=day,
+        type="Receive Deliver" if sub else "Trade", sub_type=sub or action, action=action, symbol=symbol,
+        underlying=underlying or symbol.split()[0], instrument_type="Equity" if stock else "Equity Option",
+        quantity=qty, net_value=net, fees=fees, order_id=order,
+    )
+
+
+TRADES = [
+    _trade(1, "2026-08-01", "Buy to Close", "AAPL  260815C00230000", 1, -120.0),  # opened before the copy
+    _trade(2, "2026-08-04", "Sell to Open", "SPY   260821P00600000", 1, 208.9, order=101, fees=1.1),
+    _trade(3, "2026-08-21", "Buy to Close", "SPY   260821P00600000", 1, 0.0, sub="Expiration"),
+    _trade(4, "2026-09-02", "Sell to Open", "NVDA  261016C00190000", 1, 318.9, order=102, fees=1.1),
+    _trade(5, "2026-09-02", "Buy to Open", "NVDA  261016C00195000", 1, -161.1, order=102, fees=1.1),
+    _trade(6, "2026-10-01", "Buy to Close", "NVDA  261016C00190000", 1, -80.1, order=103, fees=0.1),
+    _trade(7, "2026-10-01", "Sell to Close", "NVDA  261016C00195000", 1, 19.9, order=103, fees=0.1),
+    _trade(8, "2026-09-15", "Sell to Open", "NVDA  261016P00150000", 1, 248.9, order=104, fees=1.1),
+    _trade(9, "2026-10-16", "Buy to Close", "NVDA  261016P00150000", 1, 0.0, sub="Assignment"),
+    _trade(10, "2026-10-16", "Buy to Open", "NVDA", 100, -15000.0, sub="Assignment", underlying="NVDA"),
+    _trade(11, "2026-10-20", "Sell to Open", "NVDA  261120C00175000", 1, 478.9, order=105, fees=1.1),
+    _trade(12, "2026-11-13", "Buy to Close", "NVDA  261120C00175000", 1, -121.1, order=106, fees=1.1),
+    _trade(13, "2026-11-13", "Sell to Open", "NVDA  261218C00180000", 1, 308.9, order=106, fees=1.1),
+    _trade(14, "2026-11-03", "Buy to Open", "SPY   261218P00640000", 2, -1222.2, order=107, fees=2.2),
+]
+
+
+async def fake_sync(_session: Any) -> None:
+    return None
+
+
+async def fake_list_trades(_session: Any) -> list[OwnerTrade]:
+    return sorted(TRADES, key=lambda t: t.executed_at or "", reverse=True)
+
+
 tt.get = fake_get  # type: ignore[assignment]
+owner_router.sync = fake_sync  # type: ignore[assignment]
+owner_router.list_trades = fake_list_trades  # type: ignore[assignment]
 tt.is_configured = lambda: True  # type: ignore[assignment]
 market_router.get_prices_with_cache = prices_from_yahoo  # type: ignore[assignment]
 

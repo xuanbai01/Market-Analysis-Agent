@@ -336,6 +336,8 @@ def _trade(tid: int, p: dict[str, Any]) -> OwnerTrade:
         fees=round(sum(_fee(p.get(name), p.get(f"{name}-effect")) for name in FEES), 6),
         net_value=_signed(p.get("net-value"), p.get("net-value-effect")),
         description=_text(p.get("description")),
+        order_id=_id({"id": p.get("order-id")}),
+        reverses_id=_id({"id": p.get("reverses-id")}),
     )
 
 
@@ -347,10 +349,10 @@ async def list_trades(session: AsyncSession) -> list[OwnerTrade]:
     rows = _detached(await store.stored(session))
     await session.rollback()  # no connection held while the copy is decrypted
     trades = [_trade(tid, payload) for tid, payload in await asyncio.to_thread(_opened, rows)]
-    return sorted(trades, key=_when, reverse=True)
+    return sorted(trades, key=chronological, reverse=True)
 
 
-def _when(trade: OwnerTrade) -> tuple[datetime, int]:
+def chronological(trade: OwnerTrade) -> tuple[datetime, int]:
     """When it happened, for the order: its time, else its date's start (UTC)."""
     for text in (trade.executed_at, trade.date):
         try:

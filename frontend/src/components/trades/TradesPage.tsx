@@ -50,14 +50,17 @@ function Trades({ ownerKey }: { ownerKey: string }) {
     gcTime: 0, // gone from memory as soon as nothing shows it
     retry: false,
   });
-  const unauthorized = useSignOutOn401(query.error);
-  const refused = isOwnerKeyRefused(query.error);
-  useEffect(() => {
-    if (refused) clearOwnerKey();
-  }, [refused]);
   const [underlying, setUnderlying] = useState(ALL);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  // The download's failure counts like the list's: a 401 signs out, a refused key is forgotten.
+  const [downloadFailure, setDownloadFailure] = useState<unknown>(null);
+  const failure = query.error ?? downloadFailure;
+  const unauthorized = useSignOutOn401(failure);
+  const refused = isOwnerKeyRefused(failure);
+  useEffect(() => {
+    if (refused) clearOwnerKey();
+  }, [refused]);
   const trades = useMemo(() => query.data?.trades ?? [], [query.data]);
   const underlyings = useMemo(() => [...new Set(trades.map((t) => t.underlying).filter((u): u is string => !!u))].sort(), [trades]);
   const shown = underlying === ALL ? trades : trades.filter((t) => t.underlying === underlying);
@@ -67,9 +70,11 @@ function Trades({ ownerKey }: { ownerKey: string }) {
   async function download() {
     setDownloading(true);
     setDownloadError(null);
+    setDownloadFailure(null);
     try {
       saveBlob(await fetchOwnerTradesCsv(ownerKey), "trades.csv");
     } catch (err) {
+      setDownloadFailure(err);
       setDownloadError(err instanceof ApiError ? err.title : "Couldn't download the CSV.");
     } finally {
       setDownloading(false);

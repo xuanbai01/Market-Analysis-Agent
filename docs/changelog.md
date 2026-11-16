@@ -283,4 +283,9 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **The listing lets its connection go before decrypting.**
     - **An estimated-fee flag sent as "true"** is read.
     - **Accounts past the cap of 10 are logged**, by count.
+  - **From #129's eighth AI review:**
+    - **A sync cut short** (the visit closed mid-write) is reported as cut short for its minute, not as done.
+    - **The CSV download's failures count like the list's:** a 401 signs out, and a refused key is forgotten.
+    - **CLAUDE.md's "never store it"** points to the trade copy, the one exception.
+    - **Not changed:** the vault key is compared with the shared secret correctly, since that secret is a plain string.
 

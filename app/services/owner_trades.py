@@ -215,6 +215,11 @@ async def sync(session: AsyncSession) -> SyncResult:
             raise SyncFailed(_last_failure) from exc
         except vault.VaultUnavailable:
             raise  # a row that doesn't open stays loud: a 503
+        except asyncio.CancelledError:
+            # The visit went away mid-sync, perhaps after some rows were
+            # written: the next visit inside the minute is told so.
+            _last_failure = "the last update was cut short"
+            raise
         except Exception as exc:
             # The database, say, dropping the connection mid-write: what's
             # stored is still shown. The log names the error's type only: its

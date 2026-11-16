@@ -330,5 +330,10 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
       - The client's allowlist takes an encoded slash (`BRK%2FB`), and its tests cover it.
       - The strategy builder prices from the live chain.
       - A 404 clears the owner key only while the frontend is ahead of the backend on a deploy, since both ship from the same merge.
+  - **From #130's fourth AI review:**
+    - **A chain is kept as plain rows** of strike, call and put by expiry, not as tastytrade's dicts. SPY's or SPX's lists every expiry's strikes, and ten are kept on a 512 MB machine.
+    - **Not changed:**
+      - The nested-chain path is on the client's allowlist.
+      - During a session, `quote_time` is the current time, so live quotes are timed from now.
   - **`/positions` stays current while open** (#128's last AI review): it reads again every 15 s while the tab shows, matching the server's copy, and quote ages tick every 5 s between reads. A tab left open no longer freezes at "10s ago".
 

@@ -65,7 +65,11 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-_chains: OrderedDict[str, tuple[float, list[dict[str, Any]]]] = OrderedDict()
+# A chain by expiry (ISO date): (strike, call symbol, put symbol) rows, not
+# tastytrade's dicts. SPY's or SPX's lists every expiry's strikes, and ten
+# are kept on a 512 MB machine.
+Chain = dict[str, list[tuple[float, str, str]]]
+_chains: OrderedDict[str, tuple[float, Chain]] = OrderedDict()
 _live: dict[tuple[str, date], tuple[float, LiveChain]] = {}
 # One build at a time per symbol and expiry; others don't wait on it. A
 # lock stays while anyone holds or waits on it (counted: asyncio marks a
@@ -82,12 +86,12 @@ def reset() -> None:
     _users.clear()
 
 
-def _remember_chain(symbol: str, expirations: list[dict[str, Any]]) -> None:
+def _remember_chain(symbol: str, chain: Chain) -> None:
     """Keep a chain CHAIN_SECONDS, and only the MAX_CHAINS newest."""
     now = _clock()
     for old in [s for s, (at, _) in _chains.items() if now - at >= CHAIN_SECONDS]:
         del _chains[old]
-    _chains[symbol] = (now, expirations)
+    _chains[symbol] = (now, chain)
     _chains.move_to_end(symbol)
     while len(_chains) > MAX_CHAINS:
         _chains.popitem(last=False)
@@ -103,51 +107,58 @@ def _tastytrade_symbol(symbol: str) -> str:
     return symbol.upper().replace("-", "/").replace(".", "/")
 
 
-async def _expirations(symbol: str) -> list[dict[str, Any]]:
-    """The standard chain's expirations (a non-standard deliverable is left
-    out), kept CHAIN_SECONDS."""
+def _rows(expiration: dict[str, Any]) -> list[tuple[float, str, str]]:
+    rows = []
+    strikes = field_of(expiration, "strikes")
+    for strike in strikes if isinstance(strikes, list) else []:
+        if not isinstance(strike, dict):
+            continue
+        k = finite_number(field_of(strike, "strike-price"))
+        call, put = field_of(strike, "call"), field_of(strike, "put")
+        if k is not None and isinstance(call, str) and isinstance(put, str):
+            rows.append((k, call, put))
+    return rows
+
+
+async def _expirations(symbol: str) -> Chain:
+    """The standard chain (a non-standard deliverable is left out) as plain
+    rows by expiry, kept CHAIN_SECONDS."""
     cached = _chains.get(symbol)
     if cached is not None and _clock() - cached[0] < CHAIN_SECONDS:
         return cached[1]
     payload = await tt.get(f"/option-chains/{tt.symbol_path(symbol)}/nested", op="option_chain")
-    expirations: list[dict[str, Any]] = []
+    chain: Chain = {}
     for item in items_of(payload, strict=True):
         shares = finite_number(field_of(item, "shares-per-contract"))
         if shares not in (None, STANDARD_DELIVERABLE):
             continue
         found = field_of(item, "expirations")
-        expirations += [e for e in found if isinstance(e, dict)] if isinstance(found, list) else []
-    _remember_chain(symbol, expirations)
-    return expirations
+        for expiration in found if isinstance(found, list) else []:
+            day = field_of(expiration, "expiration-date") if isinstance(expiration, dict) else None
+            if isinstance(day, str):
+                chain.setdefault(day, []).extend(_rows(expiration))
+    _remember_chain(symbol, chain)
+    return chain
 
 
-def _strikes(expirations: list[dict[str, Any]], expiry: date, root: str) -> list[tuple[float, str, str]]:
+def _strikes(chain: Chain, expiry: date, root: str) -> list[tuple[float, str, str]]:
     """(strike, call symbol, put symbol) for ``expiry``, one per strike; a
     symbol that isn't an OCC one for that expiry is dropped, so nothing else
     reaches a query. Where two roots list a strike (an adjusted root that
     still declares 100 shares, SPX beside SPXW), the standard one is kept:
     ``root`` itself, else one without a digit; so no strike counts twice."""
     by_strike: dict[float, tuple[int, str, str]] = {}
-    for expiration in expirations:
-        if field_of(expiration, "expiration-date") != expiry.isoformat():
+    for k, call, put in chain.get(expiry.isoformat(), []):
+        try:
+            parsed = [parse_occ(s) for s in (call, put)]
+        except ValueError:
             continue
-        for strike in field_of(expiration, "strikes") or []:
-            if not isinstance(strike, dict):
-                continue
-            k = finite_number(field_of(strike, "strike-price"))
-            call, put = field_of(strike, "call"), field_of(strike, "put")
-            if k is None or not isinstance(call, str) or not isinstance(put, str):
-                continue
-            try:
-                parsed = [parse_occ(s) for s in (call, put)]
-            except ValueError:
-                continue
-            if any(p.expiry != expiry for p in parsed):
-                continue
-            found_root = parsed[0].root
-            rank = 0 if found_root == root else 1 if not any(c.isdigit() for c in found_root) else 2
-            if k not in by_strike or rank < by_strike[k][0]:
-                by_strike[k] = (rank, call, put)
+        if any(p.expiry != expiry for p in parsed):
+            continue
+        found_root = parsed[0].root
+        rank = 0 if found_root == root else 1 if not any(c.isdigit() for c in found_root) else 2
+        if k not in by_strike or rank < by_strike[k][0]:
+            by_strike[k] = (rank, call, put)
     return sorted((k, call, put) for k, (_rank, call, put) in by_strike.items())
 
 

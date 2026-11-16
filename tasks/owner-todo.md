@@ -27,4 +27,6 @@ The owner pages answer 404 until this is set.
 
 - [ ] **Your broker cross-checks:** compare the options page's figures with tastytrade for one or two tickers you trade.
 - [ ] **Try the Live switch** on an options page's expiry and compare its bids and asks with tastytrade's app.
+- [ ] **Look at the IV history panel** on an options page (with the owner key): IV and RV20 over a year, three years or all, from your tastytrade account.
+- [ ] **Read every expiry** on an options page (the button in "Every expiry · tastytrade live"), and compare a few open interest figures with tastytrade's app.
 - [ ] **Leave the probe to Claude.** During the session it reads real-time quote ages, and whether tastytrade's IVs come as fractions. You don't need to do anything for it.

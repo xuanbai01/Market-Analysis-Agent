@@ -20,6 +20,7 @@ import { EarningsMoves } from "./EarningsMoves";
 import { ExpectedMoveCone } from "./ExpectedMoveCone";
 import { ExpirySection } from "./ExpirySection";
 import { IvHistoryPanel } from "./IvHistoryPanel";
+import { WholeChainPanel } from "./WholeChainPanel";
 import { OpenInterestHistory } from "./OpenInterestHistory";
 import { OptionsReadCard } from "./OptionsReadCard";
 import { Panel } from "./Panel";
@@ -209,6 +210,7 @@ export default function OptionsPage() {
       {report && report.status === "no_usable_quotes" && (
         <div className="mt-6">
           <IvHistoryPanel symbol={symbol} />
+          <WholeChainPanel symbol={symbol} />
         </div>
       )}
 
@@ -256,6 +258,7 @@ export default function OptionsPage() {
               <AcrossExpiries expiries={report.expiries} price={report.spot} />
             </Panel>
           )}
+          <WholeChainPanel symbol={symbol} />
           {report.open_interest_history.length > 0 && (
             <Panel
               title="Open interest, all expiries"

@@ -15,6 +15,8 @@ import {
   OwnerStatusSchema,
   type OwnerTrades,
   OwnerTradesSchema,
+  type WholeChain,
+  WholeChainSchema,
 } from "./owner-schemas";
 
 export const OWNER_HEADER = "X-Owner-Key";
@@ -68,6 +70,12 @@ export function fetchLiveChain(key: string, symbol: string, expiry: string): Pro
 export function fetchIvHistory(key: string, symbol: string): Promise<IvHistory> {
   const ticker = encodeURIComponent(symbol.toUpperCase());
   return ownerGet(`/v1/owner/options/${ticker}/history`, key, (resp) => parseJsonAndValidate(resp, IvHistorySchema));
+}
+
+/** Every expiry out to four months at tastytrade's live quotes, and the positioning across them. */
+export function fetchWholeChain(key: string, symbol: string): Promise<WholeChain> {
+  const ticker = encodeURIComponent(symbol.toUpperCase());
+  return ownerGet(`/v1/owner/options/${ticker}/chain`, key, (resp) => parseJsonAndValidate(resp, WholeChainSchema));
 }
 
 /** The server refused the owner key (wrong, or none configured there). */

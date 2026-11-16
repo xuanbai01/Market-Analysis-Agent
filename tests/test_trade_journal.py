@@ -394,3 +394,34 @@ def test_shares_delivered_in_two_accounts_the_same_day_stay_apart() -> None:
     assert sorted(p.account for p in stocks) == [1, 2]
     assert all(p.legs[0].quantity == 100 for p in stocks)
 
+
+def test_shares_delivered_without_an_action_beside_shares_held_are_added() -> None:
+    """Already long 100: a put's delivery sent with no action adds 100 more
+    (by its cash), never closes the 100 held (#131's sixth AI review)."""
+    p150 = occ("2026-11-20", "P", 150)
+    j = tj.build_journal([
+        t(1, "2026-06-01", "Buy to Open", "NVDA", 100, -14000.0, order=1),
+        t(2, "2026-11-01", "Sell to Open", p150, 1, 300.0, order=30),
+        t(3, "2026-11-20", None, p150, 1, 0.0, sub="Assignment", kind="Receive Deliver"),
+        t(4, "2026-11-20", None, "NVDA", 100, -15000.0, sub="Assignment", kind="Receive Deliver"),
+    ])
+    held = by_id(j)["order-1"]
+    assert (held.status, held.realized) == ("open", None)
+    (delivered,) = (p for p in j.positions if p.origin == "assignment")
+    assert delivered.legs[0].quantity == 100 and delivered.status == "open"
+
+
+def test_an_expiry_with_nothing_open_says_so() -> None:
+    j = tj.build_journal([
+        t(1, "2026-10-01", "Sell to Open", C175, 1, 300.0, order=1),
+        t(2, "2026-12-18", None, C175, 1, 0.0, sub="Expiration", kind="Receive Deliver"),
+        t(3, "2026-12-18", None, C175, 1, 0.0, sub="Expiration", kind="Receive Deliver"),
+    ])
+    (row,) = j.unmatched
+    assert row.id == 3 and row.reason.startswith("nothing open to close")
+
+
+def test_an_unreadable_symbol_without_an_instrument_type_isnt_stock() -> None:
+    j = tj.build_journal([t(1, "2026-10-01", "Buy to Open", "NVDA 261218C175", 1, -300.0, order=1, instrument="")])
+    assert j.positions == [] and "not a contract" in j.unmatched[0].reason
+

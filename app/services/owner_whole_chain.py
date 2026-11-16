@@ -216,6 +216,8 @@ async def _build(key: str) -> WholeChain:
     if not quotes:
         raise WholeChainUnavailable("tastytrade's feed sent no quotes")  # not an empty chain kept a minute
     summaries = await dxlink.fetch_once("Summary", names)
+    if not summaries:
+        raise WholeChainUnavailable("tastytrade's feed sent no open interest")  # not a chain of zeros
     rate, _assumed = await options_chain.on_options_thread(options_chain.risk_free_rate)
     cached = options_report.cached_underlying(key)  # the dividend yield only
     rows, parts, left_out, quoted = await options_chain.on_options_thread(

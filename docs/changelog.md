@@ -524,4 +524,8 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **Overnight:** it shows when Yahoo's chain is one-sided, as the IV history does.
   - **The fake backend** has a five-expiry NVDA chain and a made-up DXLink.
   - **Sizes:** main chunk 90.74 KB gz, options 15.1 KB.
+- **Vercel builds `main` only (2026-11-16):** Vercel built a preview of every branch push, and the night's work hit the Hobby plan's daily deployment cap. That held the whole-chain panel (#141) off production until it resets.
+  - **The change:** `frontend/vercel.json` turns automatic deployments off for every branch (`"**": false`) and on for `main`. A branch matching both deploys.
+  - **Coverage:** branch pushes are still built and tested by CI's frontend job.
+  - **The owner's choice.**
 

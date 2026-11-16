@@ -135,7 +135,7 @@ In Windows PowerShell there is no `grep`, and a PowerShell pipe puts a byte-orde
 cmd /c "findstr /R /B FRED_API_KEY=. .env | fly secrets import"
 ```
 
-Vercel (once): import the repo, Root Directory `frontend`, framework Vite, environment variable `VITE_BACKEND_URL=https://<your-app>.fly.dev`. `frontend/vercel.json` rewrites every path to `index.html` so deep links like `/symbol/KO` load.
+Vercel (once): import the repo, Root Directory `frontend`, framework Vite, environment variable `VITE_BACKEND_URL=https://<your-app>.fly.dev`. `frontend/vercel.json` rewrites every path to `index.html` so deep links like `/symbol/KO` load. It also builds only `main` (`git.deploymentEnabled`: every branch off, `main` on; a branch matching both deploys). Building every branch push hit the Hobby plan's daily deployment cap on 2026-11-16 and held up production; branch pushes are checked by CI's frontend job (lint, typecheck, tests, build) instead.
 
 Verify from outside:
 

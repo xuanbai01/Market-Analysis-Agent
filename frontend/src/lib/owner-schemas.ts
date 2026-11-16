@@ -185,3 +185,41 @@ export const LiveChainSchema = z.object({
 });
 export type LiveChain = z.infer<typeof LiveChainSchema>;
 
+
+// The owner's IV history from tastytrade (/v1/owner/options/{symbol}/history).
+// Every figure is a fraction (0.41 = 41%), range-checked on the server.
+export const IvPointSchema = z.object({
+  date: z.string(),
+  close: MaybeNum,
+  iv: MaybeNum,
+  rv20: MaybeNum,
+});
+export type IvPoint = z.infer<typeof IvPointSchema>;
+
+export const IvHistorySchema = z.object({
+  symbol: z.string(),
+  as_of: z.string(),
+  metrics: z.object({
+    iv_index: MaybeNum,
+    iv30: MaybeNum,
+    iv_rank: MaybeNum,
+    iv_percentile: MaybeNum,
+    hv30: MaybeNum,
+    hv60: MaybeNum,
+    hv90: MaybeNum,
+    updated_at: z.string().nullable().default(null),
+  }),
+  points: z.array(IvPointSchema).default([]),
+  year: z.object({
+    sessions: z.number().default(0),
+    iv_low: MaybeNum,
+    iv_high: MaybeNum,
+    iv_median: MaybeNum,
+    iv_rank: MaybeNum,
+    iv_percentile: MaybeNum,
+  }),
+  iv_since: z.string().nullable().default(null),
+  complete: z.boolean().default(true),
+  source: z.literal("tastytrade"),
+});
+export type IvHistory = z.infer<typeof IvHistorySchema>;

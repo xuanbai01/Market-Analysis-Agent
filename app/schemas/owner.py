@@ -7,7 +7,7 @@ numbered 1, 2, ... in the order tastytrade lists them.
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class OwnerStatus(BaseModel):
@@ -106,6 +106,84 @@ class OwnerTrade(BaseModel):
     fees: float = 0.0
     net_value: float | None = None
     description: str | None = None
+    # tastytrade's order the fill belongs to (the legs of one strategy share
+    # it), and the transaction this one cancels, if it's a reversal.
+    order_id: int | None = None
+    reverses_id: int | None = None
+
+
+class JournalLeg(BaseModel):
+    """One contract a position opened: ``quantity`` signed (short negative),
+    ``closed`` how much of it has been closed since."""
+
+    symbol: str
+    kind: Literal["call", "put", "stock"]
+    expiry: date | None = None
+    strike: float | None = None
+    quantity: float
+    closed: float = 0.0
+
+
+class JournalPosition(BaseModel):
+    """What one order opened (or one assignment delivered), and how it ended.
+    Cash is signed like the trades: money in positive."""
+
+    id: str
+    account: int
+    underlying: str
+    structure: str
+    legs: list[JournalLeg]
+    opened_at: str | None = None
+    closed_at: str | None = None
+    days_held: int | None = None
+    status: Literal["open", "closed", "partly_closed"]
+    ended_by: Literal["closed", "expired", "assigned", "exercised", "mixed"] | None = None
+    # Stock delivered by an assignment or exercise, and the option's position.
+    origin: Literal["assignment", "exercise"] | None = None
+    origin_position: str | None = None
+    open_cash: float | None = None
+    close_cash: float | None = None
+    fees: float = 0.0
+    # On the closed part, fees in; None while nothing is closed, or when it
+    # can't be told (after a split, or a fill without its net value).
+    realized: float | None = None
+    rolled_from: str | None = None
+    rolled_to: str | None = None
+    note: str | None = None
+    transactions: list[int] = Field(default_factory=list)
+
+
+class MonthTotal(BaseModel):
+    month: str  # YYYY-MM, of the close
+    realized: float
+
+
+class UnderlyingTotal(BaseModel):
+    underlying: str
+    realized: float
+
+
+class UnmatchedRow(BaseModel):
+    id: int
+    date: str | None = None
+    symbol: str | None = None
+    reason: str
+
+
+class JournalTotals(BaseModel):
+    realized: float = 0.0
+    closed: int = 0
+    profitable: int = 0
+    average_days: float | None = None
+    fees: float = 0.0
+
+
+class TradeJournal(BaseModel):
+    positions: list[JournalPosition] = Field(default_factory=list)
+    months: list[MonthTotal] = Field(default_factory=list)
+    underlyings: list[UnderlyingTotal] = Field(default_factory=list)
+    totals: JournalTotals = Field(default_factory=JournalTotals)
+    unmatched: list[UnmatchedRow] = Field(default_factory=list)
 
 
 class OwnerTrades(BaseModel):
@@ -113,4 +191,7 @@ class OwnerTrades(BaseModel):
     # False when this visit couldn't reach tastytrade: the copy as it stood.
     synced: bool
     reason: str | None = None
+    # The trades read as positions (``trade_journal``): computed on each
+    # visit, never stored.
+    journal: TradeJournal = Field(default_factory=TradeJournal)
 

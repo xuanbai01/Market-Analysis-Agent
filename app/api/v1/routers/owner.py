@@ -11,6 +11,7 @@ from app.schemas.owner import OwnerPositions, OwnerStatus, OwnerTrades
 from app.services import owner_vault, tastytrade_client
 from app.services.owner_positions import PositionsUnavailable, get_positions
 from app.services.owner_trades import SyncFailed, csv_text, list_trades, sync
+from app.services.trade_journal import journal_of
 
 OWNER_PREFIX = "/owner"
 router = APIRouter(prefix=OWNER_PREFIX, dependencies=[Depends(require_owner)], include_in_schema=False)
@@ -36,8 +37,9 @@ async def owner_positions() -> OwnerPositions:
 @router.get("/trades", response_model=OwnerTrades)
 async def owner_trades(session: AsyncSession = Depends(get_session)) -> OwnerTrades:
     """The owner's trades from the encrypted copy, synced from tastytrade
-    first (at most once a minute). When tastytrade can't be reached, the copy
-    as it stands, saying why; 503 without the vault key."""
+    first (at most once a minute), and read as a journal (``trade_journal``,
+    never stored). When tastytrade can't be reached, the copy as it stands,
+    saying why; 503 without the vault key."""
     synced, reason = True, None
     try:
         await sync(session)
@@ -49,7 +51,7 @@ async def owner_trades(session: AsyncSession = Depends(get_session)) -> OwnerTra
         trades = await list_trades(session)
     except owner_vault.VaultUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return OwnerTrades(trades=trades, synced=synced, reason=reason)
+    return OwnerTrades(trades=trades, synced=synced, reason=reason, journal=await journal_of(trades))
 
 
 @router.get("/trades.csv")

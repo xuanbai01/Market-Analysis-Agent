@@ -211,3 +211,39 @@ async def test_a_build_that_runs_too_long_says_so(account: _Tastytrade, monkeypa
     with pytest.raises(lc.LiveChainUnavailable, match="too long"):
         await lc.live_chain("SPY", EXPIRY)
 
+
+async def test_overlapping_reads_of_one_expiry_build_it_once(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A read waiting on a build that fails, and another arriving as it's
+    woken, build one after the other, not side by side (#130's AI review:
+    the lock was dropped while one still waited on it)."""
+    import asyncio
+
+    slow = account.get
+    failures = [tt.TastytradeUnavailable("tastytrade answered 503")]
+
+    async def get(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        await asyncio.sleep(0.01)
+        if failures:
+            raise failures.pop()
+        return await slow(path, params, op=op)
+
+    monkeypatch.setattr(lc.tt, "get", get)
+    first = asyncio.ensure_future(lc.live_chain("SPY", EXPIRY))
+    await asyncio.sleep(0)
+    second = asyncio.ensure_future(lc.live_chain("SPY", EXPIRY))
+    await asyncio.sleep(0)
+    with pytest.raises(lc.LiveChainUnavailable):
+        await first  # fails, waking the second; a third arrives in that moment
+    third = asyncio.ensure_future(lc.live_chain("SPY", EXPIRY))
+    await asyncio.gather(second, third)
+    assert sum(1 for path, _ in account.calls if path == "/option-chains/SPY/nested") == 1  # the second built; the third read its copy
+    assert lc._locks == {}  # nothing left behind
+
+
+async def test_no_live_price_for_the_underlying_is_said_so(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The delayed price isn't passed off as live, even with one cached
+    (#130's AI review)."""
+    monkeypatch.setattr(lc.options_report, "cached_underlying", lambda _s: (SPOT * 0.98, 0.012))
+    del account.quotes["SPY"]
+    with pytest.raises(lc.LiveChainUnavailable, match="no price for the underlying"):
+        await lc.live_chain("SPY", EXPIRY)

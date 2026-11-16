@@ -332,3 +332,12 @@ async def test_the_page_does_not_read_the_earnings_calendar(world: Any, monkeypa
     monkeypatch.setattr(orp.options_chain, "fetch_chain", spy)
     await _report()
     assert seen == [False]
+
+
+async def test_the_live_chain_reads_the_cached_price_and_yield(world: Any) -> None:
+    """The live chain takes the dividend yield from the warm cache: the path
+    production takes, with a real build in it (#130's AI review)."""
+    assert orp.cached_underlying("TEST") is None
+    await _report()
+    assert orp.cached_underlying("TEST") == (SPOT, DIVIDEND)
+

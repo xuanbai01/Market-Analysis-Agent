@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -207,6 +207,30 @@ describe("ExpirySection live quotes", () => {
     fireEvent.click(screen.getByTestId("options-live-toggle"));
     await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live quotes unavailable: tastytrade answered 503/));
     expect(screen.getAllByText((text) => text.includes(delayedForward)).length).toBeGreaterThan(0);
+  });
+
+  it("falls back to the delayed chain when a later read fails", async () => {
+    // The last live read isn't left on screen as if live (#130's AI review).
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValueOnce(LIVE).mockRejectedValue(new ApiError({ status: 503, title: "tastytrade answered 503" }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live · tastytrade/));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(16_000);
+    });
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live quotes unavailable: tastytrade answered 503/));
+    expect(screen.getAllByText((text) => text.includes(delayedForward)).length).toBeGreaterThan(0);
+    vi.useRealTimers();
+  });
+
+  it("says so when the quotes carry no time", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue({ ...LIVE, updated_at: null });
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent("Live · tastytrade · quote time unknown · shown to you only"));
   });
 
   it("keeps the key when tastytrade doesn't list the expiry", async () => {

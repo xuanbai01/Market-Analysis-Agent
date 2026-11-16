@@ -225,6 +225,32 @@ describe("ExpirySection live quotes", () => {
     vi.useRealTimers();
   });
 
+  it("keeps counting the quotes' age between reads", async () => {
+    // Not frozen at "3s old" until the next read lands (#130's AI review).
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-16T15:00:03Z"));
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue({ ...LIVE, updated_at: "2026-11-16T15:00:00Z" });
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent("quotes 3s old"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_000);
+    });
+    expect(screen.getByTestId("options-live-status")).toHaveTextContent(/quotes [89]s old/);
+    expect(fetchLiveChain).toHaveBeenCalledTimes(1); // the same read, older
+    vi.useRealTimers();
+  });
+
+  it("signs out on a 401 from the live read", async () => {
+    localStorage.setItem("market-agent.auth-token", "stale");
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 401, title: "Sign in again." }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(localStorage.getItem("market-agent.auth-token")).toBeNull());
+  });
+
   it("says so when the quotes carry no time", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchLiveChain).mockResolvedValue({ ...LIVE, updated_at: null });

@@ -192,10 +192,10 @@ async def test_the_chains_kept_are_few_and_fresh(account: _Tastytrade, monkeypat
     """A chain is big; only the last few, and only for CHAIN_SECONDS."""
     monkeypatch.setattr(lc, "MAX_CHAINS", 3)
     for symbol in ("A", "B", "C", "D"):
-        lc._remember_chain(symbol, [])
+        lc._remember_chain(symbol, {})
     assert list(lc._chains) == ["B", "C", "D"]
     account.clock[0] += lc.CHAIN_SECONDS + 1  # type: ignore[attr-defined]
-    lc._remember_chain("E", [])
+    lc._remember_chain("E", {})
     assert list(lc._chains) == ["E"]
 
 
@@ -273,4 +273,15 @@ async def test_one_strike_is_quoted_once_whatever_roots_list_it(account: _Tastyt
     assert len(strikes) == len(set(strikes))
     asked = [s for path, p in account.calls if path == "/market-data/by-type" for s in str((p or {}).get("equity-option", "")).split(",") if s]
     assert asked and all(s.startswith("SPY   ") for s in asked)  # the standard root's contracts
+
+
+async def test_a_chain_is_kept_as_plain_rows(account: _Tastytrade) -> None:
+    """A big chain (SPY, SPX) is every expiry's strikes: kept as (strike,
+    call, put) rows by expiry, not tastytrade's dicts, so ten of them stay
+    small on a 512 MB machine (#130's AI review)."""
+    await lc.live_chain("SPY", EXPIRY)
+    _at, kept = lc._chains["SPY"]
+    assert set(kept) == {EXPIRY.isoformat()}
+    rows = kept[EXPIRY.isoformat()]
+    assert len(rows) == len(STRIKES) and all(isinstance(r, tuple) and len(r) == 3 for r in rows)
 

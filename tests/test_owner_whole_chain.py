@@ -336,3 +336,11 @@ async def test_a_deadline_hit_is_logged_without_the_symbol(
         await wc.whole_chain("XYZ")
     messages = [r.getMessage() for r in caplog.records if r.name.startswith("app")]
     assert any("gave up" in m for m in messages) and not any("XYZ" in m for m in messages)
+
+
+async def test_a_feed_that_sends_no_open_interest_is_unavailable_not_zeros(account: _Account) -> None:
+    # #140's fix round: every open interest at 0 would draw a chain with no positioning.
+    account.summaries = {}
+    with pytest.raises(wc.WholeChainUnavailable, match="no open interest"):
+        await wc.whole_chain("XYZ")
+    assert not wc._kept

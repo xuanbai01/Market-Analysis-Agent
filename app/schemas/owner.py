@@ -137,6 +137,10 @@ class JournalPosition(BaseModel):
     legs: list[JournalLeg]
     opened_at: str | None = None
     closed_at: str | None = None
+    # The trading days (transaction dates), shown and counted: a fill at 8 pm
+    # New York is the next day in UTC.
+    opened_on: date | None = None
+    closed_on: date | None = None
     days_held: int | None = None
     status: Literal["open", "closed", "partly_closed"]
     ended_by: Literal["closed", "expired", "assigned", "exercised", "mixed"] | None = None

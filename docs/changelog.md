@@ -417,4 +417,8 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
       - A delivery that buys shares while the account is short them covers the short, as the account itself nets it. "Never a close" above means shares held long.
       - `value` is on every trade, signed like the net value.
       - `parse_occ` raises only `ValueError`.
+  - **From #131's eighth AI review:**
+    - **The dates shown are the trading days** (`opened_on`, `closed_on`): the Opened column and "opened Oct 31" in a roll or assignment link, as days held already were.
+    - **The status filter reads "Open or partly closed"**, which is what it shows.
+    - **Not changed:** an expiry sent without an action, with a long and a short lot of one contract both open. That's a state tastytrade nets away.
 

@@ -115,6 +115,9 @@ const JournalPositionSchema = z.object({
   legs: z.array(JournalLegSchema),
   opened_at: z.string().nullable().default(null),
   closed_at: z.string().nullable().default(null),
+  /** The trading days (YYYY-MM-DD), shown in place of the UTC timestamps. */
+  opened_on: z.string().nullable().default(null),
+  closed_on: z.string().nullable().default(null),
   days_held: MaybeNum,
   status: z.enum(["open", "closed", "partly_closed"]),
   ended_by: z.enum(["closed", "expired", "assigned", "exercised", "mixed"]).nullable().default(null),

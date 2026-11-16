@@ -27,7 +27,8 @@ function Words({ sentence }: { sentence: Sentence }) {
 }
 
 function opened(position: JournalPosition): string {
-  return position.opened_at ? dateLabel(position.opened_at.slice(0, 10), true) : "—";
+  const day = position.opened_on ?? position.opened_at?.slice(0, 10); // the trading day
+  return day ? dateLabel(day, true) : "—";
 }
 
 function Detail({ position, byId, fills }: { position: JournalPosition; byId: Map<string, JournalPosition>; fills: OwnerTrade[] }) {
@@ -82,7 +83,7 @@ export function JournalView({ journal, trades, underlying }: { journal: TradeJou
   const shown = journal.positions
     .filter((p) => !underlying || p.underlying === underlying)
     .filter((p) => status === "all" || (status === "closed" ? p.status === "closed" : p.status !== "closed"))
-    .sort((a, b) => (b.opened_at ?? "").localeCompare(a.opened_at ?? ""));
+    .sort((a, b) => (b.opened_at ?? "").localeCompare(a.opened_at ?? "")); // by the fill's time: a total order
   const unmatched = journal.unmatched.length;
   const pickedRealized = journal.underlyings.find((u) => u.underlying === underlying)?.realized;
 
@@ -115,7 +116,7 @@ export function JournalView({ journal, trades, underlying }: { journal: TradeJou
           className="rounded border border-strata-border bg-strata-raise px-2 py-1 text-strata-hi"
         >
           <option value="all">All positions</option>
-          <option value="open">Open</option>
+          <option value="open">Open or partly closed</option>
           <option value="closed">Closed</option>
         </select>
       </label>

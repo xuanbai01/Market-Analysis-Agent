@@ -23,7 +23,8 @@ export function heldLabel(days: number | null): string {
 
 /** "the short put opened Nov 1": another position, named in a sentence. */
 export function positionName(position: JournalPosition): string {
-  const opened = position.opened_at ? dateLabel(position.opened_at.slice(0, 10)) : "on an unknown date";
+  const day = position.opened_on ?? position.opened_at?.slice(0, 10);
+  const opened = day ? dateLabel(day) : "on an unknown date";
   return `the ${position.structure} opened ${opened}`;
 }
 

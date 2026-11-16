@@ -305,6 +305,8 @@ class _Journal:
             structure=structure(legs, position.open_cash), legs=legs,
             opened_at=position.opened_at.isoformat(),
             closed_at=position.closed_at.isoformat() if position.closed_at and status == "closed" else None,
+            opened_on=position.opened_on,
+            closed_on=position.closed_on if status == "closed" else None,
             days_held=days, status=status, ended_by=ended_by,  # type: ignore[arg-type]
             origin=position.origin,  # type: ignore[arg-type]
             origin_position=self._delivered_from(position.delivered_by),

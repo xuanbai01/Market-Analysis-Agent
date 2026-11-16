@@ -298,7 +298,7 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Not changed:** the client turns its own timeouts into `TastytradeUnavailable`, so a bare `TimeoutError` can only be the sync's deadline.
 - **Live quotes on the options page (2026-11-15, tastytrade PR B, ADR 0009):** with the owner key, the options page's expiry section has a Live switch.
   - **The route:** `GET /v1/owner/options/{symbol}/live/{expiry}` (`owner_live_chain`).
-    - **Strikes:** read from tastytrade's nested chain. Only standard deliverables count, and an OCC symbol is checked before it reaches a query. The last 10 chains are kept 10 minutes.
+    - **Strikes:** read from tastytrade's nested chain. Only standard deliverables count, and an OCC symbol is checked before it reaches a query. The last chains are kept 10 minutes (4 after the tenth review below).
     - **Quotes:** bids, asks, volume and open interest come from its REST quotes for the 40 strikes either side of the price.
     - **Everything else** comes from the code that reads Yahoo's chain: the forward, our own IVs from the live mids, the smile, positioning.
     - **Limits:** 10 s in memory, one build per symbol and expiry, a 30 s deadline. An expiry tastytrade doesn't list is a 422.

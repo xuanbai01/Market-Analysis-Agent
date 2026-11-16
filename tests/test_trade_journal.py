@@ -367,3 +367,30 @@ def test_a_future_isnt_read_as_stock() -> None:
     assert j.positions == []
     assert j.unmatched[0].reason == "not modelled: Future"
 
+
+def test_a_partly_closed_position_without_a_p_and_l_is_counted() -> None:
+    """Closed in part on a fill without its net value: counted as unpriced,
+    so the sentence doesn't say nothing closed (#131's fifth AI review)."""
+    j = tj.build_journal([
+        t(1, "2026-10-01", "Sell to Open", C175, 2, 400.0, order=1),
+        t(2, "2026-10-02", "Buy to Close", C175, 1, None, order=2),
+    ])
+    (p,) = j.positions
+    assert (p.status, p.realized) == ("partly_closed", None)
+    assert (j.totals.closed, j.totals.partly, j.totals.unpriced) == (0, 0, 1)
+
+
+def test_shares_delivered_in_two_accounts_the_same_day_stay_apart() -> None:
+    p150 = occ("2026-11-20", "P", 150)
+    rows = []
+    for account in (1, 2):
+        base = account * 10
+        rows += [
+            t(base + 1, "2026-11-01", "Sell to Open", p150, 1, 300.0, order=base, account=account),
+            t(base + 2, "2026-11-20", "Buy to Close", p150, 1, 0.0, sub="Assignment", kind="Receive Deliver", account=account),
+            t(base + 3, "2026-11-20", "Buy to Open", "NVDA", 100, -15000.0, sub="Assignment", kind="Receive Deliver", account=account),
+        ]
+    stocks = [p for p in tj.build_journal(rows).positions if p.structure == "stock"]
+    assert sorted(p.account for p in stocks) == [1, 2]
+    assert all(p.legs[0].quantity == 100 for p in stocks)
+

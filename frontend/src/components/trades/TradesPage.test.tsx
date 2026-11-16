@@ -135,6 +135,21 @@ describe("TradesPage", () => {
     expect(screen.getByTestId("journal-row")).toHaveTextContent("NVDA");
   });
 
+  it("says the summary and chart cover every underlying when one is picked", async () => {
+    // The filter narrows the table; the sentence and bars stay whole, and say
+    // so, with the picked underlying's own realized figure (#131's AI review).
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
+    renderPage();
+    await screen.findAllByTestId("journal-row");
+    expect(screen.queryByTestId("journal-underlying-total")).toBeNull();
+    fireEvent.change(screen.getByTestId("trades-underlying-filter"), { target: { value: "NVDA" } });
+    expect(screen.getByTestId("journal-underlying-total")).toHaveTextContent("NVDA: +$358 realized");
+    expect(screen.getByTestId("journal-summary")).toHaveTextContent(/^All underlyings:/);
+    fireEvent.change(screen.getByTestId("trades-underlying-filter"), { target: { value: "SPY" } });
+    expect(screen.getByTestId("journal-underlying-total")).toHaveTextContent("SPY: nothing realized yet");
+  });
+
   it("names what couldn't be matched", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);

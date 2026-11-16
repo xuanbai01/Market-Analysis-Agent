@@ -58,6 +58,8 @@ class _World:
         self.per_page = 2000
         self.fail: Exception | None = None
         self.clock = [0.0]
+        self.pages_as_text = False
+        self.insert_fail: Exception | None = None
 
     def later(self, seconds: float = 0.0) -> None:
         """Past the sync spacing, and ``seconds`` more."""
@@ -68,6 +70,9 @@ class _World:
         return [_Row(r) for _, r in sorted(self.rows.items())]
 
     async def insert(self, session: _Session, rows: list[dict[str, Any]]) -> int:
+        if self.insert_fail:
+            session.in_tx = True  # the write had begun
+            raise self.insert_fail
         written = 0
         for row in rows:
             if row["id"] not in self.rows:
@@ -95,7 +100,7 @@ class _World:
         offset = params["page-offset"]
         page = matching[offset * self.per_page:(offset + 1) * self.per_page]
         pages = max(1, -(-len(matching) // self.per_page))
-        return {"data": {"items": page}, "pagination": {"total-pages": pages, "page-offset": offset}}
+        return {"data": {"items": page}, "pagination": {"total-pages": str(pages) if self.pages_as_text else pages, "page-offset": offset}}
 
 
 @pytest.fixture
@@ -312,4 +317,47 @@ async def test_a_fee_credited_back_lowers_the_fees(world: _World) -> None:
     await _sync(world)
     (trade,) = await ot.list_trades(world.session)  # type: ignore[arg-type]
     assert trade.fees == pytest.approx(-0.5 + 0.1 + 0.04)
+
+
+async def test_a_database_failure_mid_write_is_a_failed_sync_not_a_500(world: _World) -> None:
+    """Neon dropping the connection mid-write: the copy stands and says so,
+    on a rolled-back session (#129's third AI review)."""
+    world.history = [_txn(1, "2026-10-01")]
+    world.insert_fail = RuntimeError("connection was closed in the middle of operation")
+    with pytest.raises(ot.SyncFailed, match="couldn't be updated"):
+        await _sync(world)
+    assert world.session.in_tx is False
+
+
+async def test_sealing_runs_off_the_event_loop(world: _World, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A first sync seals the whole history: CPU that mustn't hold up other
+    requests (#129's third AI review)."""
+    import threading
+
+    threads: list[bool] = []
+    seal = vault.seal
+
+    def recording(*args: Any, **kwargs: Any) -> Any:
+        threads.append(threading.current_thread() is threading.main_thread())
+        return seal(*args, **kwargs)
+
+    monkeypatch.setattr(vault, "seal", recording)
+    world.history = [_txn(1, "2026-10-01"), _txn(2, "2026-10-02")]
+    await _sync(world)
+    assert threads == [False, False]
+
+
+async def test_a_page_count_sent_as_text_is_still_read(world: _World) -> None:
+    world.per_page = 1
+    world.pages_as_text = True
+    world.history = [_txn(1, "2026-10-01"), _txn(2, "2026-10-02"), _txn(3, "2026-10-03")]
+    assert (await _sync(world)).new == 3
+
+
+async def test_a_trade_without_a_time_sorts_by_its_date(world: _World) -> None:
+    late = {k: v for k, v in _txn(2, "2026-11-20").items() if k != "executed-at"}
+    world.history = [_txn(1, "2026-11-13"), late]
+    await _sync(world)
+    trades = await ot.list_trades(world.session)  # type: ignore[arg-type]
+    assert [t.id for t in trades] == [2, 1]
 

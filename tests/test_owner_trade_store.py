@@ -3,6 +3,8 @@ a row is written once, and the only update is a row stored with estimated
 fees taking the final figures."""
 from __future__ import annotations
 
+import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import owner_trade_store as store
@@ -38,3 +40,11 @@ async def test_only_a_row_with_estimated_fees_is_replaced(db_session: AsyncSessi
     rows = {r.id: r for r in await store.stored(db_session)}
     assert (rows[1].ciphertext, rows[1].estimated_fee) == (b"final", False)
     assert rows[2].ciphertext == b"sealed"
+
+
+async def test_a_nonce_that_is_not_12_bytes_is_refused(db_session: AsyncSession) -> None:
+    """The model carries the migration's check, so a test database built from
+    it holds the same guard (#129's third AI review)."""
+    with pytest.raises(IntegrityError):
+        await store.insert(db_session, [{**_row(1), "nonce": b"\x00" * 11}])
+

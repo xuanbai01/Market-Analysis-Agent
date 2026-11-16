@@ -58,7 +58,7 @@ class _World:
         self.per_page = 2000
         self.fail: Exception | None = None
         self.clock = [0.0]
-        self.pages_as_text = False
+        self.pages_as: str = "int"  # how the page count comes: int, text, float or absent
         self.insert_fail: Exception | None = None
 
     def later(self, seconds: float = 0.0) -> None:
@@ -87,6 +87,9 @@ class _World:
         return False
 
     async def get(self, path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        import asyncio
+
+        await asyncio.sleep(0)  # a real read yields: concurrent syncs interleave here
         assert not self.session.in_tx, "a database connection was held during the fetch"
         if self.fail:
             raise self.fail
@@ -100,7 +103,10 @@ class _World:
         offset = params["page-offset"]
         page = matching[offset * self.per_page:(offset + 1) * self.per_page]
         pages = max(1, -(-len(matching) // self.per_page))
-        return {"data": {"items": page}, "pagination": {"total-pages": str(pages) if self.pages_as_text else pages, "page-offset": offset}}
+        if self.pages_as == "absent":
+            return {"data": {"items": page}}
+        count: Any = {"int": pages, "text": str(pages), "float": float(pages)}[self.pages_as]
+        return {"data": {"items": page}, "pagination": {"total-pages": count, "page-offset": offset}}
 
 
 @pytest.fixture
@@ -197,7 +203,7 @@ async def test_the_list_is_newest_first_with_signed_amounts(world: _World) -> No
     trades = await ot.list_trades(world.session)  # type: ignore[arg-type]
     assert [t.id for t in trades] == [2, 1]
     assert trades[0].net_value == -120.5 and trades[1].net_value == 478.86
-    assert trades[1].fees == pytest.approx(1.14)
+    assert trades[1].fees == 1.14  # not 1.1400000000000001 in the CSV
     assert trades[1].account == 1 and trades[1].underlying == "NVDA"
 
 
@@ -249,8 +255,9 @@ async def test_a_sync_that_runs_too_long_says_so_and_lets_go(world: _World, monk
 
     monkeypatch.setattr(tt, "get", get)
     monkeypatch.setattr(ot, "SYNC_SECONDS", 0.01)
-    with pytest.raises(ot.SyncFailed, match="too long"):
+    with pytest.raises(ot.SyncFailed, match="^the update took too long") as failed:
         await _sync(world)
+    assert "tastytrade" not in str(failed.value)  # the deadline covers the database's part too
     assert world.session.in_tx is False  # rolled back, ready for the listing
 
 
@@ -358,9 +365,14 @@ async def test_sealing_runs_off_the_event_loop(world: _World, monkeypatch: pytes
     assert threads == [False, False]
 
 
-async def test_a_page_count_sent_as_text_is_still_read(world: _World) -> None:
+@pytest.mark.parametrize("pages_as", ["text", "float", "absent"])
+async def test_every_page_is_read_however_the_count_comes(world: _World, monkeypatch: pytest.MonkeyPatch, pages_as: str) -> None:
+    """A count as digits or as 2.0, or none at all with a full page: the read
+    goes on, rather than keep the first page as the whole history (#129's
+    AI reviews)."""
+    monkeypatch.setattr(ot, "PER_PAGE", 1)
     world.per_page = 1
-    world.pages_as_text = True
+    world.pages_as = pages_as
     world.history = [_txn(1, "2026-10-01"), _txn(2, "2026-10-02"), _txn(3, "2026-10-03")]
     assert (await _sync(world)).new == 3
 

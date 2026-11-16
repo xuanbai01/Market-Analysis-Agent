@@ -65,14 +65,22 @@ class SyncResult:
     skipped: bool = False
 
 
+class SyncFailed(Exception):
+    """tastytrade couldn't be read, or the sync ran past SYNC_SECONDS: the
+    copy stands as it was. The text is safe to show (account paths masked)."""
+
+
 _synced_at: float | None = None
+# Why the last sync failed, until one works: a visit inside the minute
+# after it is told so, not that the copy was updated.
+_last_failure: str | None = None
 _lock = asyncio.Lock()  # one sync at a time
 
 
 def reset() -> None:
-    """Forget when the last sync ran (tests)."""
-    global _synced_at, _lock
-    _synced_at, _lock = None, asyncio.Lock()
+    """Forget when the last sync ran and how (tests)."""
+    global _synced_at, _last_failure, _lock
+    _synced_at, _last_failure, _lock = None, None, asyncio.Lock()
 
 
 # Swapped in tests.
@@ -142,17 +150,31 @@ async def _transactions(number: str, start: date | None) -> list[dict[str, Any]]
 async def sync(session: AsyncSession) -> SyncResult:
     """Bring the copy up to date: one sync at a time, at most every
     SYNC_EVERY_SECONDS (a failed one counts), within SYNC_SECONDS.
-    ``VaultUnavailable`` without a key: nothing is read or written then."""
+    ``SyncFailed`` with the reason when tastytrade fails or the deadline
+    passes, and again for a visit inside the minute after; ``VaultUnavailable``
+    without a key, when nothing is read or written."""
+    global _last_failure
     if not vault.is_configured():
         raise vault.VaultUnavailable("the trade copy's key isn't set on the server")
     async with _lock:
         if _synced_at is not None and _clock() - _synced_at < SYNC_EVERY_SECONDS:
+            if _last_failure is not None:
+                raise SyncFailed(_last_failure)
             return SyncResult(new=0, replaced=0, skipped=True)
         try:
             async with asyncio.timeout(SYNC_SECONDS):
-                return await _sync(session)
+                result = await _sync(session)
+        except (tt.TastytradeUnavailable, tt.TastytradeNotFound, TimeoutError) as exc:
+            await session.rollback()  # a deadline can land mid-write; the listing needs a clean session
+            _last_failure = owner_positions.failure_reason(exc)
+            raise SyncFailed(_last_failure) from exc
+        except Exception:
+            _last_failure = "the last update failed"  # the error itself goes to the log
+            raise
         finally:
             _stamp()
+        _last_failure = None
+        return result
 
 
 def _stamp() -> None:
@@ -226,7 +248,10 @@ def _trade(tid: int, p: dict[str, Any]) -> OwnerTrade:
 
 
 async def list_trades(session: AsyncSession) -> list[OwnerTrade]:
-    """Every stored trade, opened, newest first."""
+    """Every stored trade, opened, newest first. ``VaultUnavailable`` without
+    a key, an empty table included: no key is no copy, not an empty one."""
+    if not vault.is_configured():
+        raise vault.VaultUnavailable("the trade copy's key isn't set on the server")
     rows = await store.stored(session)
     trades = [_trade(tid, payload) for tid, payload in await asyncio.to_thread(_opened, rows)]
     return sorted(trades, key=lambda t: (t.executed_at or "", t.id), reverse=True)

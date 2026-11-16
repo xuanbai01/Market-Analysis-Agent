@@ -27,6 +27,8 @@ function when(trade: OwnerTrade): string {
 }
 
 const num = (v: number | null, digits = 2) => (v === null ? "—" : v.toFixed(digits));
+// As many decimals as it has, up to 4: a fractional share isn't rounded to a whole one.
+const quantity = (v: number | null) => (v === null ? "—" : v.toLocaleString("en-US", { maximumFractionDigits: 4 }));
 
 function saveBlob(blob: Blob, name: string): void {
   const url = URL.createObjectURL(blob);
@@ -142,7 +144,7 @@ function Trades({ ownerKey }: { ownerKey: string }) {
                   <td className="px-3 py-1.5 text-strata-dim">{when(t)}</td>
                   <td className="px-3 py-1.5">{t.action ?? t.sub_type ?? t.type ?? "—"}</td>
                   <td className="px-3 py-1.5">{t.symbol ?? t.underlying ?? "—"}</td>
-                  <td className="px-3 py-1.5 text-right">{num(t.quantity, 0)}</td>
+                  <td className="px-3 py-1.5 text-right">{quantity(t.quantity)}</td>
                   <td className="px-3 py-1.5 text-right">{num(t.price)}</td>
                   <td className="px-3 py-1.5 text-right text-strata-dim">{t.fees ? t.fees.toFixed(2) : "—"}</td>
                   <td className={`px-3 py-1.5 text-right ${t.net_value === null ? "" : t.net_value >= 0 ? "text-strata-pos" : "text-strata-neg"}`}>

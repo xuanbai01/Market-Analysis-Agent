@@ -247,4 +247,9 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **The CSV** defuses a formula behind leading spaces or a newline.
     - **The page** shows the server's reason when the copy doesn't open, and revokes the download's address a moment later (at once, Safari can cancel the save).
     - **Both key recipes** warn about Windows clipboard history.
+  - **From #129's AI review:**
+    - **A sync that hit its 120 s deadline was a 500.** It's now a failed sync like tastytrade being down: the copy is served with the reason, after the session is rolled back.
+    - **A visit inside the minute after a failed sync was told the copy was updated.** It's now told the last update failed, until a sync works.
+    - **The CSV route lists without syncing**, so with no key and nothing stored it answered an empty CSV. Listing now refuses without the key (503).
+    - **A fractional share** shows as it is in the table, as it does in the CSV.
 

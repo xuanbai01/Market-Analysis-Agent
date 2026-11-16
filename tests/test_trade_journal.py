@@ -434,9 +434,12 @@ def test_a_close_is_booked_to_its_trading_day_not_the_utc_clock() -> None:
         t(2, "2026-10-31", "Buy to Close", C175, 1, -100.0, order=2),
     ]
     rows[1] = rows[1].model_copy(update={"executed_at": "2026-11-01T00:30:00+00:00"})
+    rows[0] = rows[0].model_copy(update={"executed_at": "2026-10-01T23:30:00+00:00", "date": "2026-10-01"})
     j = tj.build_journal(rows)
     assert [m.month for m in j.months] == ["2026-10"]
     assert j.positions[0].days_held == 30
+    # The dates shown are the trading days too (#131's eighth AI review).
+    assert (j.positions[0].opened_on, j.positions[0].closed_on) == (date(2026, 10, 1), date(2026, 10, 31))
 
 
 def test_a_butterfly_with_uneven_wings_is_named_broken_wing() -> None:

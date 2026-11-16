@@ -7,6 +7,7 @@ const base: JournalPosition = {
   id: "order-1", account: 1, underlying: "NVDA", structure: "short put", legs: [], opened_at: "2026-11-01T15:00:00+00:00",
   closed_at: null, days_held: null, status: "open", ended_by: null, origin: null, origin_position: null, open_cash: 300,
   close_cash: null, fees: 1.1, realized: null, rolled_from: null, rolled_to: null, note: null, transactions: [1],
+  opened_on: "2026-11-01", closed_on: null,
 };
 
 const text = (s: (string | { strong: string })[]) => s.map((p) => (typeof p === "string" ? p : `**${p.strong}**`)).join("");
@@ -29,6 +30,8 @@ describe("journal words", () => {
 
   it("names a position by what and when", () => {
     expect(positionName(base)).toBe("the short put opened Nov 1");
+    // The trading day, not the UTC clock: 7:30 pm New York on Oct 31 is Nov 1 in UTC.
+    expect(positionName({ ...base, opened_at: "2026-11-01T00:30:00+00:00", opened_on: "2026-10-31" })).toBe("the short put opened Oct 31");
   });
 
   it("labels a month", () => {

@@ -29,4 +29,4 @@ The owner pages answer 404 until this is set.
 - [ ] **Try the Live switch** on an options page's expiry and compare its bids and asks with tastytrade's app.
 - [ ] **Look at the IV history panel** on an options page (with the owner key): IV and RV20 over a year, three years or all, from your tastytrade account.
 - [ ] **Read every expiry** on an options page (the button in "Every expiry · tastytrade live"), and compare a few open interest figures with tastytrade's app.
-- [ ] **Leave the probe to Claude.** During the session it reads real-time quote ages, and whether tastytrade's IVs come as fractions. You don't need to do anything for it.
+- [x] **Leave the probe to Claude.** *(done 2026-11-16, 10:04 ET: the quotes are real-time, about a second old, and the IVs come as fractions; tasks/todo.md has the rest)* During the session it reads real-time quote ages, and whether tastytrade's IVs come as fractions. You don't need to do anything for it.

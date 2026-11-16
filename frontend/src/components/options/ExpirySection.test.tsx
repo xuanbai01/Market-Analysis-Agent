@@ -215,6 +215,7 @@ describe("ExpirySection live quotes", () => {
     renderSection();
     fireEvent.click(screen.getByTestId("options-live-toggle"));
     await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/lists no NVDA options/));
+    expect(screen.getByTestId("options-live-status")).toHaveTextContent("expiring 2026-12-11. Showing the delayed chain."); // one full stop
     expect(getOwnerKey()).toBe("k".repeat(40));
   });
 

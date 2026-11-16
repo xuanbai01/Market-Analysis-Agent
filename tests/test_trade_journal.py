@@ -292,3 +292,49 @@ def test_the_totals_say_what_partly_closed_positions_add() -> None:
     (p,) = j.positions
     assert p.closed_at is None  # not closed yet: only the last close of a part
 
+
+def test_the_totals_only_hold_what_the_positions_show() -> None:
+    """Half sold before a split, half after: the position has no computed
+    P&L, so the months and totals hold none of it (#131's third AI review)."""
+    j = tj.build_journal([
+        t(1, "2026-06-01", "Buy to Open", "NVDA", 10, -1000.0, order=1),
+        t(2, "2026-06-05", "Sell to Close", "NVDA", 5, 600.0, order=2),
+        t(3, "2026-06-10", None, "NVDA", 45, None, sub="Forward Split", kind="Receive Deliver"),
+        t(4, "2026-07-01", "Sell to Close", "NVDA", 5, 120.0, order=3),
+    ])
+    (p,) = j.positions
+    assert p.realized is None
+    assert j.months == [] and j.underlyings == [] and j.totals.realized == 0.0
+    assert (j.totals.closed, j.totals.unpriced) == (0, 1)
+
+
+def test_a_cash_settlement_booked_apart_isnt_guessed() -> None:
+    """A cash-settled exercise with no cash on its own fill: the settlement
+    was booked elsewhere, so the P&L isn't computed (#131's third AI review)."""
+    spx = occ("2026-12-18", "P", 6000, root="SPXW")
+    j = tj.build_journal([
+        t(1, "2026-12-01", "Sell to Open", spx, 1, 900.0, order=1, underlying="SPX"),
+        t(2, "2026-12-18", "Buy to Close", spx, 1, 0.0, sub="Cash Settled Assignment", kind="Receive Deliver", underlying="SPX"),
+    ])
+    (p,) = j.positions
+    assert (p.status, p.ended_by, p.realized) == ("closed", "assigned", None)
+    assert p.note is not None and "cash" in p.note.lower()
+    j = tj.build_journal([
+        t(1, "2026-12-01", "Sell to Open", spx, 1, 900.0, order=1, underlying="SPX"),
+        t(2, "2026-12-18", "Buy to Close", spx, 1, -2500.0, sub="Cash Settled Assignment", kind="Receive Deliver", underlying="SPX"),
+    ])
+    assert j.positions[0].realized == pytest.approx(-1600.0)  # the settlement on its own fill counts
+
+
+def test_a_roll_that_closes_two_positions_links_both() -> None:
+    jan = occ("2027-01-15", "C", 180)
+    j = tj.build_journal([
+        t(1, "2026-10-01", "Sell to Open", C175, 1, 300.0, order=1),
+        t(2, "2026-10-02", "Sell to Open", C175, 1, 310.0, order=2),
+        t(3, "2026-12-10", "Buy to Close", C175, 2, -500.0, order=3),
+        t(4, "2026-12-10", "Sell to Open", jan, 2, 800.0, order=3),
+    ])
+    positions = by_id(j)
+    assert positions["order-1"].rolled_to == "order-3" and positions["order-2"].rolled_to == "order-3"
+    assert positions["order-3"].rolled_from == "order-1"
+

@@ -334,7 +334,7 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **A chain is kept as plain rows** of strike, call and put by expiry, not as tastytrade's dicts. SPY's or SPX's lists every expiry's strikes, and ten are kept on a 512 MB machine.
     - **Not changed:**
       - The nested-chain path is on the client's allowlist.
-      - During a session, `quote_time` is the current time, so live quotes are timed from now.
+      - During a session, `quote_time` is the current time, so live quotes are timed from now. (Wrong, and fixed later: see "Live quotes are timed from now" below.)
   - **From #130's fifth AI review:**
     - **Open interest, walls, max pain and exposure come from the whole delayed chain while Live is on.** Live quotes cover only the 80 strikes near the price, and open interest is the day's figure anyway.
     - **Only a 403 clears the owner key on the Live switch.** A 404 there can't be told from a route the backend doesn't have yet, during a deploy. `/positions` and `/trades` handle a server with no owner key.
@@ -370,6 +370,10 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Not changed:**
       - The positions page's timer test restores the clock in `afterEach`.
       - The live route sits behind the owner key with no per-IP limit, as before.
+  - **Live quotes are timed from now** (found by grading DeepSeek's reviews of #130: the fourth review's finding was real, and the "Not changed" reason given for it was wrong).
+    - **The bug:** the live chain timed tastytrade's real-time quotes with Yahoo's clock (`quote_time`). In a session that clock is 15 minutes back, so every live IV ran from a time to expiry 15 minutes too long. From 09:30 to 09:45 it is the last close: on an expiry morning at 09:35 that's 24 hours (72 on a Monday) instead of 6.4, which roughly halved every live IV.
+    - **The fix:** `market_calendar.live_quote_time` is now during a session, else the last close (today's once it has closed). An expiry is "not listed" from its close, not 15 minutes after it.
+    - **Nothing else needed it:** `/positions` reads tastytrade's own Greeks and values legs from the clock to `expires_at` (`session_close`), not through `quote_time`. The strategy builder prices from the live chain's `days`, which this fixes.
   - **`/positions` stays current while open** (#128's last AI review): it reads again every 15 s while the tab shows, matching the server's copy, and quote ages tick every 5 s between reads. A tab left open no longer freezes at "10s ago".
 - **The trade journal (2026-11-16, tastytrade PR D, ADR 0009):** `/trades` reads the owner's trades as positions.
   - **`trade_journal`:** pure, computed from the trade copy on each visit, never stored.

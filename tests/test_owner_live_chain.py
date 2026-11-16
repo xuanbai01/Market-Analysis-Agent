@@ -39,8 +39,9 @@ def _occ(kind: str, strike: float) -> str:
 STRIKES = [600.0 + 5 * i for i in range(29)]  # 600 to 740
 
 
-def _quotes() -> dict[str, dict[str, Any]]:
-    years = mc.years_to_expiry(NOW, EXPIRY)
+def _quotes(at: datetime = NOW) -> dict[str, dict[str, Any]]:
+    """Quotes as a live feed would make them at ``at``."""
+    years = mc.years_to_expiry(at, EXPIRY)
     forward = SPOT * math.exp(RATE * years)
     discount = math.exp(-RATE * years)
     out: dict[str, dict[str, Any]] = {"SPY": {"symbol": "SPY", "mark": SPOT, "updated-at": "2026-11-16T14:59:59+00:00"}}
@@ -315,11 +316,46 @@ async def test_an_expiry_listed_since_the_chain_was_kept_is_found(account: _Tast
     assert sum(1 for path, _ in account.calls if path == "/option-chains/SPY/nested") == 2  # read again once
 
 
-async def test_an_expiry_that_has_closed_is_not_priced(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "now",
+    [
+        datetime(2026, 12, 18, 22, tzinfo=UTC),  # the evening after EXPIRY's close
+        # Five minutes after it: Yahoo's delayed clock still reads 15:50, but
+        # tastytrade's quotes are real time, so nothing is left to price.
+        datetime(2026, 12, 18, 16, 5, tzinfo=mc.ET),
+    ],
+)
+async def test_an_expiry_that_has_closed_is_not_priced(
+    account: _Tastytrade, monkeypatch: pytest.MonkeyPatch, now: datetime
+) -> None:
     """After its close an expiry has no time left: not priced at a negative one."""
-    monkeypatch.setattr(lc, "_now", lambda: datetime(2026, 12, 18, 22, tzinfo=UTC))  # after EXPIRY's close
+    monkeypatch.setattr(lc, "_now", lambda: now)
     with pytest.raises(lc.NotListed):
         await lc.live_chain("SPY", EXPIRY)
+
+
+@pytest.mark.parametrize(
+    ("now", "hours_left"),
+    [
+        # In the session's first quarter hour Yahoo's clock is still Thursday's
+        # close: 24 hours left instead of 6 h 25 min, which halved every IV.
+        (datetime(2026, 12, 18, 9, 35, tzinfo=mc.ET), 6 + 25 / 60),
+        # Later, 15 minutes too long: 5 h 15 min instead of 5 h.
+        (datetime(2026, 12, 18, 11, 0, tzinfo=mc.ET), 5.0),
+    ],
+)
+async def test_live_quotes_run_from_now_not_from_yahoos_delayed_clock(
+    account: _Tastytrade, monkeypatch: pytest.MonkeyPatch, now: datetime, hours_left: float
+) -> None:
+    """tastytrade's quotes are real time, so on the expiry day their time
+    to expiry runs from now (DeepSeek's review of #130, which the author
+    dismissed; grading the reviewer found it real)."""
+    monkeypatch.setattr(lc, "_now", lambda: now)
+    account.quotes = _quotes(now)
+    live = await lc.live_chain("SPY", EXPIRY)
+    assert live.quoted_at == now
+    assert live.chain.days == pytest.approx(hours_left / 24)
+    assert live.chain.atm_iv == pytest.approx(VOL, abs=0.005)
 
 
 async def test_a_contract_filed_under_another_strike_is_dropped(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:

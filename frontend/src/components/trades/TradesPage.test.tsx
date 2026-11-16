@@ -38,7 +38,7 @@ const TRADES: OwnerTrades = OwnerTradesSchema.parse({
     ],
     months: [{ month: "2026-11", realized: 357.76 }],
     underlyings: [{ underlying: "NVDA", realized: 357.76 }],
-    totals: { realized: 357.76, closed: 1, profitable: 1, average_days: 43, fees: 4.44 },
+    totals: { realized: 357.76, closed: 1, profitable: 1, average_days: 43, fees: 2.24 }, // the closed position's own
     unmatched: [{ id: 99, date: "2026-08-01", symbol: "NVDA", reason: "nothing open to close: it may come from before the copy starts" }],
   },
 });
@@ -95,7 +95,7 @@ describe("TradesPage", () => {
     vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
     renderPage();
     expect(await screen.findByTestId("journal-summary")).toHaveTextContent(
-      "1 position closed, 1 at a profit (100%), held 43 days on average. Realized: +$358 after $4 in fees.",
+      "1 position closed, 1 at a profit (100%), held 43 days on average. Realized: +$358 after $2 in fees.",
     );
     expect(screen.getAllByTestId("realized-bar")).toHaveLength(1);
     const rows = screen.getAllByTestId("journal-row");

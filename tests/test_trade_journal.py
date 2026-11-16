@@ -338,3 +338,32 @@ def test_a_roll_that_closes_two_positions_links_both() -> None:
     assert positions["order-1"].rolled_to == "order-3" and positions["order-2"].rolled_to == "order-3"
     assert positions["order-3"].rolled_from == "order-1"
 
+
+def test_shares_delivered_without_a_buy_or_sell_open_by_their_cash() -> None:
+    """A delivery sent with no action: paying for the shares is buying them.
+    It mustn't be dropped or poison the ticker's later P&L (#131's fourth AI review)."""
+    p150 = occ("2026-11-20", "P", 150)
+    j = tj.build_journal([
+        t(1, "2026-11-01", "Sell to Open", p150, 1, 300.0, order=30),
+        t(2, "2026-11-20", None, p150, 1, 0.0, sub="Assignment", kind="Receive Deliver"),
+        t(3, "2026-11-20", None, "NVDA", 100, -15000.0, sub="Assignment", kind="Receive Deliver"),
+        t(4, "2026-12-01", "Sell to Close", "NVDA", 100, 15500.0, order=31),
+    ])
+    (stock,) = (p for p in j.positions if p.structure == "stock")
+    assert (stock.origin, stock.status, stock.realized) == ("assignment", "closed", pytest.approx(500.0))
+    assert j.unmatched == []
+
+
+def test_one_order_number_in_two_accounts_makes_two_positions() -> None:
+    j = tj.build_journal([
+        t(1, "2026-10-01", "Sell to Open", C175, 1, 300.0, order=7, account=1),
+        t(2, "2026-10-01", "Sell to Open", C175, 1, 280.0, order=7, account=2),
+    ])
+    assert sorted((p.account, p.open_cash) for p in j.positions) == [(1, 300.0), (2, 280.0)]
+
+
+def test_a_future_isnt_read_as_stock() -> None:
+    j = tj.build_journal([t(1, "2026-10-01", "Buy to Open", "/ESZ6", 1, -50.0, order=1, underlying="/ES", instrument="Future")])
+    assert j.positions == []
+    assert j.unmatched[0].reason == "not modelled: Future"
+

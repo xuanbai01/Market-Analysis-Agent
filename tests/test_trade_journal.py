@@ -206,3 +206,54 @@ def test_stock_and_a_call_sold_in_one_order_is_a_covered_call() -> None:
         t(2, "2026-10-01", "Sell to Open", C175, 1, 300.0, order=1),
     ]).positions
     assert p.structure == "covered call"
+
+
+def test_a_closed_position_without_a_p_and_l_isnt_counted_as_a_loss() -> None:
+    """After a split the P&L isn't computed: the position is counted apart,
+    not as closed at 0 (#131's AI review)."""
+    j = tj.build_journal([
+        t(1, "2026-06-01", "Buy to Open", "NVDA", 10, -1000.0, order=1),
+        t(2, "2026-06-10", None, "NVDA", 90, None, sub="Forward Split", kind="Receive Deliver"),
+        t(3, "2026-07-01", "Sell to Close", "NVDA", 10, 200.0, order=2),
+        t(4, "2026-07-02", "Sell to Open", C175, 1, 300.0, order=3),
+        t(5, "2026-07-03", "Buy to Close", C175, 1, -100.0, order=4),
+    ])
+    assert (j.totals.closed, j.totals.profitable, j.totals.unpriced) == (1, 1, 1)
+    assert j.totals.realized == pytest.approx(200.0)
+
+
+def test_the_fees_beside_the_realized_p_and_l_are_the_closed_parts_own() -> None:
+    """Fees of a position still open aren't in the figure realized
+    (#131's AI review)."""
+    j = tj.build_journal([
+        t(1, "2026-10-01", "Sell to Open", C175, 2, 400.0, order=1, fees=2.0),
+        t(2, "2026-10-02", "Buy to Close", C175, 1, -50.0, order=2, fees=1.0),
+        t(3, "2026-10-03", "Buy to Open", occ("2026-12-18", "P", 150), 1, -300.0, order=3, fees=1.0),
+    ])
+    assert j.totals.fees == pytest.approx(1.0 + 1.0)  # half the open's fees, all the close's
+    assert j.totals.realized == pytest.approx(150.0)
+
+
+def test_stock_delivered_a_day_later_still_links_to_its_option() -> None:
+    p150 = occ("2026-11-20", "P", 150)
+    j = tj.build_journal([
+        t(1, "2026-11-01", "Sell to Open", p150, 1, 300.0, order=30),
+        t(2, "2026-11-20", "Buy to Close", p150, 1, 0.0, sub="Assignment", kind="Receive Deliver"),
+        t(3, "2026-11-23", "Buy to Open", "NVDA", 100, -15000.0, sub="Assignment", kind="Receive Deliver"),
+    ])
+    (stock,) = (p for p in j.positions if p.structure == "stock")
+    assert stock.origin_position == "order-30"
+
+
+def test_a_close_reaches_the_lot_it_closes_wherever_it_is_queued() -> None:
+    """Long and short lots of one contract (not something tastytrade nets
+    away in every account type): a buy to close finds the short one."""
+    j = tj.build_journal([
+        t(1, "2026-10-01", "Buy to Open", C175, 1, -300.0, order=1),
+        t(2, "2026-10-02", "Sell to Open", C175, 1, 290.0, order=2),
+        t(3, "2026-10-03", "Buy to Close", C175, 1, -250.0, order=3),
+    ])
+    assert j.unmatched == []
+    short = next(p for p in j.positions if p.id == "order-2")
+    assert (short.status, short.realized) == ("closed", pytest.approx(40.0))
+

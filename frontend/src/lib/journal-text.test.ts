@@ -36,9 +36,18 @@ describe("journal words", () => {
   });
 
   it("sums the closed positions in facts, not advice", () => {
-    expect(text(summarySentence({ realized: 1234.5, closed: 12, profitable: 8, average_days: 9.4, fees: 56.2 }))).toBe(
+    expect(text(summarySentence({ realized: 1234.5, closed: 12, profitable: 8, unpriced: 0, average_days: 9.4, fees: 56.2 }))).toBe(
       "**12** positions closed, **8** at a profit (**67%**), held **9 days** on average: **+$1,235** realized after **$56** in fees.",
     );
-    expect(text(summarySentence({ realized: 0, closed: 0, profitable: 0, average_days: null, fees: 0 }))).toBe("Nothing closed yet.");
+    expect(text(summarySentence({ realized: 0, closed: 0, profitable: 0, unpriced: 0, average_days: null, fees: 0 }))).toBe("Nothing closed yet.");
+  });
+
+  it("counts apart what closed without a computed P&L", () => {
+    expect(text(summarySentence({ realized: 200, closed: 1, profitable: 1, unpriced: 2, average_days: 3, fees: 1 }))).toBe(
+      "**1** position closed, **1** at a profit (**100%**), held **3 days** on average: **+$200** realized after **$1** in fees. **2** more closed without a computed P&L.",
+    );
+    expect(text(summarySentence({ realized: 0, closed: 0, profitable: 0, unpriced: 1, average_days: null, fees: 0 }))).toBe(
+      "**1** position closed without a computed P&L.",
+    );
   });
 });

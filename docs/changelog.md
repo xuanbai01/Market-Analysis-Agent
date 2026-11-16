@@ -296,4 +296,15 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **From #129's tenth AI review:**
     - **The chunked-insert test writes 7,000 rows (35,000 parameters).** The 6,000 it wrote fit in one statement, so it would have passed without chunking. The limit is about 6,550 transactions, not 5,400.
     - **Not changed:** the client turns its own timeouts into `TastytradeUnavailable`, so a bare `TimeoutError` can only be the sync's deadline.
+- **The trade journal (2026-11-16, tastytrade PR D, ADR 0009):** `/trades` reads the owner's trades as positions.
+  - **`trade_journal`:** pure, computed from the trade copy on each visit, never stored.
+    - **Matching:** FIFO lots per account and contract; "to Open" opens, "to Close" closes the oldest lots, a plain Buy or Sell closes first and opens the rest; each fill's net value (fees in) split by quantity.
+    - **Positions:** every lot one order opened, named from its legs (`trade_structures`: verticals, calendars and diagonals, straddles and strangles, butterflies, iron condors and butterflies, covered calls; else "custom, N legs").
+    - **Endings:** closed, expired, assigned, exercised, or mixed. An assignment closes the option at no cash (its premium stays with it) and delivers stock as a position of its own, linked to the option's.
+    - **Rolls:** an order that closes one position and opens another on the same underlying links the two.
+    - **Not guessed:** a close with nothing open, an action with no buy or sell (a split: that contract's later P&L isn't computed), an option symbol that doesn't read; each is listed with the reason. A reversal and the fill it cancels leave the matching.
+    - **Totals:** realized by month closed and by underlying, positions closed and how many at a profit, days held, fees.
+  - **The route:** `GET /v1/owner/trades` carries `journal`, built off the event loop; the trades now keep their order and reversal ids.
+  - **The page:** a Journal tab (the default) beside Transactions: a sentence on what closed, realized P&L by month (hand-rolled SVG bars from one zero line, gains and losses in the pos and neg tokens, hover for the figure), the positions newest first with how each stands or ended, filterable by open or closed and by underlying, each opening to its legs, origin, rolls and fills, and what isn't matched.
+  - **The fake backend** serves a made-up history (an expiry, a vertical, an assignment, a roll, an open put, a close with nothing to match).
 

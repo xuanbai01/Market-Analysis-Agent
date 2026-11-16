@@ -92,6 +92,8 @@ _ALLOWED = re.compile(
     r"|/customers/me/accounts"
     rf"|/accounts/{_ACCOUNT}/(?:transactions|positions|balance-snapshots)"
 )
+# An answer bigger than this is parsed off the event loop (CPU on Fly's shared core).
+LARGE_BODY_BYTES = 256 * 1024
 _ACCOUNT_IN_PATH = re.compile(r"(/accounts/)[^/?#]+")
 
 
@@ -365,6 +367,12 @@ async def get(path: str, params: dict[str, Any] | None = None, *, op: str) -> di
     if response.status_code >= 400:
         raise TastytradeUnavailable(f"tastytrade answered {response.status_code}", status=response.status_code)
     try:
-        return response.json()
+        if len(response.content) > LARGE_BODY_BYTES:  # an option chain: megabytes for SPX
+            return await asyncio.to_thread(_json, response)
+        return _json(response)
     except ValueError:
         raise TastytradeUnavailable("tastytrade answered something that isn't JSON") from None
+
+
+def _json(response: httpx.Response) -> Any:
+    return response.json()

@@ -103,10 +103,10 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 
 **Goal:** a page of the owner's open positions with computed analysis (what the market prices, what history shows; no advice, no prompt), and a copy of their trades both of their PCs can reach. The owner chose an encrypted copy in Neon and a key their password manager syncs.
 
-- [ ] **PR 1 — the owner key** *(branch `feature/owner-key`)*: `require_owner` (`X-Owner-Key` on top of the shared secret, 404 unset, per-IP lockout), `GET /v1/owner/status`, CORS, the sign-in form's hidden username for password managers, deployment §10. **Owner:** make and import `OWNER_KEY`, save it in the password manager.
-- [ ] **PR 2 — `GET /v1/owner/positions`** *(branch `feature/owner-positions`)*: accounts and positions from tastytrade, OCC symbols parsed, live REST quotes (mark, IV, Greeks), grouped by underlying, 15 s in memory, never stored, accounts numbered 1, 2, ... and never named.
-- [ ] **PR 3 — the `/positions` page** *(branch `feature/positions-page`)*: the owner unlock form and key storage, then per underlying: legs, Greeks totals, payoff at expiry and today (Black-76 in TS, held to Python), what-ifs, the risk-neutral probability of profit, how often history moved that far, earnings in the holding period, max pain and walls.
-- [ ] **PR 4 — the encrypted trade copy and `/trades`** *(branch `feature/owner-trades`)*: `cryptography`, `OWNER_VAULT_KEY`, AES-256-GCM per row with the transaction id as associated data, migration 0006, sync on visit, CSV download.
+- [x] **PR 1 — the owner key** *(branch `feature/owner-key`)*: `require_owner` (`X-Owner-Key` on top of the shared secret, 404 unset, per-IP lockout), `GET /v1/owner/status`, CORS, the sign-in form's hidden username for password managers, deployment §10. **Owner:** make and import `OWNER_KEY`, save it in the password manager.
+- [x] **PR 2 — `GET /v1/owner/positions`** *(branch `feature/owner-positions`)*: accounts and positions from tastytrade, OCC symbols parsed, live REST quotes (mark, IV, Greeks), grouped by underlying, 15 s in memory, never stored, accounts numbered 1, 2, ... and never named.
+- [x] **PR 3 — the `/positions` page** *(branch `feature/positions-page`)*: the owner unlock form and key storage, then per underlying: legs, Greeks totals, payoff at expiry and today (Black-76 in TS, held to Python), what-ifs, the risk-neutral probability of profit, how often history moved that far, earnings in the holding period, max pain and walls.
+- [x] **PR 4 — the encrypted trade copy and `/trades`** *(branch `feature/owner-trades`)*: `cryptography`, `OWNER_VAULT_KEY`, AES-256-GCM per row with the transaction id, key version and estimated-fee flag as associated data, migration 0006, sync on visit, CSV download.
 
 ## Plan — tastytrade, live and personal (2026-11-15, ADR 0009)
 
@@ -135,7 +135,7 @@ So nothing from tastytrade is stored, sent to a prompt or shown in the demo. The
     - **B:** REST quotes already carry open interest, IV and Greeks, so live quotes need no DXLink.
     - **C:** a live chart of about 9 years of daily IV from candles, plus an option contract's price and IV path.
     - **D:** the journal can show each trade's contract path from candles.
-- [ ] **PR B — live quotes on the options page:** `GET /v1/options/{symbol}/live/{expiry}`, cached 10 s; our IVs from live mids; Yahoo's open interest; a Live/Delayed switch; the builder prices at live bid/ask.
+- [ ] **PR B — live quotes on the options page** *(branch `feature/live-quotes`)*: `GET /v1/owner/options/{symbol}/live/{expiry}`, behind the owner key (tastytrade's data is the owner's alone), cached 10 s; strikes from tastytrade's nested chain, bids, asks, volume and open interest from its quotes; our IVs from live mids; a Live switch on the expiry, refreshed every 15 s; the builder prices at live bid/ask. 422 for an unlisted expiry, since the page reads a 404 as a refused key.
 - [ ] **PR C — market history, live:** `GET /v1/options/{symbol}/history` (market metrics; daily candles, with IV if they carry it); a "History · tastytrade" panel.
 - [ ] **PR D — the owner's trades:** `trade_journal` (orders to strategies, FIFO opens and closes, expirations and assignments, fees); `GET /v1/trades`; a lazy `/trades` page. Fetched on demand, account numbers masked, no advice.
 

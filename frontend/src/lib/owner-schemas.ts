@@ -5,6 +5,8 @@
  */
 import { z } from "zod";
 
+import { ExpiryChainSchema } from "./options-schemas";
+
 const MaybeNum = z.number().nullable().default(null);
 
 export const OwnerStatusSchema = z.object({ tastytrade: z.boolean(), vault: z.boolean().default(false) });
@@ -99,4 +101,17 @@ export const OwnerTradesSchema = z.object({
   reason: z.string().nullable().default(null),
 });
 export type OwnerTrades = z.infer<typeof OwnerTradesSchema>;
+
+/** One expiry at tastytrade's live quotes, shaped like the delayed chain
+ * (our own IVs from their mids). The owner's only; never persisted. */
+export const LiveChainSchema = z.object({
+  symbol: z.string(),
+  expiry: z.string(),
+  spot: z.number(),
+  quoted_at: z.string(),
+  updated_at: z.string().nullable().default(null),
+  chain: ExpiryChainSchema,
+  source: z.literal("tastytrade"),
+});
+export type LiveChain = z.infer<typeof LiveChainSchema>;
 

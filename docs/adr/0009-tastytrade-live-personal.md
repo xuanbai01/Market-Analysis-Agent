@@ -85,7 +85,7 @@ tastytrade's Open API is free to account holders. We read its docs and its Open 
 6. **The owner's own trades** may be read and analysed. They still stay out of the database (at first) and out of any prompt.
 7. **The order of work:**
    - **PR A:** connect, then probe what the account gets.
-   - **PR B:** live quotes on the options page.
+   - **PR B:** live quotes on the options page, behind the owner key (`/v1/owner/options/{symbol}/live/{expiry}`).
    - **PR C:** market history, live.
    - **PR D:** a trade journal.
 

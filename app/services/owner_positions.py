@@ -111,7 +111,7 @@ def reset() -> None:
     _cache, _accounts, _lock = None, None, asyncio.Lock()
 
 
-def _field(item: dict[str, Any], name: str) -> Any:
+def field_of(item: dict[str, Any], name: str) -> Any:
     """A field by its dashed name, or the camelCase one the spec also shows."""
     if name in item:
         return item[name]
@@ -157,8 +157,8 @@ async def account_numbers() -> list[str]:
     payload = await tt.get("/customers/me/accounts", op="accounts")
     numbers = []
     for entry in items_of(payload, strict=True):
-        account = _field(entry, "account")
-        number = _field(account, "account-number") if isinstance(account, dict) else None
+        account = field_of(entry, "account")
+        number = field_of(account, "account-number") if isinstance(account, dict) else None
         if isinstance(number, str) and _ACCOUNT.fullmatch(number):
             numbers.append(number)
     _accounts = (_clock(), numbers) if numbers else None
@@ -172,7 +172,7 @@ class _Leg:
 
 
 def _text(item: dict[str, Any], name: str) -> str:
-    value = _field(item, name)
+    value = field_of(item, name)
     return value if isinstance(value, str) else ""
 
 
@@ -180,8 +180,8 @@ def _read(item: dict[str, Any], account: int) -> _Leg | UnanalysedPosition | Non
     """One position row as a leg, as not analysed, or None when it's closed."""
     kind = _text(item, "instrument-type")
     symbol = _text(item, "symbol")
-    direction = _field(item, "quantity-direction")
-    size = finite_number(_field(item, "quantity"))
+    direction = field_of(item, "quantity-direction")
+    size = finite_number(field_of(item, "quantity"))
     if direction == "Zero" or size == 0:
         return None
     sign = _SIGNS.get(direction) if isinstance(direction, str) else None
@@ -189,10 +189,10 @@ def _read(item: dict[str, Any], account: int) -> _Leg | UnanalysedPosition | Non
     other = UnanalysedPosition(account=account, instrument_type=kind or "Unknown", symbol=symbol, quantity=quantity)
     # A share is one share, whatever the row says; an option needs a stated
     # multiplier (without one its deliverable is unknown, and it isn't modelled).
-    multiplier = 1 if kind == "Equity" else _count(_field(item, "multiplier"))
+    multiplier = 1 if kind == "Equity" else _count(field_of(item, "multiplier"))
     if quantity is None or multiplier is None or kind not in ("Equity Option", "Equity"):
         return other
-    average = finite_number(_field(item, "average-open-price"))
+    average = finite_number(field_of(item, "average-open-price"))
     if kind == "Equity":
         if not _TICKER.fullmatch(symbol):
             return other
@@ -220,23 +220,23 @@ def _fraction(iv: float | None) -> float | None:
 
 
 def _live_quote(item: dict[str, Any]) -> LiveQuote:
-    stamp = _field(item, "updated-at")
+    stamp = field_of(item, "updated-at")
     try:
         updated = datetime.fromisoformat(stamp) if isinstance(stamp, str) else None
     except ValueError:
         updated = None
     if updated is not None and updated.tzinfo is None:
         updated = updated.replace(tzinfo=UTC)  # unzoned, the browser would read it as local time
-    mark = finite_number(_field(item, "mark"))
+    mark = finite_number(field_of(item, "mark"))
     return LiveQuote(
-        bid=finite_number(_field(item, "bid")),
-        ask=finite_number(_field(item, "ask")),
-        mark=mark if mark is not None else finite_number(_field(item, "mid")),
-        iv=_fraction(finite_number(_field(item, "volatility"))),
-        delta=finite_number(_field(item, "delta")),
-        gamma=finite_number(_field(item, "gamma")),
-        theta=finite_number(_field(item, "theta")),
-        vega=finite_number(_field(item, "vega")),
+        bid=finite_number(field_of(item, "bid")),
+        ask=finite_number(field_of(item, "ask")),
+        mark=mark if mark is not None else finite_number(field_of(item, "mid")),
+        iv=_fraction(finite_number(field_of(item, "volatility"))),
+        delta=finite_number(field_of(item, "delta")),
+        gamma=finite_number(field_of(item, "gamma")),
+        theta=finite_number(field_of(item, "theta")),
+        vega=finite_number(field_of(item, "vega")),
         updated_at=updated,
     )
 
@@ -263,7 +263,7 @@ async def _quote_batch(kind: str, batch: list[str], quotes: dict[str, LiveQuote]
             return False
         raise
     for item in items_of(payload, strict=True):  # a wrong shape fails the read, not "no quotes"
-        symbol = _field(item, "symbol")
+        symbol = field_of(item, "symbol")
         if isinstance(symbol, str) and symbol in batch:
             quotes[symbol] = _live_quote(item)
     return True

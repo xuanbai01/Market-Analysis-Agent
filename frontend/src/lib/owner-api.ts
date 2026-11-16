@@ -5,6 +5,8 @@
  */
 import { ApiError, BACKEND_URL, authHeaders, extractErrorTitle, parseJsonAndValidate, parseRetryAfter } from "./api";
 import {
+  type LiveChain,
+  LiveChainSchema,
   type OwnerPositions,
   OwnerPositionsSchema,
   type OwnerStatus,
@@ -50,6 +52,14 @@ export function fetchOwnerTrades(key: string): Promise<OwnerTrades> {
 /** The stored copy as a CSV file to keep. */
 export function fetchOwnerTradesCsv(key: string): Promise<Blob> {
   return ownerGet("/v1/owner/trades.csv", key, (resp) => resp.blob());
+}
+
+/** One expiry at tastytrade's live quotes (``expiry`` is YYYY-MM-DD), at most 10 s old. */
+export function fetchLiveChain(key: string, symbol: string, expiry: string): Promise<LiveChain> {
+  const ticker = encodeURIComponent(symbol.toUpperCase());
+  return ownerGet(`/v1/owner/options/${ticker}/live/${encodeURIComponent(expiry)}`, key, (resp) =>
+    parseJsonAndValidate(resp, LiveChainSchema),
+  );
 }
 
 /** The server refused the owner key (wrong, or none configured there). */

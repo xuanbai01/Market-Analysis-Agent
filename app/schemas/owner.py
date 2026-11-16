@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.schemas.options import ExpiryChain
+
 
 class OwnerStatus(BaseModel):
     """What's set up for the owner. The unlock form reads it to check a key."""
@@ -113,4 +115,20 @@ class OwnerTrades(BaseModel):
     # False when this visit couldn't reach tastytrade: the copy as it stood.
     synced: bool
     reason: str | None = None
+
+
+class LiveChain(BaseModel):
+    """One expiry's chain at tastytrade's live quotes (owner_live_chain): the
+    same shape as the delayed chain, our own IVs from their mids. Shown to the
+    owner only; never stored."""
+
+    symbol: str
+    expiry: date
+    spot: float
+    # The time the IVs are figured from (the last close outside a session).
+    quoted_at: datetime
+    # The newest of tastytrade's quote times.
+    updated_at: datetime | None = None
+    chain: ExpiryChain
+    source: Literal["tastytrade"] = "tastytrade"
 

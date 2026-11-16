@@ -219,6 +219,24 @@ describe("PositionsPage", () => {
     expect(within(nvda).getByTestId("position-greeks")).not.toHaveTextContent(/: \$0 for a 1% rise/);
   });
 
+  it("keeps the marks and their ages current while the page is open", async () => {
+    // A tab left open shouldn't freeze "10s ago" (#128's last AI review).
+    vi.useRealTimers(); // beforeEach faked Date only; this needs the intervals too
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval", "setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    vi.setSystemTime(NOW);
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerPositions).mockResolvedValue(POSITIONS);
+    renderPage();
+    const [nvda] = await screen.findAllByTestId("position-group");
+    expect(within(nvda).getAllByText("10s ago").length).toBeGreaterThan(0);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(16_000);
+    });
+    await vi.waitFor(() => expect(fetchOwnerPositions).toHaveBeenCalledTimes(2)); // read again
+    expect(within(nvda).getAllByText(/^2\ds ago$/).length).toBeGreaterThan(0); // the same quotes, older (the clock ticks every 5 s)
+    expect(within(nvda).queryAllByText("10s ago")).toHaveLength(0);
+  });
+
   it("says when the copy is old or cut short", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchOwnerPositions).mockResolvedValue({ ...POSITIONS, stale: true, truncated: true });

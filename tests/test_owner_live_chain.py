@@ -247,3 +247,30 @@ async def test_no_live_price_for_the_underlying_is_said_so(account: _Tastytrade,
     del account.quotes["SPY"]
     with pytest.raises(lc.LiveChainUnavailable, match="no price for the underlying"):
         await lc.live_chain("SPY", EXPIRY)
+
+
+async def test_one_strike_is_quoted_once_whatever_roots_list_it(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An adjusted root that still declares 100 shares (or SPX beside SPXW)
+    lists the same strikes again: each strike is kept once, the standard
+    root's, so its open interest isn't doubled (#130's AI review)."""
+    plain = account.get
+
+    async def get(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        answer = await plain(path, params, op=op)
+        if path == "/option-chains/SPY/nested":
+            twin = {**answer["data"]["items"][0], "root-symbol": "SPY1"}
+            twin["expirations"] = [{
+                "expiration-date": EXPIRY.isoformat(),
+                "strikes": [{"strike-price": f"{k:.1f}", "call": _occ("C", k).replace("SPY   ", "SPY1  "),
+                             "put": _occ("P", k).replace("SPY   ", "SPY1  ")} for k in STRIKES],
+            }]
+            answer = {"data": {"items": [twin, *answer["data"]["items"]]}}
+        return answer
+
+    monkeypatch.setattr(lc.tt, "get", get)
+    chain = (await lc.live_chain("SPY", EXPIRY)).chain
+    strikes = [row.strike for row in chain.rows]
+    assert len(strikes) == len(set(strikes))
+    asked = [s for path, p in account.calls if path == "/market-data/by-type" for s in str((p or {}).get("equity-option", "")).split(",") if s]
+    assert asked and all(s.startswith("SPY   ") for s in asked)  # the standard root's contracts
+

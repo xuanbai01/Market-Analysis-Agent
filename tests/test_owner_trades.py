@@ -466,3 +466,13 @@ def test_an_amount_without_a_credit_or_debit_is_no_figure() -> None:
     assert ot._signed("120.5", "Debit") == -120.5 and ot._signed("120.5", "Credit") == 120.5
     assert ot._signed("0", "None") == 0.0
     assert ot._signed("120.5", None) is None and ot._signed("120.5", "None") is None
+
+
+async def test_a_fill_keeps_its_order_and_what_it_reverses(world: _World) -> None:
+    """The journal groups legs by order and drops reversals (PR D)."""
+    world.history = [_txn(1, "2026-10-01", **{"order-id": 77}), _txn(2, "2026-10-02", **{"reverses-id": 1})]
+    await _sync(world)
+    trades = {t.id: t for t in await ot.list_trades(world.session)}  # type: ignore[arg-type]
+    assert (trades[1].order_id, trades[1].reverses_id) == (77, None)
+    assert (trades[2].order_id, trades[2].reverses_id) == (None, 1)
+

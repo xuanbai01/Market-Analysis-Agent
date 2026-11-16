@@ -301,3 +301,22 @@ async def test_a_chain_is_read_into_rows_off_the_event_loop(account: _Tastytrade
     monkeypatch.setattr(lc, "_rows", recording)
     await lc.live_chain("SPY", EXPIRY)
     assert threads and not any(threads)
+
+
+async def test_an_expiry_listed_since_the_chain_was_kept_is_found(account: _Tastytrade) -> None:
+    """The kept chain is read again before saying an expiry isn't listed: a
+    weekly listed since then would otherwise be "not listed" for ten minutes
+    (#130's AI review)."""
+    later = date(2026, 12, 24)
+    await lc.live_chain("SPY", EXPIRY)  # keeps the chain
+    with pytest.raises(lc.NotListed):
+        await lc.live_chain("SPY", later)
+    assert sum(1 for path, _ in account.calls if path == "/option-chains/SPY/nested") == 2  # read again once
+
+
+async def test_an_expiry_that_has_closed_is_not_priced(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:
+    """After its close an expiry has no time left: not priced at a negative one."""
+    monkeypatch.setattr(lc, "_now", lambda: datetime(2026, 12, 18, 22, tzinfo=UTC))  # after EXPIRY's close
+    with pytest.raises(lc.NotListed):
+        await lc.live_chain("SPY", EXPIRY)
+

@@ -11,9 +11,6 @@ name: Live Eval
 #
 #   gh workflow run live-eval.yml --ref <branch> -f suite=review -f prs="128 129 130 131"
 #
-# Suite "review-verify" checks the review's second look against findings
-# already labelled (tests/evals/ai_review_findings.json).
-#
 # It costs money (about a cent per report on DeepSeek) and calls the
 # live data providers, so it never runs on a push. Start it by hand
 # before merging a change to report content — prompts, claims, tools,
@@ -52,12 +49,15 @@ on:
           - options
           - all
           - review
-          - review-verify
         default: research
       prs:
         description: PR numbers to replay (suite "review" only)
         type: string
         default: "128 129 130 131"
+      configs:
+        description: Which reviews to replay, of A B C D (suite "review" only)
+        type: string
+        default: "ABCD"
 
 permissions:
   contents: read
@@ -70,7 +70,7 @@ concurrency:
 jobs:
   golden:
     name: Golden eval (${{ inputs.provider }})
-    if: inputs.suite != 'review' && inputs.suite != 'review-verify'
+    if: inputs.suite != 'review'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -157,7 +157,7 @@ jobs:
 
   review:
     name: AI review eval
-    if: inputs.suite == 'review' || inputs.suite == 'review-verify'
+    if: inputs.suite == 'review'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -176,15 +176,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # Through the environment, not interpolated into the script.
           PRS: ${{ inputs.prs }}
-          SUITE: ${{ inputs.suite }}
+          CONFIGS: ${{ inputs.configs }}
         run: |
           case "$PRS" in *[!0-9\ ]*) echo "::error::prs takes PR numbers only."; exit 1;; esac
-          if [ "$SUITE" = "review-verify" ]; then
-            python scripts/ai_review_eval.py --verify tests/evals/ai_review_findings.json --out review-eval.json
-          else
-            # shellcheck disable=SC2086 # one argument per PR number
-            python scripts/ai_review_eval.py $PRS --out review-eval.json
-          fi
+          case "$CONFIGS" in *[!ABCD]*|"") echo "::error::configs takes letters A to D."; exit 1;; esac
+          # shellcheck disable=SC2086 # one argument per PR number
+          python scripts/ai_review_eval.py $PRS --configs "$CONFIGS" --out review-eval.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -20,6 +20,7 @@ ai_review = importlib.util.module_from_spec(_spec)
 # dataclasses look their module up in sys.modules while the class is built.
 sys.modules["ai_review"] = ai_review
 _spec.loader.exec_module(ai_review)
+asker = sys.modules["ai_review_ask"]
 
 
 def _file(path: str, body: str = "+x = 1\n") -> str:
@@ -82,7 +83,7 @@ def test_project_rules_empty_when_the_section_is_missing():
 
 
 def _messages(part_no=1, diff="DIFF-TEXT", earlier=""):
-    return ai_review.build_messages(
+    return asker.build_messages(
         title="feat: insider activity", body="Adds a card.", rules="- **Rule one.**",
         all_paths=["app/a.py", "tests/test_a.py"], part_no=part_no, part_count=2, diff=diff,
         earlier=earlier,
@@ -112,9 +113,32 @@ def test_every_part_shares_one_prefix_so_the_cache_covers_it():
 
 
 def test_messages_without_a_description():
-    messages = ai_review.build_messages(title="fix: x", body=None, rules="", all_paths=["a.py"],
+    messages = asker.build_messages(title="fix: x", body=None, rules="", all_paths=["a.py"],
                                         part_no=1, part_count=1, diff="D")
     assert "(no description)" in messages[1]["content"]
+
+
+def test_a_lens_comes_after_the_diff_so_passes_over_a_part_share_the_prefix():
+    plain = _messages(diff="DIFF-TEXT")[1]["content"]
+    lensed = asker.build_messages(title="feat: insider activity", body="Adds a card.", rules="- **Rule one.**",
+                                  all_paths=["app/a.py", "tests/test_a.py"], part_no=1, part_count=2,
+                                  diff="DIFF-TEXT", lens="time and dates")[1]["content"]
+    assert lensed.startswith(plain)
+    assert "Look hardest at time and dates" in lensed[len(plain):]
+
+
+def test_a_full_review_reads_each_part_once_per_lens():
+    asked = []
+
+    def ask(messages, options):
+        asked.append(messages[1]["content"])
+        return _answer([])
+
+    files = [ai_review.split_diff(_file("app/a.py"))[0]]
+    outcome = asker.review(files=files, all_paths=["app/a.py"], title="t", body=None, rules="", ask=ask,
+                           part_chars=1000, max_parts=4, passes=3)
+    assert len(asked) == 3 and outcome.passes == 3
+    assert {next(lens for lens in asker.LENSES if lens in text) for text in asked} == set(asker.LENSES)
 
 
 def test_a_fix_round_is_shown_the_earlier_findings_and_replies():
@@ -133,12 +157,12 @@ def test_request_part_thinks_first_at_low_effort():
         calls.append(options)
         return _answer([_finding()])
 
-    result = ai_review.request_part(ask)
+    result = asker.request_part(ask)
     assert [f.path for f in result.findings] == ["app/a.py"]
     assert result.thinking is True
     assert len(calls) == 1
     assert calls[0]["reasoning_effort"] == "low"
-    assert calls[0]["max_tokens"] == ai_review.THINKING_MAX_TOKENS
+    assert calls[0]["max_tokens"] == asker.THINKING_MAX_TOKENS
 
 
 def test_request_part_without_thinking_when_configured():
@@ -148,7 +172,7 @@ def test_request_part_without_thinking_when_configured():
         calls.append(options)
         return _answer([])
 
-    result = ai_review.request_part(ask, thinking=False)
+    result = asker.request_part(ask, thinking=False)
     assert result.thinking is False and len(calls) == 1
     assert calls[0]["thinking"] == {"type": "disabled"}
     assert calls[0]["response_format"] == {"type": "json_object"}
@@ -163,15 +187,15 @@ def test_request_part_asks_again_without_thinking_when_reasoning_uses_the_budget
         calls.append(options)
         return next(answers)
 
-    result = ai_review.request_part(ask)
+    result = asker.request_part(ask)
     assert result.thinking is False and len(result.findings) == 1
     assert calls[1]["thinking"] == {"type": "disabled"}
-    assert calls[1]["max_tokens"] == ai_review.PLAIN_MAX_TOKENS
+    assert calls[1]["max_tokens"] == asker.PLAIN_MAX_TOKENS
 
 
 def test_request_part_asks_again_when_the_answer_isnt_json():
     answers = iter([_answer(text="1. **high** — prose, not JSON"), _answer([])])
-    result = ai_review.request_part(lambda options: next(answers))
+    result = asker.request_part(lambda options: next(answers))
     assert result.thinking is False and result.findings == []
 
 
@@ -184,23 +208,23 @@ def test_request_part_asks_again_when_the_thinking_request_is_refused():
             raise answer
         return answer
 
-    assert ai_review.request_part(ask).thinking is False
+    assert asker.request_part(ask).thinking is False
 
 
 def test_request_part_fails_when_both_attempts_fail():
     with pytest.raises(RuntimeError):
-        ai_review.request_part(lambda options: _answer(text="", finish="length"))
+        asker.request_part(lambda options: _answer(text="", finish="length"))
 
 
 def test_an_answer_cut_off_at_the_token_limit_is_not_read():
     # The second live run: reasoning took 31.7K of 32K and the review
     # stopped mid-sentence.
     with pytest.raises(RuntimeError, match="cut off"):
-        ai_review.answer_text(_answer(text='{"findings": [', finish="length"))
+        asker.answer_text(_answer(text='{"findings": [', finish="length"))
 
 
 def test_usage_adds_up_across_parts():
-    usage = ai_review.Usage()
+    usage = asker.Usage()
     usage.add(_answer()["usage"])
     usage.add(_answer()["usage"])
     assert (usage.read, usage.written, usage.reasoning, usage.cached) == (200, 100, 80, 120)
@@ -328,18 +352,20 @@ def test_main_reviews_each_part_and_posts_one_comment(pr_env, monkeypatch):
 
     def ask(messages, options, **kwargs):
         asked.append(messages[1]["content"])
+        assert options["thinking"] == {"type": "disabled"}  # off unless AI_REVIEW_THINKING=low
         path = "app/a.py" if "\n+a\n" in messages[1]["content"] else "app/b.py"
         return _answer([_finding(path=path, severity="low" if path == "app/b.py" else "high")])
 
     monkeypatch.setattr(ai_review, "_ask_deepseek", ask)
 
     assert ai_review.main() == 0
-    assert len(asked) == 2
+    assert len(asked) == 2 * asker.FULL_PASSES  # each part once per pass
     # Source with whole functions, tests with three lines of context.
     assert ("aaaaaaa1...bbbbbbb2", ("app/a.py", "app/b.py"), True) in seen
     assert ("aaaaaaa1...bbbbbbb2", ("tests/test_a.py",), False) in seen
     body = pr_env["posted"][0]
     assert body.index("`app/a.py:1`") < body.index("`app/b.py:1`")  # most severe first
+    assert body.count("`app/a.py:1`") == 1 and f"raised by {asker.FULL_PASSES} passes" in body
     assert "2 parts" in body and "bbbbbbb" in body
     assert ai_review.read_state(body)["sha"] == "bbbbbbb2"
 
@@ -367,7 +393,7 @@ def test_a_push_after_a_review_reviews_only_what_changed_since(pr_env, monkeypat
     pr_env["set_event"]("synchronize")
     earlier = ai_review.render_comment(
         findings=[ai_review.Finding("medium", "app/a.py", 3, "the old bug", "x")], riskiest=[],
-        head_sha="ccccccc3", model="m", parts=1, usage=ai_review.Usage(), plan=None, mode="full",
+        head_sha="ccccccc3", model="m", parts=1, usage=asker.Usage(), plan=None, mode="full",
         earlier=[], failed=[],
     )
     pr_env["comments"] = [
@@ -393,7 +419,7 @@ def test_a_push_after_a_review_reviews_only_what_changed_since(pr_env, monkeypat
 def test_a_push_already_reviewed_asks_nothing(pr_env, monkeypatch):
     pr_env["set_event"]("synchronize")
     body = ai_review.render_comment(findings=[], riskiest=[], head_sha="bbbbbbb2", model="m", parts=1,
-                                    usage=ai_review.Usage(), plan=None, mode="full", earlier=[], failed=[])
+                                    usage=asker.Usage(), plan=None, mode="full", earlier=[], failed=[])
     pr_env["comments"] = [{"id": 7, "body": body, "author_association": "NONE"}]
     _use_git(monkeypatch, {"app/a.py": "+a\n"})
     monkeypatch.setattr(ai_review, "_ask_deepseek", lambda *a, **k: pytest.fail("already reviewed"))
@@ -465,4 +491,4 @@ def test_request_part_asks_again_after_a_dropped_connection():
             raise answer
         return answer
 
-    assert ai_review.request_part(ask).thinking is False
+    assert asker.request_part(ask).thinking is False

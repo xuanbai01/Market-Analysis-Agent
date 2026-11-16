@@ -142,3 +142,30 @@ def test_replies_keep_the_newest_within_their_cap():
     comments = [_comment("<!-- ai-review:reply -->\n" + ("old " * 3000)), _comment("<!-- ai-review:reply -->\nnewest")]
     replies = findings.replies_from(comments)
     assert "newest" in replies and len(replies) <= findings.REPLIES_MAX_CHARS
+
+
+# ── one finding per problem across passes ────────────────────────────
+
+
+def test_findings_on_the_same_lines_from_several_passes_are_one():
+    merged = findings.merge_duplicates([_f("low", line=10, defect="a"), _f("high", line=12, defect="b"),
+                                        _f("medium", line=40)])
+    assert [(f.severity, f.line, f.passes) for f in merged] == [("high", 12, 2), ("medium", 40, 1)]
+    assert merged[0].defect == "b"  # the most severe wording
+
+
+def test_findings_on_other_files_or_far_apart_stay_apart():
+    merged = findings.merge_duplicates([_f("low", path="a.py", line=1), _f("low", path="b.py", line=1),
+                                        _f("low", path="a.py", line=9)])
+    assert len(merged) == 3
+
+
+def test_findings_without_lines_merge_only_when_they_say_the_same():
+    merged = findings.merge_duplicates([_f("low", line=None, defect="x"), _f("low", line=None, defect="x"),
+                                        _f("low", line=None, defect="y")])
+    assert [f.passes for f in merged] == [2, 1]
+
+
+def test_a_finding_raised_by_several_passes_says_so():
+    text = findings.render_findings([findings.Finding("high", "a.py", 1, "d", "f", passes=3)])
+    assert "raised by 3 passes" in text

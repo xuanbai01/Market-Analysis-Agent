@@ -13,6 +13,8 @@ from dataclasses import asdict, dataclass
 
 SEVERITIES = ("high", "medium", "low")
 MAX_FINDINGS_PER_PART = 8
+# Two findings on one file within this many lines are one problem.
+SAME_PLACE_LINES = 3
 STATE_MAX_FINDINGS = 60
 STATE_TEXT_CHARS = 300
 REPLIES_MAX_CHARS = 6_000
@@ -33,6 +35,7 @@ class Finding:
     line: int | None
     defect: str
     failure: str
+    passes: int = 1  # how many passes raised it
 
 
 def _rank(f: Finding) -> tuple[int, str, int]:
@@ -88,6 +91,28 @@ def parse(text: str) -> tuple[list[Finding], str, int]:
     return found, str(data.get("riskiest") or "").strip(), dropped
 
 
+def _same_place(a: Finding, b: Finding) -> bool:
+    if a.path != b.path:
+        return False
+    if a.line is None or b.line is None:
+        return a.line is None and b.line is None and a.defect == b.defect
+    return abs(a.line - b.line) <= SAME_PLACE_LINES
+
+
+def merge_duplicates(found: list[Finding]) -> list[Finding]:
+    """One finding per problem when several passes raised it: the most
+    severe wording kept, with how many passes raised it."""
+    merged: list[Finding] = []
+    for f in sorted(found, key=_rank):
+        twin = next((i for i, m in enumerate(merged) if _same_place(m, f)), None)
+        if twin is None:
+            merged.append(f)
+        else:
+            m = merged[twin]
+            merged[twin] = Finding(m.severity, m.path, m.line, m.defect, m.failure, m.passes + f.passes)
+    return merged
+
+
 def _where(f: Finding) -> str:
     return f"`{f.path}:{f.line}`" if f.line is not None else f"`{f.path}`"
 
@@ -98,6 +123,7 @@ def render_findings(found: list[Finding]) -> str:
     ordered = sorted(found, key=_rank)
     return "\n".join(
         f"{i}. **{f.severity}** · {_where(f)} — {f.defect} Fails when: {f.failure}"
+        + (f" *(raised by {f.passes} passes)*" if f.passes > 1 else "")
         for i, f in enumerate(ordered, start=1)
     )
 

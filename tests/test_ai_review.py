@@ -507,3 +507,71 @@ def test_only_lows_says_nothing_above_low():
                                     riskiest=[], head_sha="abc1234", model="m", parts=1, usage=asker.Usage(),
                                     plan=None, mode="full", earlier=[], failed=[])
     assert "Nothing above low." in body and "Lows (1)" in body
+
+
+# ── from this PR's own first review ──────────────────────────────────
+
+
+def test_without_thinking_a_failed_request_is_asked_once_more():
+    # With thinking off there was no second attempt: one dropped
+    # connection failed a fix round's only pass.
+    answers = iter([RuntimeError("DeepSeek's connection dropped"), _answer([_finding()])])
+
+    def ask(options):
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    result = asker.request_part(ask, thinking=False)
+    assert len(result.findings) == 1
+
+
+def test_without_thinking_two_failures_fail_the_pass():
+    def ask(options):
+        raise RuntimeError("HTTP 500")
+
+    with pytest.raises(RuntimeError):
+        asker.request_part(ask, thinking=False)
+
+
+def test_passes_that_failed_are_counted_and_named_on_the_comment():
+    def ask(messages, options):
+        if asker.LENSES[2] in messages[1]["content"]:  # one pass fails every attempt
+            raise RuntimeError("HTTP 500")
+        return _answer([])
+
+    files = [ai_review.split_diff(_file("app/a.py"))[0]]
+    outcome = asker.review(files=files, all_paths=["app/a.py"], title="t", body=None, rules="", ask=ask,
+                           part_chars=1000, max_parts=4, passes=3)
+    assert outcome.failed == [] and outcome.failed_passes == 1
+    body = ai_review.render_comment(findings=[], riskiest=[], head_sha="abc1234", model="m", parts=1,
+                                    usage=outcome.usage, plan=outcome.plan, mode="full", earlier=[], failed=[],
+                                    passes=3, failed_passes=outcome.failed_passes)
+    assert "1 of 3 passes failed" in body
+
+
+def test_a_full_review_again_sees_the_earlier_findings_and_replies(pr_env, monkeypatch):
+    # A second full review is a fresh sample; without the answers it
+    # raises again what the author already showed doesn't hold.
+    pr_env["set_event"]("labeled", label="ai-review-full")
+    earlier = ai_review.render_comment(
+        findings=[ai_review.Finding("medium", "app/a.py", 3, "the old bug", "x")], riskiest=[],
+        head_sha="bbbbbbb2", model="m", parts=1, usage=asker.Usage(), plan=None, mode="full",
+        earlier=[], failed=[],
+    )
+    pr_env["comments"] = [
+        {"id": 7, "body": earlier, "author_association": "NONE"},
+        {"id": 8, "body": "<!-- ai-review:reply -->\nThe old bug doesn't hold: x is checked.",
+         "author_association": "OWNER"},
+    ]
+    seen = []
+    _use_git(monkeypatch, {"app/a.py": "+a\n"}, seen)
+    asked = []
+    monkeypatch.setattr(ai_review, "_ask_deepseek",
+                        lambda messages, options, **kw: asked.append(messages[1]["content"]) or _answer([]))
+
+    assert ai_review.main() == 0
+    assert all(rev == "aaaaaaa1...bbbbbbb2" for rev, _, _ in seen)  # the whole PR
+    assert all("the old bug" in text and "x is checked" in text for text in asked)
+    assert "the old bug" in pr_env["posted"][0]

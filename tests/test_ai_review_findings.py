@@ -169,3 +169,16 @@ def test_findings_without_lines_merge_only_when_they_say_the_same():
 def test_a_finding_raised_by_several_passes_says_so():
     text = findings.render_findings([findings.Finding("high", "a.py", 1, "d", "f", passes=3)])
     assert "raised by 3 passes" in text
+
+
+def test_a_line_with_a_digit_int_cant_read_is_no_line():
+    # "²".isdigit() is True, but int("²") raises.
+    text = json.dumps({"findings": [_item(line="1²")]})
+    assert [f.line for f in findings.parse(text)[0]] == [None]
+
+
+def test_a_long_reply_keeps_its_start():
+    # The start says which finding it answers.
+    reply = "Finding 2 doesn't hold: " + "because " * 2000
+    replies = findings.replies_from([_comment("<!-- ai-review:reply -->\n" + reply)])
+    assert replies.startswith("Finding 2 doesn't hold")

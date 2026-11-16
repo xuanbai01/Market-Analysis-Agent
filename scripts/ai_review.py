@@ -48,7 +48,14 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from ai_review_ask import EARLIER_PROMPT, FIX_PASSES, FULL_PASSES, Usage, review
+from ai_review_ask import (
+    EARLIER_FULL_PROMPT,
+    EARLIER_PROMPT,
+    FIX_PASSES,
+    FULL_PASSES,
+    Usage,
+    review,
+)
 from ai_review_findings import (
     Finding,
     describe_earlier,
@@ -139,7 +146,7 @@ def _left_out(plan: Plan | None, failed: list[str]) -> str:
 
 def render_comment(*, findings: list[Finding], riskiest: list[str], head_sha: str, model: str, parts: int,
                    usage: Usage, plan: Plan | None, mode: str, earlier: list[dict], failed: list[str],
-                   since: str | None = None, passes: int = 1) -> str:
+                   since: str | None = None, passes: int = 1, failed_passes: int = 0) -> str:
     plural = "part" if parts == 1 else "parts"
     times = f", {passes} passes each" if passes > 1 else ""
     if mode == "incremental" and since:
@@ -164,6 +171,9 @@ def render_comment(*, findings: list[Finding], riskiest: list[str], head_sha: st
     left_out = _left_out(plan, failed)
     if left_out:
         footer += f" Not reviewed — {left_out}."
+    if failed_passes:
+        footer += (f" {failed_passes} of {parts * passes} passes failed; the other passes over"
+                   " their parts stand.")
     state = {"sha": head_sha, "findings": merge_state_findings(earlier, findings)}
     return "\n\n".join(sections) + f"\n\n---\n<sub>{footer}</sub>\n{embed_state(state)}\n"
 
@@ -307,7 +317,12 @@ def main() -> int:
                                              replies=replies_from(comments) or "(none)")
         changed: set[str] | None = set(paths)
     else:
-        rev_range, paths, earlier, earlier_text, changed = f"{base}...{head}", pr_paths, [], "", None
+        # A full review again (the label, or after a force-push) sees what
+        # was raised and answered, so it doesn't raise the answered again.
+        rev_range, paths, changed = f"{base}...{head}", pr_paths, None
+        earlier = list(state.get("findings") or [])
+        earlier_text = EARLIER_FULL_PROMPT.format(
+            findings=describe_earlier(earlier), replies=replies_from(comments) or "(none)") if earlier else ""
 
     files = collect_files(rev_range, paths)
     post = dict(repo=repo, number=number, token=token, existing=existing)
@@ -337,7 +352,7 @@ def main() -> int:
     body = render_comment(findings=outcome.findings, riskiest=outcome.riskiest, head_sha=head, model=model,
                           parts=len(outcome.plan.parts), usage=outcome.usage, plan=outcome.plan, mode=mode,
                           earlier=earlier, failed=outcome.failed, since=state_sha if mode == "incremental" else None,
-                          passes=outcome.passes)
+                          passes=outcome.passes, failed_passes=outcome.failed_passes)
     print(f"Review comment {_post_or_update(body, **post)}.")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:

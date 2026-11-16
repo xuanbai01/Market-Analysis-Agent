@@ -447,4 +447,11 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **The loop** (docs/workflow.md §8):
     - Fix the full review's real findings, reply once a round, and merge when a fix-round review raises nothing real at medium or high. Lows go to the plan.
     - Before opening a PR, `/pre-pr-check` (#133) checks the diff for the kinds of defect the old rounds kept finding.
+  - **From this PR's own first review:** it read 3 parts 3 times in 15 s, read 138K tokens (35% cached), wrote 9.7K, and raised 28 findings above low. 5 held:
+    - with thinking off, a failed request is asked once more;
+    - passes that failed are named on the comment;
+    - a full review run again sees the earlier findings and replies;
+    - a line `int()` can't read is no line;
+    - a long reply keeps its start.
+    - **Not changed:** the rest misread the code. The module import works, since this comment is that job's output. Failed parts are counted once each, not once per attempt. A path can't be both in a part and over budget.
   - **Found on the way:** grading showed one of #130's "Not changed" replies was wrong. The live chain timed tastytrade's real-time quotes with Yahoo's delayed clock (#134).

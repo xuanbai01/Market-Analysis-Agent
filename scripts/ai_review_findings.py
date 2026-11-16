@@ -60,7 +60,8 @@ def _line(value: object) -> int | None:
         return None
     if isinstance(value, int):
         return value
-    if isinstance(value, str) and value.strip().isdigit():
+    # isdecimal, not isdigit: "²" is a digit int() can't read.
+    if isinstance(value, str) and value.strip().isdecimal():
         return int(value.strip())
     return None
 
@@ -184,7 +185,8 @@ def replies_from(comments: list[dict]) -> str:
         room = REPLIES_MAX_CHARS - used - 2
         if room <= 0:
             break
-        piece = reply if len(reply) <= room else reply[-room:]
+        # A reply's start says which finding it answers.
+        piece = reply if len(reply) <= room else reply[:room]
         kept.append(piece)
         used += len(piece) + 2
     return "\n\n".join(reversed(kept))

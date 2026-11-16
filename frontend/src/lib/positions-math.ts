@@ -30,6 +30,7 @@ const ONE_PERCENT = 0.01;
 const GRID_POINTS = 800;
 const GRID_LOW = 0.2;
 const GRID_HIGH = 4;
+const SESSIONS_A_YEAR = 252;
 // Fewer past windows than this says nothing.
 const MIN_WINDOWS = 20;
 
@@ -292,7 +293,7 @@ export function historicalShare(
   closes: number[],
   sessions: number,
   market: Market,
-): { share: number; windows: number } | null {
+): { share: number; windows: number; years: number } | null {
   if (sessions < 1) return null;
   let wins = 0;
   let windows = 0;
@@ -303,5 +304,6 @@ export function historicalShare(
     windows++;
     if (pnl > 0) wins++;
   }
-  return windows < MIN_WINDOWS ? null : { share: wins / windows, windows };
+  // The span the closes cover: less than asked for a stock listed lately.
+  return windows < MIN_WINDOWS ? null : { share: wins / windows, windows, years: (closes.length - 1) / SESSIONS_A_YEAR };
 }

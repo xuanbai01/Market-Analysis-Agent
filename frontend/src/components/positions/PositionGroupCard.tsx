@@ -152,7 +152,7 @@ export function PositionGroupCard({ group, now, withContext }: { group: Position
   });
   const [scenario, setScenario] = useState<Scenario>(NO_CHANGE);
 
-  const spot = group.quote?.mark ?? report.data?.spot ?? null;
+  const spot = group.quote?.mark || report.data?.spot || null; // a mark of 0 (a halted stock) is no price
   const rate = report.data?.rate ?? 0;
   const yahooSpot = report.data?.spot ?? null;
   const chainData = chain.data ?? null;

@@ -107,10 +107,24 @@ export function marketSentence(chance: number | null, expiry: string | null, spr
 }
 
 /** How often history's moves would have paid, labelled for what it is. */
-export function historySentence(symbol: string, result: { share: number; windows: number } | null, sessions: number): Sentence | null {
+/** "5 years", "1 year", "7 months". */
+function span(years: number): string {
+  if (years >= 1) {
+    const n = Math.round(years);
+    return `${n} year${n === 1 ? "" : "s"}`;
+  }
+  const months = Math.max(1, Math.round(years * 12));
+  return `${months} month${months === 1 ? "" : "s"}`;
+}
+
+export function historySentence(
+  symbol: string,
+  result: { share: number; windows: number; years: number } | null,
+  sessions: number,
+): Sentence | null {
   if (result === null) return null;
   return [
-    `Over the last 5 years, ${symbol}'s moves across ${sessions} session${sessions === 1 ? "" : "s"} would have left it in profit `,
+    `Over the last ${span(result.years)}, ${symbol}'s moves across ${sessions} session${sessions === 1 ? "" : "s"} would have left it in profit `,
     { strong: pct(result.share, 0) },
     ` of the time (${result.windows.toLocaleString("en-US")} windows): past moves, not a forecast.`,
   ];

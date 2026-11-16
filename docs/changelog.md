@@ -224,5 +224,9 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
       - A report with no options never records a view, so marking its copy as having none to record loses nothing; once the symbol has options, the new build records the view.
       - `probAbove` takes a strike and converts it to moneyness itself.
       - A holding with no live price has no delta in the totals, and is named.
+  - **From #128's seventh AI review:**
+    - **The past-moves line names the span its closes cover** ("Over the last 3 years") instead of always saying five years: a stock listed lately has less.
+    - **A mark of 0** (a halted stock) counts as no price, and the card falls back to the report's.
+    - **Not changed:** a what-if below 1% IV is priced at 1%, and a failed price read leaves out the past-moves line without a note.
   - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 

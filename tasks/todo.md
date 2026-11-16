@@ -11,7 +11,7 @@ Active sprint for the Market Analysis Agent.
 ## In progress
 
 - **Overnight 2026-11-16** (the owner asleep, and asked Claude to decide): small fixes (#137), then tastytrade PR C (IV history, live), then options PR 5 (every expiry, live). Plans below.
-- **tastytrade PR A** is code-complete (#116–#119). Still open: the probe during a session, for real-time quote ages. PR B (#130) and PR D (#131) are merged; the owner's own steps are in `tasks/owner-todo.md`.
+- **tastytrade PR A** is done (#116–#119; the probe ran in a session on 2026-11-16 and the quotes are real-time). PR B (#130) and PR D (#131) are merged; the owner's own steps are in `tasks/owner-todo.md`.
 
 ## Plan — after Phase 5 (2026-11-13)
 
@@ -125,7 +125,7 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 
 So nothing from tastytrade is stored, sent to a prompt or shown in the demo. The client only reads: it requests `scope=read` and makes GET calls only, besides the token POST. The owner's own trades are outside the terms' "Data", but stay out of the database and any prompt too. One PR each, in order.
 
-- [ ] **PR A — connect and probe** *(code merged in #116; review follow-up on `fix/tastytrade-probe-robustness`)*: ADR 0009; `tastytrade_client` (OAuth refresh with `scope=read`, a path allowlist, backoff, an hour's pause after a refused sign-in); `dxlink` (candles, one-shot Summary/Greeks); `tastytrade_probe` (`python -m`, prints what the account gets, stores nothing). **Owner:** create the personal OAuth app and grant, set the three Fly secrets. **Done when** the probe has run on Fly during a session and its answers are recorded here: real-time or not, candle depth, whether candles carry IV, whether options have candles. **First run (2026-11-15, Sunday):** the grant is read-only (`read` and an account scope, no `trade`); the client refused it over the account scope, fixed on `fix/tastytrade-probe-robustness`; nothing else ran. **Second run (#117 deployed):**
+- [x] **PR A — connect and probe** *(code merged in #116; review follow-up on `fix/tastytrade-probe-robustness`)*: ADR 0009; `tastytrade_client` (OAuth refresh with `scope=read`, a path allowlist, backoff, an hour's pause after a refused sign-in); `dxlink` (candles, one-shot Summary/Greeks); `tastytrade_probe` (`python -m`, prints what the account gets, stores nothing). **Owner:** create the personal OAuth app and grant, set the three Fly secrets. **Done when** the probe has run on Fly during a session and its answers are recorded here: real-time or not, candle depth, whether candles carry IV, whether options have candles. **First run (2026-11-15, Sunday):** the grant is read-only (`read` and an account scope, no `trade`); the client refused it over the account scope, fixed on `fix/tastytrade-probe-robustness`; nothing else ran. **Second run (#117 deployed):**
   - Sign-in works.
   - **Chain:** SPY has 32 expiries and 258 strikes near 30 days.
   - **REST quotes** also carry open interest, IV (`volatility`), the Greeks and `theo-price`, so PR B may not need DXLink for open interest. Their mids matched Yahoo's spreads 10 of 10.
@@ -137,7 +137,12 @@ So nothing from tastytrade is stored, sent to a prompt or shown in the demo. The
     - **Daily candles:** back to 1995 (8,000 is the per-request cap), with IV on about the last 9 years.
     - **Intraday:** hourly back to February 2026; 5-minute bars about six weeks back.
     - **An option contract:** a year of daily candles with IV and open interest.
-  - **Still open:** real-time quote ages, which needs a run during a session (Monday 2026-11-16).
+  - **Fourth run (2026-11-16, 10:04 ET, in the session):**
+    - **Real-time:** the quote token is still level `api` on the `/realtime` feed, and the quotes were fresh. SPY's was under a second old; the options' ages ran from 0 to 2.5 s, with a median of 1 s.
+    - **Units:** the options' IVs came as fractions, 10 of 10.
+    - **The grant** may still only read (`read` and the account scope).
+    - **Mids against Yahoo's spreads:** tastytrade's mids sat inside Yahoo's spreads 0 of 10, against 10 of 10 at Sunday's close. Expected in a session: Yahoo's quotes are 15 minutes old and SPY's spreads are a cent or two.
+    - **IV30 against our snapshot:** "can't tell" for NVDA, QQQ and SPY. The only stored rows (Friday's session, taken by hand on 2026-11-15 at 04:45 UTC) are method version 1, and `METHOD_VERSION` went to 2 two hours later. The cron's first scheduled run is 2026-11-16 at 22:17 UTC: it was added after Friday night's last slot.
   - **What this means for the next PRs:**
     - **B:** REST quotes already carry open interest, IV and Greeks, so live quotes need no DXLink.
     - **C:** a live chart of about 9 years of daily IV from candles, plus an option contract's price and IV path.

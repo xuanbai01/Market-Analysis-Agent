@@ -10,8 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_session, require_owner
-from app.schemas.owner import LiveChain, OwnerPositions, OwnerStatus, OwnerTrades
+from app.schemas.owner import IvHistory, LiveChain, OwnerPositions, OwnerStatus, OwnerTrades
 from app.services import owner_vault, tastytrade_client
+from app.services.owner_iv_history import IvHistoryUnavailable, NoHistory, iv_history
 from app.services.owner_live_chain import LiveChainUnavailable, NotListed, live_chain
 from app.services.owner_positions import PositionsUnavailable, get_positions
 from app.services.owner_trades import SyncFailed, csv_text, list_trades, sync
@@ -91,3 +92,15 @@ async def owner_live_chain(symbol: Symbol, expiry: date) -> LiveChain:
     except LiveChainUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+
+@router.get("/options/{symbol}/history", response_model=IvHistory)
+async def owner_iv_history(symbol: Symbol) -> IvHistory:
+    """``symbol``'s IV history from tastytrade's daily candles, today's IV
+    rank and percentile, at most 15 minutes old; 422 when tastytrade has
+    nothing for it (not 404, which the page reads as "no owner key")."""
+    try:
+        return await iv_history(symbol)
+    except NoHistory as exc:
+        raise HTTPException(status_code=422, detail=f"tastytrade has no IV history for {symbol.upper()}.") from exc
+    except IvHistoryUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc

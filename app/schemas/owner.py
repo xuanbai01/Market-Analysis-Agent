@@ -228,3 +228,51 @@ class LiveChain(BaseModel):
     chain: ExpiryChain
     source: Literal["tastytrade"] = "tastytrade"
 
+
+
+class IvMetrics(BaseModel):
+    """tastytrade's figures for today, as fractions (0.41 = 41%)."""
+
+    iv_index: float | None = None
+    iv30: float | None = None
+    iv_rank: float | None = None  # tastytrade's, 0 to 1
+    iv_percentile: float | None = None  # 0 to 1
+    hv30: float | None = None
+    hv60: float | None = None
+    hv90: float | None = None
+    updated_at: datetime | None = None
+
+
+class IvPoint(BaseModel):
+    """One session: its close, its IV and the 20-session realized volatility."""
+
+    date: date
+    close: float | None = None
+    iv: float | None = None
+    rv20: float | None = None
+
+
+class IvYear(BaseModel):
+    """Where today's IV sits among the last year's sessions (our arithmetic on
+    tastytrade's series), and how many sessions that year holds."""
+
+    sessions: int = 0
+    iv_low: float | None = None
+    iv_high: float | None = None
+    iv_median: float | None = None
+    iv_rank: float | None = None  # today between the year's low (0) and high (1)
+    iv_percentile: float | None = None  # the share of the year's sessions below today
+
+
+class IvHistory(BaseModel):
+    """The owner's IV history for one symbol, live from tastytrade (ADR 0009,
+    PR C): never stored, never in a prompt, never in the demo."""
+
+    symbol: str
+    as_of: datetime
+    metrics: IvMetrics
+    points: list[IvPoint]
+    year: IvYear
+    iv_since: date | None = None  # the first session with an IV
+    complete: bool = True  # tastytrade sent the whole history asked for
+    source: Literal["tastytrade"] = "tastytrade"

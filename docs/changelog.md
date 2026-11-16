@@ -468,4 +468,11 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **The server:** `GET /v1/owner/positions` now says when the marks were made (`priced_at`, from `market_calendar.live_quote_time`): the read's own time in a session, else the last close.
   - **The page:** it values the legs from there (`positions-math.valuedAt`), while quote ages keep ticking from the clock.
   - **The plan:** stale entries tidied: options PRs 2–4 were merged as #121–#125.
+- **IV history from tastytrade, the route (2026-11-16, tastytrade PR C, ADR 0009):** the options page's IV percentile waits on our own snapshots (63 sessions), but tastytrade has the history already.
+  - **The route:** `GET /v1/owner/options/{symbol}/history` (`owner_iv_history`), behind the owner key.
+  - **The history:** ten years of daily candles over DXLink, each session with its close, IV and 20-session realized volatility (the options page's RV20).
+  - **Today:** where today's IV sits in the last year (low, high, median, rank, percentile), and tastytrade's market metrics: the IV index, IV rank and percentile, the 30-day IV, and the 30/60/90-day historical volatility.
+  - **Units:** checked on Fly without printing a value. The IV index, rank, percentile and the candles' IV are fractions; the 30-day IV and the historical volatilities are percent, read here as fractions. Each is range-checked.
+  - **ADR 0009 holds:** 15 minutes in memory for at most 8 symbols, never stored, never in a prompt or the demo, logged as counts. A symbol tastytrade has nothing for is a 422.
+  - **Not here:** tastytrade's earnings history carries dates and EPS but no timing, so past earnings moves stay with Yahoo's calendar.
 

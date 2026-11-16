@@ -145,19 +145,22 @@ async def _transactions(number: str, start: date | None) -> list[dict[str, Any]]
         if start is not None:
             params["start-date"] = start.isoformat()
         payload = await tt.get(f"/accounts/{number}/transactions", params, op="transactions")
-        found += owner_positions.items_of(payload, strict=True)
+        items = owner_positions.items_of(payload, strict=True)
+        found += items
         pagination = payload.get("pagination") if isinstance(payload, dict) else None
         pages = _whole(pagination.get("total-pages")) if isinstance(pagination, dict) else None
-        if pages is None or page + 1 >= pages:
-            break
-        if page + 1 == MAX_PAGES:
-            logger.warning("owner trades: %d pages of history, %d read", pages, MAX_PAGES)
+        # Without a page count, a short page is the last one.
+        if (len(items) < PER_PAGE) if pages is None else (page + 1 >= pages):
+            return found
+    logger.warning("owner trades: more than %d pages of history; the rest isn't read", MAX_PAGES)
     return found
 
 
 def _whole(value: Any) -> int | None:
-    """A count tastytrade sent, as a number or as digits."""
+    """A count tastytrade sent, as a number (2 or 2.0) or as digits."""
     if isinstance(value, str) and value.isascii() and value.isdigit():
+        return int(value)
+    if isinstance(value, float) and value.is_integer() and value >= 0:
         return int(value)
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
@@ -181,7 +184,9 @@ async def sync(session: AsyncSession) -> SyncResult:
                 result = await _sync(session)
         except (tt.TastytradeUnavailable, tt.TastytradeNotFound, TimeoutError) as exc:
             await _roll_back(session)  # a deadline can land mid-write; the listing needs a clean session
-            _last_failure = owner_positions.failure_reason(exc)
+            # The deadline covers the database's part too: don't blame tastytrade for it.
+            too_long = isinstance(exc, TimeoutError)
+            _last_failure = f"the update took too long (over {SYNC_SECONDS:.0f} s)" if too_long else owner_positions.failure_reason(exc)
             raise SyncFailed(_last_failure) from exc
         except vault.VaultUnavailable:
             raise  # a row that doesn't open stays loud: a 503
@@ -286,7 +291,8 @@ def _trade(tid: int, p: dict[str, Any]) -> OwnerTrade:
         quantity=owner_positions.finite_number(p.get("quantity")),
         price=owner_positions.finite_number(p.get("price")),
         value=_signed(p.get("value"), p.get("value-effect")),
-        fees=sum(_fee(p.get(name), p.get(f"{name}-effect")) for name in FEES),
+        # Rounded off float noise: the CSV writes 1.14, not 1.1400000000000001.
+        fees=round(sum(_fee(p.get(name), p.get(f"{name}-effect")) for name in FEES), 6),
         net_value=_signed(p.get("net-value"), p.get("net-value-effect")),
         description=_text(p.get("description")),
     )

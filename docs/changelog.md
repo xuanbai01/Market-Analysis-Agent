@@ -231,7 +231,7 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 - **The owner's trade copy, encrypted (2026-11-15, ADR 0009 amended):** the owner asked for a copy of their trades that both of their PCs can reach, and chose an encrypted copy in Neon.
   - **The vault:** `owner_vault` seals each transaction with AES-256-GCM under `OWNER_VAULT_KEY` (32 random bytes, a Fly secret), with a fresh nonce and the transaction id as associated data. The app won't start with a malformed key or one equal to another key. `cryptography` 50.0.2 is pinned in `pyproject.toml` and the Dockerfile.
-  - **The table:** `owner_transactions` (migration 0006) holds only the id and an estimated-fee flag in the clear. Rows are written once; the one update is a row stored with estimated fees taking the final ones.
+  - **The table:** `owner_transactions` (migration 0006) holds only the id, the key version and an estimated-fee flag in the clear, all three bound to the ciphertext. Rows are written once; the one update is a row stored with estimated fees taking the final ones.
   - **The sync:** `owner_trades.sync`, at most once a minute. It reads each account's transactions from a week before the newest stored, every page (2,000 a page), and holds no database connection during the fetch. It keeps a listed set of fields plus the account's 1-based number, never the account number.
   - **The routes:**
     - `GET /v1/owner/trades` syncs, then lists newest first, with money in positive, money out negative, and fees totalled. When tastytrade is down it serves the copy as it stands, with the reason. Without the key it's a 503.
@@ -268,4 +268,10 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **From #129's fourth AI review:**
     - **A failed sync's log line names the error's type only**, not its text, which could carry an account path.
     - **Not changed:** past 50,000 transactions or 10 accounts the copy stops short, with a warning in the log. That's far beyond this account.
+  - **From #129's fifth AI review:**
+    - **A page count sent as 2.0, or not at all,** no longer stops the read after the first page. Without a count, a full page means read on.
+    - **Fees are rounded off float noise**, so the CSV writes 1.14, not 1.1400000000000001.
+    - **A sync past its deadline says "the update took too long"**, since the deadline covers the database's part too, not only tastytrade's.
+    - **The concurrency test now interleaves**, so it fails without the sync's lock.
+    - **Not changed:** the CSV download can't save an error body, because the fetch throws on any non-2xx before reading it. `uv.lock` is in the diff.
 

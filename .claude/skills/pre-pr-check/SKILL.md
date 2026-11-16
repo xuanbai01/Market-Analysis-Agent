@@ -32,7 +32,7 @@ Look for a deadline, a dropped DB connection, a cancelled request or a wrong-sha
 **Check:** compare each new route's statuses with `isOwnerKeyRefused` and the 401 handling in `lib/owner-api.ts` and `lib/api.ts`. A new fetcher handles 401, 403, 404, 422, 429 and 503 the way its neighbours do, and stops polling on an answer that won't change (#130's 422).
 
 ### 4. Time
-Look for a fixed hour, a UTC date, or the clock where the quote time belongs.
+Look for a fixed hour, a UTC date, or the clock where the quote time belongs, and the reverse: `market_calendar.quote_time` is Yahoo's delayed time, wrong for tastytrade's live quotes (#130, found after merge).
 - #128: every expiry closed at 21:00 UTC: an hour late in summer, three on a half day. The sessions left didn't count today's before the open.
 - #131: a fill at 8 pm New York on Oct 31 was booked to November (UTC). #130: an expiry that had closed was priced at a negative time to expiry.
 **Check:** `git diff main...HEAD | grep -nE '^\+.*(21:00|20:00|16:00|[Uu][Tt][Cc]|\.date\(\)|toISOString|getUTC|new Date\()'`. Go through `market_calendar` (`session_close`, `quote_time`, `market_open`, `sessions_between`, `et_date`). Test at 9 am New York (before the open), at 1:30 pm on 27 Nov 2026 (a half day), in July and in December (EDT, EST), at 8 pm New York on a month's last day, and after an expiry's close. Ages on screen keep ticking between reads (`lib/use-now.ts`, #130).
@@ -82,11 +82,14 @@ From the security reviews beside them: a bad key's start-up error would have quo
 
 ## Answering "Not changed" findings
 
-Almost every finding left unchanged was wrong because the reviewer saw only the diff. Answer each with a `path:line` and the test that covers it, and list it under the changelog's "Not changed".
-- **The guard is in a helper:** "this path isn't on the allowlist" came most often (#129, #130: `tastytrade_client`'s allowlist, an encoded slash, `symbol_path`'s `BF.B` → `BF/B`). "This exception isn't caught": `items_of` raises `TastytradeUnavailable`, the client turns its own timeouts into it, and `parse_occ` raises only `ValueError`. "This value is wrong here": `quote_time` is now during a session, and `cached_underlying` returns nothing without a fetched chain.
+A "Not changed" reply can be wrong too. #130 answered "`quote_time` is now during a session", but it's 15 minutes back during a session, and the last close until 09:45, so the live chain timed real-time quotes as delayed ones. Check each claim against the code at the line, every time. The patterns below are kinds of reasons, not dismissals approved in advance.
+
+Most findings left unchanged were wrong because the reviewer saw only the diff. Answer each with a `path:line` and the test that covers it, and list it under the changelog's "Not changed".
+- **The guard is in a helper:** "this path isn't on the allowlist" came most often (#129, #130: `tastytrade_client`'s allowlist, an encoded slash, `symbol_path`'s `BF.B` → `BF/B`). "This exception isn't caught": `items_of` raises `TastytradeUnavailable`, the client turns its own timeouts into it, and `parse_occ` raises only `ValueError`. "This value is wrong here": `cached_underlying` returns nothing without a fetched chain.
 - **It's done elsewhere:** the strategy builder already prices from the live chain (twice); the chain route reads any listed expiry; `value` is on every trade; the 503's title carries the route's detail; the CSV fetch throws on a non-2xx before reading the body.
 - **The type is known from the source:** the dividend yield is always a float, the shared secret is a plain string, and `probAbove` takes a strike.
-- **A trade-off already made:** a GCM failure is loud on purpose; the caps are far beyond this account; a full read after a restart is cheaper; the live route has no per-IP limit behind the owner key; a view recorded twice is an upsert. Point at the ADR or the doc line.
+- **A trade-off already made:** a GCM failure is loud on purpose; the caps are far beyond this account; a full read after a restart is cheaper; a view recorded twice is an upsert. Point at the ADR or the doc line.
+- **A limit that's there, on another axis:** every `/v1/owner` route takes `require_owner`, which spends one of the caller's hourly tries before comparing the key and gives it back on a right one (`app/api/v1/dependencies.py:244`), so wrong keys lock an IP out (`tests/test_owner_auth.py:100`). Requests with the right key aren't rate-limited, by design (one owner), and the client backs off on tastytrade's 429.
 - **A state the provider never sends:** an expiry without an action with a long and a short lot of one contract open (tastytrade nets it away).
 - **A diff it didn't fully see:** "`uv.lock` is missing" when it was in the diff.
 

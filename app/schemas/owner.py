@@ -172,9 +172,14 @@ class UnmatchedRow(BaseModel):
 
 class JournalTotals(BaseModel):
     realized: float = 0.0
+    # Closed positions with a computed P&L, and those without one (after a
+    # split, say): counted apart, not as closed at 0.
     closed: int = 0
     profitable: int = 0
+    unpriced: int = 0
     average_days: float | None = None
+    # The fees inside ``realized``: the closed parts' own, not an open
+    # position's entry fees.
     fees: float = 0.0
 
 

@@ -307,4 +307,9 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **The route:** `GET /v1/owner/trades` carries `journal`, built off the event loop; the trades now keep their order and reversal ids.
   - **The page:** a Journal tab (the default) beside Transactions: a sentence on what closed, realized P&L by month (hand-rolled SVG bars from one zero line, gains and losses in the pos and neg tokens, hover for the figure), the positions newest first with how each stands or ended, filterable by open or closed and by underlying, each opening to its legs, origin, rolls and fills, and what isn't matched.
   - **The fake backend** serves a made-up history (an expiry, a vertical, an assignment, a roll, an open put, a close with nothing to match).
+  - **From #131's AI review:**
+    - **A closed position without a computed P&L** (after a split) is counted apart (`unpriced`), not as closed at $0. It used to pull the share at a profit down.
+    - **The fees beside the realized P&L are the closed parts' own.** They used to include an open position's entry fees.
+    - **Stock delivered a session after its assignment** still links to the option: the latest assignment on that underlying on or before its date.
+    - **A close reaches the lot it closes wherever it's queued**, not only at the front.
 

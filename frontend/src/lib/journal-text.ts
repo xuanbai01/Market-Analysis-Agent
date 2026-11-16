@@ -33,13 +33,18 @@ export function monthLabel(month: string): string {
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
-/** What closed, how often at a profit, how long held, and what it came to. */
+/** What closed, how often at a profit, how long held, and what it came to;
+ * what closed without a computed P&L (after a split) is counted apart. */
 export function summarySentence(totals: TradeJournal["totals"]): Sentence {
-  if (totals.closed === 0) return ["Nothing closed yet."];
+  const plural = (n: number) => (n === 1 ? "" : "s");
+  if (totals.closed === 0) {
+    if (totals.unpriced === 0) return ["Nothing closed yet."];
+    return [{ strong: `${totals.unpriced}` }, ` position${plural(totals.unpriced)} closed without a computed P&L.`];
+  }
   const share = Math.round((totals.profitable / totals.closed) * 100);
   const parts: Sentence = [
     { strong: `${totals.closed}` },
-    ` position${totals.closed === 1 ? "" : "s"} closed, `,
+    ` position${plural(totals.closed)} closed, `,
     { strong: `${totals.profitable}` },
     " at a profit (",
     { strong: `${share}%` },
@@ -47,5 +52,6 @@ export function summarySentence(totals: TradeJournal["totals"]): Sentence {
   ];
   if (totals.average_days !== null) parts.push(", held ", { strong: heldLabel(Math.round(totals.average_days)) }, " on average");
   parts.push(": ", { strong: signedUsd(totals.realized) }, " realized after ", { strong: usd(totals.fees) }, " in fees.");
+  if (totals.unpriced > 0) parts.push(" ", { strong: `${totals.unpriced}` }, " more closed without a computed P&L.");
   return parts;
 }

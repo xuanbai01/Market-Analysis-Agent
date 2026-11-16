@@ -60,6 +60,7 @@ class _Lot:
     sign: int  # +1 long, -1 short
     remaining: float
     unit_cash: float | None  # signed cash per unit at the open
+    unit_fees: float
 
 
 @dataclass
@@ -77,7 +78,7 @@ class _Position:
     endings: set[str] = field(default_factory=set)
     closed_at: datetime | None = None
     origin: str | None = None
-    delivered_by: tuple[str | None, str, str] | None = None  # date, underlying, ending
+    delivered_by: tuple[str, str, str] | None = None  # date, underlying, ending
     note: str | None = None
     transactions: list[int] = field(default_factory=list)
 
@@ -103,11 +104,12 @@ class _Journal:
         self.lots: dict[Key, list[_Lot]] = defaultdict(list)
         self.flagged: dict[Key, str] = {}  # contract -> the action not modelled
         self.closed_by_order: dict[int, list[str]] = defaultdict(list)
-        self.delivered: dict[tuple[str | None, str, str], str] = {}  # date, underlying, ending -> option position
+        # Options closed by an assignment or exercise: (date, underlying, ending, position).
+        self.delivered: list[tuple[str, str, str, str]] = []
         self.months: dict[str, float] = defaultdict(float)
         self.underlyings: dict[str, float] = defaultdict(float)
         self.unmatched: list[UnmatchedRow] = []
-        self.fees = 0.0
+        self.fees = 0.0  # inside the realized P&L
 
     def _unmatched(self, trade: OwnerTrade, reason: str) -> None:
         self.unmatched.append(UnmatchedRow(id=trade.id, date=trade.date, symbol=trade.symbol, reason=reason))
@@ -127,7 +129,6 @@ class _Journal:
         if contract is None:
             self._unmatched(trade, "not a contract symbol tastytrade's format reads")
             return
-        self.fees += trade.fees
         quantity = trade.quantity
         unit_cash = None if trade.net_value is None else trade.net_value / quantity
         unit_fees = trade.fees / quantity
@@ -147,8 +148,12 @@ class _Journal:
         lots = self.lots[key]
         ending = ENDINGS.get(trade.sub_type or "", "closed")
         when = chronological(trade)[0]
-        while remaining > EPS and lots and lots[0].sign == -direction:
-            lot = lots[0]
+        while remaining > EPS:
+            # The oldest lot this fill closes, wherever it's queued.
+            index = next((i for i, lot in enumerate(lots) if lot.sign == -direction), None)
+            if index is None:
+                break
+            lot = lots[index]
             size = min(remaining, lot.remaining)
             position = self.positions[lot.position]
             part = None if lot.unit_cash is None or unit_cash is None else (lot.unit_cash + unit_cash) * size
@@ -159,6 +164,7 @@ class _Journal:
                 position.unknown = True
             else:
                 position.realized += part
+                self.fees += (lot.unit_fees + unit_fees) * size
                 self.months[when.strftime("%Y-%m")] += part
                 self.underlyings[position.underlying] += part
             position.close_cash = _add(position.close_cash, None if unit_cash is None else unit_cash * size)
@@ -171,11 +177,11 @@ class _Journal:
             if trade.order_id is not None and position.id not in self.closed_by_order[trade.order_id]:
                 self.closed_by_order[trade.order_id].append(position.id)
             if ending in DELIVERIES and kind != "stock":
-                self.delivered[(trade.date, position.underlying, ending)] = position.id
+                self.delivered.append((trade.date or "", position.underlying, ending, position.id))
             lot.remaining -= size
             remaining -= size
             if lot.remaining <= EPS:
-                lots.pop(0)
+                lots.pop(index)
         return remaining
 
     def _open(
@@ -197,8 +203,8 @@ class _Journal:
             self.positions[pid] = position
         if kind == "stock" and ending in DELIVERIES:
             position.origin = DELIVERIES[ending]
-            position.delivered_by = (trade.date, position.underlying, ending)
-        self.lots[key].append(_Lot(pid, direction, size, unit_cash))
+            position.delivered_by = (trade.date or "", position.underlying, ending)
+        self.lots[key].append(_Lot(pid, direction, size, unit_cash, unit_fees))
         leg = position.legs.setdefault(key[1], JournalLeg(symbol=key[1], kind=kind, expiry=expiry, strike=strike, quantity=0.0))  # type: ignore[arg-type]
         leg.quantity += direction * size
         position.open_cash = _add(position.open_cash, None if unit_cash is None else unit_cash * size)
@@ -222,6 +228,16 @@ class _Journal:
                     break
         return links
 
+    def _delivered_from(self, delivered_by: tuple[str, str, str] | None) -> str | None:
+        """The option whose assignment or exercise delivered this stock: the
+        latest on the same underlying on or before its date (delivery can
+        settle a session later)."""
+        if delivered_by is None:
+            return None
+        day, underlying, ending = delivered_by
+        found = [d for d in self.delivered if d[1] == underlying and d[2] == ending and d[0] <= day]
+        return max(found)[3] if found else None
+
     def _out(self, position: _Position, links: dict[str, tuple[str | None, str | None]]) -> JournalPosition:
         legs = list(position.legs.values())
         opened = sum(abs(leg.quantity) for leg in legs)
@@ -240,7 +256,7 @@ class _Journal:
             closed_at=position.closed_at.isoformat() if position.closed_at and status != "open" else None,
             days_held=days, status=status, ended_by=ended_by,  # type: ignore[arg-type]
             origin=position.origin,  # type: ignore[arg-type]
-            origin_position=self.delivered.get(position.delivered_by) if position.delivered_by else None,
+            origin_position=self._delivered_from(position.delivered_by),
             open_cash=None if position.open_cash is None else round(position.open_cash, CENTS),
             close_cash=None if position.close_cash is None or status == "open" else round(position.close_cash, CENTS),
             fees=round(position.fees, CENTS), realized=realized,
@@ -251,7 +267,8 @@ class _Journal:
     def journal(self) -> TradeJournal:
         links = self._rolls()
         positions = [self._out(position, links) for position in self.positions.values()]
-        closed = [p for p in positions if p.status == "closed"]
+        done = [p for p in positions if p.status == "closed"]
+        closed = [p for p in done if p.realized is not None]
         days = [p.days_held for p in closed if p.days_held is not None]
         return TradeJournal(
             positions=positions,
@@ -261,6 +278,7 @@ class _Journal:
                 realized=round(sum(self.months.values()), CENTS),
                 closed=len(closed),
                 profitable=sum(1 for p in closed if p.realized is not None and p.realized > 0),
+                unpriced=len(done) - len(closed),
                 average_days=round(sum(days) / len(days), 1) if days else None,
                 fees=round(self.fees, CENTS),
             ),

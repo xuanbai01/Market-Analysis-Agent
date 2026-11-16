@@ -22,6 +22,7 @@ the strike. A reversal and the fill it cancels both leave the matching.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -54,6 +55,7 @@ EPS = 1e-9
 CENTS = 2
 
 Key = tuple[int, str]  # account, contract symbol
+_TICKER = re.compile(r"[A-Z][A-Z0-9]{0,9}(?:[./-][A-Z0-9]{1,4})?")
 
 
 @dataclass
@@ -100,7 +102,9 @@ def _contract(trade: OwnerTrade) -> tuple[str, date | None, float | None] | None
         occ = parse_occ(trade.symbol or "")
     except ValueError:
         is_option = "option" in (trade.instrument_type or "").lower()
-        return None if is_option else ("stock", None, None)
+        # Stock only for a symbol shaped like a ticker (NVDA, BRK/B): anything
+        # else that doesn't read as an option isn't guessed.
+        return None if is_option or not _TICKER.fullmatch(trade.symbol or "") else ("stock", None, None)
     return occ.kind, occ.expiry, occ.strike
 
 
@@ -129,25 +133,29 @@ class _Journal:
         if instrument not in MODELLED:
             self._unmatched(trade, f"not modelled: {trade.instrument_type}")
             return
+        contract = _contract(trade)
+        if contract is None:
+            self._unmatched(trade, "not a contract symbol tastytrade's format reads")
+            return
         ending = (trade.sub_type or "") in ENDINGS
         cash = trade.net_value if trade.net_value is not None else trade.value
-        if direction == 0 and ending and self.lots[key]:
-            # An expiry, assignment or exercise sent without a buy or sell
-            # only removes what's open.
+        if direction == 0 and ending and contract[0] != "stock":
+            # An option's expiry, assignment or exercise sent without a buy or
+            # sell only removes what's open of it.
+            if not self.lots[key]:
+                self._unmatched(trade, "nothing open to close: it may come from before the copy starts")
+                return
             direction = -self.lots[key][0].sign
             action = "to close"
         elif direction == 0 and ending and cash:
-            # Shares delivered with no action: paying for them is buying.
+            # Shares delivered with no action go by their cash: paying for them
+            # is buying, whatever is already held (never a close of it).
             direction = 1 if cash < 0 else -1
         if direction == 0:
             what = trade.sub_type or trade.type or "an action with no buy or sell"
             self._unmatched(trade, f"not modelled: {what}")
             if not ending:  # a split or symbol change: the contract's later P&L can't be told
                 self.flagged[key] = what
-            return
-        contract = _contract(trade)
-        if contract is None:
-            self._unmatched(trade, "not a contract symbol tastytrade's format reads")
             return
         quantity = trade.quantity
         unit_cash = None if trade.net_value is None else trade.net_value / quantity

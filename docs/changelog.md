@@ -331,4 +331,8 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **A partly closed position without a computed P&L counts as unpriced**, so the sentence doesn't say nothing closed.
     - **With an underlying picked**, the page gives that underlying's realized figure, and the sentence and chart say they cover every underlying.
     - **Delivered stock is keyed by account too**, and links to an option in the same account.
+  - **From #131's sixth AI review:**
+    - **The high:** shares delivered with no buy or sell, beside shares already held, were read as a close of the held ones, which would have booked a phantom loss. Delivered shares now go by their cash. Closing what's open applies only to an option's expiry, assignment or exercise.
+    - **An option's expiry with nothing open** says "nothing open to close", not "not modelled".
+    - **Only a symbol shaped like a ticker counts as stock**, so an unreadable option symbol without an instrument type is listed, not held as shares.
 

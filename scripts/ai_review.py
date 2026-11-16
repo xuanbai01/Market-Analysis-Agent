@@ -76,6 +76,8 @@ DEFAULT_BASE_URL = "https://api.deepseek.com"
 # first past that, then the last parts).
 PART_CHARS = 50_000
 MAX_PARTS = 8
+# The running totals the comment's state carries across a PR's reviews.
+TOTAL_KEYS = ("reviews", "read", "cached", "written", "reasoning", "calls")
 LLM_TIMEOUT_SECONDS = 300
 GITHUB_TIMEOUT_SECONDS = 30
 _PAGE_SIZE = 100
@@ -146,7 +148,8 @@ def _left_out(plan: Plan | None, failed: list[str]) -> str:
 
 def render_comment(*, findings: list[Finding], riskiest: list[str], head_sha: str, model: str, parts: int,
                    usage: Usage, plan: Plan | None, mode: str, earlier: list[dict], failed: list[str],
-                   since: str | None = None, passes: int = 1, failed_passes: int = 0) -> str:
+                   since: str | None = None, passes: int = 1, failed_passes: int = 0,
+                   totals: dict | None = None) -> str:
     plural = "part" if parts == 1 else "parts"
     times = f", {passes} passes each" if passes > 1 else ""
     if mode == "incremental" and since:
@@ -160,7 +163,9 @@ def render_comment(*, findings: list[Finding], riskiest: list[str], head_sha: st
     sections = [f"{MARKER}\n### AI review (DeepSeek)\n", heading,
                 render_findings(main) if main or not lows else "Nothing above low."]
     if lows:
-        sections.append(f"<details><summary>Lows ({len(lows)})</summary>\n\n{render_findings(lows)}\n\n</details>")
+        # Numbered on from the others, so a reply's numbers are unique.
+        sections.append(f"<details><summary>Lows ({len(lows)})</summary>\n\n"
+                        f"{render_findings(lows, start=len(main) + 1)}\n\n</details>")
     if riskiest:
         sections.append("<details><summary>Riskiest, by part</summary>\n\n"
                         + "\n".join(f"- {r}" for r in riskiest) + "\n\n</details>")
@@ -174,13 +179,32 @@ def render_comment(*, findings: list[Finding], riskiest: list[str], head_sha: st
     if failed_passes:
         footer += (f" {failed_passes} of {parts * passes} passes failed; the other passes over"
                    " their parts stand.")
-    state = {"sha": head_sha, "findings": merge_state_findings(earlier, findings)}
+    so_far = add_totals(totals, usage)
+    reviews = f"{so_far['reviews']} review" + ("" if so_far["reviews"] == 1 else "s")
+    footer += (f" This PR so far: {reviews}, {so_far['read']:,} tokens read "
+               f"({so_far['cached']:,} cached), {so_far['written']:,} written.")
+    state = {"sha": head_sha, "findings": merge_state_findings(earlier, findings), "tokens": so_far}
     return "\n\n".join(sections) + f"\n\n---\n<sub>{footer}</sub>\n{embed_state(state)}\n"
 
 
-def render_nothing_to_review(head_sha: str, plan: Plan, earlier: list[dict]) -> str:
+def add_totals(totals: dict | None, usage: Usage) -> dict:
+    """The PR's reviews so far, this one included: what ai_review_stats reads."""
+    def whole(value: object) -> int:
+        # A hand-edited state mustn't crash the review after DeepSeek is paid.
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+    so_far = {k: whole((totals or {}).get(k)) for k in TOTAL_KEYS}
+    so_far["reviews"] += 1
+    for k in TOTAL_KEYS[1:]:
+        so_far[k] += getattr(usage, k)
+    return so_far
+
+
+def render_nothing_to_review(head_sha: str, plan: Plan, earlier: list[dict], totals: dict | None = None) -> str:
     why = _left_out(plan, []) or "the diff has no files"
     state = {"sha": head_sha, "findings": earlier}
+    if totals:
+        state["tokens"] = totals  # nothing was asked, so nothing to add
     # A docs-only push mustn't hide what the last review found.
     folded = (f"\n<details><summary>Earlier findings ({len(earlier)})</summary>\n\n"
               f"{describe_earlier(earlier)}\n\n</details>\n") if earlier else ""
@@ -333,7 +357,7 @@ def main() -> int:
     if not plan.parts:
         # Say so on the PR: no comment reads as a review that never ran,
         # and a review of code since removed would otherwise stand.
-        action_taken = _post_or_update(render_nothing_to_review(head, plan, earlier), **post)
+        action_taken = _post_or_update(render_nothing_to_review(head, plan, earlier, state.get("tokens")), **post)
         print(f"Nothing reviewable ({mode}). Comment {action_taken}.")
         return 0
 
@@ -355,7 +379,8 @@ def main() -> int:
     body = render_comment(findings=outcome.findings, riskiest=outcome.riskiest, head_sha=head, model=model,
                           parts=len(outcome.plan.parts), usage=outcome.usage, plan=outcome.plan, mode=mode,
                           earlier=earlier, failed=outcome.failed, since=state_sha if mode == "incremental" else None,
-                          passes=outcome.passes, failed_passes=outcome.failed_passes)
+                          passes=outcome.passes, failed_passes=outcome.failed_passes,
+                          totals=state.get("tokens"))
     print(f"Review comment {_post_or_update(body, **post)}.")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:

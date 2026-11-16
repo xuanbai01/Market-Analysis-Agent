@@ -459,3 +459,8 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - a long reply keeps its start.
     - **Not changed:** the rest misread the code. The module import works, since this comment is that job's output. Failed parts are counted once each, not once per attempt. A path can't be both in a part and over budget.
   - **Found on the way:** grading showed one of #130's "Not changed" replies was wrong. The live chain timed tastytrade's real-time quotes with Yahoo's delayed clock (#134).
+- **Tracking the AI review (2026-11-16):** the owner asked to keep checking how the new review does on later work.
+  - **Running totals:** the review comment's state now carries the PR's totals so far (reviews, tokens), shown in its footer.
+  - **Countable replies:** lows are numbered on from the others, and replies carry `Held:` and `Didn't hold:` lines.
+  - **The stats script:** `scripts/ai_review_stats.py` reads all three, plus the changelog's `missed by #NNN's review` tags, and prints each PR beside the old review on #128–#131.
+  - **When:** after about five feature PRs, with what to watch for in docs/workflow.md §8.

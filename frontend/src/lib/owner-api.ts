@@ -5,6 +5,8 @@
  */
 import { ApiError, BACKEND_URL, authHeaders, extractErrorTitle, parseJsonAndValidate, parseRetryAfter } from "./api";
 import {
+  type IvHistory,
+  IvHistorySchema,
   type LiveChain,
   LiveChainSchema,
   type OwnerPositions,
@@ -60,6 +62,12 @@ export function fetchLiveChain(key: string, symbol: string, expiry: string): Pro
   return ownerGet(`/v1/owner/options/${ticker}/live/${encodeURIComponent(expiry)}`, key, (resp) =>
     parseJsonAndValidate(resp, LiveChainSchema),
   );
+}
+
+/** Ten years of the symbol's daily IV and realized volatility from tastytrade, with today's figures. */
+export function fetchIvHistory(key: string, symbol: string): Promise<IvHistory> {
+  const ticker = encodeURIComponent(symbol.toUpperCase());
+  return ownerGet(`/v1/owner/options/${ticker}/history`, key, (resp) => parseJsonAndValidate(resp, IvHistorySchema));
 }
 
 /** The server refused the owner key (wrong, or none configured there). */

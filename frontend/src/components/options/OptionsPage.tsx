@@ -19,6 +19,7 @@ import { AcrossExpiries, drawsAcross } from "./AcrossExpiries";
 import { EarningsMoves } from "./EarningsMoves";
 import { ExpectedMoveCone } from "./ExpectedMoveCone";
 import { ExpirySection } from "./ExpirySection";
+import { IvHistoryPanel } from "./IvHistoryPanel";
 import { OpenInterestHistory } from "./OpenInterestHistory";
 import { OptionsReadCard } from "./OptionsReadCard";
 import { Panel } from "./Panel";
@@ -203,6 +204,13 @@ export default function OptionsPage() {
             : `No two-sided quotes to price for ${symbol}: its options trade too thinly.`}
         </p>
       )}
+      {/* tastytrade's history doesn't depend on Yahoo's chain, which can come
+          back one-sided overnight: the owner still gets it. */}
+      {report && report.status === "no_usable_quotes" && (
+        <div className="mt-6">
+          <IvHistoryPanel symbol={symbol} />
+        </div>
+      )}
 
       {report && report.status === "ok" && (
         <>
@@ -232,6 +240,7 @@ export default function OptionsPage() {
               </Panel>
             )}
           </div>
+          <IvHistoryPanel symbol={symbol} />
           {report.earnings && drawsEarnings(report.earnings) && (
             <Panel title="Earnings" info={GLOSSARY.earnings}>
               <EarningsMoves earnings={report.earnings} />

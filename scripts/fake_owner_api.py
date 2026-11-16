@@ -17,7 +17,8 @@ history is just missing.
 
 then the frontend dev server; in the browser set localStorage
 ``market-agent.auth-token`` to ``FAKE_SHARED_SECRET`` and unlock
-``/positions`` with ``FAKE_OWNER_KEY``.
+``/positions`` with ``FAKE_OWNER_KEY``. The options page's IV history
+panel reads made-up candles and metrics for any ticker.
 """
 from __future__ import annotations
 
@@ -56,6 +57,7 @@ from app.api.v1.routers import market as market_router  # noqa: E402
 from app.api.v1.routers import owner as owner_router  # noqa: E402
 from app.main import app  # noqa: E402
 from app.schemas.owner import OwnerTrade  # noqa: E402
+from app.services import dxlink  # noqa: E402
 from app.services import tastytrade_client as tt  # noqa: E402
 
 ACCOUNT = "FAKE0001"
@@ -122,7 +124,32 @@ async def fake_get(path: str, params: dict[str, Any] | None = None, *, op: str) 
         asked = [s for value in (params or {}).values() for s in str(value).split(",")]
         items = [QUOTES.get(s) or _chain_quote(s) for s in asked]
         return {"data": {"items": [item for item in items if item]}}
+    if path == "/market-metrics":
+        symbol = str((params or {}).get("symbols", ""))
+        return {"data": {"items": [{
+            "symbol": symbol, "implied-volatility-index": "0.3412", "implied-volatility-30-day": "34.6",
+            "tw-implied-volatility-index-rank": "0.41", "implied-volatility-percentile": "0.55",
+            "historical-volatility-30-day": "29.8", "historical-volatility-60-day": "31.2",
+            "historical-volatility-90-day": "33.0", "implied-volatility-updated-at": "2026-11-14T20:59:00+00:00",
+        }]}}
     raise tt.TastytradeNotFound(path)
+
+
+async def fake_candles(symbol: str, period: str, from_time: datetime) -> dxlink.CandleHistory:
+    """Made-up daily candles from 2016: a drifting, wobbling close and an IV
+    that swings between about 25% and 60%. Nothing anyone traded."""
+    out = []
+    day, close, i = date(2016, 1, 4), 30.0, 0
+    while day <= date(2026, 11, 13):
+        if day.weekday() < 5:
+            close *= math.exp(0.0006 + 0.02 * math.sin(i * 1.7) * math.cos(i * 0.13))
+            iv = 0.42 + 0.15 * math.sin(i / 90) + 0.04 * math.sin(i / 7)
+            out.append(dxlink.Candle(time=datetime(day.year, day.month, day.day, tzinfo=UTC), open=close, high=close,
+                                     low=close, close=round(close, 2), volume=1e6, imp_volatility=round(iv, 4),
+                                     open_interest=None))
+            i += 1
+        day = date.fromordinal(day.toordinal() + 1)
+    return dxlink.CandleHistory(candles=tuple(out), complete=True)
 
 
 async def prices_from_yahoo(_session: Any, symbol: str, range_: str) -> dict[str, Any]:
@@ -178,6 +205,7 @@ async def fake_list_trades(_session: Any) -> list[OwnerTrade]:
 
 
 tt.get = fake_get  # type: ignore[assignment]
+dxlink.fetch_candles = fake_candles  # type: ignore[assignment]
 owner_router.sync = fake_sync  # type: ignore[assignment]
 owner_router.list_trades = fake_list_trades  # type: ignore[assignment]
 tt.is_configured = lambda: True  # type: ignore[assignment]

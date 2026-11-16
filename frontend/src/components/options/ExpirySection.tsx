@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import { ApiError } from "../../lib/api";
 import { fetchOptionsChain } from "../../lib/options-api";
 import { clearOwnerKey, useOwnerKey } from "../../lib/owner";
+import { useNow } from "../../lib/use-now";
 import { fetchLiveChain, isOwnerKeyRefused } from "../../lib/owner-api";
 import type { ChainRow, ExpiryChain, Positioning } from "../../lib/options-schemas";
 import {
@@ -61,10 +62,11 @@ const iv = (v: number | null) => (v === null ? dash : pct(v));
 const delta = (v: number | null) => (v === null ? dash : v.toFixed(2));
 const strike = (k: number) => (Number.isInteger(k) ? k.toFixed(0) : k.toFixed(2));
 const LIVE_REFRESH_MS = 15_000;
+const AGE_TICK_MS = 5_000;
 
 /** "3s", "2m": how long ago tastytrade's newest quote was. */
-function quoteAge(updatedAt: string): string {
-  const seconds = Math.max(0, Math.round((Date.now() - new Date(updatedAt).getTime()) / 1000));
+function quoteAge(updatedAt: string, now: Date): string {
+  const seconds = Math.max(0, Math.round((now.getTime() - new Date(updatedAt).getTime()) / 1000));
   return seconds < 90 ? `${seconds}s` : seconds < 5400 ? `${Math.round(seconds / 60)}m` : `${Math.round(seconds / 3600)}h`;
 }
 
@@ -96,7 +98,9 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
     gcTime: 0, // tastytrade's quotes leave memory with the view
     retry: false,
   });
+  const liveUnauthorized = useSignOutOn401(liveQuery.error); // a stale sign-in, as for the delayed chain
   const liveRefused = isOwnerKeyRefused(liveQuery.error);
+  const now = useNow(AGE_TICK_MS, liveOn); // the quotes' age keeps counting between reads
   useEffect(() => {
     if (liveRefused) clearOwnerKey();
   }, [liveRefused]);
@@ -140,8 +144,8 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
           {liveOn && (
             <p data-testid="options-live-status" className="mb-2 font-mono text-[11px] text-strata-muted">
               {liveChain ? (
-                <>Live · tastytrade · {liveChain.updated_at ? `quotes ${quoteAge(liveChain.updated_at)} old` : "quote time unknown"} · shown to you only</>
-              ) : liveQuery.error && !liveRefused ? (
+                <>Live · tastytrade · {liveChain.updated_at ? `quotes ${quoteAge(liveChain.updated_at, now)} old` : "quote time unknown"} · shown to you only</>
+              ) : liveQuery.error && !liveRefused && !liveUnauthorized ? (
                 <span className="text-strata-neg">
                   Live quotes unavailable: {liveQuery.error instanceof ApiError ? liveQuery.error.title.replace(/\.$/, "") : "tastytrade didn't answer"}. Showing the delayed chain.
                 </span>

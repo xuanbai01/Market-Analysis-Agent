@@ -317,5 +317,12 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **No quote time reads "quote time unknown"**, not "quotes of unknown age old".
     - **The warm cache the live chain reads is tested** with a real build in it.
     - **Not changed:** a wrong-shaped answer is already a 503 with the reason, since `items_of` raises `TastytradeUnavailable`.
+  - **From #130's second AI review:**
+    - **The live quotes' age keeps counting between reads**, from a clock shared with `/positions` (`lib/use-now.ts`) that ticks only while Live is on.
+    - **A 401 on the live read signs out**, as one on the delayed chain does.
+    - **Not changed:**
+      - `/option-chains/{symbol}/nested` is on the client's allowlist.
+      - The strategy builder already prices from the live chain.
+      - The dividend yield only checks the put-call-parity forward taken from the live quotes, so a yield of 0 when the report isn't cached on that machine barely moves it.
   - **`/positions` stays current while open** (#128's last AI review): it reads again every 15 s while the tab shows, matching the server's copy, and quote ages tick every 5 s between reads. A tab left open no longer freezes at "10s ago".
 

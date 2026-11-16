@@ -8,9 +8,10 @@
  * code, and none says what to do.
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import { clearOwnerKey, useOwnerKey } from "../../lib/owner";
+import { useNow } from "../../lib/use-now";
 import { fetchOwnerPositions, isOwnerKeyRefused } from "../../lib/owner-api";
 import type { OwnerPositions, PositionGroup } from "../../lib/owner-schemas";
 import { type Greeks, greeks } from "../../lib/positions-math";
@@ -22,16 +23,6 @@ import { MAX_CONTEXT, PositionGroupCard } from "./PositionGroupCard";
 
 const FIFTEEN_SECONDS = 15_000;
 const FIVE_SECONDS = 5_000;
-
-/** The time, a fresh one every ``everyMs``. */
-function useNow(everyMs: number): Date {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), everyMs);
-    return () => clearInterval(id);
-  }, [everyMs]);
-  return now;
-}
 
 /** A total across the holdings, and the ones it leaves out for want of a
  * live figure (one unquoted holding mustn't blank the rest). */

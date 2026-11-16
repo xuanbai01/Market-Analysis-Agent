@@ -60,6 +60,17 @@ POP: list[dict[str, Any]] = [
     {"smile": "flat", "legs": [("put", 1, 100.0, 7.0)]},
 ]
 
+# Black-76 prices for the positions page's valuation before expiry
+# (frontend/src/lib/options-pricing.ts): (forward, strike, years, vol, rate, call).
+BLACK76 = [
+    (163.03, 165.0, 28 / 365, 0.60, 0.04, True),
+    (163.03, 150.0, 28 / 365, 0.66, 0.04, False),
+    (100.0, 100.0, 1.0, 0.20, 0.04, True),
+    (100.0, 80.0, 0.5, 0.35, 0.0, False),
+    (600.0, 650.0, 7 / 365, 0.15, 0.045, True),
+    (600.0, 650.0, 7 / 365, 0.15, 0.045, False),
+]
+
 _GRID = 20_000
 _TAIL_SIGMAS = 10
 
@@ -136,6 +147,13 @@ def golden() -> dict[str, Any]:
         "generated_by": "tests/test_options_strategy_golden.py, from app.services.options_math",
         "smiles": {name: {**s, "points": [list(p) for p in s["points"]]} for name, s in SMILES.items()},
         "norm_cdf": [{"x": x, "p": om.norm_cdf(x)} for x in NORM_XS],
+        "black76": [
+            {
+                "forward": f, "strike": k, "years": t, "vol": v, "discount": math.exp(-r * t), "call": call,
+                "price": om.black76(f, k, t, v, math.exp(-r * t), call=call),
+            }
+            for f, k, t, v, r, call in BLACK76
+        ],
         "prob_above": [{"smile": name, "strike": k, "prob": _prob_above(SMILES[name], k)} for name, k in PROB_ABOVE],
         "pop": [
             {

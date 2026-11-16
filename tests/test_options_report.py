@@ -92,6 +92,61 @@ async def test_a_report_from_a_chain(world: Any) -> None:
     assert report.earnings is not None and report.earnings.refused == "no earnings date"
 
 
+async def test_a_report_read_for_the_positions_page_records_no_view(world: Any) -> None:
+    """The positions page reads the report of every underlying the owner
+    holds; recording those as views would store a list of the holdings
+    (positions PR 3's security review)."""
+    _yahoo, store, _clock = world
+    await orp.get_report(None, "HELD", now=NOW, track=False)  # type: ignore[arg-type]
+    assert store.touched == []
+    await orp.get_chain(None, "OTHER", EXP_20, now=NOW, track=False)  # type: ignore[arg-type]
+    assert store.touched == []
+    await _report("VIEWED")
+    assert store.touched == ["VIEWED"]
+
+
+async def test_a_view_after_an_untracked_read_is_still_recorded(world: Any) -> None:
+    """The positions page's untracked build is cached; opening the options
+    page inside its 15 minutes must still record the view (#128's AI review)."""
+    _yahoo, store, _clock = world
+    await orp.get_report(None, "HELD", now=NOW, track=False)  # type: ignore[arg-type]
+    assert store.touched == []
+    await orp.get_report(None, "HELD", now=NOW)  # type: ignore[arg-type]
+    await orp.get_report(None, "HELD", now=NOW)  # type: ignore[arg-type]
+    assert store.touched == ["HELD"]  # once, from the cached copy
+
+
+async def test_a_view_waiting_on_an_untracked_build_is_still_recorded(world: Any) -> None:
+    """A view that waits on the lock while the positions page's untracked
+    build runs is served that build's copy, and still recorded (#128's
+    second AI review)."""
+    yahoo, store, _clock = world
+    await asyncio.gather(
+        orp.get_report(None, "HELD", now=NOW, track=False),  # type: ignore[arg-type]
+        orp.get_report(None, "HELD", now=NOW),  # type: ignore[arg-type]
+    )
+    assert yahoo.calls == ["HELD"]  # one build
+    assert store.touched == ["HELD"]
+
+
+async def test_a_view_served_the_old_copy_is_still_recorded(world: Any) -> None:
+    """Yahoo down: the view is served the positions page's old copy, and recorded."""
+    yahoo, store, clock = world
+    await orp.get_report(None, "HELD", now=NOW, track=False)  # type: ignore[arg-type]
+    clock[0] = orp.CACHE_TTL_SECONDS + 1
+    yahoo.broken = True
+    await orp.get_report(None, "HELD", now=NOW)  # type: ignore[arg-type]
+    assert store.touched == ["HELD"]
+
+
+async def test_no_view_is_recorded_for_an_untracked_copy_with_no_options(world: Any) -> None:
+    """A view is recorded only for a usable report, whoever built the copy."""
+    _yahoo, store, _clock = world
+    await orp.get_report(None, "BRK-A", now=NOW, track=False)  # type: ignore[arg-type]
+    await _report("BRK-A")
+    assert store.touched == []
+
+
 async def test_quotes_in_a_session_are_not_the_close(world: Any) -> None:
     monday_11am_et = datetime(2026, 11, 16, 16, tzinfo=UTC)
     report = await orp.get_report(None, "TEST", now=monday_11am_et)  # type: ignore[arg-type]

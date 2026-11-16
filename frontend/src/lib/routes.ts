@@ -14,6 +14,8 @@ export const ROUTES = {
   lens: (id: string) => `/lens/${encodeURIComponent(id)}`,
   /** A symbol's options page (ADR 0008); signed in only. */
   options: (ticker: string) => `/options/${ticker.toUpperCase()}`,
+  /** The owner's positions, live from tastytrade (ADR 0009); needs the owner key. */
+  positions: "/positions",
   /** Public read-only demo: no sign-in. */
   demo: "/demo",
   demoSymbol: (ticker: string) => `/demo/${ticker.toUpperCase()}`,
@@ -27,6 +29,7 @@ export const ROUTE_PATHS = {
   lenses: "/lens",
   lens: "/lens/:id",
   options: "/options/:ticker",
+  positions: "/positions",
   demo: "/demo",
   demoSymbol: "/demo/:ticker",
 } as const;

@@ -20,6 +20,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, fetchDemoIndex, probeAuth } from "../lib/api";
 import { setStoredToken } from "../lib/auth";
+import { clearOwnerKey } from "../lib/owner";
 import { ROUTES } from "../lib/routes";
 
 interface Props {
@@ -56,6 +57,7 @@ export function LoginScreen({ onAuthenticated }: Props) {
         setError("Wrong password.");
         return;
       }
+      clearOwnerKey(); // a new sign-in starts without the owner key
       setStoredToken(secret);
       onAuthenticated();
     } catch (err) {

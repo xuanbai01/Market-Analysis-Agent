@@ -107,12 +107,12 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
             no_options=[], no_usable_quotes=[], failed=[], deferred=[], duration_ms=0.0,
         )
 
-    async def _options_report(_session: Any, symbol: str) -> Any:
+    async def _options_report(_session: Any, symbol: str, *, track: bool = True) -> Any:
         from tests.test_options_routes import _report
 
         return _report(symbol)
 
-    async def _options_chain(_session: Any, _symbol: str, expiry: Any) -> Any:
+    async def _options_chain(_session: Any, _symbol: str, expiry: Any, *, track: bool = True) -> Any:
         from app.schemas.options import ExpiryChain
 
         return ExpiryChain(expiry=expiry, days=30.0, forward=1.0, atm_iv=None, smile=[], rows=[], open_interest=[])

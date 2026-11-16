@@ -172,5 +172,61 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - the client logged a query's single value as itself, so one held stock or option reached Fly's logs; it now logs counts only;
     - NaN or infinity from tastytrade would have made the route a 500 and stayed cached; a number must now be finite.
   - **And the review's lows:** a multiplier must be a positive whole count; a position must say long or short; a stock or underlying must be a ticker; an answer of the wrong shape reads as nothing; an account tastytrade can't find is skipped; at most 10 accounts and 500 positions (`truncated`); a 60 s deadline; no empty account list remembered; the stale copy dropped after 15 minutes; `no-store` on every owner response, errors included; the import guard follows imports transitively.
-  - **From #127's AI review:** underlyings and options are quoted in separate calls, and a refused batch is asked for again a symbol at a time (up to 25), so one symbol tastytrade won't quote (an index like SPX, as an equity) costs only its own quote; a stock is one share per unit whatever its row says; only a real refusal (a 4xx other than 401 and 429; the client's error now carries its status) is retried a symbol at a time, while a 429 or 5xx fails the read so the last copy stands in; an IV outside 0 to 3 is no figure rather than a percent read as a fraction; an accounts or positions answer of the wrong shape is a failure, not "no positions"; the 60 s deadline covers waiting behind another read; reading stops asking for accounts at the cap; a 503 reason has any account path masked; a 404 on the quotes call, or every symbol refused, fails the read instead of showing no quotes anywhere; an unzoned quote time is read as UTC; `accounts` counts the accounts actually read; more than 10 accounts sets `truncated`; a list-valued query parameter is logged as a count too; every 500 says `no-store` (it's built outside the middleware). A test value Gitleaks read as a key is now plainly fake, and its old commit is in `.gitleaksignore`.
+  - **From #127's AI review:** underlyings and options are quoted in separate calls, and a refused batch is asked for again a symbol at a time (up to 25), so one symbol tastytrade won't quote (an index like SPX, as an equity) costs only its own quote; a stock is one share per unit whatever its row says; only a real refusal (a 4xx other than 401 and 429; the client's error now carries its status) is retried a symbol at a time, while a 429 or 5xx fails the read so the last copy stands in; an IV outside 0 to 3 is no figure rather than a percent read as a fraction; an accounts or positions answer of the wrong shape is a failure, not "no positions"; the 60 s deadline covers waiting behind another read; reading stops asking for accounts at the cap; a 503 reason has any account path masked; a 404 on the quotes call, or every symbol refused, fails the read instead of showing no quotes anywhere; an unzoned quote time is read as UTC; `accounts` counts the accounts actually read; a quotes answer of the wrong shape fails the read too (#127's last review, landed with the page); more than 10 accounts sets `truncated`; a list-valued query parameter is logged as a count too; every 500 says `no-store` (it's built outside the middleware). A test value Gitleaks read as a key is now plainly fake, and its old commit is in `.gitleaksignore`.
+- **The `/positions` page (2026-11-15, ADR 0009 amended):** the owner's positions with analysis computed in code, behind the owner key.
+  - **Unlocking:** a form with a fixed hidden username (`market-agent-owner`), so a password manager saves the key and syncs it to the owner's other PC. It posts, and it checks the key with `/v1/owner/status` before keeping it. It says why a key was refused: wrong, none set on the server, too many tries, or the sign-in expired. A refused key is forgotten, and sign out forgets it too.
+  - **A card per underlying:**
+    - the legs at tastytrade's marks, each quote's age, P&L against the open, and IV;
+    - the Greeks as P&L: per 1% move (and how delta itself moves), per day, per IV point;
+    - the payoff at the first expiry and in a what-if (price ±30%, IV ±20 points, days to expiry). Legs expiring later are valued by Black-76 on a forward drifting at the chain's own carry, discounted at the report's rate. `lib/options-pricing.ts` is held to `options_math.black76` by the golden file.
+  - **What our data says around it:**
+    - the risk-neutral chance of profit at expiry from that expiry's smile, for any single-expiry position, stock included. It's integrated over the breakevens with the strategy builder's `probAbove`, and agrees with `probProfit` on plain options.
+    - how often five years of moves over the sessions left would have left it in profit;
+    - a report before expiry, with its implied move and the last 8 moves;
+    - max pain and the walls, with the dealer assumption.
+    Each is labelled for what it is, not a forecast, and the page says nothing is advice.
+  - **Not modelled:** adjusted contracts are listed but not modelled, and futures are listed as not analysed. A leg without an IV gets no curve before expiry rather than a guessed one.
+  - **From the security review** (one medium, fixed):
+    - **The medium:** a forced sign-out on a 401 cleared only the shared secret, so the owner key outlived the sign-in. `clearStoredToken` now clears it too, and a new sign-in starts without one.
+    - **The positions in memory** are dropped (`gcTime: 0`) when the page goes or the key does.
+    - **No redirects:** owner requests don't follow one.
+    - **Blocked storage:** the key lasts the page in memory when storage refuses it.
+    - **No list of holdings:** the options report and chain routes take `track=false`, so the holdings aren't recorded as option-page views.
+    - **The fake backend** can't open real routes, spend a key or reach a database.
+  - **From #128's AI review:**
+    - a holding whose option data can't be read says so on its card, instead of dropping the chance of profit and max pain quietly;
+    - an options-page view after the positions page's untracked read is still recorded (the cached copy records it once);
+    - the first expiry is taken by date.
+  - **From #128's second AI review:**
+    - **The chance of profit read 0% for stock bought far below today's price.** Breakevens were searched only between a fifth of the price and four times it, and a covered call on shares bought at a twentieth of today's price breaks even below that. Options that expire together have a payoff that bends only at the strikes, so their breakevens are now found exactly, as the strategy builder finds them. A leg that can't be valued gives no chance, not 0%.
+    - **The positions page's reads have query keys of their own.** Under the options page's keys, a visit there within five minutes was served the untracked copy from the browser and never reached the server, so no view was recorded.
+    - **The server records a view that waited on the lock** while the untracked build ran. A report with no usable options records none, whoever built it.
+    - **The page's test pins the clock,** since its fixtures' expiries pass in December.
+  - **From #128's third AI review:**
+    - **Option context for the first 10 underlyings only,** as the plan said and the page didn't: each cold report or chain read spends one of the IP's 60 options lookups an hour, so a big portfolio could have spent them all in one load. The rest say why they show no context. The held expiry's chain waits for the report, which often read that expiry already, so it costs nothing.
+    - **Each option leg says when its expiry closes** (`expires_at`, from `market_calendar.session_close`): the page had used 21:00 UTC for every expiry, an hour late in summer and three hours late on half days, so a position on the day after Thanksgiving still had time value after the close.
+    - **The normal CDF keeps its digits in the tails** (Numerical Recipes' erfc, error under 1.2e-7 of the value). Its error had been absolute, so the golden check allowed an error larger than a far out-of-the-money price and a tail priced at 0 passed. Black-76 is now held to Python within 1e-5 of each price.
+    - **No bare "Dec 11: "** when a chain has no max pain.
+    - **A view served the old copy** (Yahoo down) is recorded too.
+  - **From #128's fourth AI review** (lows only):
+    - **Sessions left count today's** while the market hasn't opened, so a check before the open has the right window for the past-moves share.
+    - **One holding without a live figure no longer blanks every total.** The tiles add what they can and name what they leave out.
+    - **A leg sent without its close** gets 4 pm in New York, daylight time included, rather than 21:00 UTC.
+  - **From #128's fifth AI review:**
+    - **A report on the expiry day after the close** no longer counts as before the expiry. The card uses the report's reaction session, as the options page does.
+    - **The tiles say what's missing:** a live price or delta, theta or vega.
+    - **Not changed:**
+      - The chain route reads any listed expiry on demand, not only those the report read, so a held expiry far from the report's targets still gets its chain.
+      - Recording a view twice is harmless, since it's an upsert.
+  - **From #128's sixth AI review:**
+    - **"Moves like −0 shares" is gone:** the share counts are rounded before their sign is taken.
+    - **Not changed:**
+      - A report with no options never records a view, so marking its copy as having none to record loses nothing; once the symbol has options, the new build records the view.
+      - `probAbove` takes a strike and converts it to moneyness itself.
+      - A holding with no live price has no delta in the totals, and is named.
+  - **From #128's seventh AI review:**
+    - **The past-moves line names the span its closes cover** ("Over the last 3 years") instead of always saying five years: a stock listed lately has less.
+    - **A mark of 0** (a halted stock) counts as no price, and the card falls back to the report's.
+    - **Not changed:** a what-if below 1% IV is priced at 1%, and a failed price read leaves out the past-moves line without a note.
+  - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 

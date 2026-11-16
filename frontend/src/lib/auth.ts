@@ -25,6 +25,8 @@
  * the simplicity of single-secret auth.
  */
 
+import { clearOwnerKey } from "./owner";
+
 const TOKEN_STORAGE_KEY = "market-agent.auth-token";
 
 /** Read the token from localStorage. Returns null if not present. */
@@ -47,8 +49,10 @@ export function setStoredToken(token: string): void {
   }
 }
 
-/** Forget the stored token. Called on 401 + on explicit logout. */
+/** Forget the stored token, and the owner key with it: the owner key never
+ * outlives the sign-in, however that ends (sign out, or a 401 anywhere). */
 export function clearStoredToken(): void {
+  clearOwnerKey();
   try {
     window.localStorage.removeItem(TOKEN_STORAGE_KEY);
   } catch {

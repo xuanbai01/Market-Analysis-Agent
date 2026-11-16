@@ -257,3 +257,38 @@ def test_a_close_reaches_the_lot_it_closes_wherever_it_is_queued() -> None:
     short = next(p for p in j.positions if p.id == "order-2")
     assert (short.status, short.realized) == ("closed", pytest.approx(40.0))
 
+
+def test_a_close_bigger_than_what_is_open_lists_only_the_rest() -> None:
+    """Three closed, two with nothing to close: the two are listed, and say
+    so (#131's second AI review)."""
+    j = tj.build_journal([
+        t(1, "2026-10-01", "Sell to Open", C175, 3, 900.0, order=1),
+        t(2, "2026-10-02", "Buy to Close", C175, 5, -500.0, order=2),
+    ])
+    (p,) = j.positions
+    assert (p.status, p.realized) == ("closed", pytest.approx(600.0))
+    (row,) = j.unmatched
+    assert row.reason.startswith("2 of 5 had nothing open to close")
+
+
+def test_an_expiry_without_a_buy_or_sell_still_closes_the_option() -> None:
+    j = tj.build_journal([
+        t(1, "2026-10-01", "Sell to Open", C175, 1, 300.0, order=1),
+        t(2, "2026-12-18", None, C175, 1, 0.0, sub="Expiration", kind="Receive Deliver"),
+    ])
+    (p,) = j.positions
+    assert (p.status, p.ended_by, p.realized) == ("closed", "expired", pytest.approx(300.0))
+    assert j.unmatched == []
+
+
+def test_the_totals_say_what_partly_closed_positions_add() -> None:
+    """The realized figure includes partial closes: the count of partly
+    closed positions goes with it (#131's second AI review)."""
+    j = tj.build_journal([
+        t(1, "2026-10-01", "Sell to Open", C175, 2, 400.0, order=1),
+        t(2, "2026-10-02", "Buy to Close", C175, 1, -50.0, order=2),
+    ])
+    assert (j.totals.closed, j.totals.partly, j.totals.realized) == (0, 1, pytest.approx(150.0))
+    (p,) = j.positions
+    assert p.closed_at is None  # not closed yet: only the last close of a part
+

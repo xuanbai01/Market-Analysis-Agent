@@ -95,7 +95,7 @@ describe("TradesPage", () => {
     vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
     renderPage();
     expect(await screen.findByTestId("journal-summary")).toHaveTextContent(
-      "1 position closed, 1 at a profit (100%), held 43 days on average: +$358 realized after $4 in fees.",
+      "1 position closed, 1 at a profit (100%), held 43 days on average. Realized: +$358 after $4 in fees.",
     );
     expect(screen.getAllByTestId("realized-bar")).toHaveLength(1);
     const rows = screen.getAllByTestId("journal-row");

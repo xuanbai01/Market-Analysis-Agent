@@ -583,3 +583,51 @@ def test_a_docs_only_push_keeps_the_earlier_findings_in_view():
         "abc1234", plan, [{"severity": "medium", "path": "app/a.py", "line": 3, "defect": "the old bug"}])
     assert "Nothing to review" in body and "the old bug" in body
     assert ai_review.read_state(body)["findings"][0]["defect"] == "the old bug"
+
+
+# ── what the PR's reviews cost, carried in the comment ───────────────
+
+
+def _render(found=(), totals=None, usage=None):
+    return ai_review.render_comment(findings=list(found), riskiest=[], head_sha="abc1234", model="m", parts=1,
+                                    usage=usage or asker.Usage(read=100, written=10, reasoning=0, cached=40,
+                                                               calls=3),
+                                    plan=None, mode="full", earlier=[], failed=[], totals=totals)
+
+
+def test_the_comment_carries_the_pr_s_running_token_totals():
+    first = ai_review.read_state(_render())["tokens"]
+    assert first == {"reviews": 1, "read": 100, "cached": 40, "written": 10, "reasoning": 0, "calls": 3}
+    second = _render(totals=first)
+    assert ai_review.read_state(second)["tokens"]["reviews"] == 2
+    assert ai_review.read_state(second)["tokens"]["written"] == 20
+    assert "This PR so far: 2 reviews" in second
+
+
+def test_lows_are_numbered_on_from_the_others():
+    body = _render([ai_review.Finding("high", "a.py", 1, "h", "x"), ai_review.Finding("low", "a.py", 9, "l", "y")])
+    assert "1. **high**" in body and "2. **low**" in body
+
+
+def test_a_docs_only_push_keeps_the_totals():
+    plan = ai_review.plan_parts([ai_review.split_diff(_file("docs/changelog.md"))[0]], 1000, 4)
+    totals = {"reviews": 2, "read": 5, "cached": 1, "written": 3, "reasoning": 0, "calls": 2}
+    body = ai_review.render_nothing_to_review("abc1234", plan, [], totals)
+    assert ai_review.read_state(body)["tokens"] == totals
+
+
+def test_main_adds_each_review_to_the_totals(pr_env, monkeypatch):
+    pr_env["set_event"]("synchronize")
+    totals = {"reviews": 1, "read": 1000, "cached": 0, "written": 50, "reasoning": 0, "calls": 9}
+    earlier = ai_review.render_comment(findings=[], riskiest=[], head_sha="ccccccc3", model="m", parts=1,
+                                       usage=asker.Usage(), plan=None, mode="full", earlier=[], failed=[],
+                                       totals=None)
+    state = ai_review.read_state(earlier)
+    state["tokens"] = totals
+    pr_env["comments"] = [{"id": 7, "body": earlier.split("<!-- ai-review-state")[0]
+                           + ai_review.embed_state(state), "author_association": "NONE"}]
+    _use_git(monkeypatch, {"app/a.py": "+fix\n"})
+    monkeypatch.setattr(ai_review, "_ask_deepseek", lambda messages, options, **kw: _answer([]))
+    assert ai_review.main() == 0
+    after = ai_review.read_state(pr_env["posted"][0])["tokens"]
+    assert after["reviews"] == 2 and after["read"] == 1100 and after["written"] == 100

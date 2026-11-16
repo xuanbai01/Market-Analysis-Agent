@@ -182,3 +182,9 @@ def test_a_long_reply_keeps_its_start():
     reply = "Finding 2 doesn't hold: " + "because " * 2000
     replies = findings.replies_from([_comment("<!-- ai-review:reply -->\n" + reply)])
     assert replies.startswith("Finding 2 doesn't hold")
+
+
+def test_findings_can_be_numbered_on_from_another_list():
+    # Lows are numbered on from the others, so a reply's numbers are unique.
+    text = findings.render_findings([_f("low", line=9)], start=4)
+    assert text.startswith("4. **low**")

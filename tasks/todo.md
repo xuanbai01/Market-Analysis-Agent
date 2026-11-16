@@ -88,7 +88,7 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 
 ## The AI review (2026-11-16, #135)
 
-- [ ] **Measure it on the next feature PR:** tokens for the full review and each fix round, from the comment's footer. Count the findings that held and those that didn't, and compare with #128–#131 (changelog).
+- [ ] **Measure it after about five feature PRs:** run `python scripts/ai_review_stats.py --since 135` and compare with #128–#131. Tokens and real problems found per PR are the figures that compare; what to watch for is in docs/workflow.md §8. Report to the owner.
 - [ ] **Lows left from #135's reviews:** a full review run again keeps the earlier findings in its state, so answered ones stay listed (capped at 60). A failed thinking request's tokens aren't counted.
 - [ ] **The positions page measures time to expiry from the clock** (#134's review). Outside a session it should run from the last close, as the options code does (`market_calendar`): a weekend understates a leg's time value in the what-if and payoff.
 

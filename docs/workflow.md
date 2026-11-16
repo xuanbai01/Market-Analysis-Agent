@@ -58,10 +58,20 @@ DeepSeek reviews each PR in CI (`.github/workflows/ai-review.yml`).
 - **Full review:** when the PR opens, it reviews the whole PR in parts.
 - **Fix rounds:** each later push gets a review of only what changed, with the earlier findings and your replies in view.
 - **Reply once per round:** post one PR comment starting with `<!-- ai-review:reply -->`. List what you fixed, and what you didn't with the reason. The review reads these, so a finding that didn't hold isn't raised again.
+  - The reply also carries two lines that `scripts/ai_review_stats.py` counts: `Held: 2, 14` and `Didn't hold: 1, 3-5`. Use the review's numbers; lows are numbered on from the others. Leave lows you didn't check out of both lines.
 - **When to merge:** fix the full review's real findings and reply. Merge once the latest fix-round review raises nothing real at medium or high. Lows go to `tasks/todo.md`, not another round.
 - **A second full review:** if the first one found two or more real problems at medium or high, add the `ai-review-full` label once the fixes are in. Each full review is a fresh sample, and one that finds at most one real problem is the sign to stop. Do the same after a big rework. To run it again, remove the label and add it back.
 - **Expect noise:** about two in three findings don't hold (graded, #128–#131). Check each against the code at the line before fixing or dismissing it.
 - **Smaller PRs:** a feature with a backend and a page goes as two PRs (backend first). Each review then reads less, and CI finishes sooner.
+- **A bug the review missed:** when a bug turns up after merge in code a PR added, its changelog line says `missed by #NNN's review`. You might find it, or the owner, a later PR or production.
+- **Keep measuring:** after about five feature PRs, run `python scripts/ai_review_stats.py --since 135`. It shows each PR's reviews, tokens, what held and what was missed later, beside the old review on #128–#131.
+  - **Compare tokens and real problems found per PR.** The share that held doesn't compare: the old review's comes from the changelog's lists, and the new review raises more on purpose.
+  - **Rethink the passes or lenses** if:
+    - fewer than one finding in five holds;
+    - a missed bug is of a kind a lens should catch;
+    - fix rounds go past three;
+    - tokens per PR creep up.
+  - **To measure a change to the reviewer,** replay past PRs: `gh workflow run live-eval.yml --ref <branch> -f suite=review`.
 
 ## Task Management
 

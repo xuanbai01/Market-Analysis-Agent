@@ -118,14 +118,14 @@ def _where(f: Finding) -> str:
     return f"`{f.path}:{f.line}`" if f.line is not None else f"`{f.path}`"
 
 
-def render_findings(found: list[Finding]) -> str:
+def render_findings(found: list[Finding], start: int = 1) -> str:
     if not found:
         return "Nothing worth raising."
     ordered = sorted(found, key=_rank)
     return "\n".join(
         f"{i}. **{f.severity}** · {_where(f)} — {f.defect} Fails when: {f.failure}"
         + (f" *(raised by {f.passes} passes)*" if f.passes > 1 else "")
-        for i, f in enumerate(ordered, start=1)
+        for i, f in enumerate(ordered, start=start)
     )
 
 

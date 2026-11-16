@@ -133,7 +133,12 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 See `.github/workflows/ci.yml`:
 
 1. **Gitleaks** — secrets detection on every push and PR.
-2. **AI PR review (DeepSeek)** — reads the diff of every PR from a branch of this repo and posts one comment: bugs, security holes, broken project rules ([`scripts/ai_review.py`](../scripts/ai_review.py)). A different model family from the one that writes the code. Advisory; it never blocks a merge. It sees the diff only, so it is no substitute for `/security-review`. It runs the PR's own copy of the script with the DeepSeek key, which is fine while only the owner can push branches: anyone who can push could already change `ci.yml` in a PR and print any secret. Revisit before adding collaborators (the comment on the job in `ci.yml` says how).
+2. **AI PR review (DeepSeek)** (`.github/workflows/ai-review.yml`): reads every PR from a branch of this repo and posts one comment about bugs, security holes and broken project rules ([`scripts/ai_review.py`](../scripts/ai_review.py)).
+   - **Its job:** a second read from a different model family than the one that writes the code. It's advisory and never blocks a merge.
+   - **When it runs:** a full review in parts when a PR opens, and again with the `ai-review-full` label. After that, each push gets a review of only what changed.
+   - **What it sees:** the diff only, so it's no substitute for `/security-review`.
+   - **Replies:** the replies it reads come only from people who can push, and the prompt treats them as data.
+   - **The key:** it runs the PR's own copy of the script with the DeepSeek key. That's fine while only the owner can push branches, since anyone who can push could already change a workflow in a PR and print any secret. Revisit before adding collaborators; the comment at the top of `ai-review.yml` says how.
 3. **`security-review` skill** — run manually via `/security-review` before merging anything that touches a new route, service, or external call.
 
 ## Do / Don't Cheat Sheet

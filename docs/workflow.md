@@ -51,6 +51,18 @@
 - Do not rely on unit tests alone. They will not catch missing navigation, broken redirects, or role-gating bugs.
 - If the project has a deployed staging environment, dogfood there continuously.
 
+### 8. The AI review loop
+
+DeepSeek reviews each PR in CI (`.github/workflows/ai-review.yml`).
+
+- **Full review:** when the PR opens, it reviews the whole PR in parts.
+- **Fix rounds:** each later push gets a review of only what changed, with the earlier findings and your replies in view.
+- **Reply once per round:** post one PR comment starting with `<!-- ai-review:reply -->`. List what you fixed, and what you didn't with the reason. The review reads these, so a finding that didn't hold isn't raised again.
+- **When to merge:** fix the full review's real findings and reply. Merge once the latest fix-round review raises nothing real at medium or high. Lows go to `tasks/todo.md`, not another round.
+- **A second full review:** if the first one found two or more real problems at medium or high, add the `ai-review-full` label once the fixes are in. Each full review is a fresh sample, and one that finds at most one real problem is the sign to stop. Do the same after a big rework. To run it again, remove the label and add it back.
+- **Expect noise:** about two in three findings don't hold (graded, #128–#131). Check each against the code at the line before fixing or dismissing it.
+- **Smaller PRs:** a feature with a backend and a page goes as two PRs (backend first). Each review then reads less, and CI finishes sooner.
+
 ## Task Management
 
 1. **Plan First:** Write plan to `tasks/todo.md` with checkable items.

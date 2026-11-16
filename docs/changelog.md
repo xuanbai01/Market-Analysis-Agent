@@ -426,3 +426,36 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **The status filter reads "Open or partly closed"**, which is what it shows.
     - **Not changed:** an expiry sent without an action, with a long and a short lot of one contract both open. That's a state tastytrade nets away.
 
+- **The AI review: full reviews in parts, small fix-round reviews (2026-11-16):** the owner found DeepSeek's spend high ($3.29 on Nov 15) and the PR loop slow.
+  - **Where it went:** the review re-read the whole PR on every push. #128–#131 took 41 rounds, and 98% of the tokens it wrote were hidden thinking, about 25–35K a review.
+  - **Not noise:** every round still found about 3 real problems. So reviewing once would have lost most of them.
+  - **Measured:** `scripts/ai_review_eval.py` (`gh workflow run live-eval.yml --ref <branch> -f suite=review`) replayed #128–#131 at their first reviewed commit. Blind graders checked each finding against the code.
+
+    | One review of the four PRs | Real problems | Raised | Didn't hold | Tokens read | Tokens written |
+    |---|---|---|---|---|---|
+    | A: the old review, one pass, thinking low (3 PRs: #128's dropped) | 10 | 16 | 5 | 100K | 71K |
+    | B: in parts, whole functions, thinking low (2 parts dropped) | 13 | 24 | 4 | 136K | 220K |
+    | C: the same, thinking off | 15 | 55 | 32 | 167K | 11K |
+    | D: C three times, each pass with a lens (what CI runs now) | at least 17, and on #129 9 against A's 4 | 156 | about 70% | 502K (99% cached) | 35K |
+
+    - **Coverage comes from passes:** A, B and C caught mostly different problems, and D found on #129 as many as A, B and C together.
+    - **The cost:** D writes about an eighth of the tokens one old round did, and the 3 passes over each part share a cached prefix.
+    - **A second look didn't work:** DeepSeek re-checked each finding against its whole file and threw away real problems. With thinking off it kept 18 of 38; with thinking low, 29 of 38, while still keeping half of the rest. Not adopted.
+    - **Severity is a weak signal:** with thinking off, about one low in six held up, against two highs in five.
+  - **What changed:**
+    - **The review has its own workflow** (`ai-review.yml`), out of `ci.yml`.
+    - **A full review** when a PR opens, is reopened or marked ready, or gets the `ai-review-full` label (`ai_review_ask`). It reads each source file beside its tests (`ai_review_shards`), in parts of about 50K characters, with whole functions around each change. It runs three passes over each part, thinking off, each looking hardest at one kind of defect. Prose docs are left out by name.
+    - **Findings:** they come back as JSON, and one without a failing input or state is dropped. Duplicates across passes are merged, lows fold away (`ai_review_findings`), and the comment carries the tokens spent.
+    - **Fix rounds:** a later push reviews only what changed since the last review, with the earlier findings and the author's `<!-- ai-review:reply -->` comments in view. The comment holds that state.
+    - **Reliability:** a dropped DeepSeek connection (`IncompleteRead`, seen in the eval) is a failed attempt and is asked again, not a crashed review.
+  - **The loop** (docs/workflow.md §8):
+    - Fix the full review's real findings, reply once a round, and merge when a fix-round review raises nothing real at medium or high. Lows go to the plan.
+    - Before opening a PR, `/pre-pr-check` (#133) checks the diff for the kinds of defect the old rounds kept finding.
+  - **From this PR's own first review:** it read 3 parts 3 times in 15 s, read 138K tokens (35% cached), wrote 9.7K, and raised 28 findings above low. 5 held:
+    - with thinking off, a failed request is asked once more;
+    - passes that failed are named on the comment;
+    - a full review run again sees the earlier findings and replies;
+    - a line `int()` can't read is no line;
+    - a long reply keeps its start.
+    - **Not changed:** the rest misread the code. The module import works, since this comment is that job's output. Failed parts are counted once each, not once per attempt. A path can't be both in a part and over budget.
+  - **Found on the way:** grading showed one of #130's "Not changed" replies was wrong. The live chain timed tastytrade's real-time quotes with Yahoo's delayed clock (#134).

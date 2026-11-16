@@ -144,3 +144,16 @@ Each entry has three parts:
 **Context:** The tastytrade client's account-scope fix (#117), checked by breaking the guard with `sed` and restoring the file with `git checkout`.
 **Mistake:** the fix wasn't committed yet. `git checkout` restored the file to its last commit, which also threw away the fix being checked; the next test run would have passed on old code had the change not been re-applied.
 **Rule:** commit (or stash) a change before mutating it to check its tests, and restore with `git checkout` only from a clean tree. The same goes for an untracked file, which `git checkout` can't restore at all (earlier lesson).
+
+### An AI review pass is a sample: measure it, and re-check "Not changed"
+
+**Date:** 2026-11-16
+**Context:** The owner asked why DeepSeek's spend and the PR loop had grown (#128–#131: 41 review rounds, hours each).
+**Mistake:**
+- I treated each round's AI review as a queue to empty, and assumed the reviewer was converging. Replayed and graded blind, a single pass caught 15–25% of the bugs the later rounds found, and different passes caught different ones. Ten rounds were ten serial samples, each re-reading the whole PR at about 25K thinking tokens.
+- One reply I'd marked "Not changed" was wrong. #130's live chain times real-time quotes with Yahoo's delayed clock.
+
+**Rule:**
+- Change the reviewer only with numbers. `scripts/ai_review_eval.py` replays past PRs, with `gh workflow run live-eval.yml --ref <branch> -f suite=review`. Grade the findings blind against the code at that commit.
+- Get coverage from several cheap passes at once, not round after round.
+- Every "Not changed" reason cites a line you've just read. A reason from memory is a guess.

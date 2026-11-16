@@ -425,3 +425,25 @@ def test_an_unreadable_symbol_without_an_instrument_type_isnt_stock() -> None:
     j = tj.build_journal([t(1, "2026-10-01", "Buy to Open", "NVDA 261218C175", 1, -300.0, order=1, instrument="")])
     assert j.positions == [] and "not a contract" in j.unmatched[0].reason
 
+
+def test_a_close_is_booked_to_its_trading_day_not_the_utc_clock() -> None:
+    """A fill at 8 pm New York on Oct 31 is Nov 1 in UTC: its month and the
+    days held follow the trading day (#131's seventh AI review)."""
+    rows = [
+        t(1, "2026-10-01", "Sell to Open", C175, 1, 300.0, order=1),
+        t(2, "2026-10-31", "Buy to Close", C175, 1, -100.0, order=2),
+    ]
+    rows[1] = rows[1].model_copy(update={"executed_at": "2026-11-01T00:30:00+00:00"})
+    j = tj.build_journal(rows)
+    assert [m.month for m in j.months] == ["2026-10"]
+    assert j.positions[0].days_held == 30
+
+
+def test_a_butterfly_with_uneven_wings_is_named_broken_wing() -> None:
+    legs = [("C", 170, 1), ("C", 175, -2), ("C", 185, 1)]
+    rows = [
+        t(i, "2026-10-01", "Buy to Open" if q > 0 else "Sell to Open", occ("2026-12-18", k, s), abs(q), -50.0 if i == 1 else 0.0, order=1)
+        for i, (k, s, q) in enumerate(legs, start=1)
+    ]
+    assert tj.build_journal(rows).positions[0].structure == "broken-wing call butterfly"
+

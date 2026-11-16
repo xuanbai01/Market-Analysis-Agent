@@ -57,6 +57,11 @@ class _World:
         self.calls: list[dict[str, Any]] = []
         self.per_page = 2000
         self.fail: Exception | None = None
+        self.clock = [0.0]
+
+    def later(self, seconds: float = 0.0) -> None:
+        """Past the sync spacing, and ``seconds`` more."""
+        self.clock[0] += ot.SYNC_EVERY_SECONDS + 1 + seconds
 
     async def stored(self, session: _Session) -> list[_Row]:
         session.in_tx = True
@@ -101,6 +106,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> _World:
     monkeypatch.setattr(ot.store, "insert", w.insert)
     monkeypatch.setattr(ot.store, "replace_estimated", w.replace_estimated)
     monkeypatch.setattr(tt, "get", w.get)
+    monkeypatch.setattr(ot, "_clock", lambda: w.clock[0])
     owner_positions.reset()
     ot.reset()
     yield w
@@ -128,7 +134,7 @@ async def test_a_later_sync_reads_back_a_week_and_adds_only_new_ones(world: _Wor
     world.history = [_txn(1, "2026-10-01"), _txn(2, "2026-11-13")]
     await _sync(world)
     world.history.append(_txn(3, "2026-11-16"))
-    ot.reset()  # past the sync spacing
+    world.later()
     result = await _sync(world)
     assert (result.new, result.replaced) == (1, 0)
     assert world.calls[-1]["start-date"] == date(2026, 11, 6).isoformat()
@@ -139,11 +145,11 @@ async def test_estimated_fees_are_replaced_once_final_and_only_then(world: _Worl
     await _sync(world)
     assert world.rows[1]["estimated_fee"] is True
     world.history = [_txn(1, "2026-11-13", **{"is-estimated-fee": False, "net-value": "478.86"})]
-    ot.reset()
+    world.later()
     assert (await _sync(world)).replaced == 1
     row = world.rows[1]
     assert vault.unseal(row["nonce"], row["ciphertext"], 1, key_version=1, estimated_fee=False)["net-value"] == "478.86"
-    ot.reset()
+    world.later()
     assert (await _sync(world)).replaced == 0  # a final row is never touched again
 
 
@@ -278,3 +284,32 @@ async def test_a_closed_account_is_skipped(world: _World, monkeypatch: pytest.Mo
 def test_a_formula_behind_spaces_or_a_newline_is_defused_too() -> None:
     assert ot.csv_cell(" =1+1") == "' =1+1"
     assert ot.csv_cell("\n=1+1") == "'\n=1+1"
+
+
+async def test_a_full_read_once_a_day_catches_what_was_posted_late(world: _World) -> None:
+    """The week read back misses a correction tastytrade posts later under an
+    older date, or a new account's history; a full read a day catches it
+    (#129's second AI review)."""
+    world.history = [_txn(1, "2026-10-01"), _txn(2, "2026-11-13")]
+    await _sync(world)
+    assert "start-date" not in world.calls[-1]  # the first read in a process is whole
+    world.history.append(_txn(3, "2026-11-02"))  # dated before the week read back
+    world.later()
+    assert (await _sync(world)).new == 0
+    assert world.calls[-1]["start-date"] == date(2026, 11, 6).isoformat()
+    world.later(ot.FULL_READ_EVERY_SECONDS)
+    assert (await _sync(world)).new == 1
+    assert "start-date" not in world.calls[-1]
+
+
+async def test_an_id_sent_as_digits_is_still_an_id(world: _World) -> None:
+    world.history = [{**_txn(4, "2026-10-01"), "id": "4"}]
+    assert (await _sync(world)).new == 1 and 4 in world.rows
+
+
+async def test_a_fee_credited_back_lowers_the_fees(world: _World) -> None:
+    world.history = [_txn(1, "2026-10-01", **{"commission": "0.5", "commission-effect": "Credit"})]
+    await _sync(world)
+    (trade,) = await ot.list_trades(world.session)  # type: ignore[arg-type]
+    assert trade.fees == pytest.approx(-0.5 + 0.1 + 0.04)
+

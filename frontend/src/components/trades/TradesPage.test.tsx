@@ -58,8 +58,8 @@ describe("TradesPage", () => {
     const rows = table.querySelectorAll("tbody tr");
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent("Buy to Close");
-    expect(rows[0]).toHaveTextContent("−$121");
-    expect(rows[1]).toHaveTextContent("+$479");
+    expect(rows[0]).toHaveTextContent("−$121.10"); // to the cent, like the fees beside it
+    expect(rows[1]).toHaveTextContent("+$478.86");
     expect(screen.getByTestId("trades-status")).toHaveTextContent("3 trades · a copy stored encrypted");
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "SPY" } });
     expect(table.querySelectorAll("tbody tr")).toHaveLength(1);

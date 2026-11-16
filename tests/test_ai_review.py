@@ -322,12 +322,13 @@ def test_main_says_so_on_the_pr_when_nothing_is_reviewable(pr_env, monkeypatch):
 def test_main_reviews_each_part_and_posts_one_comment(pr_env, monkeypatch):
     seen = []
     _use_git(monkeypatch, {"app/a.py": "+a\n", "tests/test_a.py": "+t\n", "app/b.py": "+b\n"}, seen)
-    monkeypatch.setattr(ai_review, "PART_CHARS", 200)
+    # About 110 characters a file: a.py and its test share a part, b.py doesn't fit.
+    monkeypatch.setattr(ai_review, "PART_CHARS", 300)
     asked = []
 
     def ask(messages, options, **kwargs):
         asked.append(messages[1]["content"])
-        path = "app/a.py" if "+a" in messages[1]["content"] else "app/b.py"
+        path = "app/a.py" if "\n+a\n" in messages[1]["content"] else "app/b.py"
         return _answer([_finding(path=path, severity="low" if path == "app/b.py" else "high")])
 
     monkeypatch.setattr(ai_review, "_ask_deepseek", ask)
@@ -412,7 +413,7 @@ def test_a_part_that_fails_is_named_and_the_rest_posted(pr_env, monkeypatch):
     monkeypatch.setattr(ai_review, "PART_CHARS", 100)
 
     def ask(messages, options, **kwargs):
-        if "+b" in messages[1]["content"]:
+        if "\n+b\n" in messages[1]["content"]:
             raise RuntimeError("HTTP 500")
         return _answer([_finding()])
 
@@ -437,3 +438,31 @@ def test_main_fails_without_the_key(pr_env, monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "")
     assert ai_review.main() == 1
     assert pr_env["posted"] == []
+
+
+def test_a_dropped_connection_is_a_failed_attempt(monkeypatch):
+    # The eval's long thinking requests ended in IncompleteRead(1 bytes
+    # read), which isn't an OSError: the part failed instead of asking
+    # again without thinking.
+    import http.client
+
+    def dropped(*args, **kwargs):
+        raise http.client.IncompleteRead(b"\n")
+
+    monkeypatch.setattr(ai_review, "_request", dropped)
+    with pytest.raises(RuntimeError, match="connection"):
+        ai_review._ask_deepseek([], {}, key="k", model="m", base_url="https://api.deepseek.com")
+
+
+def test_request_part_asks_again_after_a_dropped_connection():
+    import http.client
+
+    answers = iter([http.client.IncompleteRead(b"\n"), _answer([])])
+
+    def ask(options):
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    assert ai_review.request_part(ask).thinking is False

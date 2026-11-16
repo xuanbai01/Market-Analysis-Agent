@@ -35,6 +35,7 @@ Environment (all set by the workflow):
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import subprocess
@@ -228,7 +229,8 @@ def request_part(ask: Callable[[dict], dict], thinking: bool = True) -> PartResu
             usage.add(response.get("usage"))
             found, riskiest, dropped = parse(answer_text(response))
             return PartResult(found, riskiest, dropped, True, usage)
-        except (RuntimeError, OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+        except (RuntimeError, OSError, ValueError, KeyError, IndexError, TypeError,
+                http.client.HTTPException) as exc:
             print(f"::warning::With thinking on: {exc!r}. Asking again with thinking off.")
     response = ask({"max_tokens": PLAIN_MAX_TOKENS, **_THINKING_OFF})
     usage.add(response.get("usage"))
@@ -432,6 +434,10 @@ def _ask_deepseek(messages: list[dict[str, str]], options: dict, *, key: str, mo
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")[:500]
         raise RuntimeError(f"DeepSeek returned HTTP {exc.code}: {detail}") from exc
+    except http.client.HTTPException as exc:
+        # A long thinking request can end with the connection cut mid-body
+        # (IncompleteRead), which isn't an OSError.
+        raise RuntimeError(f"DeepSeek's connection dropped: {exc!r}") from exc
 
 
 _GITHUB_HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}

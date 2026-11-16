@@ -11,6 +11,11 @@ three ways:
 Writes every finding and the tokens each way spent to a JSON file, for
 grading by hand against what the later rounds found (docs/changelog.md).
 
+With --verify, it instead checks the second look (ai_review_verify)
+against findings already labelled real or not (tests/evals/
+ai_review_findings.json): how many real ones it keeps and how many
+others it drops, with thinking off (V0) and low (V1).
+
 Needs DEEPSEEK_API_KEY, and `gh` signed in (GH_TOKEN in Actions) to read
 the PRs and their review comment's history. Run from the repo root:
   python scripts/ai_review_eval.py 128 129 130 131 --out review-eval.json
@@ -33,6 +38,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ai_review  # noqa: E402
+import ai_review_verify  # noqa: E402
+from ai_review_findings import Finding  # noqa: E402
+from ai_review_shards import wants_function_context  # noqa: E402
+
+VERIFY_OPTIONS = {
+    "V0": {"max_tokens": 1_000, "thinking": {"type": "disabled"}, "response_format": {"type": "json_object"}},
+    "V1": {"max_tokens": 32_000, "reasoning_effort": "low"},
+}
 
 _REVIEWED = re.compile(r"Reviewed ([0-9a-f]{7,40}) with")
 _ITEM = re.compile(r"^\s*\d+\.\s+\*\*(high|medium|low)\*\*.*$", re.M | re.I)
@@ -113,10 +126,61 @@ def run_parts(c: dict, rules: str, ask, thinking: bool) -> dict:
             "failed": outcome.failed, "docs": outcome.plan.docs, "over_budget": outcome.plan.over_budget}
 
 
+def _labelled(row: dict) -> Finding:
+    severity = next((s for s in ("high", "medium", "low") if s in row["text"][:20].lower()), "medium")
+    rest = row["text"].split("—", 1)[-1].strip()
+    defect, _, failure = rest.partition("Fails when:")
+    return Finding(severity, row["path"], row["line"], defect.strip(), failure.strip() or "(as above)")
+
+
+def verify_labelled(path: str, ask_raw) -> dict:
+    """Run the second look over labelled findings, both ways."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    jobs = []
+    for pr in data["prs"].values():
+        for row in pr["findings"]:
+            text = ai_review._file_at(pr["head"], row["path"])
+            diff = ai_review._git_diff(f"{pr['base']}...{pr['head']}", [row["path"]],
+                                       whole_functions=wants_function_context(row["path"]))
+            jobs.append((row, ai_review_verify.build_messages(_labelled(row), file_text=text, file_diff=diff)))
+
+    def one(job):
+        row, messages = job
+        result = {"id": row["id"], "label": row["label"], "config": row["config"]}
+        for name, options in VERIFY_OPTIONS.items():
+            usage = ai_review.Usage()
+            try:
+                response = ask_raw(messages, options)
+                usage.add(response.get("usage"))
+                verdict, reason = ai_review_verify.parse_verdict(ai_review.answer_text(response))
+            except Exception as exc:  # noqa: BLE001 - a failed check counts as unsure
+                verdict, reason = "unsure", f"error: {exc!r}"
+            result[name] = {"verdict": verdict, "reason": reason, "usage": _usage(usage)}
+        return result
+
+    with ThreadPoolExecutor(6) as pool:
+        rows = list(pool.map(one, jobs))
+    summary = {}
+    for name in VERIFY_OPTIONS:
+        def count(label, verdicts, name=name):
+            return sum(1 for r in rows if r["label"] == label and r[name]["verdict"] in verdicts)
+        totals = {label: sum(1 for r in rows if r["label"] == label) for label in ("real", "not", "trivial")}
+        summary[name] = {
+            "real kept": f"{count('real', ('confirmed', 'unsure'))}/{totals['real']}",
+            "not dropped": f"{count('not', ('refuted',))}/{totals['not']}",
+            "trivial dropped": f"{count('trivial', ('refuted',))}/{totals['trivial']}",
+            "unsure": sum(1 for r in rows if r[name]["verdict"] == "unsure"),
+            "tokens": {k: sum(r[name]["usage"][k] for r in rows) for k in ("read", "cached", "written", "reasoning")},
+        }
+        print(name, summary[name])
+    return {"summary": summary, "rows": rows}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("numbers", type=int, nargs="+")
+    parser.add_argument("numbers", type=int, nargs="*")
     parser.add_argument("--out", default="review-eval.json")
+    parser.add_argument("--verify", help="labelled findings to check the second look against")
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", "xuanbai01/Market-Analysis-Agent"))
     args = parser.parse_args()
     key = os.environ.get("DEEPSEEK_API_KEY", "")
@@ -125,6 +189,9 @@ def main() -> int:
         return 1
     ask = _ask(key, os.environ.get("AI_REVIEW_MODEL") or ai_review.DEFAULT_MODEL,
                os.environ.get("DEEPSEEK_BASE_URL") or ai_review.DEFAULT_BASE_URL)
+    if args.verify:
+        Path(args.out).write_text(json.dumps(verify_labelled(args.verify, ask), indent=1), encoding="utf-8")
+        return 0
     results = {}
     for number in args.numbers:
         c = case(number, args.repo)

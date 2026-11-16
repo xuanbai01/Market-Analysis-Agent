@@ -318,4 +318,8 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **An expiry, assignment or exercise sent without a buy or sell** still closes what's open.
     - **A partly closed position has no `closed_at`.**
     - **Not changed:** two puts on one underlying assigned the same day deliver one stock position, linked to one of them.
+  - **From #131's third AI review:**
+    - **The totals hold only what the positions show.** Each position keeps its closed parts, and only positions with a computed P&L add to the months, underlyings, realized total and fees. A part sold before a split used to stay in the months while its position showed none.
+    - **A cash-settled exercise with no cash on its fill isn't guessed.** The settlement was booked apart, so its P&L isn't computed, with a note. One whose fill carries the cash counts.
+    - **A roll that closes two positions links both** to the one it opened.
 

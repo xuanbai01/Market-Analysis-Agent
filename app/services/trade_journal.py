@@ -75,6 +75,10 @@ class _Position:
     fees: float = 0.0
     realized: float = 0.0
     unknown: bool = False  # some closed part's P&L can't be told
+    # Each closed part's (month, P&L, fees in it): summed into the totals
+    # only when the whole position's P&L can be told, so the totals hold
+    # just what the positions show.
+    parts: list[tuple[str, float, float]] = field(default_factory=list)
     endings: set[str] = field(default_factory=set)
     closed_at: datetime | None = None
     origin: str | None = None
@@ -106,10 +110,7 @@ class _Journal:
         self.closed_by_order: dict[int, list[str]] = defaultdict(list)
         # Options closed by an assignment or exercise: (date, underlying, ending, position).
         self.delivered: list[tuple[str, str, str, str]] = []
-        self.months: dict[str, float] = defaultdict(float)
-        self.underlyings: dict[str, float] = defaultdict(float)
         self.unmatched: list[UnmatchedRow] = []
-        self.fees = 0.0  # inside the realized P&L
 
     def _unmatched(self, trade: OwnerTrade, reason: str) -> None:
         self.unmatched.append(UnmatchedRow(id=trade.id, date=trade.date, symbol=trade.symbol, reason=reason))
@@ -168,13 +169,15 @@ class _Journal:
             if key in self.flagged:
                 part = None
                 position.note = f"After a {self.flagged[key].lower()}, the P&L isn't computed."
+            elif (trade.sub_type or "").startswith("Cash Settled") and not trade.net_value:
+                # The settlement wasn't on this fill: booked apart, so not guessed.
+                part = None
+                position.note = "Cash-settled, with the settlement booked apart from the fill: the P&L isn't computed."
             if part is None:
                 position.unknown = True
             else:
                 position.realized += part
-                self.fees += (lot.unit_fees + unit_fees) * size
-                self.months[when.strftime("%Y-%m")] += part
-                self.underlyings[position.underlying] += part
+                position.parts.append((when.strftime("%Y-%m"), part, (lot.unit_fees + unit_fees) * size))
             position.close_cash = _add(position.close_cash, None if unit_cash is None else unit_cash * size)
             position.fees += unit_fees * size
             position.legs[key[1]].closed += size
@@ -228,12 +231,11 @@ class _Journal:
             opened = self.positions.get(f"order-{order}")
             if opened is None:
                 continue
-            for pid in closed:
-                old = self.positions[pid]
-                if pid != opened.id and old.underlying == opened.underlying:
-                    links[opened.id] = (pid, links.get(opened.id, (None, None))[1])
+            rolled = [pid for pid in closed if pid != opened.id and self.positions[pid].underlying == opened.underlying]
+            if rolled:  # every position the order closed rolls into the one it opened
+                links[opened.id] = (rolled[0], links.get(opened.id, (None, None))[1])
+                for pid in rolled:
                     links[pid] = (links.get(pid, (None, None))[0], opened.id)
-                    break
         return links
 
     def _delivered_from(self, delivered_by: tuple[str, str, str] | None) -> str | None:
@@ -275,21 +277,31 @@ class _Journal:
     def journal(self) -> TradeJournal:
         links = self._rolls()
         positions = [self._out(position, links) for position in self.positions.values()]
+        months: dict[str, float] = defaultdict(float)
+        underlyings: dict[str, float] = defaultdict(float)
+        fees = 0.0
+        for position in self.positions.values():
+            if position.unknown:
+                continue  # shown as no P&L: none of it in the totals
+            for month, part, part_fees in position.parts:
+                months[month] += part
+                underlyings[position.underlying] += part
+                fees += part_fees
         done = [p for p in positions if p.status == "closed"]
         closed = [p for p in done if p.realized is not None]
         days = [p.days_held for p in closed if p.days_held is not None]
         return TradeJournal(
             positions=positions,
-            months=[MonthTotal(month=m, realized=round(v, CENTS)) for m, v in sorted(self.months.items())],
-            underlyings=[UnderlyingTotal(underlying=u, realized=round(v, CENTS)) for u, v in sorted(self.underlyings.items())],
+            months=[MonthTotal(month=m, realized=round(v, CENTS)) for m, v in sorted(months.items())],
+            underlyings=[UnderlyingTotal(underlying=u, realized=round(v, CENTS)) for u, v in sorted(underlyings.items())],
             totals=JournalTotals(
-                realized=round(sum(self.months.values()), CENTS),
+                realized=round(sum(months.values()), CENTS),
                 closed=len(closed),
                 profitable=sum(1 for p in closed if p.realized is not None and p.realized > 0),
                 partly=sum(1 for p in positions if p.status == "partly_closed" and p.realized is not None),
                 unpriced=len(done) - len(closed),
                 average_days=round(sum(days) / len(days), 1) if days else None,
-                fees=round(self.fees, CENTS),
+                fees=round(fees, CENTS),
             ),
             unmatched=self.unmatched,
         )

@@ -236,8 +236,9 @@ def _newest(items: list[dict[str, Any]]) -> datetime | None:
 
 
 async def _build(symbol: str, expiry: date) -> LiveChain:
-    now = _now()
-    quoted_at = mc.quote_time(now)
+    # tastytrade's quotes are real time: Yahoo's delayed clock (quote_time)
+    # would add 15 minutes to T, and a day or more before 09:45.
+    quoted_at = mc.live_quote_time(_now())
     if mc.years_to_expiry(quoted_at, expiry) <= 0:
         raise NotListed(expiry)  # it has closed: no time left to price
     root = symbol.upper().replace("-", "").replace(".", "")

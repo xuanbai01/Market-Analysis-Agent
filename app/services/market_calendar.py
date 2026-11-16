@@ -4,7 +4,9 @@ NYSE sessions, for option IVs measured to the minute (ADR 0008).
 An option's time to expiry runs from the moment its quotes were made to
 the close on the expiry date. Outside market hours that moment is the last
 close, not the clock: measured from a Saturday, a 7-day option would look
-6 days long and its IV about 8% too high. Sessions (not calendar days)
+6 days long and its IV about 8% too high. Yahoo's quotes trail the market
+by 15 minutes (``quote_time``); tastytrade's are real time
+(``live_quote_time``). Sessions (not calendar days)
 count the days that carry variance, for the earnings event move.
 
 Holidays follow NYSE's rules (Rule 7.2): New Year's Day, Martin Luther
@@ -155,17 +157,32 @@ def latest_completed_session(now: datetime) -> date:
     return previous_session(day)
 
 
-def quote_time(now: datetime) -> datetime:
-    """When the quotes Yahoo serves at ``now`` were made: 15 minutes ago
-    during a session, else the last close."""
+def _made_at(now: datetime, delay: timedelta) -> datetime:
+    """When quotes ``delay`` behind the market, seen at ``now``, were made:
+    ``delay`` ago during a session, else the last close."""
     now_et = now.astimezone(ET)
     day = now_et.date()
-    delayed = now_et - QUOTE_DELAY
-    # In a session's first 15 minutes the delayed quotes are still the last
+    delayed = now_et - delay
+    # In a session's first ``delay`` the delayed quotes are still the last
     # close's: 09:16 is no quote time, and a weekly's T would run short.
     if is_session(day) and delayed >= session_open(day):
         return min(delayed, session_close(day))
     return session_close(previous_session(day))
+
+
+def quote_time(now: datetime) -> datetime:
+    """When the quotes Yahoo serves at ``now`` were made: 15 minutes ago
+    during a session, else the last close."""
+    return _made_at(now, QUOTE_DELAY)
+
+
+def live_quote_time(now: datetime) -> datetime:
+    """When real-time quotes (tastytrade's) seen at ``now`` were made: now
+    during a session, else the last close (today's once it has closed).
+    Yahoo's clock (``quote_time``) would put them 15 minutes back, and in
+    a session's first quarter hour at the last close: on an expiry morning
+    that's a day or more of time to expiry that isn't there."""
+    return _made_at(now, timedelta(0))
 
 
 def is_close(quoted_at: datetime) -> bool:

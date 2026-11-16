@@ -112,6 +112,10 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
   // live copy, which mustn't stay on screen as if it were live.
   const liveChain = liveOn && !liveQuery.isError ? (liveQuery.data ?? null) : null;
   const chain = liveChain?.chain ?? delayed;
+  // Open interest is the day's figure and live quotes cover only the strikes
+  // near the price: while live, open interest and positioning come from the
+  // whole delayed chain or not at all (#130's AI review).
+  const day = liveChain ? delayed : chain;
   const price = liveChain?.spot ?? spot;
 
   return (
@@ -171,16 +175,23 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
                 >
                   <SmileChart chain={chain} />
                 </ChartBlock>
-                <ChartBlock
-                  title="Open interest by strike"
-                  info={GLOSSARY.openInterest}
-                  sentence={openInterestWords(delayed ?? chain, price)}
-                  testId="options-oi-block"
-                >
-                  <OpenInterestChart chain={delayed ?? chain} spot={price} />
-                </ChartBlock>
+                {day ? (
+                  <ChartBlock
+                    title={liveChain ? "Open interest by strike · the day's figures, delayed" : "Open interest by strike"}
+                    info={GLOSSARY.openInterest}
+                    sentence={openInterestWords(day, price)}
+                    testId="options-oi-block"
+                  >
+                    <OpenInterestChart chain={day} spot={price} />
+                  </ChartBlock>
+                ) : (
+                  <p data-testid="options-oi-missing" className="self-center text-sm text-strata-dim">
+                    Open interest comes with the delayed chain, which couldn&rsquo;t be read for this expiry: the live quotes cover only
+                    the strikes near the price.
+                  </p>
+                )}
               </div>
-              <WholePositioning chain={delayed ?? chain} price={price} />
+              {day && <WholePositioning chain={day} price={price} />}
               <ChainTable chain={chain} />
             </>
           )}
@@ -228,9 +239,6 @@ const maybeMoney = (v: number | null) => (v === null ? "—" : money(v));
 
 /** Where the expiry's open interest sits: the largest contracts, gamma and
  * delta exposure by strike, with the dealer assumption stated. */
-// Open interest is the day's figure and live quotes cover only the strikes
-// near the price: open interest, walls, max pain and exposure are drawn from
-// the whole delayed chain when it's there (#130's AI review).
 function openInterestWords(chain: ExpiryChain, price: number | null) {
   return chain.positioning ? maxPainSentence(chain.positioning, price) : openInterestSentence(chain);
 }

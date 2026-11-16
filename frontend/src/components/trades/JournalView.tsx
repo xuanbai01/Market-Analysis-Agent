@@ -10,7 +10,7 @@ import { Fragment, useMemo, useState } from "react";
 import { endingLabel, heldLabel, positionName, summarySentence } from "../../lib/journal-text";
 import { dateLabel, type Sentence } from "../../lib/options-text";
 import type { JournalPosition, OwnerTrade, TradeJournal } from "../../lib/owner-schemas";
-import { legLabel } from "../../lib/positions-text";
+import { legLabel, signedUsd } from "../../lib/positions-text";
 import { cents, quantity, tradeTime } from "../../lib/trades-format";
 import { RealizedByMonth } from "./RealizedByMonth";
 
@@ -84,15 +84,25 @@ export function JournalView({ journal, trades, underlying }: { journal: TradeJou
     .filter((p) => status === "all" || (status === "closed" ? p.status === "closed" : p.status !== "closed"))
     .sort((a, b) => (b.opened_at ?? "").localeCompare(a.opened_at ?? ""));
   const unmatched = journal.unmatched.length;
+  const pickedRealized = journal.underlyings.find((u) => u.underlying === underlying)?.realized;
 
   return (
     <section data-testid="journal">
+      {underlying && (
+        <p data-testid="journal-underlying-total" className="mb-1 text-sm text-strata-hi">
+          {underlying}: {pickedRealized === undefined ? "nothing realized yet" : `${signedUsd(pickedRealized)} realized`}
+        </p>
+      )}
       <p data-testid="journal-summary" className="mb-4 text-sm text-strata-fg">
+        {/* The filter narrows the table only: say what the sentence covers. */}
+        {underlying && <span className="text-strata-dim">All underlyings: </span>}
         <Words sentence={summarySentence(journal.totals)} />
       </p>
       {journal.months.length > 0 && (
         <div className="mb-6 rounded-md border border-strata-border bg-strata-surface p-4">
-          <h2 className="mb-2 font-mono text-[10px] uppercase tracking-kicker text-strata-muted">Realized P&amp;L by month closed</h2>
+          <h2 className="mb-2 font-mono text-[10px] uppercase tracking-kicker text-strata-muted">
+            Realized P&amp;L by month closed{underlying ? ", all underlyings" : ""}
+          </h2>
           <RealizedByMonth months={journal.months} />
         </div>
       )}

@@ -327,4 +327,8 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Positions are keyed by account and order**, so one order number in two accounts makes two positions.
     - **Futures and anything else that isn't equity or an equity option** are listed as not modelled, not read as stock.
     - **Not changed:** realized P&L sums tastytrade's net values, which include fees (210 − 1.10 = 208.90). The owner checks a few against tastytrade's own figures.
+  - **From #131's fifth AI review:**
+    - **A partly closed position without a computed P&L counts as unpriced**, so the sentence doesn't say nothing closed.
+    - **With an underlying picked**, the page gives that underlying's realized figure, and the sentence and chart say they cover every underlying.
+    - **Delivered stock is keyed by account too**, and links to an option in the same account.
 

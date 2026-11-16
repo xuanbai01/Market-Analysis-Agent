@@ -84,7 +84,7 @@ class _Position:
     endings: set[str] = field(default_factory=set)
     closed_at: datetime | None = None
     origin: str | None = None
-    delivered_by: tuple[str, str, str] | None = None  # date, underlying, ending
+    delivered_by: tuple[str, str, str, int] | None = None  # date, underlying, ending, account
     note: str | None = None
     transactions: list[int] = field(default_factory=list)
 
@@ -112,8 +112,8 @@ class _Journal:
         # By (account, order id): the positions an order closed, and the one it opened.
         self.closed_by_order: dict[tuple[int, int], list[str]] = defaultdict(list)
         self.opened_by_order: dict[tuple[int, int], str] = {}
-        # Options closed by an assignment or exercise: (date, underlying, ending, position).
-        self.delivered: list[tuple[str, str, str, str]] = []
+        # Options closed by an assignment or exercise: (date, underlying, ending, account, position).
+        self.delivered: list[tuple[str, str, str, int, str]] = []
         self.unmatched: list[UnmatchedRow] = []
 
     def _unmatched(self, trade: OwnerTrade, reason: str) -> None:
@@ -203,7 +203,7 @@ class _Journal:
             if order is not None and position.id not in self.closed_by_order[order]:
                 self.closed_by_order[order].append(position.id)
             if ending in DELIVERIES and kind != "stock":
-                self.delivered.append((trade.date or "", position.underlying, ending, position.id))
+                self.delivered.append((trade.date or "", position.underlying, ending, trade.account, position.id))
             lot.remaining -= size
             remaining -= size
             if lot.remaining <= EPS:
@@ -223,7 +223,8 @@ class _Journal:
                 pid = f"order-{trade.order_id}-account-{trade.account}"
             self.opened_by_order[(trade.account, trade.order_id)] = pid
         else:  # delivered by an assignment or exercise, or another fill without an order
-            pid = f"{(trade.sub_type or trade.type or 'fill').lower().replace(' ', '-')}-{trade.date}-{trade.underlying}"
+            slug = (trade.sub_type or trade.type or "fill").lower().replace(" ", "-")
+            pid = f"{slug}-{trade.date}-{trade.underlying}-{trade.account}"
         position = self.positions.get(pid)
         if position is None:
             position = _Position(
@@ -233,7 +234,7 @@ class _Journal:
             self.positions[pid] = position
         if kind == "stock" and ending in DELIVERIES:
             position.origin = DELIVERIES[ending]
-            position.delivered_by = (trade.date or "", position.underlying, ending)
+            position.delivered_by = (trade.date or "", position.underlying, ending, trade.account)
         self.lots[key].append(_Lot(pid, direction, size, unit_cash, unit_fees))
         leg = position.legs.setdefault(key[1], JournalLeg(symbol=key[1], kind=kind, expiry=expiry, strike=strike, quantity=0.0))  # type: ignore[arg-type]
         leg.quantity += direction * size
@@ -258,15 +259,15 @@ class _Journal:
                     links[pid] = (links.get(pid, (None, None))[0], opened.id)
         return links
 
-    def _delivered_from(self, delivered_by: tuple[str, str, str] | None) -> str | None:
+    def _delivered_from(self, delivered_by: tuple[str, str, str, int] | None) -> str | None:
         """The option whose assignment or exercise delivered this stock: the
-        latest on the same underlying on or before its date (delivery can
-        settle a session later)."""
+        latest in the same account on the same underlying, on or before its
+        date (delivery can settle a session later)."""
         if delivered_by is None:
             return None
-        day, underlying, ending = delivered_by
-        found = [d for d in self.delivered if d[1] == underlying and d[2] == ending and d[0] <= day]
-        return max(found)[3] if found else None
+        day, underlying, ending, account = delivered_by
+        found = [d for d in self.delivered if d[1:4] == (underlying, ending, account) and d[0] <= day]
+        return max(found)[4] if found else None
 
     def _out(self, position: _Position, links: dict[str, tuple[str | None, str | None]]) -> JournalPosition:
         legs = list(position.legs.values())
@@ -319,7 +320,8 @@ class _Journal:
                 closed=len(closed),
                 profitable=sum(1 for p in closed if p.realized is not None and p.realized > 0),
                 partly=sum(1 for p in positions if p.status == "partly_closed" and p.realized is not None),
-                unpriced=len(done) - len(closed),
+                # Closed in full or in part, with no computed P&L.
+                unpriced=sum(1 for p in positions if p.status != "open" and p.realized is None),
                 average_days=round(sum(days) / len(days), 1) if days else None,
                 fees=round(fees, CENTS),
             ),

@@ -252,4 +252,10 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **A visit inside the minute after a failed sync was told the copy was updated.** It's now told the last update failed, until a sync works.
     - **The CSV route lists without syncing**, so with no key and nothing stored it answered an empty CSV. Listing now refuses without the key (503).
     - **A fractional share** shows as it is in the table, as it does in the CSV.
+  - **From #129's second AI review:**
+    - **The week read back missed what tastytrade posts late under an older date**, and a new account's history. A sync reads the whole history first in each process and once a day.
+    - **An id sent as digits** is still an id, so rows aren't dropped.
+    - **A fee credited back** lowers the fees instead of adding to them.
+    - **The table's net** is shown to the cent, like the fees beside it.
+    - **Not changed:** a row that fails its GCM check still fails the list with a 503. That's the sign of a wrong key or tampering, and it should be loud; §11 says how to start the copy again.
 

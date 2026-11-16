@@ -39,6 +39,9 @@ SYNC_EVERY_SECONDS = 60.0
 SYNC_SECONDS = 120.0
 # How far before the newest stored transaction a sync reads again.
 OVERLAP_DAYS = 7
+# A whole read this often (and first in each process): what tastytrade posts
+# late under an older date, or a new account's history, is caught then.
+FULL_READ_EVERY_SECONDS = 24 * 3600.0
 PER_PAGE = 2000  # tastytrade's maximum
 MAX_PAGES = 25
 # The fields a stored transaction keeps (plus the account's number in the list).
@@ -71,6 +74,7 @@ class SyncFailed(Exception):
 
 
 _synced_at: float | None = None
+_full_read_at: float | None = None
 # Why the last sync failed, until one works: a visit inside the minute
 # after it is told so, not that the copy was updated.
 _last_failure: str | None = None
@@ -79,8 +83,8 @@ _lock = asyncio.Lock()  # one sync at a time
 
 def reset() -> None:
     """Forget when the last sync ran and how (tests)."""
-    global _synced_at, _last_failure, _lock
-    _synced_at, _last_failure, _lock = None, None, asyncio.Lock()
+    global _synced_at, _full_read_at, _last_failure, _lock
+    _synced_at, _full_read_at, _last_failure, _lock = None, None, None, asyncio.Lock()
 
 
 # Swapped in tests.
@@ -90,6 +94,8 @@ def _clock() -> float:
 
 def _id(item: dict[str, Any]) -> int | None:
     value = item.get("id")
+    if isinstance(value, str) and value.isascii() and value.isdigit():
+        value = int(value)  # the same id, sent as text
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
@@ -183,9 +189,11 @@ def _stamp() -> None:
 
 
 async def _sync(session: AsyncSession) -> SyncResult:
+    global _full_read_at
     rows = await store.stored(session)
     known = {row.id: row.estimated_fee for row in rows}
-    latest = _latest_date([payload for _, payload in await asyncio.to_thread(_opened, rows)])
+    full = _full_read_at is None or _clock() - _full_read_at >= FULL_READ_EVERY_SECONDS
+    latest = None if full else _latest_date([payload for _, payload in await asyncio.to_thread(_opened, rows)])
     await session.rollback()  # no connection held while tastytrade is read
     start = latest - timedelta(days=OVERLAP_DAYS) if latest else None
     new: list[dict[str, Any]] = []
@@ -212,7 +220,9 @@ async def _sync(session: AsyncSession) -> SyncResult:
     replaced = 0
     for row in replacements:
         replaced += await store.replace_estimated(session, row)
-    logger.info("owner trades: %d new, %d replaced", written, replaced)
+    if full:
+        _full_read_at = _clock()
+    logger.info("owner trades: %d new, %d replaced%s", written, replaced, " (full read)" if full else "")
     return SyncResult(new=written, replaced=replaced)
 
 
@@ -225,8 +235,15 @@ def _text(value: Any) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _fee(amount: Any, effect: Any) -> float:
+    """A fee's cost: a fee credited back (a rebate) counts against the rest."""
+    number = owner_positions.finite_number(amount)
+    if number is None:
+        return 0.0
+    return -abs(number) if effect == "Credit" else abs(number)
+
+
 def _trade(tid: int, p: dict[str, Any]) -> OwnerTrade:
-    fees = [owner_positions.finite_number(p.get(name)) for name in FEES]
     return OwnerTrade(
         id=tid,
         account=p.get("account") if isinstance(p.get("account"), int) else 0,
@@ -241,7 +258,7 @@ def _trade(tid: int, p: dict[str, Any]) -> OwnerTrade:
         quantity=owner_positions.finite_number(p.get("quantity")),
         price=owner_positions.finite_number(p.get("price")),
         value=_signed(p.get("value"), p.get("value-effect")),
-        fees=sum(abs(f) for f in fees if f is not None),
+        fees=sum(_fee(p.get(name), p.get(f"{name}-effect")) for name in FEES),
         net_value=_signed(p.get("net-value"), p.get("net-value-effect")),
         description=_text(p.get("description")),
     )

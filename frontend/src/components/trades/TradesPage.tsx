@@ -14,7 +14,6 @@ import { ApiError } from "../../lib/api";
 import { clearOwnerKey, useOwnerKey } from "../../lib/owner";
 import { fetchOwnerTrades, fetchOwnerTradesCsv, isOwnerKeyRefused } from "../../lib/owner-api";
 import type { OwnerTrade } from "../../lib/owner-schemas";
-import { signedUsd } from "../../lib/positions-text";
 import { ErrorBanner } from "../ErrorBanner";
 import { useSignOutOn401 } from "../options/useSignOutOn401";
 import { OwnerUnlock } from "../owner/OwnerUnlock";
@@ -27,6 +26,11 @@ function when(trade: OwnerTrade): string {
 }
 
 const num = (v: number | null, digits = 2) => (v === null ? "—" : v.toFixed(digits));
+// To the cent, like the fees beside it: two nets a few cents apart don't read alike.
+const cents = (v: number) => {
+  const sign = v > 0.004 ? "+" : v < -0.004 ? "−" : "";
+  return `${sign}$${Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
 // As many decimals as it has, up to 4: a fractional share isn't rounded to a whole one.
 const quantity = (v: number | null) => (v === null ? "—" : v.toLocaleString("en-US", { maximumFractionDigits: 4 }));
 
@@ -148,7 +152,7 @@ function Trades({ ownerKey }: { ownerKey: string }) {
                   <td className="px-3 py-1.5 text-right">{num(t.price)}</td>
                   <td className="px-3 py-1.5 text-right text-strata-dim">{t.fees ? t.fees.toFixed(2) : "—"}</td>
                   <td className={`px-3 py-1.5 text-right ${t.net_value === null ? "" : t.net_value >= 0 ? "text-strata-pos" : "text-strata-neg"}`}>
-                    {t.net_value === null ? "—" : signedUsd(t.net_value)}
+                    {t.net_value === null ? "—" : cents(t.net_value)}
                   </td>
                 </tr>
               ))}

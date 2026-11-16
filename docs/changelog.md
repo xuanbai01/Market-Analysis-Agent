@@ -265,4 +265,7 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **A trade without a time** sorts by its date.
     - **The model carries the migration's nonce-length check**, so test databases built from the models enforce it too.
     - **Not changed:** a full read after a restart. It costs one tastytrade page per 2,000 transactions and decrypts nothing, which is cheaper than the incremental read for this account.
+  - **From #129's fourth AI review:**
+    - **A failed sync's log line names the error's type only**, not its text, which could carry an account path.
+    - **Not changed:** past 50,000 transactions or 10 accounts the copy stops short, with a warning in the log. That's far beyond this account.
 

@@ -187,8 +187,9 @@ async def sync(session: AsyncSession) -> SyncResult:
             raise  # a row that doesn't open stays loud: a 503
         except Exception as exc:
             # The database, say, dropping the connection mid-write: what's
-            # stored is still shown, and the error goes to the log.
-            logger.exception("owner trades: the sync failed")
+            # stored is still shown. The log names the error's type only: its
+            # text could carry a request path with the account number.
+            logger.error("owner trades: the sync failed (%s)", type(exc).__name__)
             await _roll_back(session)
             _last_failure = "the copy couldn't be updated"
             raise SyncFailed(_last_failure) from exc

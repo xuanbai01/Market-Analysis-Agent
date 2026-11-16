@@ -1,15 +1,21 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
 import { fetchOptionsChain } from "../../lib/options-api";
-import { OptionsReportSchema } from "../../lib/options-schemas";
+import { OptionsReportSchema, PositioningSchema } from "../../lib/options-schemas";
+import { clearOwnerKey, getOwnerKey, setOwnerKey } from "../../lib/owner";
+import { fetchLiveChain } from "../../lib/owner-api";
 import { ExpirySection } from "./ExpirySection";
 import { RAW_OPTIONS_REPORT } from "./fixture";
 
 vi.mock("../../lib/options-api", () => ({ fetchOptionsReport: vi.fn(), fetchOptionsChain: vi.fn() }));
+vi.mock("../../lib/owner-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/owner-api")>()),
+  fetchLiveChain: vi.fn(),
+}));
 
 const REPORT = OptionsReportSchema.parse(RAW_OPTIONS_REPORT);
 const CHAIN = REPORT.chain!;
@@ -45,7 +51,11 @@ function renderSection(ui = section()) {
 
 const select = () => screen.getByTestId("options-expiry-select") as HTMLSelectElement;
 
-afterEach(() => vi.mocked(fetchOptionsChain).mockReset());
+afterEach(() => {
+  vi.mocked(fetchOptionsChain).mockReset();
+  vi.mocked(fetchLiveChain).mockReset();
+  clearOwnerKey();
+});
 
 describe("ExpirySection labels", () => {
   it("names each expiry with its days and whether it is the monthly", () => {
@@ -165,3 +175,189 @@ describe("ExpirySection", () => {
     expect(select().value).toBe(CHAIN.expiry);
   });
 });
+
+describe("ExpirySection live quotes", () => {
+  const LIVE = {
+    symbol: "NVDA", expiry: CHAIN.expiry, spot: 163.4, quoted_at: "2026-11-16T15:00:00Z",
+    updated_at: new Date(Date.now() - 3000).toISOString(), source: "tastytrade" as const,
+    chain: { ...CHAIN, forward: 163.9 },
+  };
+  const delayedForward = `forward $${CHAIN.forward.toFixed(2)}`;
+
+  it("offers no live switch without the owner key", () => {
+    renderSection();
+    expect(screen.queryByTestId("options-live-toggle")).toBeNull();
+  });
+
+  it("switches the expiry to tastytrade's live quotes and says how old they are", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue(LIVE);
+    renderSection();
+    expect(fetchLiveChain).not.toHaveBeenCalled(); // delayed until asked
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live · tastytrade · quotes \d+s old/));
+    expect(fetchLiveChain).toHaveBeenCalledWith("k".repeat(40), "NVDA", CHAIN.expiry);
+    expect(screen.getAllByText(/forward \$163\.90/).length).toBeGreaterThan(0); // the live chain is drawn
+  });
+
+  it("keeps the delayed chain and says why when live quotes fail", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 503, title: "tastytrade answered 503" }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live quotes unavailable: tastytrade answered 503/));
+    expect(screen.getAllByText((text) => text.includes(delayedForward)).length).toBeGreaterThan(0);
+  });
+
+  it("falls back to the delayed chain when a later read fails", async () => {
+    // The last live read isn't left on screen as if live (#130's AI review).
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValueOnce(LIVE).mockRejectedValue(new ApiError({ status: 503, title: "tastytrade answered 503" }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live · tastytrade/));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(16_000);
+    });
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live quotes unavailable: tastytrade answered 503/));
+    expect(screen.getAllByText((text) => text.includes(delayedForward)).length).toBeGreaterThan(0);
+    vi.useRealTimers();
+  });
+
+  it("keeps counting the quotes' age between reads", async () => {
+    // Not frozen at "3s old" until the next read lands (#130's AI review).
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-16T15:00:03Z"));
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue({ ...LIVE, updated_at: "2026-11-16T15:00:00Z" });
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent("quotes 3s old"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_000);
+    });
+    expect(screen.getByTestId("options-live-status")).toHaveTextContent(/quotes [89]s old/);
+    expect(fetchLiveChain).toHaveBeenCalledTimes(1); // the same read, older
+    vi.useRealTimers();
+  });
+
+  it("signs out on a 401 from the live read", async () => {
+    localStorage.setItem("market-agent.auth-token", "stale");
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 401, title: "Sign in again." }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(localStorage.getItem("market-agent.auth-token")).toBeNull());
+  });
+
+  it("says so when the quotes carry no time", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue({ ...LIVE, updated_at: null });
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent("Live · tastytrade · quote time unknown · shown to you only"));
+  });
+
+  it("stops asking about an expiry tastytrade doesn't list", async () => {
+    // A 422 won't turn into a chain 15 s later (#130's AI review).
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 422, title: "tastytrade lists no NVDA options expiring 2026-12-11." }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/lists no NVDA options/));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000);
+    });
+    expect(fetchLiveChain).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("keeps the key when tastytrade doesn't list the expiry", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 422, title: "tastytrade lists no NVDA options expiring 2026-12-11." }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/lists no NVDA options/));
+    expect(screen.getByTestId("options-live-status")).toHaveTextContent("expiring 2026-12-11. Showing the delayed chain."); // one full stop
+    expect(getOwnerKey()).toBe("k".repeat(40));
+  });
+
+  it("keeps the key on a 404 from the live read", async () => {
+    // A 404 there can't be told from a route the backend doesn't have yet (a
+    // deploy in flight): only a 403 says the key is wrong (#130's AI review).
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 404, title: "Not Found" }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live quotes unavailable: Not Found/));
+    expect(getOwnerKey()).toBe("k".repeat(40));
+  });
+
+  it("draws open interest and positioning from the whole delayed chain while live", async () => {
+    // Live quotes cover the strikes near the price; open interest is the
+    // day's figure, so the whole chain's walls and max pain stand (#130's AI review).
+    const positioning = (maxPain: number) =>
+      PositioningSchema.parse({
+        call_open_interest: 1000, put_open_interest: 800, put_call: 0.8, max_pain: maxPain, call_gex: 1, put_gex: -1, net_gex: 0,
+        call_dex: 1, put_dex: -1, net_dex: 0, call_wall: 175, put_wall: 150, gamma_flip: null, assumption: "Dealers long calls, short puts.",
+      });
+    const delayed = { ...CHAIN, positioning: positioning(161) };
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue({ ...LIVE, chain: { ...LIVE.chain, positioning: positioning(999) } });
+    renderSection(section(delayed));
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live · tastytrade/));
+    expect(screen.getAllByText(/forward \$163\.90/).length).toBeGreaterThan(0); // the live chain is drawn
+    expect(screen.queryAllByText(/\$999/)).toHaveLength(0);
+    expect(screen.getAllByText(/\$161/).length).toBeGreaterThan(0);
+  });
+
+  it("says open interest is the day's while live, and draws none from the live strikes alone", async () => {
+    // Open interest comes only from the whole delayed chain: when that read
+    // fails for a picked expiry, the panel says so rather than counting the
+    // 80 live strikes (#130's AI review).
+    const other = REPORT.listed_expiries.find((d) => d !== CHAIN.expiry)!;
+    vi.mocked(fetchOptionsChain).mockRejectedValue(new ApiError({ status: 503, title: "Yahoo didn't answer" }));
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue({ ...LIVE, expiry: other, chain: { ...LIVE.chain, expiry: other } });
+    renderSection();
+    fireEvent.change(screen.getByTestId("options-expiry-select"), { target: { value: other } });
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live · tastytrade/));
+    expect(screen.queryByTestId("options-oi-block")).toBeNull();
+    expect(screen.getByTestId("options-oi-missing")).toHaveTextContent(/open interest comes with the delayed chain/i);
+  });
+
+  it("says it's reading open interest while the delayed chain is on its way", async () => {
+    const other = REPORT.listed_expiries.find((d) => d !== CHAIN.expiry)!;
+    vi.mocked(fetchOptionsChain).mockReturnValue(new Promise(() => {})); // never answers in this test
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue({ ...LIVE, expiry: other, chain: { ...LIVE.chain, expiry: other } });
+    renderSection();
+    fireEvent.change(screen.getByTestId("options-expiry-select"), { target: { value: other } });
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live · tastytrade/));
+    expect(screen.getByTestId("options-oi-missing")).toHaveTextContent(/Reading the day's open interest/);
+  });
+
+  it("labels open interest as the day's figures while live", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockResolvedValue(LIVE);
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/Live · tastytrade/));
+    expect(screen.getByTestId("options-oi-block")).toHaveTextContent(/the day's figures, delayed/);
+  });
+
+  it("forgets a refused owner key", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 403, title: "This needs the owner key." }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(getOwnerKey()).toBeNull());
+    expect(screen.queryByTestId("options-live-toggle")).toBeNull();
+  });
+});
+

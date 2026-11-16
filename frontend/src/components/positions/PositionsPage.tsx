@@ -11,6 +11,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
 import { clearOwnerKey, useOwnerKey } from "../../lib/owner";
+import { useNow } from "../../lib/use-now";
 import { fetchOwnerPositions, isOwnerKeyRefused } from "../../lib/owner-api";
 import type { OwnerPositions, PositionGroup } from "../../lib/owner-schemas";
 import { type Greeks, greeks } from "../../lib/positions-math";
@@ -21,6 +22,7 @@ import { OwnerUnlock } from "../owner/OwnerUnlock";
 import { MAX_CONTEXT, PositionGroupCard } from "./PositionGroupCard";
 
 const FIFTEEN_SECONDS = 15_000;
+const FIVE_SECONDS = 5_000;
 
 /** A total across the holdings, and the ones it leaves out for want of a
  * live figure (one unquoted holding mustn't blank the rest). */
@@ -66,6 +68,9 @@ function Positions({ ownerKey }: { ownerKey: string }) {
     queryKey: ["owner-positions"],
     queryFn: () => fetchOwnerPositions(ownerKey),
     staleTime: FIFTEEN_SECONDS,
+    // Read again as often as the server's copy turns over, while the tab shows
+    // (TanStack pauses an interval in a background tab).
+    refetchInterval: FIFTEEN_SECONDS,
     // Gone from memory as soon as nothing shows it (unmount, sign out).
     gcTime: 0,
     refetchOnWindowFocus: true,
@@ -77,7 +82,7 @@ function Positions({ ownerKey }: { ownerKey: string }) {
     if (refused) clearOwnerKey(); // the page shows the unlock form again
   }, [refused]);
   const positions = query.data;
-  const now = new Date();
+  const now = useNow(FIVE_SECONDS); // quote ages keep counting between reads
   const t = positions ? totals(positions) : null;
   const dash = (v: number | null) => (v === null ? "—" : signedUsd(v));
 

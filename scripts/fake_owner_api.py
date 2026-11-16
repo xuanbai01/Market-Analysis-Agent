@@ -21,9 +21,10 @@ then the frontend dev server; in the browser set localStorage
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -85,14 +86,42 @@ QUOTES = {
 }
 
 
+# A made-up NVDA chain for the options page's Live switch: one expiry, quotes
+# priced by Black-76 on a gently skewed smile around the fake price.
+CHAIN_EXPIRY = date(2026, 12, 18)
+CHAIN_STRIKES = [120.0 + 2.5 * i for i in range(41)]  # 120 to 220
+
+
+def _occ(kind: str, strike: float) -> str:
+    return f"NVDA  {CHAIN_EXPIRY:%y%m%d}{kind}{int(strike * 1000):08d}"
+
+
+def _chain_quote(symbol: str) -> dict[str, Any] | None:
+    from app.services import options_math as om  # noqa: PLC0415
+
+    match = next(((k, kind) for k in CHAIN_STRIKES for kind in "CP" if _occ(kind, k) == symbol), None)
+    if match is None:
+        return None
+    strike, kind = match
+    spot, years, rate = QUOTES["NVDA"]["mark"], 32 / 365, 0.04
+    vol = 0.55 + 0.25 * max(0.0, (spot - strike) / spot)  # puts below the price cost more
+    price = om.black76(spot * math.exp(rate * years), strike, years, vol, math.exp(-rate * years), call=kind == "C")
+    return {**_quote(symbol, round(price, 2)), "volume": 50, "open-interest": int(4000 * math.exp(-abs(strike - 175) / 15))}
+
+
 async def fake_get(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
     if path == "/customers/me/accounts":
         return {"data": {"items": [{"account": {"account-number": ACCOUNT}}]}}
     if path == f"/accounts/{ACCOUNT}/positions":
         return {"data": {"items": POSITIONS}}
+    if path == "/option-chains/NVDA/nested":
+        strikes = [{"strike-price": f"{k:.1f}", "call": _occ("C", k), "put": _occ("P", k)} for k in CHAIN_STRIKES]
+        return {"data": {"items": [{"root-symbol": "NVDA", "shares-per-contract": 100,
+                                    "expirations": [{"expiration-date": CHAIN_EXPIRY.isoformat(), "strikes": strikes}]}]}}
     if path == "/market-data/by-type":
         asked = [s for value in (params or {}).values() for s in str(value).split(",")]
-        return {"data": {"items": [QUOTES[s] for s in asked if s in QUOTES]}}
+        items = [QUOTES.get(s) or _chain_quote(s) for s in asked]
+        return {"data": {"items": [item for item in items if item]}}
     raise tt.TastytradeNotFound(path)
 
 

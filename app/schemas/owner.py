@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.options import ExpiryChain
+
 
 class OwnerStatus(BaseModel):
     """What's set up for the owner. The unlock form reads it to check a key."""
@@ -201,4 +203,20 @@ class OwnerTrades(BaseModel):
     # The trades read as positions (``trade_journal``): computed on each
     # visit, never stored.
     journal: TradeJournal = Field(default_factory=TradeJournal)
+
+
+class LiveChain(BaseModel):
+    """One expiry's chain at tastytrade's live quotes (owner_live_chain): the
+    same shape as the delayed chain, our own IVs from their mids. Shown to the
+    owner only; never stored."""
+
+    symbol: str
+    expiry: date
+    spot: float
+    # The time the IVs are figured from (the last close outside a session).
+    quoted_at: datetime
+    # The newest of tastytrade's quote times.
+    updated_at: datetime | None = None
+    chain: ExpiryChain
+    source: Literal["tastytrade"] = "tastytrade"
 

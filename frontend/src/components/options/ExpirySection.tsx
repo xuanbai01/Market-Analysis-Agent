@@ -3,11 +3,21 @@
  * and the near-the-money chain, and build a strategy on it. The report
  * carries the expiry nearest 30 days; any other is read on demand
  * (/v1/options/{symbol}/chain/{expiry}).
+ *
+ * With the owner key, a Live switch reads the expiry at tastytrade's live
+ * quotes instead (/v1/owner/options/{symbol}/live/{expiry}, ADR 0009):
+ * the same charts, table and strategy builder, priced live, refreshed every
+ * 15 seconds while the tab shows, labelled with the quotes' age. When live
+ * quotes fail the delayed chain stays, with the reason.
  */
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { ApiError } from "../../lib/api";
 import { fetchOptionsChain } from "../../lib/options-api";
+import { clearOwnerKey, useOwnerKey } from "../../lib/owner";
+import { useNow } from "../../lib/use-now";
+import { fetchLiveChain } from "../../lib/owner-api";
 import type { ChainRow, ExpiryChain, Positioning } from "../../lib/options-schemas";
 import {
   GLOSSARY,
@@ -51,6 +61,14 @@ const ask = (v: number) => (v > 0 ? v.toFixed(2) : dash);
 const iv = (v: number | null) => (v === null ? dash : pct(v));
 const delta = (v: number | null) => (v === null ? dash : v.toFixed(2));
 const strike = (k: number) => (Number.isInteger(k) ? k.toFixed(0) : k.toFixed(2));
+const LIVE_REFRESH_MS = 15_000;
+const AGE_TICK_MS = 5_000;
+
+/** "3s", "2m": how long ago tastytrade's newest quote was. */
+function quoteAge(updatedAt: string, now: Date): string {
+  const seconds = Math.max(0, Math.round((now.getTime() - new Date(updatedAt).getTime()) / 1000));
+  return seconds < 90 ? `${seconds}s` : seconds < 5400 ? `${Math.round(seconds / 60)}m` : `${Math.round(seconds / 3600)}h`;
+}
 
 export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 }: Props) {
   // The report's expiry unless the reader picked another that is still
@@ -63,11 +81,42 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
     enabled: expiry !== initial.expiry,
     staleTime: 5 * 60_000,
   });
-  const chain = expiry === initial.expiry ? initial : query.data;
+  const delayed = expiry === initial.expiry ? initial : query.data;
   const unauthorized = useSignOutOn401(query.error);
   // An error belongs to an expiry read on demand; once the report's own
   // chain is that expiry, it no longer applies.
   const failed = expiry !== initial.expiry && !unauthorized ? query.error : null;
+
+  const ownerKey = useOwnerKey();
+  const [live, setLive] = useState(false);
+  const liveOn = live && ownerKey !== null;
+  const liveQuery = useQuery({
+    queryKey: ["owner-live-chain", symbol, expiry],
+    queryFn: () => fetchLiveChain(ownerKey as string, symbol, expiry),
+    enabled: liveOn,
+    // An expiry tastytrade doesn't list (422) won't be listed 15 s later: stop asking.
+    refetchInterval: (q) => (liveOn && !(q.state.error instanceof ApiError && q.state.error.status === 422) ? LIVE_REFRESH_MS : false),
+    gcTime: 0, // tastytrade's quotes leave memory with the view
+    retry: false,
+  });
+  const liveUnauthorized = useSignOutOn401(liveQuery.error); // a stale sign-in, as for the delayed chain
+  // Only a 403 says the key is wrong here: a 404 can't be told from a route
+  // the backend doesn't have yet (a deploy in flight). /positions and
+  // /trades handle a server with no owner key.
+  const liveRefused = liveQuery.error instanceof ApiError && liveQuery.error.status === 403;
+  const now = useNow(AGE_TICK_MS, liveOn); // the quotes' age keeps counting between reads
+  useEffect(() => {
+    if (liveRefused) clearOwnerKey();
+  }, [liveRefused]);
+  // A failed read drops back to the delayed chain: TanStack keeps the last
+  // live copy, which mustn't stay on screen as if it were live.
+  const liveChain = liveOn && !liveQuery.isError ? (liveQuery.data ?? null) : null;
+  const chain = liveChain?.chain ?? delayed;
+  // Open interest is the day's figure and live quotes cover only the strikes
+  // near the price: while live, open interest and positioning come from the
+  // whole delayed chain or not at all (#130's AI review).
+  const day = liveChain ? delayed : chain;
+  const price = liveChain?.spot ?? spot;
 
   return (
     <>
@@ -88,7 +137,31 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
               ))}
             </select>
             {chain && <span>forward ${chain.forward.toFixed(2)} · {expiryKind(chain.expiry)}</span>}
+            {ownerKey !== null && (
+              <button
+                type="button"
+                data-testid="options-live-toggle"
+                aria-pressed={live}
+                onClick={() => setLive(!live)}
+                className={`ml-auto rounded border px-2 py-0.5 ${live ? "border-strata-highlight text-strata-hi" : "border-strata-border text-strata-dim hover:text-strata-hi"}`}
+              >
+                {live ? "Live ✓" : "Live"}
+              </button>
+            )}
           </label>
+          {liveOn && (
+            <p data-testid="options-live-status" className="mb-2 font-mono text-[11px] text-strata-muted">
+              {liveChain ? (
+                <>Live · tastytrade · {liveChain.updated_at ? `quotes ${quoteAge(liveChain.updated_at, now)} old` : "quote time unknown"} · shown to you only</>
+              ) : liveQuery.error && !liveRefused && !liveUnauthorized ? (
+                <span className="text-strata-neg">
+                  Live quotes unavailable: {liveQuery.error instanceof ApiError ? liveQuery.error.title.replace(/\.$/, "") : "tastytrade didn't answer"}. Showing the delayed chain.
+                </span>
+              ) : (
+                "Reading tastytrade's quotes…"
+              )}
+            </p>
+          )}
           {query.isFetching && <p className="font-mono text-[11px] text-strata-muted">Reading {shortDate(expiry, true)}…</p>}
           {failed && <ErrorBanner error={failed} />}
           {chain && (
@@ -97,21 +170,29 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
                 <ChartBlock
                   title="IV by strike"
                   info={GLOSSARY.smile}
-                  sentence={chain.expiry === initial.expiry ? smileSentence(skew25) : null}
+                  sentence={chain.expiry === initial.expiry && !liveChain ? smileSentence(skew25) : null}
                   testId="options-smile-block"
                 >
                   <SmileChart chain={chain} />
                 </ChartBlock>
-                <ChartBlock
-                  title="Open interest by strike"
-                  info={GLOSSARY.openInterest}
-                  sentence={chain.positioning ? maxPainSentence(chain.positioning, spot) : openInterestSentence(chain)}
-                  testId="options-oi-block"
-                >
-                  <OpenInterestChart chain={chain} spot={spot} />
-                </ChartBlock>
+                {day ? (
+                  <ChartBlock
+                    title={liveChain ? "Open interest by strike · the day's figures, delayed" : "Open interest by strike"}
+                    info={GLOSSARY.openInterest}
+                    sentence={openInterestWords(day, price)}
+                    testId="options-oi-block"
+                  >
+                    <OpenInterestChart chain={day} spot={price} />
+                  </ChartBlock>
+                ) : (
+                  <p data-testid="options-oi-missing" className="self-center text-sm text-strata-dim">
+                    {query.isFetching
+                      ? "Reading the day's open interest from the delayed chain…"
+                      : "Open interest comes with the delayed chain, which couldn't be read for this expiry: the live quotes cover only the strikes near the price."}
+                  </p>
+                )}
               </div>
-              {chain.positioning && <PositioningBlock expiry={chain.expiry} p={chain.positioning} price={spot} />}
+              {day && <WholePositioning chain={day} price={price} />}
               <ChainTable chain={chain} />
             </>
           )}
@@ -159,6 +240,14 @@ const maybeMoney = (v: number | null) => (v === null ? "—" : money(v));
 
 /** Where the expiry's open interest sits: the largest contracts, gamma and
  * delta exposure by strike, with the dealer assumption stated. */
+function openInterestWords(chain: ExpiryChain, price: number | null) {
+  return chain.positioning ? maxPainSentence(chain.positioning, price) : openInterestSentence(chain);
+}
+
+function WholePositioning({ chain, price }: { chain: ExpiryChain; price: number | null }) {
+  return chain.positioning ? <PositioningBlock expiry={chain.expiry} p={chain.positioning} price={price} /> : null;
+}
+
 function PositioningBlock({ expiry, p, price }: { expiry: string; p: Positioning; price: number | null }) {
   if (p.call_open_interest + p.put_open_interest === 0) return null;
   return (

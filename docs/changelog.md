@@ -230,7 +230,7 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Not changed:** a what-if below 1% IV is priced at 1%, and a failed price read leaves out the past-moves line without a note.
   - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 - **The owner's trade copy, encrypted (2026-11-15, ADR 0009 amended):** the owner asked for a copy of their trades that both of their PCs can reach, and chose an encrypted copy in Neon.
-  - **The vault:** `owner_vault` seals each transaction with AES-256-GCM under `OWNER_VAULT_KEY` (32 random bytes, a Fly secret), with a fresh nonce and the transaction id as associated data. The app won't start with a malformed key or one equal to another key. `cryptography` 50.0.2 is pinned in `pyproject.toml` and the Dockerfile.
+  - **The vault:** `owner_vault` seals each transaction with AES-256-GCM under `OWNER_VAULT_KEY` (32 random bytes, a Fly secret), with a fresh nonce, and the transaction id, the key version and the estimated-fee flag as associated data. The app won't start with a malformed key or one equal to another key. `cryptography` 50.0.2 is pinned in `pyproject.toml` and the Dockerfile.
   - **The table:** `owner_transactions` (migration 0006) holds only the id, the key version and an estimated-fee flag in the clear, all three bound to the ciphertext. Rows are written once; the one update is a row stored with estimated fees taking the final ones.
   - **The sync:** `owner_trades.sync`, at most once a minute. It reads each account's transactions from a week before the newest stored, every page (2,000 a page), and holds no database connection during the fetch. It keeps a listed set of fields plus the account's 1-based number, never the account number.
   - **The routes:**
@@ -296,6 +296,81 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **From #129's tenth AI review:**
     - **The chunked-insert test writes 7,000 rows (35,000 parameters).** The 6,000 it wrote fit in one statement, so it would have passed without chunking. The limit is about 6,550 transactions, not 5,400.
     - **Not changed:** the client turns its own timeouts into `TastytradeUnavailable`, so a bare `TimeoutError` can only be the sync's deadline.
+- **Live quotes on the options page (2026-11-15, tastytrade PR B, ADR 0009):** with the owner key, the options page's expiry section has a Live switch.
+  - **The route:** `GET /v1/owner/options/{symbol}/live/{expiry}` (`owner_live_chain`).
+    - **Strikes:** read from tastytrade's nested chain. Only standard deliverables count, and an OCC symbol is checked before it reaches a query. The last chains are kept 10 minutes (4 after the tenth review below).
+    - **Quotes:** bids, asks, volume and open interest come from its REST quotes for the 40 strikes either side of the price.
+    - **Everything else** comes from the code that reads Yahoo's chain: the forward, our own IVs from the live mids, the smile, positioning.
+    - **Limits:** 10 s in memory, one build per symbol and expiry, a 30 s deadline. An expiry tastytrade doesn't list is a 422.
+  - **The page:** the switch draws the same smile, open interest, positioning, chain table and strategy builder, priced at live quotes and refreshed every 15 s while the tab shows. It's labelled "Live · tastytrade · quotes Ns old · shown to you only". When live quotes fail, the delayed chain stays, with the reason.
+  - **Never stored, never in a prompt:** the options read stays on Yahoo's chain.
+  - **From the security review:**
+    - **The medium:** an unlisted expiry answered 404, which the page reads as "no owner key", so the owner would have been signed out of every owner page. It's a 422 now.
+    - the ticker pattern only takes what tastytrade's path allowlist does;
+    - the chains kept are capped;
+    - builds lock per symbol and expiry, with a deadline.
+  - **The fake backend** answers a made-up NVDA chain to look at the switch.
+  - **From #130's AI review:**
+    - **One build per expiry, really.** asyncio marks a lock free before the waiter it wakes has taken it, so a lock dropped then let a third read build alongside, after a failed build. Locks are now counted while held or waited on.
+    - **No live price, no live chain.** Yahoo's delayed price was used when tastytrade sent none, under the "Live" label. The chain now says tastytrade sent no price.
+    - **A later read that fails drops back to the delayed chain** with the reason, rather than leaving the last live copy on screen.
+    - **No quote time reads "quote time unknown"**, not "quotes of unknown age old".
+    - **The warm cache the live chain reads is tested** with a real build in it.
+    - **Not changed:** a wrong-shaped answer is already a 503 with the reason, since `items_of` raises `TastytradeUnavailable`.
+  - **From #130's second AI review:**
+    - **The live quotes' age keeps counting between reads**, from a clock shared with `/positions` (`lib/use-now.ts`) that ticks only while Live is on.
+    - **A 401 on the live read signs out**, as one on the delayed chain does.
+    - **Not changed:**
+      - `/option-chains/{symbol}/nested` is on the client's allowlist.
+      - The strategy builder already prices from the live chain.
+      - The dividend yield only checks the put-call-parity forward taken from the live quotes, so a yield of 0 when the report isn't cached on that machine barely moves it.
+  - **From #130's third AI review:**
+    - **One contract per strike.** An adjusted root that still declares 100 shares, or SPX beside SPXW on a third Friday, listed the same strikes again, which doubled their open interest. The standard root is kept: the ticker's own, else one without a digit.
+    - **Not changed:**
+      - The client's allowlist takes an encoded slash (`BRK%2FB`), and its tests cover it.
+      - The strategy builder prices from the live chain.
+      - A 404 clears the owner key only while the frontend is ahead of the backend on a deploy, since both ship from the same merge.
+  - **From #130's fourth AI review:**
+    - **A chain is kept as plain rows** of strike, call and put by expiry, not as tastytrade's dicts. SPY's or SPX's lists every expiry's strikes, and ten are kept on a 512 MB machine.
+    - **Not changed:**
+      - The nested-chain path is on the client's allowlist.
+      - During a session, `quote_time` is the current time, so live quotes are timed from now.
+  - **From #130's fifth AI review:**
+    - **Open interest, walls, max pain and exposure come from the whole delayed chain while Live is on.** Live quotes cover only the 80 strikes near the price, and open interest is the day's figure anyway.
+    - **Only a 403 clears the owner key on the Live switch.** A 404 there can't be told from a route the backend doesn't have yet, during a deploy. `/positions` and `/trades` handle a server with no owner key.
+    - **The nested chain is read into rows on the options thread**, not the event loop.
+  - **From #130's sixth AI review:**
+    - **The kept chain is read again before an expiry is called "not listed"**, so a weekly listed since then is found.
+    - **An expiry that has closed is "not listed"**, not priced at a negative time to expiry.
+    - **Not changed:**
+      - The client's allowlist takes the nested-chain path and its quote parameters.
+      - `cached_underlying` returns nothing for a build with no fetched chain.
+  - **From #130's seventh AI review:**
+    - **A contract filed under another strike is dropped**, so it can't shift the smile.
+    - **A symbol tastytrade lists no options for** reads as "not listed", not an outage.
+    - **Not changed:**
+      - `symbol_path` turns `BF.B` into `BF/B`, and the client's tests cover it.
+      - The status line gives the newest quote's age.
+      - The live route sits behind the owner key with no per-IP limit; the client backs off on 429.
+  - **From #130's eighth AI review:**
+    - **An expiry not in the kept chain gets one fresh read a minute at most** (`CHAIN_RECHECK_SECONDS`), not one per 15 s poll.
+    - **The page stops polling after a 422**, since that expiry won't be listed 15 s later.
+    - **Not changed:** the dividend yield (always a float) only checks the parity forward, so a test of it through the live chain would show nothing.
+  - **From #130's ninth AI review:**
+    - **While Live is on, open interest comes from the delayed chain or not at all.** When that read fails for a picked expiry, the panel says so rather than counting the 80 live strikes. The panel's title says its figures are the day's, delayed.
+    - **Not changed:**
+      - `BRK/B` is tastytrade's own equity symbol, as for the chain.
+      - A stray 404 on the chain is checked again within a minute.
+  - **From #130's tenth AI review:**
+    - **Memory, measured:** an SPX-sized chain (80 expiries × 300 strikes, 2.2 MB of JSON) keeps 5.7 MB as rows, strings included (tracemalloc), and peaks at 11.6 MB while parsing. Four chains are kept now, not ten.
+    - **An answer over 256 KB is parsed off the event loop** (`tastytrade_client.LARGE_BODY_BYTES`). An SPX chain is about 9 ms of CPU, roughly 145 ms on Fly's shared core.
+    - **A strike tastytrade sends no quote for is left out**, not drawn as $0.00.
+    - **An expiry date sent with its time still reads.**
+    - **While the delayed chain is on its way,** the open-interest panel says it's reading, not that the read failed.
+    - **Not changed:**
+      - The positions page's timer test restores the clock in `afterEach`.
+      - The live route sits behind the owner key with no per-IP limit, as before.
+  - **`/positions` stays current while open** (#128's last AI review): it reads again every 15 s while the tab shows, matching the server's copy, and quote ages tick every 5 s between reads. A tab left open no longer freezes at "10s ago".
 - **The trade journal (2026-11-16, tastytrade PR D, ADR 0009):** `/trades` reads the owner's trades as positions.
   - **`trade_journal`:** pure, computed from the trade copy on each visit, never stored.
     - **Matching:** FIFO lots per account and contract; "to Open" opens, "to Close" closes the oldest lots, a plain Buy or Sell closes first and opens the rest; each fill's net value (fees in) split by quantity.

@@ -186,7 +186,7 @@ More in [docs/commands.md](docs/commands.md).
 
 ## CI and deployment
 
-Every PR runs ([.github/workflows/ci.yml](.github/workflows/ci.yml)): backend `ruff` + `pytest` against a Postgres service; frontend lint, typecheck, vitest and build; a production-image job that builds the Dockerfile and boots it against Postgres (`alembic upgrade` + `/v1/health`); Gitleaks; and an AI review of the diff by DeepSeek, posted as one PR comment ([scripts/ai_review.py](scripts/ai_review.py)).
+Every PR runs ([.github/workflows/ci.yml](.github/workflows/ci.yml)): backend `ruff` + `pytest` against a Postgres service; frontend lint, typecheck, vitest and build; a production-image job that builds the Dockerfile and boots it against Postgres (`alembic upgrade` + `/v1/health`); and Gitleaks. A separate workflow ([.github/workflows/ai-review.yml](.github/workflows/ai-review.yml)) has DeepSeek review the PR and post one comment ([scripts/ai_review.py](scripts/ai_review.py)): a full review in parts when it opens, then each push's changes.
 
 A push to `main` deploys both halves: [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) runs `flyctl deploy` (the container applies migrations before `uvicorn` starts) and Vercel builds `frontend/`. Setup, secrets and operations are in [docs/deployment.md](docs/deployment.md); rationale in [ADR 0002](docs/adr/0002-deployment.md).
 

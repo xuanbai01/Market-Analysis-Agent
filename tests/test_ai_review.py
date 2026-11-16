@@ -492,3 +492,18 @@ def test_request_part_asks_again_after_a_dropped_connection():
         return answer
 
     assert asker.request_part(ask).thinking is False
+
+
+def test_lows_fold_away_under_the_others():
+    found = [ai_review.Finding("low", "app/a.py", 9, "a low", "x"),
+             ai_review.Finding("high", "app/a.py", 1, "a high", "y")]
+    body = ai_review.render_comment(findings=found, riskiest=[], head_sha="abc1234", model="m", parts=1,
+                                    usage=asker.Usage(), plan=None, mode="full", earlier=[], failed=[])
+    assert body.index("a high") < body.index("<details><summary>Lows (1)</summary>") < body.index("a low")
+
+
+def test_only_lows_says_nothing_above_low():
+    body = ai_review.render_comment(findings=[ai_review.Finding("low", "app/a.py", 9, "a low", "x")],
+                                    riskiest=[], head_sha="abc1234", model="m", parts=1, usage=asker.Usage(),
+                                    plan=None, mode="full", earlier=[], failed=[])
+    assert "Nothing above low." in body and "Lows (1)" in body

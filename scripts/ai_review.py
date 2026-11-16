@@ -146,7 +146,14 @@ def render_comment(*, findings: list[Finding], riskiest: list[str], head_sha: st
         heading = f"Review of the changes since {since[:7]}, at {head_sha[:7]}, in {parts} {plural}{times}."
     else:
         heading = f"Full review of {head_sha[:7]} in {parts} {plural}{times}."
-    sections = [f"{MARKER}\n### AI review (DeepSeek)\n", heading, render_findings(findings)]
+    # Lows fold away: with thinking off, about one in six held up when
+    # graded (#128-#131), against two in five of the highs.
+    main = [f for f in findings if f.severity != "low"]
+    lows = [f for f in findings if f.severity == "low"]
+    sections = [f"{MARKER}\n### AI review (DeepSeek)\n", heading,
+                render_findings(main) if main or not lows else "Nothing above low."]
+    if lows:
+        sections.append(f"<details><summary>Lows ({len(lows)})</summary>\n\n{render_findings(lows)}\n\n</details>")
     if riskiest:
         sections.append("<details><summary>Riskiest, by part</summary>\n\n"
                         + "\n".join(f"- {r}" for r in riskiest) + "\n\n</details>")

@@ -258,4 +258,11 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **A fee credited back** lowers the fees instead of adding to them.
     - **The table's net** is shown to the cent, like the fees beside it.
     - **Not changed:** a row that fails its GCM check still fails the list with a 503. That's the sign of a wrong key or tampering, and it should be loud; §11 says how to start the copy again.
+  - **From #129's third AI review:**
+    - **Sealing runs off the event loop.** A first sync seals the whole history, and on Fly's shared CPU that would have held up every other request.
+    - **A database failure mid-write** (Neon dropping the connection) was a 500. It's now a failed sync, so the stored copy is shown with "the copy couldn't be updated" and the error is logged.
+    - **A page count sent as digits** is read. A history longer than 25 pages logs a warning.
+    - **A trade without a time** sorts by its date.
+    - **The model carries the migration's nonce-length check**, so test databases built from the models enforce it too.
+    - **Not changed:** a full read after a restart. It costs one tastytrade page per 2,000 transactions and decrypts nothing, which is cheaper than the incremental read for this account.
 

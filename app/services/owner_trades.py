@@ -19,7 +19,7 @@ import io
 import logging
 import time
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -147,10 +147,19 @@ async def _transactions(number: str, start: date | None) -> list[dict[str, Any]]
         payload = await tt.get(f"/accounts/{number}/transactions", params, op="transactions")
         found += owner_positions.items_of(payload, strict=True)
         pagination = payload.get("pagination") if isinstance(payload, dict) else None
-        pages = pagination.get("total-pages") if isinstance(pagination, dict) else None
-        if not isinstance(pages, int) or page + 1 >= pages:
+        pages = _whole(pagination.get("total-pages")) if isinstance(pagination, dict) else None
+        if pages is None or page + 1 >= pages:
             break
+        if page + 1 == MAX_PAGES:
+            logger.warning("owner trades: %d pages of history, %d read", pages, MAX_PAGES)
     return found
+
+
+def _whole(value: Any) -> int | None:
+    """A count tastytrade sent, as a number or as digits."""
+    if isinstance(value, str) and value.isascii() and value.isdigit():
+        return int(value)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 async def sync(session: AsyncSession) -> SyncResult:
@@ -171,16 +180,31 @@ async def sync(session: AsyncSession) -> SyncResult:
             async with asyncio.timeout(SYNC_SECONDS):
                 result = await _sync(session)
         except (tt.TastytradeUnavailable, tt.TastytradeNotFound, TimeoutError) as exc:
-            await session.rollback()  # a deadline can land mid-write; the listing needs a clean session
+            await _roll_back(session)  # a deadline can land mid-write; the listing needs a clean session
             _last_failure = owner_positions.failure_reason(exc)
             raise SyncFailed(_last_failure) from exc
-        except Exception:
-            _last_failure = "the last update failed"  # the error itself goes to the log
-            raise
+        except vault.VaultUnavailable:
+            raise  # a row that doesn't open stays loud: a 503
+        except Exception as exc:
+            # The database, say, dropping the connection mid-write: what's
+            # stored is still shown, and the error goes to the log.
+            logger.exception("owner trades: the sync failed")
+            await _roll_back(session)
+            _last_failure = "the copy couldn't be updated"
+            raise SyncFailed(_last_failure) from exc
         finally:
             _stamp()
         _last_failure = None
         return result
+
+
+async def _roll_back(session: AsyncSession) -> None:
+    """Leave the session clean for the listing; a lost connection may refuse
+    even this, and the next statement takes a fresh one."""
+    try:
+        await session.rollback()
+    except Exception:
+        logger.warning("owner trades: the rollback after a failed sync failed too")
 
 
 def _stamp() -> None:
@@ -196,8 +220,8 @@ async def _sync(session: AsyncSession) -> SyncResult:
     latest = None if full else _latest_date([payload for _, payload in await asyncio.to_thread(_opened, rows)])
     await session.rollback()  # no connection held while tastytrade is read
     start = latest - timedelta(days=OVERLAP_DAYS) if latest else None
-    new: list[dict[str, Any]] = []
-    replacements: list[dict[str, Any]] = []
+    to_add: list[tuple[int, dict[str, Any], int]] = []
+    to_replace: list[tuple[int, dict[str, Any], int]] = []
     accounts = (await owner_positions.account_numbers())[: owner_positions.MAX_ACCOUNTS]
     numbers = {number: index for index, number in enumerate(accounts, start=1)}
     for number, index in numbers.items():
@@ -211,11 +235,14 @@ async def _sync(session: AsyncSession) -> SyncResult:
                 continue
             estimated = item.get("is-estimated-fee") is True
             if tid not in known:
-                new.append(_sealed(tid, item, index, numbers))
+                to_add.append((tid, item, index))
                 known[tid] = estimated
             elif known[tid] and not estimated:
-                replacements.append(_sealed(tid, item, index, numbers))
+                to_replace.append((tid, item, index))
                 known[tid] = False
+    # Sealing is CPU (a first sync seals the whole history): off the event loop.
+    new = await asyncio.to_thread(lambda: [_sealed(tid, item, index, numbers) for tid, item, index in to_add])
+    replacements = await asyncio.to_thread(lambda: [_sealed(tid, item, index, numbers) for tid, item, index in to_replace])
     written = await store.insert(session, new)
     replaced = 0
     for row in replacements:
@@ -271,7 +298,19 @@ async def list_trades(session: AsyncSession) -> list[OwnerTrade]:
         raise vault.VaultUnavailable("the trade copy's key isn't set on the server")
     rows = await store.stored(session)
     trades = [_trade(tid, payload) for tid, payload in await asyncio.to_thread(_opened, rows)]
-    return sorted(trades, key=lambda t: (t.executed_at or "", t.id), reverse=True)
+    return sorted(trades, key=_when, reverse=True)
+
+
+def _when(trade: OwnerTrade) -> tuple[datetime, int]:
+    """When it happened, for the order: its time, else its date's start (UTC)."""
+    for text in (trade.executed_at, trade.date):
+        try:
+            when = datetime.fromisoformat(text) if text else None
+        except ValueError:
+            continue
+        if when is not None:
+            return (when if when.tzinfo else when.replace(tzinfo=UTC), trade.id)
+    return (datetime.min.replace(tzinfo=UTC), trade.id)
 
 
 def csv_cell(value: Any) -> str:

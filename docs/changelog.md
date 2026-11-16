@@ -502,4 +502,12 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **The figures:** each expiry goes through the options page's own code: its smile from the mids, and its summary row (ATM IV, expected move, max pain, net gamma). The positioning is added up across the expiries (`options_positioning.across`): open interest, gamma and delta exposure by strike, and the chain's walls and gamma flip. There's no max pain for the chain, since that's one expiry's settle.
   - **Live chain rows:** they keep each contract's DXLink name beside its OCC symbol.
   - **Bounds:** at most 6,000 contracts, nearest expiries first (`capped` says so); a minute in memory for 4 symbols; a 60 s deadline. A symbol tastytrade lists no options on is a 422. Never stored.
+  - **From #140's reviews** (two security reviews, no high; and DeepSeek's):
+    - **DXLink's one-shot read** stops once no new contract has answered for 3 s, or after three events a contract. During a session, found contracts keep updating and the feed never goes quiet, so a read missing one contract would have decoded up to 100,000 events on the event loop.
+    - **DXLink names** are worked out from each checked OCC symbol, not taken from tastytrade's answer. They matched for 52,552 contracts on Fly, and the chain's rows are back to their size.
+    - **Choosing the contracts** runs on the options thread, filtering strikes by range before parsing them.
+    - **One build at a time.**
+    - **Bad values:** an absurd open interest is no figure (in the live chain too), a quote time that isn't one is ignored, and a feed that sends no quotes is a 503, not an empty chain.
+    - **The ticker** is upper-cased for the caches, and masked in the client's log of chain and earnings paths.
+    - **Too big:** a nearest expiry bigger than one read keeps its nearest strikes, instead of reading as "no options".
 

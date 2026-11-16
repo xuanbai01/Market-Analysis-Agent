@@ -4,8 +4,10 @@ chain from tastytrade, out to MAX_DAYS, for strikes within STRIKE_RANGE of
 the price.
 
 - **Strikes:** from tastytrade's nested chain (owner_live_chain keeps it,
-  standard deliverables only, one root per strike, each contract's DXLink
-  name beside its OCC symbol).
+  standard deliverables only, one root per strike, OCC-checked). Each
+  contract's DXLink name is worked out from its checked OCC symbol
+  (``owner_live_chain.dxlink_name``), so nothing unchecked from tastytrade's
+  answer reaches a subscription.
 - **Quotes and open interest:** over DXLink, one session of Quote events
   and one of Summary events for every contract at once (SPY: 4,816
   contracts in 19 expiries, about 3.5 s a session, checked on Fly
@@ -19,7 +21,9 @@ the price.
 
 tastytrade's data is the owner's alone: behind the owner key, the result
 kept CACHE_SECONDS in memory for at most MAX_SYMBOLS symbols, never stored,
-never in a prompt or the demo, logged as counts only.
+never in a prompt or the demo, logged as counts only. It's read on demand,
+one underlying at a time, never in the background (tastytrade's terms
+§8(3): no large cross-sections collected).
 """
 from __future__ import annotations
 
@@ -55,6 +59,11 @@ MAX_OPTIONS = 6_000
 CACHE_SECONDS = 60.0  # open interest is a day's; quotes move, but this is read on demand
 MAX_SYMBOLS = 4
 BUILD_SECONDS = 60.0  # the chain, the price and two DXLink sessions of up to 20 s
+# Builds at once across symbols: DXLink takes one session at a time anyway,
+# and each build holds a parsed chain while it waits.
+MAX_BUILDS = 1
+# A quote time this far ahead of now is no time.
+FUTURE_SKEW_SECONDS = 86_400
 
 _TT_SYMBOL = re.compile(r"[A-Z][A-Z0-9]{0,9}(?:/[A-Z0-9]{1,4})?")
 
@@ -79,13 +88,23 @@ def _clock() -> float:
 _kept: OrderedDict[str, tuple[float, WholeChain]] = OrderedDict()
 _locks: dict[str, asyncio.Lock] = {}
 _users: dict[str, int] = {}
+_builds: asyncio.Semaphore | None = None
+
+
+def _building() -> asyncio.Semaphore:
+    global _builds
+    if _builds is None:
+        _builds = asyncio.Semaphore(MAX_BUILDS)
+    return _builds
 
 
 def reset() -> None:
     """Tests only."""
+    global _builds
     _kept.clear()
     _locks.clear()
     _users.clear()
+    _builds = None
 
 
 @dataclass(frozen=True)
@@ -94,26 +113,29 @@ class _Expiry:
     strikes: tuple[tuple[float, str, str], ...]  # (strike, call's DXLink name, put's)
 
 
-def _pick(chain: lc.Chain, root: str, spot: float, quoted_at: datetime) -> tuple[list[_Expiry], bool]:
+def pick(chain: lc.Chain, root: str, spot: float, quoted_at: datetime) -> tuple[list[_Expiry], bool]:
     """The expiries out to MAX_DAYS, nearest first, each with its strikes
-    within STRIKE_RANGE that have DXLink names; stops at MAX_OPTIONS.
-    Returns (picked, capped)."""
+    within STRIKE_RANGE and their DXLink names; stops at MAX_OPTIONS.
+    Returns (picked, capped). CPU (it parses each symbol in range): run on
+    the options thread."""
     picked: list[_Expiry] = []
     budget = MAX_OPTIONS
+    low, high = spot * (1 - STRIKE_RANGE), spot * (1 + STRIKE_RANGE)
     for day in sorted(chain):
         expiry = date.fromisoformat(day)
         years = mc.years_to_expiry(quoted_at, expiry)
         if years <= 0 or years * 365 > MAX_DAYS:
             continue
-        names = lc.streamer_symbols(chain, expiry)
         strikes = tuple(
-            (k, names[call], names[put])
-            for k, call, put in lc.standard_strikes(chain, expiry, root)
-            if abs(k / spot - 1) <= STRIKE_RANGE and call in names and put in names
+            (k, lc.dxlink_name(call), lc.dxlink_name(put))
+            for k, call, put in lc.standard_strikes(chain, expiry, root, low, high)
         )
         if not strikes:
             continue
         if 2 * len(strikes) > budget:
+            if not picked:  # the nearest expiry alone is too big: its strikes nearest the price
+                nearest = sorted(strikes, key=lambda s: abs(s[0] - spot))[: budget // 2]
+                picked.append(_Expiry(expiry, tuple(sorted(nearest))))
             return picked, True
         budget -= 2 * len(strikes)
         picked.append(_Expiry(expiry, strikes))
@@ -124,14 +146,21 @@ def _quote(strike: float, quote: dict[str, Any] | None, summary: dict[str, Any] 
     bid = finite_number((quote or {}).get("bidPrice"))
     ask = finite_number((quote or {}).get("askPrice"))
     oi = finite_number((summary or {}).get("openInterest"))
+    # Open interest beyond any real contract's is no figure (it would overflow the sums).
+    oi = oi if oi is not None and 0 <= oi <= lc.MAX_OPEN_INTEREST else 0
     return Quote(strike=strike, bid=max(bid or 0.0, 0.0), ask=max(ask or 0.0, 0.0), volume=0,
-                 open_interest=int(max(oi or 0, 0)), regular=True)
+                 open_interest=int(oi), regular=True)
 
 
-def _newest(quotes: dict[str, dict[str, Any]]) -> datetime | None:
+def _newest(quotes: dict[str, dict[str, Any]], now: datetime) -> datetime | None:
+    """The newest quote time, ignoring one that isn't a time or is ahead of now."""
+    latest = now.timestamp() + FUTURE_SKEW_SECONDS
     stamps = [finite_number(q.get(f)) for q in quotes.values() for f in ("bidTime", "askTime")]
-    millis = [s for s in stamps if s is not None and s > 0]
-    return datetime.fromtimestamp(max(millis) / 1000, UTC) if millis else None
+    seconds = [s / 1000 for s in stamps if s is not None and 0 < s / 1000 <= latest]
+    try:
+        return datetime.fromtimestamp(max(seconds), UTC) if seconds else None
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def assemble(
@@ -169,30 +198,33 @@ def _shown(parts: list[tuple[ExpiryQuotes, Smile]], spot: float) -> list[float]:
     return sorted(k for k in strikes if abs(k / spot - 1) <= SHOWN_RANGE)
 
 
-async def _build(key: str, symbol: str) -> WholeChain:
+async def _build(key: str) -> WholeChain:
+    """``key`` is the upper-cased ticker: the chain and report caches are keyed so."""
     now = _now()
     quoted_at = mc.live_quote_time(now)  # tastytrade's quotes are real time
-    chain = await lc.expirations(symbol)
+    chain = await lc.expirations(key)
     if not any(0 < mc.years_to_expiry(quoted_at, date.fromisoformat(d)) * 365 <= MAX_DAYS for d in chain):
-        raise NoOptions(symbol)
-    spot = await lc.underlying_price(symbol)
-    root = symbol.upper().replace("-", "").replace(".", "")
-    picked, capped = _pick(chain, root, spot, quoted_at)
+        raise NoOptions(key)
+    spot = await lc.underlying_price(key)
+    root = key.replace("-", "").replace(".", "")
+    picked, capped = await options_chain.on_options_thread(pick, chain, root, spot, quoted_at)
     if not picked:
-        raise NoOptions(symbol)
+        raise NoOptions(key)
     names = [name for e in picked for _k, c, p in e.strikes for name in (c, p)]
     # One session at a time on the machine (dxlink): quotes, then open interest.
     quotes = await dxlink.fetch_once("Quote", names)
+    if not quotes:
+        raise WholeChainUnavailable("tastytrade's feed sent no quotes")  # not an empty chain kept a minute
     summaries = await dxlink.fetch_once("Summary", names)
     rate, _assumed = await options_chain.on_options_thread(options_chain.risk_free_rate)
-    cached = options_report.cached_underlying(symbol)  # the dividend yield only
+    cached = options_report.cached_underlying(key)  # the dividend yield only
     rows, parts, left_out, quoted = await options_chain.on_options_thread(
         assemble, picked, quotes, summaries, spot, quoted_at, rate, cached[1] if cached else 0.0)
     positioning = await options_chain.on_options_thread(op.across, parts, spot, _shown(parts, spot))
     logger.info("owner whole chain: %d expiries, %d left out, %d contracts asked, %d quoted",
                 len(rows), len(left_out), len(names), quoted)
     return WholeChain(
-        symbol=key, spot=spot, quoted_at=quoted_at, as_of=now, updated_at=_newest(quotes), expiries=rows,
+        symbol=key, spot=spot, quoted_at=quoted_at, as_of=now, updated_at=_newest(quotes, now), expiries=rows,
         positioning=positioning, max_days=MAX_DAYS, strike_range=STRIKE_RANGE, options_read=len(names),
         options_quoted=quoted, left_out=left_out, capped=capped,
     )
@@ -228,7 +260,8 @@ async def whole_chain(symbol: str) -> WholeChain:
             kept = _kept.get(key)
             if kept is not None and _clock() - kept[0] < CACHE_SECONDS:
                 return kept[1]
-            built = await _build(key, symbol)
+            async with _building():  # one whole chain at a time across symbols
+                built = await _build(key)
             _keep(key, built)
             return built
     except TimeoutError as exc:

@@ -63,6 +63,10 @@ FETCH_TIMEOUT_SECONDS = 20.0
 SUBSCRIBE_CHUNK = 500
 # Once events have come, a feed this quiet has sent all it will.
 IDLE_SECONDS = 3.0
+# A one-shot read's events, per symbol asked (and a few spare), before it
+# stops: updates for symbols already found are decoded for nothing.
+ONCE_EVENTS_PER_SYMBOL = 3
+ONCE_EVENTS_SPARE = 1_000
 OPEN_TIMEOUT_SECONDS = 10.0
 MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 MAX_QUEUE = 4
@@ -426,15 +430,30 @@ async def fetch_candles(symbol: str, period: str, from_time: datetime) -> Candle
 
 async def fetch_once(event_type: str, symbols: Sequence[str]) -> dict[str, dict[str, Any]]:
     """The first ``event_type`` event (Summary, Greeks, Quote) for each of
-    ``symbols``, by symbol; a symbol that sent none is missing."""
+    ``symbols``, by symbol; a symbol that sent none is missing.
+
+    During a session thousands of contracts keep sending updates, so the
+    feed never goes quiet: the read ends once no new symbol has come for
+    IDLE_SECONDS, or after ONCE_EVENTS_PER_SYMBOL events a symbol, rather
+    than at MAX_EVENTS (#140's security review)."""
     wanted = set(symbols)
     found: dict[str, dict[str, Any]] = {}
+    budget = ONCE_EVENTS_PER_SYMBOL * len(wanted) + ONCE_EVENTS_SPARE
+    seen = 0
+    last_new = time.monotonic()
 
     def on_event(event: dict[str, Any]) -> bool | None:
+        nonlocal seen, last_new
+        seen += 1
         symbol = event.get("eventSymbol")
         if isinstance(symbol, str) and symbol in wanted and symbol not in found:
             found[symbol] = event
-        return True if len(found) == len(wanted) else None
+            last_new = time.monotonic()
+        if len(found) == len(wanted):
+            return True
+        if seen >= budget or (found and time.monotonic() - last_new >= IDLE_SECONDS):
+            return False  # the rest aren't coming: stop decoding updates
+        return None
 
     with log_external_call(f"dxlink.{event_type.lower()}", {"symbols": len(wanted)}) as call:
         await _run(event_type, [{"type": event_type, "symbol": s} for s in sorted(wanted)], on_event)

@@ -619,3 +619,12 @@ async def test_a_large_answer_is_parsed_off_the_event_loop(fake: FakeTastytrade,
     await tt.get("/market-metrics", {"symbols": "SPY"}, op="market_metrics")
     assert threads == [False, True]
 
+
+
+
+def test_the_ticker_in_a_chain_or_company_path_is_masked() -> None:
+    # The owner's choice of ticker, like a quote's symbols (#140's review).
+    for path in ("/option-chains/ZQXW/nested", "/market-metrics/historic-corporate-events/earnings-reports/ZQXW",
+                 "/market-metrics/historic-corporate-events/dividends/BF%2FB"):
+        masked = tt._masked(path)
+        assert "ZQXW" not in masked and "BF" not in masked and "***" in masked

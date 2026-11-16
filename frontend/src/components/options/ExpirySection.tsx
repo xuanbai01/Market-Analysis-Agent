@@ -17,7 +17,7 @@ import { ApiError } from "../../lib/api";
 import { fetchOptionsChain } from "../../lib/options-api";
 import { clearOwnerKey, useOwnerKey } from "../../lib/owner";
 import { useNow } from "../../lib/use-now";
-import { fetchLiveChain, isOwnerKeyRefused } from "../../lib/owner-api";
+import { fetchLiveChain } from "../../lib/owner-api";
 import type { ChainRow, ExpiryChain, Positioning } from "../../lib/options-schemas";
 import {
   GLOSSARY,
@@ -99,7 +99,10 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
     retry: false,
   });
   const liveUnauthorized = useSignOutOn401(liveQuery.error); // a stale sign-in, as for the delayed chain
-  const liveRefused = isOwnerKeyRefused(liveQuery.error);
+  // Only a 403 says the key is wrong here: a 404 can't be told from a route
+  // the backend doesn't have yet (a deploy in flight). /positions and
+  // /trades handle a server with no owner key.
+  const liveRefused = liveQuery.error instanceof ApiError && liveQuery.error.status === 403;
   const now = useNow(AGE_TICK_MS, liveOn); // the quotes' age keeps counting between reads
   useEffect(() => {
     if (liveRefused) clearOwnerKey();
@@ -170,13 +173,13 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
                 <ChartBlock
                   title="Open interest by strike"
                   info={GLOSSARY.openInterest}
-                  sentence={chain.positioning ? maxPainSentence(chain.positioning, price) : openInterestSentence(chain)}
+                  sentence={openInterestWords(delayed ?? chain, price)}
                   testId="options-oi-block"
                 >
-                  <OpenInterestChart chain={chain} spot={price} />
+                  <OpenInterestChart chain={delayed ?? chain} spot={price} />
                 </ChartBlock>
               </div>
-              {chain.positioning && <PositioningBlock expiry={chain.expiry} p={chain.positioning} price={price} />}
+              <WholePositioning chain={delayed ?? chain} price={price} />
               <ChainTable chain={chain} />
             </>
           )}
@@ -224,6 +227,17 @@ const maybeMoney = (v: number | null) => (v === null ? "—" : money(v));
 
 /** Where the expiry's open interest sits: the largest contracts, gamma and
  * delta exposure by strike, with the dealer assumption stated. */
+// Open interest is the day's figure and live quotes cover only the strikes
+// near the price: open interest, walls, max pain and exposure are drawn from
+// the whole delayed chain when it's there (#130's AI review).
+function openInterestWords(chain: ExpiryChain, price: number | null) {
+  return chain.positioning ? maxPainSentence(chain.positioning, price) : openInterestSentence(chain);
+}
+
+function WholePositioning({ chain, price }: { chain: ExpiryChain; price: number | null }) {
+  return chain.positioning ? <PositioningBlock expiry={chain.expiry} p={chain.positioning} price={price} /> : null;
+}
+
 function PositioningBlock({ expiry, p, price }: { expiry: string; p: Positioning; price: number | null }) {
   if (p.call_open_interest + p.put_open_interest === 0) return null;
   return (

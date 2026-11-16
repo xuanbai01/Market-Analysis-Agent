@@ -127,6 +127,15 @@ async def _expirations(symbol: str) -> Chain:
     if cached is not None and _clock() - cached[0] < CHAIN_SECONDS:
         return cached[1]
     payload = await tt.get(f"/option-chains/{tt.symbol_path(symbol)}/nested", op="option_chain")
+    # Tens of thousands of strikes for SPY or SPX: read on the options thread.
+    chain = await options_chain.on_options_thread(_compact, payload)
+    _remember_chain(symbol, chain)
+    return chain
+
+
+def _compact(payload: Any) -> Chain:
+    """tastytrade's nested chain as plain rows by expiry, standard
+    deliverables only. CPU: run on the options thread."""
     chain: Chain = {}
     for item in items_of(payload, strict=True):
         shares = finite_number(field_of(item, "shares-per-contract"))
@@ -137,7 +146,6 @@ async def _expirations(symbol: str) -> Chain:
             day = field_of(expiration, "expiration-date") if isinstance(expiration, dict) else None
             if isinstance(day, str):
                 chain.setdefault(day, []).extend(_rows(expiration))
-    _remember_chain(symbol, chain)
     return chain
 
 

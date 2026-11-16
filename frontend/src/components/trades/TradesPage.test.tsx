@@ -105,6 +105,27 @@ describe("TradesPage", () => {
     await waitFor(() => expect(client.getQueryData(["owner-trades"])).toBeUndefined());
   });
 
+  it("signs out on a 401 from the download, as the list does", async () => {
+    localStorage.setItem("market-agent.auth-token", "stale");
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
+    vi.mocked(fetchOwnerTradesCsv).mockRejectedValue(new ApiError({ status: 401, title: "Sign in again." }));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Download CSV" }));
+    await waitFor(() => expect(localStorage.getItem("market-agent.auth-token")).toBeNull());
+    expect(getOwnerKey()).toBeNull(); // signing out clears the owner key too
+  });
+
+  it("forgets a key the download is refused with", async () => {
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);
+    vi.mocked(fetchOwnerTradesCsv).mockRejectedValue(new ApiError({ status: 403, title: "This needs the owner key." }));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Download CSV" }));
+    expect(await screen.findByTestId("owner-unlock")).toBeInTheDocument();
+    expect(getOwnerKey()).toBeNull();
+  });
+
   it("downloads the CSV with the owner key", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchOwnerTrades).mockResolvedValue(TRADES);

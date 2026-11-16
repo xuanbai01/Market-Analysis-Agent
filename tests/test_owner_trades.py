@@ -438,3 +438,25 @@ async def test_accounts_past_the_cap_are_logged(world: _World, monkeypatch: pyte
 async def _none() -> list[dict[str, Any]]:
     return []
 
+
+async def test_a_sync_cut_short_is_not_reported_as_done(world: _World, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A visit closed mid-sync cancels it after some rows are written: the
+    next visit inside the minute is told the update was cut short (#129's
+    eighth AI review)."""
+    import asyncio
+
+    world.history = [_txn(1, "2026-10-01")]
+
+    async def hang(session: Any, rows: list[dict[str, Any]]) -> int:
+        await asyncio.sleep(10)
+        return 0
+
+    monkeypatch.setattr(ot.store, "insert", hang)
+    task = asyncio.ensure_future(_sync(world))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    with pytest.raises(ot.SyncFailed, match="cut short"):
+        await _sync(world)
+

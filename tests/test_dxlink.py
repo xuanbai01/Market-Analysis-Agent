@@ -449,3 +449,16 @@ async def test_a_history_the_server_cut_short_is_not_complete(server: FakeServer
     assert [c.close for c in history.candles] == [602.0, 603.0]
     assert history.complete is False
     assert history.snipped is True
+
+
+async def test_a_candle_log_names_no_symbol(server: FakeServer, caplog: pytest.LogCaptureFixture) -> None:
+    # The owner's IV history asks for candles of the tickers they look at
+    # (#138's security review): the log keeps a count, as the client's does.
+    server.on_subscribe = [["Candle", candle_row("ZQXW{=1d}", "2026-11-13", 60.0, flags=dxlink.SNAPSHOT_END)]]
+    with caplog.at_level(logging.DEBUG, logger="app"):
+        await dxlink.fetch_candles("ZQXW", "1d", datetime(2026, 11, 1, tzinfo=UTC))
+    records = [r for r in caplog.records if r.name.startswith("app")]
+    assert any(getattr(r, "service_id", "") == "dxlink.candles" for r in records)
+    for record in records:
+        text = record.getMessage() + str(getattr(record, "input_summary", "")) + str(getattr(record, "output_summary", ""))
+        assert "ZQXW" not in text

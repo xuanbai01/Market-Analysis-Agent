@@ -322,4 +322,9 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **The totals hold only what the positions show.** Each position keeps its closed parts, and only positions with a computed P&L add to the months, underlyings, realized total and fees. A part sold before a split used to stay in the months while its position showed none.
     - **A cash-settled exercise with no cash on its fill isn't guessed.** The settlement was booked apart, so its P&L isn't computed, with a note. One whose fill carries the cash counts.
     - **A roll that closes two positions links both** to the one it opened.
+  - **From #131's fourth AI review:**
+    - **Shares delivered with no buy or sell open by their cash** (paying for them is buying). They used to be dropped, and the ticker's later P&L was flagged as not computed. Only a split or symbol change flags a contract now.
+    - **Positions are keyed by account and order**, so one order number in two accounts makes two positions.
+    - **Futures and anything else that isn't equity or an equity option** are listed as not modelled, not read as stock.
+    - **Not changed:** realized P&L sums tastytrade's net values, which include fees (210 − 1.10 = 208.90). The owner checks a few against tastytrade's own figures.
 

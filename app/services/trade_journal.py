@@ -48,6 +48,8 @@ ENDINGS = {
     "Cash Settled Exercise": "exercised",
 }
 DELIVERIES = {"assigned": "assignment", "exercised": "exercise"}
+# What the journal reads; anything else (futures, crypto) is listed, not modelled.
+MODELLED = {"equity", "equity option"}
 EPS = 1e-9
 CENTS = 2
 
@@ -107,7 +109,9 @@ class _Journal:
         self.positions: dict[str, _Position] = {}
         self.lots: dict[Key, list[_Lot]] = defaultdict(list)
         self.flagged: dict[Key, str] = {}  # contract -> the action not modelled
-        self.closed_by_order: dict[int, list[str]] = defaultdict(list)
+        # By (account, order id): the positions an order closed, and the one it opened.
+        self.closed_by_order: dict[tuple[int, int], list[str]] = defaultdict(list)
+        self.opened_by_order: dict[tuple[int, int], str] = {}
         # Options closed by an assignment or exercise: (date, underlying, ending, position).
         self.delivered: list[tuple[str, str, str, str]] = []
         self.unmatched: list[UnmatchedRow] = []
@@ -121,15 +125,25 @@ class _Journal:
         action = (trade.action or "").lower()
         direction = 1 if "buy" in action else -1 if "sell" in action else 0
         key = (trade.account, trade.symbol)
-        if direction == 0 and (trade.sub_type or "") in ENDINGS and self.lots[key]:
+        instrument = (trade.instrument_type or "equity").lower()
+        if instrument not in MODELLED:
+            self._unmatched(trade, f"not modelled: {trade.instrument_type}")
+            return
+        ending = (trade.sub_type or "") in ENDINGS
+        cash = trade.net_value if trade.net_value is not None else trade.value
+        if direction == 0 and ending and self.lots[key]:
             # An expiry, assignment or exercise sent without a buy or sell
             # only removes what's open.
             direction = -self.lots[key][0].sign
             action = "to close"
+        elif direction == 0 and ending and cash:
+            # Shares delivered with no action: paying for them is buying.
+            direction = 1 if cash < 0 else -1
         if direction == 0:
             what = trade.sub_type or trade.type or "an action with no buy or sell"
             self._unmatched(trade, f"not modelled: {what}")
-            self.flagged[key] = what
+            if not ending:  # a split or symbol change: the contract's later P&L can't be told
+                self.flagged[key] = what
             return
         contract = _contract(trade)
         if contract is None:
@@ -185,8 +199,9 @@ class _Journal:
             position.closed_at = when
             if trade.id not in position.transactions:
                 position.transactions.append(trade.id)
-            if trade.order_id is not None and position.id not in self.closed_by_order[trade.order_id]:
-                self.closed_by_order[trade.order_id].append(position.id)
+            order = (trade.account, trade.order_id) if trade.order_id is not None else None
+            if order is not None and position.id not in self.closed_by_order[order]:
+                self.closed_by_order[order].append(position.id)
             if ending in DELIVERIES and kind != "stock":
                 self.delivered.append((trade.date or "", position.underlying, ending, position.id))
             lot.remaining -= size
@@ -202,7 +217,11 @@ class _Journal:
         kind, expiry, strike = contract
         ending = ENDINGS.get(trade.sub_type or "")
         if trade.order_id is not None:
-            pid = f"order-{trade.order_id}"
+            pid = self.opened_by_order.get((trade.account, trade.order_id), f"order-{trade.order_id}")
+            taken = self.positions.get(pid)
+            if taken is not None and taken.account != trade.account:  # the same number in another account
+                pid = f"order-{trade.order_id}-account-{trade.account}"
+            self.opened_by_order[(trade.account, trade.order_id)] = pid
         else:  # delivered by an assignment or exercise, or another fill without an order
             pid = f"{(trade.sub_type or trade.type or 'fill').lower().replace(' ', '-')}-{trade.date}-{trade.underlying}"
         position = self.positions.get(pid)
@@ -228,7 +247,8 @@ class _Journal:
         underlying rolled it: position id -> (rolled from, rolled to)."""
         links: dict[str, tuple[str | None, str | None]] = {}
         for order, closed in self.closed_by_order.items():
-            opened = self.positions.get(f"order-{order}")
+            pid_opened = self.opened_by_order.get(order)
+            opened = self.positions.get(pid_opened) if pid_opened else None
             if opened is None:
                 continue
             rolled = [pid for pid in closed if pid != opened.id and self.positions[pid].underlying == opened.underlying]

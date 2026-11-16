@@ -133,7 +133,7 @@ async def test_the_first_sync_copies_every_transaction_sealed(world: _World) -> 
     world.history = [_txn(1, "2026-10-01"), _txn(2, "2026-11-13")]
     result = await _sync(world)
     assert (result.new, result.replaced) == (2, 0)
-    assert "start-date" not in world.calls[0]
+    assert world.calls[0]["start-date"] == ot.FULL_READ_FROM.isoformat()  # asked from the start, whatever the default
     for tid, row in world.rows.items():
         assert set(row) == {"id", "key_version", "nonce", "ciphertext", "estimated_fee"}
         assert b"NVDA" not in row["ciphertext"] and ACCOUNT.encode() not in row["ciphertext"]
@@ -304,14 +304,14 @@ async def test_a_full_read_once_a_day_catches_what_was_posted_late(world: _World
     (#129's second AI review)."""
     world.history = [_txn(1, "2026-10-01"), _txn(2, "2026-11-13")]
     await _sync(world)
-    assert "start-date" not in world.calls[-1]  # the first read in a process is whole
+    assert world.calls[-1]["start-date"] == ot.FULL_READ_FROM.isoformat()  # the first read in a process is whole
     world.history.append(_txn(3, "2026-11-02"))  # dated before the week read back
     world.later()
     assert (await _sync(world)).new == 0
     assert world.calls[-1]["start-date"] == date(2026, 11, 6).isoformat()
     world.later(ot.FULL_READ_EVERY_SECONDS)
     assert (await _sync(world)).new == 1
-    assert "start-date" not in world.calls[-1]
+    assert world.calls[-1]["start-date"] == ot.FULL_READ_FROM.isoformat()
 
 
 async def test_an_id_sent_as_digits_is_still_an_id(world: _World) -> None:
@@ -401,4 +401,40 @@ async def test_finding_the_newest_date_holds_no_connection(world: _World, monkey
     world.later()
     await _sync(world)  # incremental: reads the newest date from the copy
     assert held == [False, False]
+
+
+async def test_listing_holds_no_connection_while_decrypting(world: _World, monkeypatch: pytest.MonkeyPatch) -> None:
+    world.history = [_txn(1, "2026-10-01")]
+    await _sync(world)
+    held: list[bool] = []
+    unseal = vault.unseal
+
+    def recording(*args: Any, **kwargs: Any) -> Any:
+        held.append(world.session.in_tx)
+        return unseal(*args, **kwargs)
+
+    monkeypatch.setattr(vault, "unseal", recording)
+    await ot.list_trades(world.session)  # type: ignore[arg-type]
+    assert held == [False]
+
+
+async def test_an_estimated_fee_flag_sent_as_text_is_read(world: _World) -> None:
+    world.history = [_txn(1, "2026-11-13", **{"is-estimated-fee": "true"})]
+    await _sync(world)
+    assert world.rows[1]["estimated_fee"] is True
+
+
+async def test_accounts_past_the_cap_are_logged(world: _World, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    async def many() -> list[str]:
+        return [f"5WZ9QX{i:02d}" for i in range(owner_positions.MAX_ACCOUNTS + 2)]
+
+    monkeypatch.setattr(owner_positions, "account_numbers", many)
+    monkeypatch.setattr(ot, "_transactions", lambda number, start: _none())
+    with caplog.at_level("WARNING"):
+        await _sync(world)
+    assert "2 accounts past" in caplog.text and "5WZ9QX" not in caplog.text
+
+
+async def _none() -> list[dict[str, Any]]:
+    return []
 

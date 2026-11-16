@@ -147,3 +147,50 @@ def test_the_assumption_is_stated_for_gamma_and_delta_is_the_options_own() -> No
     p = op.positioning(chain({100.0: 10}, {}), smile(), spot=100.0)
     assert "dealer" in p.assumption.lower()
     assert "delta exposure is the open options' own delta" in p.assumption.lower()
+
+
+# ── across expiries (the owner's whole chain, live) ──────────────────────
+
+
+def _other(calls: dict[float, int], puts: dict[float, int]) -> tuple[ExpiryQuotes, Smile]:
+    later = date(2027, 1, 15)
+    c = ExpiryQuotes(expiry=later, calls=tuple(q(k, oi) for k, oi in sorted(calls.items())),
+                     puts=tuple(q(k, oi) for k, oi in sorted(puts.items())))
+    s = Smile(expiry=later, years=0.33, forward=100.5, forward_from_parity=True, discount=1.0, atm_vol=0.25,
+              points=((90.0, 0.25), (100.0, 0.25), (110.0, 0.25)), quotes=())
+    return c, s
+
+
+def test_across_expiries_adds_each_expiry_s_figures() -> None:
+    first = (chain({100.0: 300, 105.0: 900}, {95.0: 800}), smile())
+    second = _other({105.0: 100, 110.0: 400}, {95.0: 200, 90.0: 50})
+    whole = op.across([first, second], spot=100.0)
+    parts = [op.positioning(c, s, spot=100.0) for c, s in (first, second)]
+    assert whole.call_open_interest == 300 + 900 + 100 + 400
+    assert whole.put_open_interest == 800 + 200 + 50
+    assert whole.net_gex == pytest.approx(sum(p.net_gex for p in parts), rel=1e-9)
+    assert whole.call_gex == pytest.approx(sum(p.call_gex for p in parts), rel=1e-9)
+    assert whole.net_dex == pytest.approx(sum(p.net_dex for p in parts), rel=1e-9)
+    by_strike = {r.strike: r.gex for r in whole.exposure}
+    assert by_strike[105.0] == pytest.approx(
+        sum({r.strike: r.gex for r in p.exposure}.get(105.0, 0) for p in parts), abs=1)
+    assert [(t.strike, t.side, t.open_interest) for t in whole.top[:2]] == [(95.0, "put", 1000), (105.0, "call", 1000)]  # a tie goes by strike
+    assert whole.call_wall == 105.0 and whole.put_wall == 95.0
+    assert whole.max_pain is None  # a settle price is one expiry's idea, not the chain's
+
+
+def test_across_expiries_finds_the_flip_of_the_chain_s_net_gamma() -> None:
+    whole = op.across([(chain({105.0: 1000}, {95.0: 1000}), smile(strikes=(80.0, 100.0, 120.0)))], spot=100.0)
+    alone = op.positioning(chain({105.0: 1000}, {95.0: 1000}), smile(strikes=(80.0, 100.0, 120.0)), spot=100.0)
+    assert whole.gamma_flip == pytest.approx(alone.gamma_flip)
+
+
+def test_across_expiries_limits_the_rows_to_the_strikes_shown() -> None:
+    whole = op.across([(chain({100.0: 1, 105.0: 1, 120.0: 1}, {80.0: 1}), smile())], spot=100.0, shown=[100.0, 105.0])
+    assert [r.strike for r in whole.exposure] == [100.0, 105.0]
+
+
+def test_across_no_expiries_is_empty() -> None:
+    whole = op.across([], spot=100.0)
+    assert (whole.call_open_interest, whole.put_open_interest, whole.net_gex) == (0, 0, 0)
+    assert whole.call_wall is None and whole.gamma_flip is None and whole.put_call is None

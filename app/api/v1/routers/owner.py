@@ -10,12 +10,20 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_session, require_owner
-from app.schemas.owner import IvHistory, LiveChain, OwnerPositions, OwnerStatus, OwnerTrades
+from app.schemas.owner import (
+    IvHistory,
+    LiveChain,
+    OwnerPositions,
+    OwnerStatus,
+    OwnerTrades,
+    WholeChain,
+)
 from app.services import owner_vault, tastytrade_client
 from app.services.owner_iv_history import IvHistoryUnavailable, NoHistory, iv_history
 from app.services.owner_live_chain import LiveChainUnavailable, NotListed, live_chain
 from app.services.owner_positions import PositionsUnavailable, get_positions
 from app.services.owner_trades import SyncFailed, csv_text, list_trades, sync
+from app.services.owner_whole_chain import NoOptions, WholeChainUnavailable, whole_chain
 from app.services.trade_journal import journal_of
 
 OWNER_PREFIX = "/owner"
@@ -103,4 +111,18 @@ async def owner_iv_history(symbol: Symbol) -> IvHistory:
     except NoHistory as exc:
         raise HTTPException(status_code=422, detail=f"tastytrade has no IV history for {symbol.upper()}.") from exc
     except IvHistoryUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/options/{symbol}/chain", response_model=WholeChain)
+async def owner_whole_chain(symbol: Symbol) -> WholeChain:
+    """Every expiry out to four months at tastytrade's live quotes, each
+    read through our own smile code, and the positioning added up across
+    them, at most a minute old; 422 when tastytrade lists no options (not
+    404, which the page reads as "no owner key")."""
+    try:
+        return await whole_chain(symbol)
+    except NoOptions as exc:
+        raise HTTPException(status_code=422, detail=f"tastytrade lists no options on {symbol.upper()} to read.") from exc
+    except WholeChainUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

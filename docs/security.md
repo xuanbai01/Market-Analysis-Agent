@@ -35,6 +35,17 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
     - **The symbol:** the service checks tastytrade's form of the ticker itself, not only the route, so no list or dxFeed attribute syntax reaches the query.
     - **Logs:** the candle fetch is logged as a count, not the symbol, as the client's queries are. A deadline hit is logged without the symbol.
     - **Status codes:** a symbol tastytrade has nothing for is a 422, not a 404.
+  - **The whole chain** (`owner_whole_chain`, `/v1/owner/options/{symbol}/chain`):
+    - **Memory only:** tastytrade's quotes and open interest over DXLink become summaries and positioning; only the result is kept, a minute, for at most 4 symbols. Never stored.
+    - **Bounds:**
+      - at most 6,000 contracts a read, nearest expiries first, and one whole-chain build at a time;
+      - two DXLink sessions, one at a time on the machine, each capped at 20 s, and stopped once no new contract has answered for 3 s or after three events a contract (a session's updates never go quiet);
+      - a 60 s deadline.
+      - Choosing the contracts runs on the options thread.
+    - **The symbol:** checked by the route and again by the service.
+    - **The contracts:** each one's DXLink name is worked out from its checked OCC symbol, so nothing unchecked from tastytrade's answer reaches a subscription. The worked-out names matched tastytrade's own for 52,552 contracts.
+    - **Ranges:** open interest beyond 10 million is no figure, and a quote time that isn't one is ignored.
+    - **Logs:** counts only. The ticker in a chain or earnings path is masked in the client's log, as an account number is.
   - **The dev-only fake backend** (`scripts/fake_owner_api.py`) runs with a throwaway shared secret and owner key, no LLM, news, FRED or tastytrade keys, and a database address nothing listens on, whatever `.env` says. It refuses to start on Fly. The Dockerfile doesn't copy `scripts/`.
   - [`tests/test_owner_auth.py`](../tests/test_owner_auth.py) pins the owner's routes.
 - **One deliberate exception: the read-only demo.** `GET /v1/demo`, `/v1/demo/research/{symbol}` and `/v1/demo/market/{symbol}/prices` answer without the secret ([`app/services/demo.py`](../app/services/demo.py)). They return only what is already stored (the latest report and the stored prices) for the tickers in `DEMO_SYMBOLS`; they never generate a report, call the LLM or reach a data provider, so a visitor cannot spend money or quota. A ticker off the list is a 404 whether or not anything is stored for it. They are built to be hammered: responses are cached for five minutes as serialized bytes (no per-request validation or serialization of a large report), the cache can only hold keys for listed tickers and the three allowed ranges, responses carry `Cache-Control: public, max-age=300`, and one IP is limited to `DEMO_RATE_LIMIT_PER_MINUTE` requests (120 by default). `DEMO_SYMBOLS` empty turns all three off. `tests/test_route_auth.py` pins the set to exactly these three GET routes; `tests/test_demo.py` fails if any path from them reaches the orchestrator or the price ingest. The reports hold public market data and AI prose about it, nothing about the owner.

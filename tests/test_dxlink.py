@@ -462,3 +462,36 @@ async def test_a_candle_log_names_no_symbol(server: FakeServer, caplog: pytest.L
     for record in records:
         text = record.getMessage() + str(getattr(record, "input_summary", "")) + str(getattr(record, "output_summary", ""))
         assert "ZQXW" not in text
+
+
+async def test_a_long_subscription_goes_in_chunks(server: FakeServer, monkeypatch: pytest.MonkeyPatch) -> None:
+    # One FEED_SUBSCRIPTION of 4,816 symbols (SPY's chain within 15%) was
+    # refused as INVALID_MESSAGE on Fly; 500 at a time read them all in 3.5 s.
+    monkeypatch.setattr(dxlink, "FETCH_TIMEOUT_SECONDS", 0.3)  # no events come: don't wait 20 s
+    symbols = [f".SPY261218C{600 + i}" for i in range(1200)]
+    server.on_subscribe = []
+    await dxlink.fetch_once("Summary", symbols)
+    subs = [m for m in server.sent if m["type"] == "FEED_SUBSCRIPTION"]
+    assert [len(m["add"]) for m in subs] == [dxlink.SUBSCRIBE_CHUNK, dxlink.SUBSCRIBE_CHUNK, 200]
+    assert subs[0].get("reset") is True and all("reset" not in m for m in subs[1:])
+    assert sorted(s["symbol"] for m in subs for s in m["add"]) == sorted(symbols)
+
+
+async def test_a_one_shot_read_stops_once_the_rest_arent_coming(server: FakeServer) -> None:
+    # In a session found contracts keep updating, so the feed never goes
+    # quiet: the read stops after a few events a symbol (#140's review).
+    fields = list(dxlink.SUMMARY_FIELDS)
+
+    def summary(symbol: str) -> list[Any]:
+        row = {"eventType": "Summary", "eventSymbol": symbol, "openInterest": 5, "dayOpenPrice": 1.0,
+               "dayHighPrice": 1.2, "dayLowPrice": 0.9, "prevDayClosePrice": 1.1}
+        return [row[name] for name in fields]
+
+    updates: list[Any] = []
+    for _ in range(dxlink.ONCE_EVENTS_SPARE + 50):
+        updates += summary(".SPY261218C600")
+    server.on_subscribe = [["Summary", updates]]
+    started = asyncio.get_running_loop().time()
+    events = await dxlink.fetch_once("Summary", [".SPY261218C600", ".SPY261218P600"])
+    assert set(events) == {".SPY261218C600"}
+    assert asyncio.get_running_loop().time() - started < dxlink.IDLE_SECONDS  # not the 20 s deadline

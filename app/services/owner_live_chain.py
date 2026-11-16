@@ -75,6 +75,9 @@ def _now() -> datetime:
 # tastytrade's dicts. SPY's or SPX's lists every expiry's strikes, and ten
 # are kept on a 512 MB machine.
 Chain = dict[str, list[tuple[float, str, str]]]
+# Open interest beyond this is no figure: a unit change or a garbage value
+# would otherwise overflow the positioning sums (#140's security review).
+MAX_OPEN_INTEREST = 10_000_000
 _chains: OrderedDict[str, tuple[float, Chain]] = OrderedDict()
 _live: dict[tuple[str, date], tuple[float, LiveChain]] = {}
 # One build at a time per symbol and expiry; others don't wait on it. A
@@ -177,7 +180,8 @@ def _compact(payload: Any) -> Chain:
     return chain
 
 
-def _strikes(chain: Chain, expiry: date, root: str) -> list[tuple[float, str, str]]:
+def _strikes(chain: Chain, expiry: date, root: str, low: float = 0.0,
+             high: float = float("inf")) -> list[tuple[float, str, str]]:
     """(strike, call symbol, put symbol) for ``expiry``, one per strike; a
     symbol that isn't an OCC one for that expiry is dropped, so nothing else
     reaches a query. Where two roots list a strike (an adjusted root that
@@ -185,6 +189,8 @@ def _strikes(chain: Chain, expiry: date, root: str) -> list[tuple[float, str, st
     ``root`` itself, else one without a digit; so no strike counts twice."""
     by_strike: dict[float, tuple[int, str, str]] = {}
     for k, call, put in chain.get(expiry.isoformat(), []):
+        if not low <= k <= high:  # before parsing: a chain has thousands
+            continue
         try:
             parsed = [parse_occ(s) for s in (call, put)]
         except ValueError:
@@ -211,7 +217,10 @@ async def _quotes(kind: str, symbols: list[str]) -> dict[str, dict[str, Any]]:
 
 def _quote(strike: float, item: dict[str, Any] | None) -> Quote:
     item = item or {}
-    count = lambda name: int(max(finite_number(field_of(item, name)) or 0, 0))  # noqa: E731
+    def count(name: str) -> int:  # beyond any real contract's, no figure
+        value = finite_number(field_of(item, name))
+        return int(value) if value is not None and 0 <= value <= MAX_OPEN_INTEREST else 0
+
     return Quote(
         strike=strike,
         bid=max(finite_number(field_of(item, "bid")) or 0.0, 0.0),
@@ -303,3 +312,40 @@ async def live_chain(symbol: str, expiry: date) -> LiveChain:
         if _users[key] == 0:  # no lock left behind per expiry ever asked
             del _users[key]
             _locks.pop(key, None)
+
+
+# ── For the whole chain (owner_whole_chain) ────────────────────────────
+
+
+async def expirations(symbol: str) -> Chain:
+    """The standard chain as plain rows by expiry, kept CHAIN_SECONDS."""
+    return await _expirations(symbol)
+
+
+def standard_strikes(chain: Chain, expiry: date, root: str, low: float = 0.0,
+                     high: float = float("inf")) -> list[tuple[float, str, str]]:
+    """(strike, call, put) for ``expiry`` with strikes in [low, high], one per
+    strike, OCC-checked. CPU (it parses each symbol): run on the options thread."""
+    return _strikes(chain, expiry, root, low, high)
+
+
+def dxlink_name(occ: str) -> str:
+    """A contract's DXLink name, worked out from its checked OCC symbol:
+    "." + root + YYMMDD + C/P + strike without trailing zeros. It matched
+    tastytrade's own name for all 52,552 SPY, SPX, NVDA, BRK/B and AAPL
+    contracts (Fly, 2026-11-16, counts only), and nothing unchecked from
+    tastytrade's answer reaches a subscription."""
+    p = parse_occ(occ)
+    strike = f"{p.strike:.3f}".rstrip("0").rstrip(".")
+    return f".{p.root}{p.expiry:%y%m%d}{'C' if p.kind == 'call' else 'P'}{strike}"
+
+
+async def underlying_price(symbol: str) -> float:
+    """tastytrade's own price for the stock; ``LiveChainUnavailable`` without one."""
+    underlying = _tastytrade_symbol(symbol)
+    equity = (await _quotes("equity", [underlying])).get(underlying, {})
+    spot = finite_number(field_of(equity, "mark")) or finite_number(field_of(equity, "mid"))
+    if spot is None or spot <= 0:
+        raise LiveChainUnavailable("tastytrade sent no price for the underlying")
+    return spot
+

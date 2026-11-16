@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.schemas.options import ExpiryChain
+from app.schemas.options import ExpiryChain, ExpirySummary, Positioning
 
 
 class OwnerStatus(BaseModel):
@@ -275,4 +275,26 @@ class IvHistory(BaseModel):
     year: IvYear
     iv_since: date | None = None  # the first session with an IV
     complete: bool = True  # tastytrade sent the whole history asked for
+    source: Literal["tastytrade"] = "tastytrade"
+
+
+class WholeChain(BaseModel):
+    """Every expiry out to ``max_days``, live from tastytrade (options PR 5):
+    each read through our own smile code as Yahoo's chain is, and the
+    positioning added up across them for strikes within ``strike_range`` of
+    the price. The owner's alone: never stored, never in a prompt or the demo."""
+
+    symbol: str
+    spot: float
+    quoted_at: datetime
+    as_of: datetime
+    updated_at: datetime | None = None  # the newest quote's time
+    expiries: list[ExpirySummary]
+    positioning: Positioning  # across the expiries; no max pain, which is one expiry's
+    max_days: int
+    strike_range: float
+    options_read: int  # contracts asked for
+    options_quoted: int  # contracts that sent a quote and open interest
+    left_out: list[date] = Field(default_factory=list)  # listed, but no usable quotes
+    capped: bool = False  # more contracts than one read takes: the farthest expiries left out
     source: Literal["tastytrade"] = "tastytrade"

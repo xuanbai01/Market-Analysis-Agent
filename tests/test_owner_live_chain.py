@@ -427,3 +427,20 @@ def test_few_chains_are_kept() -> None:
     """An SPX-sized chain keeps about 5.7 MB (measured with tracemalloc): four at most."""
     assert lc.MAX_CHAINS == 4
 
+
+
+
+@pytest.mark.parametrize(
+    ("occ", "name"),
+    [("SPY   261218C00600000", ".SPY261218C600"), ("SPY   261218P00622500", ".SPY261218P622.5"),
+     ("SPXW  261218C06000000", ".SPXW261218C6000"), ("BRKB  261218C00450000", ".BRKB261218C450"),
+     ("SPY   261218C00000500", ".SPY261218C0.5"), ("NVDA  261218P00187125", ".NVDA261218P187.125")],
+)
+def test_a_contract_s_dxlink_name_comes_from_its_occ_symbol(occ: str, name: str) -> None:
+    # Matched tastytrade's own names for 52,552 contracts (Fly, counts only).
+    assert lc.dxlink_name(occ) == name
+
+
+def test_open_interest_beyond_any_real_contract_s_is_no_figure() -> None:
+    assert lc._quote(100.0, {"open-interest": 1e308}).open_interest == 0
+    assert lc._quote(100.0, {"open-interest": "1200"}).open_interest == 1200

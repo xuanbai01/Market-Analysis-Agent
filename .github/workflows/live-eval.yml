@@ -4,7 +4,12 @@ name: Live Eval
 # fresh report per golden case (tests/evals/golden.py), every number in
 # the prose checked against the report's claims. Suite "options" runs
 # the options page's cited read instead (tests/evals/test_options_read.py,
-# three tickers); "all" runs both.
+# three tickers); "all" runs both. Suite "review" measures the AI PR
+# review instead (scripts/ai_review_eval.py): past PRs replayed at their
+# first reviewed commit, reviewed by main's script and this ref's, the
+# findings and tokens uploaded as an artifact to grade by hand:
+#
+#   gh workflow run live-eval.yml --ref <branch> -f suite=review -f prs="128 129 130 131"
 #
 # It costs money (about a cent per report on DeepSeek) and calls the
 # live data providers, so it never runs on a push. Start it by hand
@@ -43,7 +48,12 @@ on:
           - research
           - options
           - all
+          - review
         default: research
+      prs:
+        description: PR numbers to replay (suite "review" only)
+        type: string
+        default: "128 129 130 131"
 
 permissions:
   contents: read
@@ -56,6 +66,7 @@ concurrency:
 jobs:
   golden:
     name: Golden eval (${{ inputs.provider }})
+    if: inputs.suite != 'review'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -139,3 +150,35 @@ jobs:
             grep -E "factuality=|PASSED|FAILED|SKIPPED|passed|failed" eval.log || echo "no results in the log"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  review:
+    name: AI review eval
+    if: inputs.suite == 'review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Replay past PRs through both reviews
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          # Through the environment, not interpolated into the script.
+          PRS: ${{ inputs.prs }}
+        run: |
+          case "$PRS" in *[!0-9\ ]*) echo "::error::prs takes PR numbers only."; exit 1;; esac
+          # shellcheck disable=SC2086 # one argument per PR number
+          python scripts/ai_review_eval.py $PRS --out review-eval.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: review-eval
+          path: review-eval.json
+          if-no-files-found: warn

@@ -16,6 +16,8 @@ export const ROUTES = {
   options: (ticker: string) => `/options/${ticker.toUpperCase()}`,
   /** The owner's positions, live from tastytrade (ADR 0009); needs the owner key. */
   positions: "/positions",
+  /** The owner's trades from the encrypted copy (ADR 0009); needs the owner key. */
+  trades: "/trades",
   /** Public read-only demo: no sign-in. */
   demo: "/demo",
   demoSymbol: (ticker: string) => `/demo/${ticker.toUpperCase()}`,
@@ -30,6 +32,7 @@ export const ROUTE_PATHS = {
   lens: "/lens/:id",
   options: "/options/:ticker",
   positions: "/positions",
+  trades: "/trades",
   demo: "/demo",
   demoSymbol: "/demo/:ticker",
 } as const;

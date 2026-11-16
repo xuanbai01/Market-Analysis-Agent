@@ -37,6 +37,7 @@ from app.db.models.options import (  # noqa: F401  -- registers on Base.metadata
     OptionOiTotal,
     OptionsTracked,
 )
+from app.db.models.owner import OwnerTransaction  # noqa: F401  -- registers on Base.metadata
 from app.db.models.research_reports import (
     ResearchReportRow,  # noqa: F401  -- registers on Base.metadata
 )

@@ -4,7 +4,14 @@
  * never cached by the browser (``no-store`` both ways).
  */
 import { ApiError, BACKEND_URL, authHeaders, extractErrorTitle, parseJsonAndValidate, parseRetryAfter } from "./api";
-import { type OwnerPositions, OwnerPositionsSchema, type OwnerStatus, OwnerStatusSchema } from "./owner-schemas";
+import {
+  type OwnerPositions,
+  OwnerPositionsSchema,
+  type OwnerStatus,
+  OwnerStatusSchema,
+  type OwnerTrades,
+  OwnerTradesSchema,
+} from "./owner-schemas";
 
 export const OWNER_HEADER = "X-Owner-Key";
 
@@ -33,6 +40,16 @@ export function fetchOwnerStatus(key: string): Promise<OwnerStatus> {
 /** The owner's positions with tastytrade's live quotes, at most 15 s old. */
 export function fetchOwnerPositions(key: string): Promise<OwnerPositions> {
   return ownerGet("/v1/owner/positions", key, (resp) => parseJsonAndValidate(resp, OwnerPositionsSchema));
+}
+
+/** The owner's trades from the encrypted copy, synced from tastytrade first. */
+export function fetchOwnerTrades(key: string): Promise<OwnerTrades> {
+  return ownerGet("/v1/owner/trades", key, (resp) => parseJsonAndValidate(resp, OwnerTradesSchema));
+}
+
+/** The stored copy as a CSV file to keep. */
+export function fetchOwnerTradesCsv(key: string): Promise<Blob> {
+  return ownerGet("/v1/owner/trades.csv", key, (resp) => resp.blob());
 }
 
 /** The server refused the owner key (wrong, or none configured there). */

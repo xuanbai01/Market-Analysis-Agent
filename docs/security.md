@@ -30,6 +30,17 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
 
 ## A02 — Cryptographic Failures
 
+- **The owner's trade copy is encrypted at rest in the app,** not only by Neon (ADR 0009, amended; `app/services/owner_vault.py`).
+  - **The cipher:** each transaction is sealed with AES-256-GCM under `OWNER_VAULT_KEY` (a Fly secret, 32 random bytes), with a fresh 12-byte nonce (a CHECK constraint holds its length).
+  - **What the associated data binds:** the transaction id, the key version and the estimated-fee flag, so a ciphertext copied onto another row, or a flag changed in the table, doesn't open. A row under another key version is refused before decrypting.
+  - **In the clear:** only the id, the key version and the flag. The ciphertext's length shows roughly how long each record is.
+  - **Account numbers:** each stored payload keeps the account's 1-based number, never the account number, and free text has any account number replaced by "account N" before sealing. Labels follow the account's place in tastytrade's list, so they would shift if that order changed. That's moot with the owner's one account.
+  - **Writes:** inserts go 1,000 rows a statement, under Postgres's parameter limit.
+  - **Syncs:** one runs at a time, at most once a minute (a failed one counts too, and a visit inside that minute is told it failed), and gives up after 120 s, rolling back. Decryption runs off the event loop.
+  - **Without the key:** nothing is stored, and the routes answer 503.
+  - **Who can read it:** Neon and its backups hold ciphertext only. Someone who got into Fly would have the key, but they'd already have the tastytrade grant there.
+  - **The CSV download** prefixes text a spreadsheet would run as a formula with `'` (OWASP CSV injection), including one behind leading spaces or a newline.
+- **No secret in a settings error:** settings are validated with `hide_input_in_errors`, so a bad key's start-up error can't quote the settings' values (a slice of the tastytrade refresh token, say) into the log.
 - When auth lands: JWTs signed with HS256 (or stronger); secret lives in `DATABASE_URL`-style env vars only.
 - Passwords (if we go that route): hash with bcrypt or argon2. Never log or store plaintext.
 - TLS everywhere in staging and prod. Local dev over http is fine.

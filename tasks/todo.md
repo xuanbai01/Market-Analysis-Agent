@@ -106,7 +106,7 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 - [ ] **PR 1 — the owner key** *(branch `feature/owner-key`)*: `require_owner` (`X-Owner-Key` on top of the shared secret, 404 unset, per-IP lockout), `GET /v1/owner/status`, CORS, the sign-in form's hidden username for password managers, deployment §10. **Owner:** make and import `OWNER_KEY`, save it in the password manager.
 - [ ] **PR 2 — `GET /v1/owner/positions`** *(branch `feature/owner-positions`)*: accounts and positions from tastytrade, OCC symbols parsed, live REST quotes (mark, IV, Greeks), grouped by underlying, 15 s in memory, never stored, accounts numbered 1, 2, ... and never named.
 - [ ] **PR 3 — the `/positions` page** *(branch `feature/positions-page`)*: the owner unlock form and key storage, then per underlying: legs, Greeks totals, payoff at expiry and today (Black-76 in TS, held to Python), what-ifs, the risk-neutral probability of profit, how often history moved that far, earnings in the holding period, max pain and walls.
-- [ ] **PR 4 — the encrypted trade copy and `/trades`:** `cryptography`, `OWNER_VAULT_KEY`, AES-256-GCM per row with the transaction id as associated data, migration 0006, sync on visit, CSV download.
+- [ ] **PR 4 — the encrypted trade copy and `/trades`** *(branch `feature/owner-trades`)*: `cryptography`, `OWNER_VAULT_KEY`, AES-256-GCM per row with the transaction id as associated data, migration 0006, sync on visit, CSV download.
 
 ## Plan — tastytrade, live and personal (2026-11-15, ADR 0009)
 

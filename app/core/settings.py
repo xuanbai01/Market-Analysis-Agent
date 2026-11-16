@@ -1,9 +1,12 @@
+import base64
+import binascii
 from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 OWNER_KEY_MIN_LENGTH = 32
+VAULT_KEY_BYTES = 32
 
 
 class Settings(BaseSettings):
@@ -106,6 +109,11 @@ class Settings(BaseSettings):
     # before it's locked out, the right key included, until a try refills.
     # There is no off switch: 1 to 100.
     OWNER_KEY_FAILURES_PER_HOUR: int = Field(default=10, ge=1, le=100)
+    # The owner's trade copy's key (owner_vault.py, ADR 0009 amended): 32
+    # random bytes, base64, a Fly secret the owner also keeps in their
+    # password manager. Each stored transaction is sealed under it
+    # (AES-256-GCM). Empty: no copy is kept, and nothing in the clear.
+    OWNER_VAULT_KEY: SecretStr = SecretStr("")
     # CORS allowlist origin for the frontend (Phase 3.0). When empty,
     # CORS middleware is not installed (same-origin only). When set,
     # exactly one origin is allowlisted (e.g.
@@ -158,7 +166,10 @@ class Settings(BaseSettings):
         "https://api.tastyworks.com"
     )
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # A setting that fails to validate stops the app before it starts; without
+    # hide_input_in_errors, pydantic's message would quote the settings'
+    # values (a slice of the tastytrade refresh token included) into the log.
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", hide_input_in_errors=True)
 
     @model_validator(mode="after")
     def _owner_key_is_strong(self) -> "Settings":
@@ -170,6 +181,23 @@ class Settings(BaseSettings):
             raise ValueError(f"OWNER_KEY must be at least {OWNER_KEY_MIN_LENGTH} characters (docs/deployment.md §10)")
         if key and key == self.BACKEND_SHARED_SECRET:
             raise ValueError("OWNER_KEY must differ from the shared secret")
+        return self
+
+    @model_validator(mode="after")
+    def _vault_key_is_a_key(self) -> "Settings":
+        """The trade copy's key is 32 random bytes, base64 (docs/deployment.md
+        §11); anything else would fail on the first trade, so fail at start."""
+        raw = self.OWNER_VAULT_KEY.get_secret_value()
+        if not raw:
+            return self
+        try:
+            key = base64.b64decode(raw, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("OWNER_VAULT_KEY must be base64") from exc
+        if len(key) != VAULT_KEY_BYTES:
+            raise ValueError(f"OWNER_VAULT_KEY must be {VAULT_KEY_BYTES} bytes, base64")
+        if raw in (self.OWNER_KEY.get_secret_value(), self.BACKEND_SHARED_SECRET):
+            raise ValueError("OWNER_VAULT_KEY must differ from the other keys")
         return self
 
 

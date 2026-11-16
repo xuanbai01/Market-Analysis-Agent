@@ -25,7 +25,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
         feedparser==6.0.12 \
         lxml==5.3.0 \
         rapidfuzz==3.14.6 \
-        websockets==16.0
+        websockets==16.0 \
+        cryptography==50.0.2
 
 # Copy the app code + migrations.
 COPY app ./app

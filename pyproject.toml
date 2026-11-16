@@ -31,6 +31,8 @@ dependencies = [
   # DXLink, tastytrade's market-data websocket (app/services/dxlink.py, ADR 0009).
   # uvicorn[standard] already brought it in; pinned here so it stays.
   "websockets==16.0",
+  # The owner's encrypted trade copy (owner_vault.py, AES-256-GCM).
+  "cryptography==50.0.2",
 ]
 
 [tool.uv]

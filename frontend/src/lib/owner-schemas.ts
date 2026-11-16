@@ -7,7 +7,7 @@ import { z } from "zod";
 
 const MaybeNum = z.number().nullable().default(null);
 
-export const OwnerStatusSchema = z.object({ tastytrade: z.boolean() });
+export const OwnerStatusSchema = z.object({ tastytrade: z.boolean(), vault: z.boolean().default(false) });
 export type OwnerStatus = z.infer<typeof OwnerStatusSchema>;
 
 export const LiveQuoteSchema = z.object({
@@ -69,3 +69,34 @@ export const OwnerPositionsSchema = z.object({
   truncated: z.boolean().default(false),
 });
 export type OwnerPositions = z.infer<typeof OwnerPositionsSchema>;
+
+/** One of the owner's transactions from the encrypted copy. Money in is
+ * positive, money out negative; fees are their total. */
+export const OwnerTradeSchema = z.object({
+  id: z.number(),
+  account: z.number(),
+  executed_at: z.string().nullable().default(null),
+  date: z.string().nullable().default(null),
+  type: z.string().nullable().default(null),
+  sub_type: z.string().nullable().default(null),
+  action: z.string().nullable().default(null),
+  symbol: z.string().nullable().default(null),
+  underlying: z.string().nullable().default(null),
+  instrument_type: z.string().nullable().default(null),
+  quantity: MaybeNum,
+  price: MaybeNum,
+  value: MaybeNum,
+  fees: z.number().default(0),
+  net_value: MaybeNum,
+  description: z.string().nullable().default(null),
+});
+export type OwnerTrade = z.infer<typeof OwnerTradeSchema>;
+
+export const OwnerTradesSchema = z.object({
+  trades: z.array(OwnerTradeSchema).default([]),
+  /** False when tastytrade couldn't be reached: the copy as it stood. */
+  synced: z.boolean(),
+  reason: z.string().nullable().default(null),
+});
+export type OwnerTrades = z.infer<typeof OwnerTradesSchema>;
+

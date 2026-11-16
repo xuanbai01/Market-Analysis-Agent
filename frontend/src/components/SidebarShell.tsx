@@ -39,6 +39,7 @@ import {
   IconHome,
   IconLens,
   IconPositions,
+  IconTrades,
   IconSearch,
   IconSignOut,
   IconStar,
@@ -161,6 +162,15 @@ export function SidebarShell(props: SidebarShellProps) {
             label="Positions"
             icon={<IconPositions />}
             active={pathname.startsWith(ROUTES.positions)}
+            collapsed={collapsed}
+          />
+        )}
+        {owner && (
+          <NavItem
+            to={ROUTES.trades}
+            label="Trades"
+            icon={<IconTrades />}
+            active={pathname.startsWith(ROUTES.trades)}
             collapsed={collapsed}
           />
         )}

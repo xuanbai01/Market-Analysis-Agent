@@ -3,12 +3,14 @@ owner key (``require_owner``); ``tests/test_owner_auth.py`` pins the set.
 They're left out of the public OpenAPI schema, and every response under
 ``/v1/owner``, errors included, says ``Cache-Control: no-store``
 (``app.main``)."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import require_owner
-from app.schemas.owner import OwnerPositions, OwnerStatus
-from app.services import tastytrade_client
+from app.api.v1.dependencies import get_session, require_owner
+from app.schemas.owner import OwnerPositions, OwnerStatus, OwnerTrades
+from app.services import owner_vault, tastytrade_client
 from app.services.owner_positions import PositionsUnavailable, get_positions
+from app.services.owner_trades import SyncFailed, csv_text, list_trades, sync
 
 OWNER_PREFIX = "/owner"
 router = APIRouter(prefix=OWNER_PREFIX, dependencies=[Depends(require_owner)], include_in_schema=False)
@@ -17,7 +19,7 @@ router = APIRouter(prefix=OWNER_PREFIX, dependencies=[Depends(require_owner)], i
 @router.get("/status", response_model=OwnerStatus)
 async def owner_status() -> OwnerStatus:
     """Whether the owner's sources are set up; a 200 also says the key is right."""
-    return OwnerStatus(tastytrade=tastytrade_client.is_configured())
+    return OwnerStatus(tastytrade=tastytrade_client.is_configured(), vault=owner_vault.is_configured())
 
 
 @router.get("/positions", response_model=OwnerPositions)
@@ -29,3 +31,37 @@ async def owner_positions() -> OwnerPositions:
         return await get_positions()
     except PositionsUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/trades", response_model=OwnerTrades)
+async def owner_trades(session: AsyncSession = Depends(get_session)) -> OwnerTrades:
+    """The owner's trades from the encrypted copy, synced from tastytrade
+    first (at most once a minute). When tastytrade can't be reached, the copy
+    as it stands, saying why; 503 without the vault key."""
+    synced, reason = True, None
+    try:
+        await sync(session)
+    except owner_vault.VaultUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except SyncFailed as exc:
+        synced, reason = False, str(exc)
+    try:
+        trades = await list_trades(session)
+    except owner_vault.VaultUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return OwnerTrades(trades=trades, synced=synced, reason=reason)
+
+
+@router.get("/trades.csv")
+async def owner_trades_csv(session: AsyncSession = Depends(get_session)) -> Response:
+    """The stored copy as CSV, to keep: text a spreadsheet would run as a
+    formula is prefixed with ' (``owner_trades.csv_cell``)."""
+    try:
+        trades = await list_trades(session)
+    except owner_vault.VaultUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return Response(
+        content=csv_text(trades),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="trades.csv"'},
+    )

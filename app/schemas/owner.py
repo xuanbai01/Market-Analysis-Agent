@@ -14,6 +14,8 @@ class OwnerStatus(BaseModel):
     """What's set up for the owner. The unlock form reads it to check a key."""
 
     tastytrade: bool
+    # The trade copy's key is set (OWNER_VAULT_KEY).
+    vault: bool = False
 
 
 class LiveQuote(BaseModel):
@@ -82,3 +84,33 @@ class OwnerPositions(BaseModel):
     stale: bool = False
     # More accounts or positions than one read takes (owner_positions.MAX_ACCOUNTS, MAX_POSITIONS).
     truncated: bool = False
+
+
+class OwnerTrade(BaseModel):
+    """One of the owner's transactions, from the encrypted copy. Amounts are
+    signed: money in positive, money out negative; fees are their total."""
+
+    id: int
+    account: int
+    executed_at: str | None = None
+    date: str | None = None
+    type: str | None = None
+    sub_type: str | None = None
+    action: str | None = None
+    symbol: str | None = None
+    underlying: str | None = None
+    instrument_type: str | None = None
+    quantity: float | None = None
+    price: float | None = None
+    value: float | None = None
+    fees: float = 0.0
+    net_value: float | None = None
+    description: str | None = None
+
+
+class OwnerTrades(BaseModel):
+    trades: list[OwnerTrade]
+    # False when this visit couldn't reach tastytrade: the copy as it stood.
+    synced: bool
+    reason: str | None = None
+

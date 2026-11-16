@@ -193,10 +193,31 @@ The owner's account routes (`/v1/owner`, ADR 0009) need a second key on top of t
    Remove-Item $env:TEMP\owner.env; Set-Clipboard $key; Remove-Variable key, bytes
    ```
 
+   If Windows clipboard history (Win+V) or clipboard sync is on, clearing the clipboard doesn't remove the earlier entry: open Win+V and delete it, or turn history off first.
 2. **Save it in your password manager** right away, as the password of an entry for the dashboard's address with the username `market-agent-owner`. That's a second entry beside the sign-in password, which the manager saves under `market-agent`: two keys, two entries. Then clear the clipboard with `Set-Clipboard -Value ' '`. The manager syncs it to your other PCs; the dashboard's owner pages ask for it once per browser.
 3. **Rotate it** by running step 1 again and updating the entry. Each browser asks for the new key on its next owner request.
 
 The app refuses to start with an owner key under 32 characters or equal to the shared secret. Ten wrong keys in an hour lock an address out, the right key included; `fly apps restart` clears it.
+
+### 11. The trade copy's key (2 min)
+
+The owner's trades are copied into Neon encrypted (ADR 0009, amended): each row is sealed with AES-256-GCM under `OWNER_VAULT_KEY`, 32 random bytes in base64. Without it `/v1/owner/trades` answers 503 and nothing is stored.
+
+1. **Make the key and import it into Fly** (PowerShell; it's written to a temporary file without a byte-order mark, imported, deleted and put on the clipboard; the import restarts the machines):
+
+   ```powershell
+   $bytes = New-Object byte[] 32; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+   $key = [Convert]::ToBase64String($bytes)
+   Set-Content -NoNewline -Encoding ascii "$env:TEMP\vault.env" "OWNER_VAULT_KEY=$key"
+   cmd /c "fly secrets import < %TEMP%\vault.env"
+   Remove-Item $env:TEMP\vault.env; Set-Clipboard $key; Remove-Variable key, bytes
+   ```
+
+   If Windows clipboard history (Win+V) or clipboard sync is on, clearing the clipboard doesn't remove the earlier entry: open Win+V and delete it, or turn history off first.
+2. **Save it in your password manager** as its own entry (for example `market-agent trade-copy key`), then clear the clipboard with `Set-Clipboard -Value ' '`. You never type it anywhere; it's kept so the copy can be read again if Fly's secrets are ever lost.
+3. **Open `/trades` once** to fill the copy.
+
+The app refuses to start with a key that isn't 32 bytes of base64 or that equals another key. **Losing the key loses only the copy:** tastytrade still has the history. Empty the table (`DELETE FROM owner_transactions`), import a new key, and open `/trades` again.
 
 ## Ongoing operations
 

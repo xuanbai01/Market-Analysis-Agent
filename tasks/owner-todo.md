@@ -6,7 +6,7 @@ These are the steps only you can do. Claude can't do them, because each one invo
 
 The owner pages answer 404 until this is set.
 
-- [ ] **Run the steps on your PC.** In PowerShell, from the repo, run the five lines in [docs/deployment.md §10](../docs/deployment.md) step 1. They make a random key, import it into Fly (which restarts the app), and copy the key to your clipboard.
+- [x] **Run the steps on your PC.** *(done 2026-11-15: `OWNER_KEY` is deployed on Fly and the app restarted healthy with it)* In PowerShell, from the repo, run the five lines in [docs/deployment.md §10](../docs/deployment.md) step 1. They make a random key, import it into Fly (which restarts the app), and copy the key to your clipboard.
 - [ ] **Save the key in your password manager** right away. Make an entry for `https://market-analysis-agent-red.vercel.app` with the username `market-agent-owner` and the clipboard as the password. That's a second entry beside your sign-in password, which is saved under `market-agent`. Then clear the clipboard with `Set-Clipboard -Value ' '`.
 - [ ] **Check that the entry synced** to your other PC's password manager.
 
@@ -18,7 +18,7 @@ The owner pages answer 404 until this is set.
 
 ## 3. Set the trade-copy key (after PR 4 is merged)
 
-- [ ] **Run the PowerShell steps** that PR 4 adds to docs/deployment.md, to set `OWNER_VAULT_KEY`.
+- [ ] **Run the PowerShell steps** in [docs/deployment.md §11](../docs/deployment.md) to set `OWNER_VAULT_KEY`.
 - [ ] **Save that key in your password manager too.** If it's lost, the stored copy can't be read, but tastytrade still has your full history, so the copy can be rebuilt with a new key.
 - [ ] **Open `/trades` once** to fill the copy, then check its count against tastytrade's history.
 

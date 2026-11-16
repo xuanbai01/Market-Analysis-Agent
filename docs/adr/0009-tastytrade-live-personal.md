@@ -112,8 +112,8 @@ The owner asked for two things: a page of their open positions with analysis, an
 2. **Positions, live.** Open positions are read when the owner opens the page and are never stored: kept in memory 15 s, and when tastytrade fails the last copy stands in, marked stale, for at most 15 minutes. Their live marks, IVs and Greeks are tastytrade's data, so decision 1 applies to them. The analysis is computed in code, with no prompt.
    - **No list of holdings is left behind:** the page reads each underlying's option report with `track=false`, so the holdings aren't recorded as option-page views (which the daily run would then snapshot). The candle cache still keeps prices for any ticker read, held or not, as it always has.
    - **The key in the browser:** the owner chose a key each browser keeps until sign out, filled by a password manager. So it sits in `localStorage` beside the shared secret. One XSS, or a look at a shared PC's storage, gets both, which `sessionStorage` would not avoid against XSS anyway. It goes with the sign-in however that ends, a forced sign-out on a 401 included.
-3. **Decision 6 changes for the trades (planned).** The owner's transactions are their own (the terms' "Data" excludes them), so they may be kept.
-   - **Where:** Neon, one row per transaction, encrypted (AES-256-GCM) with a key held as a Fly secret. Only the transaction id and an estimated-fee flag stay outside the ciphertext.
+3. **Decision 6 changes for the trades.** The owner's transactions are their own (the terms' "Data" excludes them), so they may be kept.
+   - **Where:** Neon, one row per transaction, encrypted (AES-256-GCM) with a key held as a Fly secret. Only the transaction id, the key version and an estimated-fee flag stay outside the ciphertext, and all three are bound to it.
    - **Still never stored:** tastytrade's market data.
    - **Still out of every prompt:** the trades themselves.
    - **Claude sessions:** a session checks counts only, never decrypting or printing a trade.

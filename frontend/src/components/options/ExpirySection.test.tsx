@@ -259,6 +259,21 @@ describe("ExpirySection live quotes", () => {
     await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent("Live · tastytrade · quote time unknown · shown to you only"));
   });
 
+  it("stops asking about an expiry tastytrade doesn't list", async () => {
+    // A 422 won't turn into a chain 15 s later (#130's AI review).
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 422, title: "tastytrade lists no NVDA options expiring 2026-12-11." }));
+    renderSection();
+    fireEvent.click(screen.getByTestId("options-live-toggle"));
+    await vi.waitFor(() => expect(screen.getByTestId("options-live-status")).toHaveTextContent(/lists no NVDA options/));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000);
+    });
+    expect(fetchLiveChain).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
   it("keeps the key when tastytrade doesn't list the expiry", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchLiveChain).mockRejectedValue(new ApiError({ status: 422, title: "tastytrade lists no NVDA options expiring 2026-12-11." }));

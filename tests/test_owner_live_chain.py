@@ -309,6 +309,7 @@ async def test_an_expiry_listed_since_the_chain_was_kept_is_found(account: _Tast
     (#130's AI review)."""
     later = date(2026, 12, 24)
     await lc.live_chain("SPY", EXPIRY)  # keeps the chain
+    account.clock[0] += lc.CHAIN_RECHECK_SECONDS  # type: ignore[attr-defined]
     with pytest.raises(lc.NotListed):
         await lc.live_chain("SPY", later)
     assert sum(1 for path, _ in account.calls if path == "/option-chains/SPY/nested") == 2  # read again once
@@ -346,4 +347,21 @@ async def test_a_symbol_tastytrade_lists_no_options_for_is_not_listed(account: _
     monkeypatch.setattr(lc.tt, "get", get)
     with pytest.raises(lc.NotListed):
         await lc.live_chain("SPY", EXPIRY)
+
+
+async def test_an_unlisted_expiry_reads_the_chain_again_at_most_once_a_minute(account: _Tastytrade) -> None:
+    """Live polls every 15 s: an expiry tastytrade doesn't list mustn't
+    re-read the whole chain each time (#130's AI review)."""
+    later = date(2026, 12, 24)
+    await lc.live_chain("SPY", EXPIRY)
+    for _ in range(3):
+        with pytest.raises(lc.NotListed):
+            await lc.live_chain("SPY", later)
+        account.clock[0] += 15  # type: ignore[attr-defined]
+    reads = sum(1 for path, _ in account.calls if path == "/option-chains/SPY/nested")
+    assert reads == 1  # the kept chain answers inside the minute
+    account.clock[0] += lc.CHAIN_RECHECK_SECONDS  # type: ignore[attr-defined]
+    with pytest.raises(lc.NotListed):
+        await lc.live_chain("SPY", later)
+    assert sum(1 for path, _ in account.calls if path == "/option-chains/SPY/nested") == 2  # one fresh look
 

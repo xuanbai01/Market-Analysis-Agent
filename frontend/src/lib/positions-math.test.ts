@@ -196,9 +196,11 @@ describe("what history shows", () => {
   it("counts the windows whose move would have paid", () => {
     const flat = Array.from({ length: 60 }, () => 100);
     const result = historicalShare(group([option("call", 200, 1, 2.5)]), flat, 10, MARKET);
-    expect(result).toEqual({ share: 0, windows: 50 }); // no move: the premium is lost every time
+    expect(result).toEqual({ share: 0, windows: 50, years: 59 / 252 }); // no move: the premium is lost every time
     const doubling = Array.from({ length: 60 }, (_, i) => 100 * 1.02 ** i);
     expect(historicalShare(group([option("call", 200, 1, 2.5)]), doubling, 10, MARKET)?.share).toBe(1);
+    // The span the closes cover, for the sentence: a stock listed lately has less than five years.
+    expect(historicalShare(group([option("call", 200, 1, 2.5)]), flat, 10, MARKET)?.years).toBeCloseTo((flat.length - 1) / 252, 9);
   });
 
   it("says nothing from too few windows", () => {

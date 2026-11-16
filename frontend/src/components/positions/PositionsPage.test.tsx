@@ -208,6 +208,17 @@ describe("PositionsPage", () => {
     expect(tiles).toHaveTextContent("leaves out SPY (no live theta from tastytrade)");
   });
 
+  it("takes a mark of 0 as no price", async () => {
+    // A halted underlying can come back marked 0: the card falls back to the report's price.
+    const zero = { ...POSITIONS.groups[0], quote: { ...POSITIONS.groups[0].quote!, mark: 0 } };
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerPositions).mockResolvedValue({ ...POSITIONS, groups: [zero] });
+    renderPage();
+    const [nvda] = await screen.findAllByTestId("position-group");
+    await waitFor(() => expect(within(nvda).getByTestId("position-greeks")).toHaveTextContent(/for a 1% rise/));
+    expect(within(nvda).getByTestId("position-greeks")).not.toHaveTextContent(/: \$0 for a 1% rise/);
+  });
+
   it("says when the copy is old or cut short", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchOwnerPositions).mockResolvedValue({ ...POSITIONS, stale: true, truncated: true });

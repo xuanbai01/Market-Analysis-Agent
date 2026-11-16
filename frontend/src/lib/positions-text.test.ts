@@ -69,7 +69,9 @@ describe("position words", () => {
       "Option prices put the chance this is in profit at **Dec 18**'s close at **43%**: what the market implies, not a forecast.",
     );
     expect(text(marketSentence(null, null, true))).toMatch(/no single chance of profit for a spread across expiries/);
-    expect(text(historySentence("NVDA", { share: 0.381, windows: 1234 }, 23))).toBe(
+    expect(text(historySentence("NVDA", { share: 0.4, windows: 500, years: 2.9 }, 23))).toMatch(/^Over the last 3 years,/);
+    expect(text(historySentence("NVDA", { share: 0.4, windows: 100, years: 0.6 }, 23))).toMatch(/^Over the last 7 months,/);
+    expect(text(historySentence("NVDA", { share: 0.381, windows: 1234, years: 4.98 }, 23))).toBe(
       "Over the last 5 years, NVDA's moves across 23 sessions would have left it in profit **38%** of the time (1,234 windows): past moves, not a forecast.",
     );
     expect(historySentence("NVDA", null, 23)).toBeNull();

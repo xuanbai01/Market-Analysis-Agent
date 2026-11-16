@@ -65,6 +65,15 @@ describe("TradesPage", () => {
     expect(table.querySelectorAll("tbody tr")).toHaveLength(1);
   });
 
+  it("shows a fractional quantity as it is, as the CSV does", async () => {
+    setOwnerKey("k".repeat(40));
+    const half = { ...TRADES.trades[2], id: 9, symbol: "SPY", quantity: 0.5 };
+    vi.mocked(fetchOwnerTrades).mockResolvedValue({ ...TRADES, trades: [half] });
+    renderPage();
+    const table = await screen.findByTestId("trades-table");
+    expect(table.querySelector("tbody tr")).toHaveTextContent(/SPY\s*0\.5/);
+  });
+
   it("says when the copy couldn't be updated, and why", async () => {
     setOwnerKey("k".repeat(40));
     vi.mocked(fetchOwnerTrades).mockResolvedValue({ ...TRADES, synced: false, reason: "tastytrade answered 503" });

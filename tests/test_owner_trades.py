@@ -205,13 +205,50 @@ async def test_an_account_number_in_free_text_is_scrubbed_before_sealing(world: 
     assert payload["description"] == "Transfer to account 1"
 
 
-async def test_a_failed_sync_is_spaced_too(world: _World) -> None:
+async def test_a_failed_sync_is_spaced_too_and_still_says_it_failed(world: _World, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A visit inside the minute after a failed sync isn't told the copy was
+    updated (#129's AI review); the next sync that works clears it."""
+    clock = [0.0]
+    monkeypatch.setattr(ot, "_clock", lambda: clock[0])
     world.history = [_txn(1, "2026-10-01")]
-    world.fail = tt.TastytradeUnavailable("tastytrade answered 503")
-    with pytest.raises(tt.TastytradeUnavailable):
+    world.fail = tt.TastytradeUnavailable(f"tastytrade answered 503 for /accounts/{ACCOUNT}/transactions")
+    with pytest.raises(ot.SyncFailed) as first:
         await _sync(world)
+    assert ACCOUNT not in str(first.value)  # the reason is the masked one
     world.fail = None
-    assert (await _sync(world)).skipped is True  # not asked again within the minute
+    calls = len(world.calls)
+    with pytest.raises(ot.SyncFailed):
+        await _sync(world)  # not asked again within the minute, and not reported as synced
+    assert len(world.calls) == calls
+    clock[0] = ot.SYNC_EVERY_SECONDS + 1
+    assert (await _sync(world)).new == 1
+    clock[0] += 1
+    assert (await _sync(world)).skipped is True
+
+
+async def test_a_sync_that_runs_too_long_says_so_and_lets_go(world: _World, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The deadline's TimeoutError is a failed sync, not a 500 (#129's AI review)."""
+    import asyncio
+
+    slow = world.get
+
+    async def get(path: str, params: dict[str, Any] | None = None, *, op: str) -> dict[str, Any]:
+        await asyncio.sleep(1)
+        return await slow(path, params, op=op)
+
+    monkeypatch.setattr(tt, "get", get)
+    monkeypatch.setattr(ot, "SYNC_SECONDS", 0.01)
+    with pytest.raises(ot.SyncFailed, match="too long"):
+        await _sync(world)
+    assert world.session.in_tx is False  # rolled back, ready for the listing
+
+
+async def test_listing_without_the_key_refuses_even_with_nothing_stored(world: _World, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CSV route lists without syncing: an empty table mustn't read as an
+    empty copy when there's no key (#129's AI review)."""
+    monkeypatch.setattr(settings_module.settings, "OWNER_VAULT_KEY", SecretStr(""))
+    with pytest.raises(vault.VaultUnavailable):
+        await ot.list_trades(world.session)  # type: ignore[arg-type]
 
 
 async def test_two_visits_at_once_sync_once(world: _World) -> None:

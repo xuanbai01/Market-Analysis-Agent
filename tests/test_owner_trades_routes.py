@@ -17,7 +17,8 @@ from app.api.v1.routers import owner as owner_router
 from app.core import settings as settings_module
 from app.main import app
 from app.schemas.owner import OwnerTrade
-from app.services import owner_vault, tastytrade_client
+from app.services import owner_vault
+from app.services.owner_trades import SyncFailed
 
 OWNER_KEY = "o" * 40  # plainly fake
 TRADES = [
@@ -77,10 +78,12 @@ async def test_the_trades_are_synced_then_listed(client: tuple[AsyncClient, _Cal
 
 async def test_with_tastytrade_down_the_copy_stands_and_says_why(client: tuple[AsyncClient, _Calls]) -> None:
     ac, calls = client
-    calls.sync_fail = tastytrade_client.TastytradeUnavailable("tastytrade answered 500 for /accounts/5WZ9QX7T/transactions")
-    body = (await ac.get("/v1/owner/trades")).json()
+    calls.sync_fail = SyncFailed("tastytrade took too long to answer")
+    resp = await ac.get("/v1/owner/trades")
+    body = resp.json()
+    assert resp.status_code == 200
     assert body["synced"] is False and len(body["trades"]) == 2
-    assert "5WZ9QX7T" not in body["reason"] and "/accounts/***/" in body["reason"]
+    assert body["reason"] == "tastytrade took too long to answer"
 
 
 async def test_without_the_vault_key_it_is_a_503(client: tuple[AsyncClient, _Calls]) -> None:

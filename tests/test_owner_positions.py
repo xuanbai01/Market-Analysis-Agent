@@ -670,3 +670,18 @@ async def test_positions_say_when_their_marks_were_made(
     monkeypatch.setattr(op, "_now", lambda: now)
     result = await op.get_positions()
     assert result.priced_at == priced
+
+
+async def test_a_stale_copy_keeps_the_time_its_marks_were_made(
+    account: _Tastytrade, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #137's review: a copy served when tastytrade fails must keep its own
+    # marks' time, not get this moment's last close.
+    account.positions[ACCOUNT] = [_position("NVDA", "Equity", "10", "Long")]
+    monkeypatch.setattr(op, "_now", lambda: datetime(2026, 11, 12, 15, 0, tzinfo=UTC))  # a Thursday session
+    first = await op.get_positions()
+    monkeypatch.setattr(op, "_now", lambda: datetime(2026, 11, 14, 1, 0, tzinfo=UTC))  # the Saturday after
+    account.clock[0] += op.CACHE_SECONDS + 1  # type: ignore[attr-defined]
+    account.fail = tt.TastytradeUnavailable("tastytrade didn't answer")
+    again = await op.get_positions()
+    assert again.stale is True and again.priced_at == first.priced_at == datetime(2026, 11, 12, 15, 0, tzinfo=UTC)

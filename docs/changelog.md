@@ -278,4 +278,9 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **The stored rows are read out of the session before it's let go**, so finding the newest date decrypts with no database connection held.
     - **A page count under 1** counts as no count, so the read goes on while pages are full.
     - **Not changed:** the real client takes the query parameters, and `/accounts/{n}/transactions` is on its allowlist. `tests/test_tastytrade_client.py` covers both.
+  - **From #129's seventh AI review:**
+    - **A whole read asks from 2000-01-01**, so no default window on tastytrade's side can leave the oldest trades out.
+    - **The listing lets its connection go before decrypting.**
+    - **An estimated-fee flag sent as "true"** is read.
+    - **Accounts past the cap of 10 are logged**, by count.
 

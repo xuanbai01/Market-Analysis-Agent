@@ -42,6 +42,9 @@ OVERLAP_DAYS = 7
 # A whole read this often (and first in each process): what tastytrade posts
 # late under an older date, or a new account's history, is caught then.
 FULL_READ_EVERY_SECONDS = 24 * 3600.0
+# A whole read asks from here, so no default window on tastytrade's side can
+# leave the oldest trades out.
+FULL_READ_FROM = date(2000, 1, 1)
 PER_PAGE = 2000  # tastytrade's maximum
 MAX_PAGES = 25
 # The fields a stored transaction keeps (plus the account's number in the list).
@@ -108,10 +111,16 @@ def _scrubbed(value: Any, numbers: dict[str, int]) -> Any:
     return value
 
 
+def _estimated(item: dict[str, Any]) -> bool:
+    """Whether tastytrade's fees for it are still estimates (a JSON true, or "true")."""
+    value = item.get("is-estimated-fee")
+    return value is True or (isinstance(value, str) and value.strip().lower() == "true")
+
+
 def _sealed(tid: int, item: dict[str, Any], account: int, numbers: dict[str, int]) -> dict[str, Any]:
     payload = {key: _scrubbed(item[key], numbers) for key in KEPT if key in item}
     payload["account"] = account
-    estimated = item.get("is-estimated-fee") is True
+    estimated = _estimated(item)
     nonce, ciphertext = vault.seal(payload, tid, estimated_fee=estimated)
     return {
         "id": tid, "key_version": vault.KEY_VERSION, "nonce": nonce, "ciphertext": ciphertext,
@@ -241,10 +250,13 @@ async def _sync(session: AsyncSession) -> SyncResult:
     known = {row.id: row.estimated_fee for row in rows}
     full = _full_read_at is None or _clock() - _full_read_at >= FULL_READ_EVERY_SECONDS
     latest = None if full else _latest_date([payload for _, payload in await asyncio.to_thread(_opened, rows)])
-    start = latest - timedelta(days=OVERLAP_DAYS) if latest else None
+    start = latest - timedelta(days=OVERLAP_DAYS) if latest else FULL_READ_FROM
     to_add: list[tuple[int, dict[str, Any], int]] = []
     to_replace: list[tuple[int, dict[str, Any], int]] = []
-    accounts = (await owner_positions.account_numbers())[: owner_positions.MAX_ACCOUNTS]
+    every = await owner_positions.account_numbers()
+    if len(every) > owner_positions.MAX_ACCOUNTS:
+        logger.warning("owner trades: %d accounts past the cap of %d aren't copied", len(every) - owner_positions.MAX_ACCOUNTS, owner_positions.MAX_ACCOUNTS)
+    accounts = every[: owner_positions.MAX_ACCOUNTS]
     numbers = {number: index for index, number in enumerate(accounts, start=1)}
     for number, index in numbers.items():
         try:
@@ -255,7 +267,7 @@ async def _sync(session: AsyncSession) -> SyncResult:
             tid = _id(item)
             if tid is None:
                 continue
-            estimated = item.get("is-estimated-fee") is True
+            estimated = _estimated(item)
             if tid not in known:
                 to_add.append((tid, item, index))
                 known[tid] = estimated
@@ -319,7 +331,8 @@ async def list_trades(session: AsyncSession) -> list[OwnerTrade]:
     a key, an empty table included: no key is no copy, not an empty one."""
     if not vault.is_configured():
         raise vault.VaultUnavailable("the trade copy's key isn't set on the server")
-    rows = await store.stored(session)
+    rows = _detached(await store.stored(session))
+    await session.rollback()  # no connection held while the copy is decrypted
     trades = [_trade(tid, payload) for tid, payload in await asyncio.to_thread(_opened, rows)]
     return sorted(trades, key=_when, reverse=True)
 

@@ -118,36 +118,41 @@ function Line({ sentence, testId }: { sentence: ReturnType<typeof marketSentence
 }
 
 const UNTRACKED = "untracked";
+/** Underlyings whose option context a page load reads: each cold read
+ * spends one of the IP's options lookups an hour (60). */
+export const MAX_CONTEXT = 10;
 
-export function PositionGroupCard({ group, now }: { group: PositionGroup; now: Date }) {
+export function PositionGroupCard({ group, now, withContext }: { group: PositionGroup; now: Date; withContext: boolean }) {
   const expiry = firstExpiry(group);
   const hasOptions = expiry !== null;
+  const reads = hasOptions && withContext;
   // Keys of its own: under the options page's, a visit there would be
   // served this untracked copy and never record the view.
   const report = useQuery({
     queryKey: ["options", group.symbol, UNTRACKED],
     queryFn: () => fetchOptionsReport(group.symbol, { track: false }), // a holding isn't a view
     staleTime: FIVE_MINUTES,
-    enabled: hasOptions,
+    enabled: reads,
     retry: false,
   });
   const chain = useQuery({
     queryKey: ["options-chain", group.symbol, expiry, UNTRACKED],
     queryFn: () => fetchOptionsChain(group.symbol, expiry as string, { track: false }),
     staleTime: FIVE_MINUTES,
-    enabled: hasOptions,
+    // After the report: it reads several expiries, often the held one, which is then no new lookup.
+    enabled: reads && report.isSuccess,
     retry: false,
   });
   const prices = useQuery({
     queryKey: ["prices", group.symbol, "5Y"],
     queryFn: () => fetchMarketPrices(group.symbol, "5Y"),
     staleTime: AN_HOUR,
-    enabled: hasOptions,
+    enabled: reads,
     retry: false,
   });
   const [scenario, setScenario] = useState<Scenario>(NO_CHANGE);
 
-  const spot = group.quote?.mark ?? report.data?.spot ?? null;
+  const spot = group.quote?.mark || report.data?.spot || null; // a mark of 0 (a halted stock) is no price
   const rate = report.data?.rate ?? 0;
   const yahooSpot = report.data?.spot ?? null;
   const chainData = chain.data ?? null;
@@ -158,11 +163,12 @@ export function PositionGroupCard({ group, now }: { group: PositionGroup; now: D
   const cost = costBasis(group);
   const g = spot === null ? null : greeks(group, spot);
   const smile = chainData ? smileOf(chainData) : null;
-  const sigma = chainData?.atm_iv && expiry ? chainData.atm_iv * Math.sqrt(yearsTo(expiry, now)) : null;
-  const sessions = expiry ? sessionsUntil(expiry, now) : 0;
+  const sigma = chainData?.atm_iv && expiry ? chainData.atm_iv * Math.sqrt(yearsTo(expiry, now, group.legs)) : null;
+  const sessions = expiry ? sessionsUntil(expiry, now, group.legs) : 0;
   const closes = prices.data?.prices.map((p) => p.close) ?? [];
-  const daysLeft = expiry ? Math.max(0, Math.floor(yearsTo(expiry, now) * 365)) : 0;
+  const daysLeft = expiry ? Math.max(0, Math.floor(yearsTo(expiry, now, group.legs) * 365)) : 0;
   const spread = group.expiries.length > 1;
+  const maxPain = chainData?.positioning ? maxPainSentence(chainData.positioning, spot) : null;
   // A route that failed leaves gaps in the card: say so rather than drop them quietly.
   const contextError = [report.error, chain.error].find((e) => e && !(e instanceof ApiError && e.status === 401));
 
@@ -200,6 +206,12 @@ export function PositionGroupCard({ group, now }: { group: PositionGroup; now: D
         </div>
       )}
       <div className="mt-4 space-y-2">
+        {hasOptions && !withContext && (
+          <p data-testid="position-context-skipped" className="text-xs text-strata-dim">
+            Option context (the chance of profit, past moves, max pain, the walls) is read for the first {MAX_CONTEXT} underlyings
+            only, to stay within the hour&rsquo;s option lookups.
+          </p>
+        )}
         {contextError && (
           <p data-testid="position-context-missing" className="text-xs text-strata-dim">
             {group.underlying}&rsquo;s option data couldn&rsquo;t be read (
@@ -209,9 +221,7 @@ export function PositionGroupCard({ group, now }: { group: PositionGroup; now: D
         {market && <Line sentence={marketSentence(smile ? profitChance(group, smile, market) : null, expiry, spread)} testId="position-market" />}
         {market && expiry && <Line sentence={historySentence(group.underlying, historicalShare(group, closes, sessions, market), sessions)} testId="position-history" />}
         <Line sentence={earningsSentence(group.underlying, report.data?.earnings ?? null, expiry)} testId="position-earnings" />
-        {chainData?.positioning && expiry && (
-          <Line sentence={[`${dateLabel(expiry)}: `, ...(maxPainSentence(chainData.positioning, spot) ?? [])]} testId="position-maxpain" />
-        )}
+        {maxPain && expiry && <Line sentence={[`${dateLabel(expiry)}: `, ...maxPain]} testId="position-maxpain" />}
         {chainData?.positioning && (chainData.positioning.call_wall !== null || chainData.positioning.put_wall !== null) && (
           <p className="text-xs text-strata-dim" data-testid="position-walls">
             Walls: {chainData.positioning.call_wall !== null ? `calls ${strikeLabel(chainData.positioning.call_wall)}` : ""}

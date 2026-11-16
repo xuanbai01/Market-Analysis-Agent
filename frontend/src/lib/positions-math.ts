@@ -18,15 +18,19 @@ import type { PositionGroup, PositionLeg } from "./owner-schemas";
 
 const DAY_MS = 24 * 3600 * 1000;
 const YEAR_MS = 365 * DAY_MS;
-// Options settle at the 4 pm New York close: 21:00 UTC in winter, 20:00 in
-// summer. An hour off is noise for these figures.
-const CLOSE_UTC = "T21:00:00Z";
+// New York's date and time of day, for sessions and closes.
+const NEW_YORK = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+const OPEN_MINUTE = 9 * 60 + 30; // 9:30 am
+const CLOSE_HOUR = 16;
 const MIN_VOL = 0.01;
 const ONE_PERCENT = 0.01;
 // Price grid for breakevens: log-spaced over a wide range around the spot.
 const GRID_POINTS = 800;
 const GRID_LOW = 0.2;
 const GRID_HIGH = 4;
+const SESSIONS_A_YEAR = 252;
 // Fewer past windows than this says nothing.
 const MIN_WINDOWS = 20;
 
@@ -53,12 +57,28 @@ export const NO_CHANGE: Scenario = { move: 0, ivShift: 0, days: 0 };
 const size = (leg: PositionLeg) => leg.quantity * leg.multiplier;
 const isOption = (leg: PositionLeg) => leg.kind !== "stock";
 
-export function expiryClose(expiry: string): Date {
-  return new Date(`${expiry}${CLOSE_UTC}`);
+/** ``at`` in New York: its date (YYYY-MM-DD) and minutes past midnight. */
+function newYork(at: Date): { date: string; minute: number } {
+  const part = (type: string) => NEW_YORK.formatToParts(at).find((p) => p.type === type)?.value ?? "0";
+  return { date: `${part("year")}-${part("month")}-${part("day")}`, minute: Number(part("hour")) * 60 + Number(part("minute")) };
 }
 
-export function yearsTo(expiry: string, at: Date): number {
-  return Math.max(0, (expiryClose(expiry).getTime() - at.getTime()) / YEAR_MS);
+/** 4 pm in New York on ``day``: 20:00 UTC in summer, 21:00 in winter. */
+function fourPm(day: string): Date {
+  const summer = new Date(`${day}T20:00:00Z`);
+  return newYork(summer).minute === CLOSE_HOUR * 60 ? summer : new Date(`${day}T21:00:00Z`);
+}
+
+/** When ``expiry`` closes, as the server gave it for ``legs`` on it: 4 pm
+ * New York, 1 pm on a half day (market_calendar.session_close). A leg sent
+ * without it gets 4 pm, half days aside. */
+export function expiryClose(expiry: string, legs: PositionLeg[]): Date {
+  const close = legs.find((leg) => leg.expiry === expiry && leg.expires_at !== null)?.expires_at;
+  return close ? new Date(close) : fourPm(expiry);
+}
+
+export function yearsTo(expiry: string, at: Date, legs: PositionLeg[]): number {
+  return Math.max(0, (expiryClose(expiry, legs).getTime() - at.getTime()) / YEAR_MS);
 }
 
 /** Every leg can be valued: none is an adjusted contract. */
@@ -76,7 +96,7 @@ function intrinsic(leg: PositionLeg, price: number): number {
 export function legValue(leg: PositionLeg, price: number, at: Date, ivShift: number, market: Market): number | null {
   if (leg.kind === "stock") return price;
   if (leg.expiry === null || leg.strike === null) return null;
-  const years = yearsTo(leg.expiry, at);
+  const years = yearsTo(leg.expiry, at, [leg]);
   if (years <= 0) return intrinsic(leg, price);
   const iv = leg.quote?.iv;
   if (iv === null || iv === undefined) return null;
@@ -125,7 +145,7 @@ export function firstExpiry(group: PositionGroup): string | null {
  * later are valued then); with no options, P&L now. */
 export function pnlAtExpiry(group: PositionGroup, price: number, market: Market): number | null {
   const first = firstExpiry(group);
-  const value = valueAt(group, price, first ? expiryClose(first) : market.now, 0, market);
+  const value = valueAt(group, price, first ? expiryClose(first, group.legs) : market.now, 0, market);
   const cost = costBasis(group);
   return value === null || cost === null ? null : value - cost;
 }
@@ -248,14 +268,19 @@ export function profitChance(group: PositionGroup, smile: Smile, market: Market)
   return Math.min(1, Math.max(0, chance));
 }
 
-/** Trading sessions from ``now`` to the expiry's close (weekdays; holidays
- * aside). */
-export function sessionsUntil(expiry: string, now: Date): number {
-  const end = expiryClose(expiry).getTime();
+/** Whole trading sessions from ``now`` to the expiry's close (weekdays;
+ * holidays aside): today's counts while the market hasn't opened. */
+export function sessionsUntil(expiry: string, now: Date, legs: PositionLeg[]): number {
+  if (expiryClose(expiry, legs).getTime() <= now.getTime()) return 0;
+  const today = newYork(now);
   let count = 0;
-  for (let t = now.getTime() + DAY_MS; t <= end + DAY_MS / 2; t += DAY_MS) {
-    const day = new Date(t).getUTCDay();
-    if (day !== 0 && day !== 6) count++;
+  for (let t = new Date(`${today.date}T12:00:00Z`).getTime(); ; t += DAY_MS) {
+    const day = new Date(t).toISOString().slice(0, 10);
+    if (day > expiry) break;
+    const weekday = new Date(t).getUTCDay();
+    if (weekday === 0 || weekday === 6) continue;
+    if (day === today.date && today.minute >= OPEN_MINUTE) continue; // under way or over
+    count++;
   }
   return count;
 }
@@ -268,7 +293,7 @@ export function historicalShare(
   closes: number[],
   sessions: number,
   market: Market,
-): { share: number; windows: number } | null {
+): { share: number; windows: number; years: number } | null {
   if (sessions < 1) return null;
   let wins = 0;
   let windows = 0;
@@ -279,5 +304,6 @@ export function historicalShare(
     windows++;
     if (pnl > 0) wins++;
   }
-  return windows < MIN_WINDOWS ? null : { share: wins / windows, windows };
+  // The span the closes cover: less than asked for a stock listed lately.
+  return windows < MIN_WINDOWS ? null : { share: wins / windows, windows, years: (closes.length - 1) / SESSIONS_A_YEAR };
 }

@@ -202,6 +202,32 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **The positions page's reads have query keys of their own.** Under the options page's keys, a visit there within five minutes was served the untracked copy from the browser and never reached the server, so no view was recorded.
     - **The server records a view that waited on the lock** while the untracked build ran. A report with no usable options records none, whoever built it.
     - **The page's test pins the clock,** since its fixtures' expiries pass in December.
+  - **From #128's third AI review:**
+    - **Option context for the first 10 underlyings only,** as the plan said and the page didn't: each cold report or chain read spends one of the IP's 60 options lookups an hour, so a big portfolio could have spent them all in one load. The rest say why they show no context. The held expiry's chain waits for the report, which often read that expiry already, so it costs nothing.
+    - **Each option leg says when its expiry closes** (`expires_at`, from `market_calendar.session_close`): the page had used 21:00 UTC for every expiry, an hour late in summer and three hours late on half days, so a position on the day after Thanksgiving still had time value after the close.
+    - **The normal CDF keeps its digits in the tails** (Numerical Recipes' erfc, error under 1.2e-7 of the value). Its error had been absolute, so the golden check allowed an error larger than a far out-of-the-money price and a tail priced at 0 passed. Black-76 is now held to Python within 1e-5 of each price.
+    - **No bare "Dec 11: "** when a chain has no max pain.
+    - **A view served the old copy** (Yahoo down) is recorded too.
+  - **From #128's fourth AI review** (lows only):
+    - **Sessions left count today's** while the market hasn't opened, so a check before the open has the right window for the past-moves share.
+    - **One holding without a live figure no longer blanks every total.** The tiles add what they can and name what they leave out.
+    - **A leg sent without its close** gets 4 pm in New York, daylight time included, rather than 21:00 UTC.
+  - **From #128's fifth AI review:**
+    - **A report on the expiry day after the close** no longer counts as before the expiry. The card uses the report's reaction session, as the options page does.
+    - **The tiles say what's missing:** a live price or delta, theta or vega.
+    - **Not changed:**
+      - The chain route reads any listed expiry on demand, not only those the report read, so a held expiry far from the report's targets still gets its chain.
+      - Recording a view twice is harmless, since it's an upsert.
+  - **From #128's sixth AI review:**
+    - **"Moves like −0 shares" is gone:** the share counts are rounded before their sign is taken.
+    - **Not changed:**
+      - A report with no options never records a view, so marking its copy as having none to record loses nothing; once the symbol has options, the new build records the view.
+      - `probAbove` takes a strike and converts it to moneyness itself.
+      - A holding with no live price has no delta in the totals, and is named.
+  - **From #128's seventh AI review:**
+    - **The past-moves line names the span its closes cover** ("Over the last 3 years") instead of always saying five years: a stock listed lately has less.
+    - **A mark of 0** (a halted stock) counts as no price, and the card falls back to the report's.
+    - **Not changed:** a what-if below 1% IV is priced at 1%, and a failed price read leaves out the past-moves line without a note.
   - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 - **The owner's trade copy, encrypted (2026-11-15, ADR 0009 amended):** the owner asked for a copy of their trades that both of their PCs can reach, and chose an encrypted copy in Neon.
   - **The vault:** `owner_vault` seals each transaction with AES-256-GCM under `OWNER_VAULT_KEY` (32 random bytes, a Fly secret), with a fresh nonce and the transaction id as associated data. The app won't start with a malformed key or one equal to another key. `cryptography` 50.0.2 is pinned in `pyproject.toml` and the Dockerfile.

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
@@ -153,6 +153,23 @@ async def test_an_adjusted_contract_is_kept_and_flagged(account: _Tastytrade) ->
     ]
     (group,) = (await op.get_positions()).groups
     assert [leg.adjusted for leg in group.legs] == [True, True, False]
+
+
+async def test_an_option_leg_says_when_its_expiry_closes(account: _Tastytrade) -> None:
+    """The page values a leg to its expiry's close: 4 pm New York (20:00 UTC
+    in summer, 21:00 in winter), 1 pm on NYSE's half days (#128's AI review)."""
+    account.positions[ACCOUNT] = [
+        _position("SPY   261127C00600000", "Equity Option", "1", "Long"),  # the day after Thanksgiving
+        _position("SPY   261218C00600000", "Equity Option", "1", "Long"),
+        _position("SPY   270618C00600000", "Equity Option", "1", "Long"),
+        _position("SPY", "Equity", "10", "Long"),
+    ]
+    (group,) = (await op.get_positions()).groups
+    closes = {leg.symbol: leg.expires_at for leg in group.legs}
+    assert closes["SPY   261127C00600000"] == datetime(2026, 11, 27, 18, tzinfo=UTC)
+    assert closes["SPY   261218C00600000"] == datetime(2026, 12, 18, 21, tzinfo=UTC)
+    assert closes["SPY   270618C00600000"] == datetime(2027, 6, 18, 20, tzinfo=UTC)
+    assert closes["SPY"] is None
 
 
 async def test_a_ticker_with_a_slash_gets_its_dashed_form_for_our_pages(account: _Tastytrade) -> None:

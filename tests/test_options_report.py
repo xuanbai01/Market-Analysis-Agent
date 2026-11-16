@@ -129,6 +129,16 @@ async def test_a_view_waiting_on_an_untracked_build_is_still_recorded(world: Any
     assert store.touched == ["HELD"]
 
 
+async def test_a_view_served_the_old_copy_is_still_recorded(world: Any) -> None:
+    """Yahoo down: the view is served the positions page's old copy, and recorded."""
+    yahoo, store, clock = world
+    await orp.get_report(None, "HELD", now=NOW, track=False)  # type: ignore[arg-type]
+    clock[0] = orp.CACHE_TTL_SECONDS + 1
+    yahoo.broken = True
+    await orp.get_report(None, "HELD", now=NOW)  # type: ignore[arg-type]
+    assert store.touched == ["HELD"]
+
+
 async def test_no_view_is_recorded_for_an_untracked_copy_with_no_options(world: Any) -> None:
     """A view is recorded only for a usable report, whoever built the copy."""
     _yahoo, store, _clock = world

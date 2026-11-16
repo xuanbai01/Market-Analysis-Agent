@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../lib/api";
 import { ApiError } from "../../lib/api";
 import { fetchOptionsChain, fetchOptionsReport } from "../../lib/options-api";
-import { OptionsReportSchema } from "../../lib/options-schemas";
+import { OptionsReportSchema, PositioningSchema } from "../../lib/options-schemas";
 import { clearOwnerKey, getOwnerKey, setOwnerKey } from "../../lib/owner";
 import { fetchOwnerPositions } from "../../lib/owner-api";
 import { type OwnerPositions, OwnerPositionsSchema } from "../../lib/owner-schemas";
@@ -124,6 +124,45 @@ describe("PositionsPage", () => {
     await waitFor(() => expect(within(spy[1]).getByTestId("position-context-missing")).toHaveTextContent(/SPY.s option data couldn.t be read/));
   });
 
+  it("reads option context for the first 10 underlyings only", async () => {
+    // Each cold read spends one of the hour's options lookups (60 an IP).
+    const groups = Array.from({ length: 12 }, (_, i) => ({ ...POSITIONS.groups[1], underlying: `T${i}`, symbol: `T${i}` }));
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerPositions).mockResolvedValue({ ...POSITIONS, groups });
+    renderPage();
+    const cards = await screen.findAllByTestId("position-group");
+    expect(cards).toHaveLength(12);
+    await waitFor(() => expect(fetchOptionsReport).toHaveBeenCalledTimes(10));
+    expect(vi.mocked(fetchOptionsReport).mock.calls.map(([s]) => s)).not.toContain("T10");
+    expect(within(cards[10]).getByTestId("position-context-skipped")).toHaveTextContent(/first 10/);
+    expect(within(cards[9]).queryByTestId("position-context-skipped")).toBeNull();
+  });
+
+  it("asks for the held expiry only once the report is in", async () => {
+    // The report reads several expiries; the held one is then often free.
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerPositions).mockResolvedValue(POSITIONS);
+    renderPage();
+    const [, spy] = await screen.findAllByTestId("position-group");
+    await waitFor(() => expect(within(spy).getByTestId("position-context-missing")).toBeInTheDocument());
+    expect(vi.mocked(fetchOptionsChain).mock.calls.map(([s]) => s)).not.toContain("SPY"); // its report failed
+  });
+
+  it("leaves out max pain when the chain has none", async () => {
+    const positioning = PositioningSchema.parse({
+      call_open_interest: 1000, put_open_interest: 800, put_call: 0.8, max_pain: null, call_gex: 1, put_gex: -1, net_gex: 0,
+      call_dex: 1, put_dex: -1, net_dex: 0, call_wall: 175, put_wall: 150, gamma_flip: null, assumption: "Dealers long calls, short puts.",
+    });
+    vi.mocked(fetchOptionsChain).mockResolvedValue({ ...REPORT.chain!, positioning });
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerPositions).mockResolvedValue(POSITIONS);
+    renderPage();
+    const [nvda] = await screen.findAllByTestId("position-group");
+    await waitFor(() => expect(within(nvda).getByTestId("position-market")).toHaveTextContent(/not a forecast/));
+    expect(within(nvda).getByTestId("position-walls")).toHaveTextContent("calls $175"); // the positioning drew
+    expect(within(nvda).queryByTestId("position-maxpain")).toBeNull();
+  });
+
   it("keeps its untracked reads out of the options page's cache", async () => {
     // Under the options page's keys, a visit there inside the staleTime
     // would be served this copy and never reach the server: no view recorded.
@@ -154,6 +193,30 @@ describe("PositionsPage", () => {
     act(() => clearOwnerKey());
     expect(await screen.findByTestId("owner-unlock")).toBeInTheDocument();
     await waitFor(() => expect(client.getQueryData(["owner-positions"])).toBeUndefined());
+  });
+
+  it("totals what it can when a holding has no live figure, and names it", async () => {
+    // tastytrade sent no quote for SPY: its delta and Greeks are unknown.
+    const unquoted = { ...POSITIONS.groups[1], quote: null, legs: [{ ...POSITIONS.groups[1].legs[0], quote: null }] };
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerPositions).mockResolvedValue({ ...POSITIONS, groups: [POSITIONS.groups[0], unquoted] });
+    renderPage();
+    const tiles = await screen.findByTestId("positions-totals");
+    expect(tiles).toHaveTextContent("+$12"); // NVDA's short call: 0.12 a share a day, 100 shares
+    expect(tiles).not.toHaveTextContent("—");
+    expect(tiles).toHaveTextContent("leaves out SPY (no live price or delta from tastytrade)");
+    expect(tiles).toHaveTextContent("leaves out SPY (no live theta from tastytrade)");
+  });
+
+  it("takes a mark of 0 as no price", async () => {
+    // A halted underlying can come back marked 0: the card falls back to the report's price.
+    const zero = { ...POSITIONS.groups[0], quote: { ...POSITIONS.groups[0].quote!, mark: 0 } };
+    setOwnerKey("k".repeat(40));
+    vi.mocked(fetchOwnerPositions).mockResolvedValue({ ...POSITIONS, groups: [zero] });
+    renderPage();
+    const [nvda] = await screen.findAllByTestId("position-group");
+    await waitFor(() => expect(within(nvda).getByTestId("position-greeks")).toHaveTextContent(/for a 1% rise/));
+    expect(within(nvda).getByTestId("position-greeks")).not.toHaveTextContent(/: \$0 for a 1% rise/);
   });
 
   it("says when the copy is old or cut short", async () => {

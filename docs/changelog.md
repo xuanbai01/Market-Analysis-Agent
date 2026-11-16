@@ -352,5 +352,9 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
       - `symbol_path` turns `BF.B` into `BF/B`, and the client's tests cover it.
       - The status line gives the newest quote's age.
       - The live route sits behind the owner key with no per-IP limit; the client backs off on 429.
+  - **From #130's eighth AI review:**
+    - **An expiry not in the kept chain gets one fresh read a minute at most** (`CHAIN_RECHECK_SECONDS`), not one per 15 s poll.
+    - **The page stops polling after a 422**, since that expiry won't be listed 15 s later.
+    - **Not changed:** the dividend yield (always a float) only checks the parity forward, so a test of it through the live chain would show nothing.
   - **`/positions` stays current while open** (#128's last AI review): it reads again every 15 s while the tab shows, matching the server's copy, and quote ages tick every 5 s between reads. A tab left open no longer freezes at "10s ago".
 

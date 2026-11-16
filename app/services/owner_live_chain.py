@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 
 CACHE_SECONDS = 10.0
 CHAIN_SECONDS = 600.0  # a chain's strikes change rarely
+# An expiry not in the kept chain sends one fresh read at most this often
+# (Live polls every 15 s; SPY's chain is tens of thousands of strikes).
+CHAIN_RECHECK_SECONDS = 60.0
 MAX_CHAINS = 10  # a chain is big (every expiry's strikes): only the last few are kept
 BUILD_SECONDS = 30.0
 STRIKES_EACH_SIDE = 40
@@ -124,6 +127,12 @@ def _rows(expiration: dict[str, Any]) -> list[tuple[float, str, str]]:
 def _kept(symbol: str) -> Chain | None:
     cached = _chains.get(symbol)
     return cached[1] if cached is not None and _clock() - cached[0] < CHAIN_SECONDS else None
+
+
+def _kept_for(symbol: str) -> float | None:
+    """How long ago the kept chain was read; None when there's none."""
+    cached = _chains.get(symbol)
+    return None if cached is None or _clock() - cached[0] >= CHAIN_SECONDS else _clock() - cached[0]
 
 
 async def _expirations(symbol: str, *, fresh: bool = False) -> Chain:
@@ -222,9 +231,9 @@ async def _build(symbol: str, expiry: date) -> LiveChain:
     if mc.years_to_expiry(quoted_at, expiry) <= 0:
         raise NotListed(expiry)  # it has closed: no time left to price
     root = symbol.upper().replace("-", "").replace(".", "")
-    was_kept = _kept(symbol) is not None
+    kept_for = _kept_for(symbol)
     strikes = _strikes(await _expirations(symbol), expiry, root)
-    if not strikes and was_kept:  # listed since the chain was kept, perhaps
+    if not strikes and kept_for is not None and kept_for >= CHAIN_RECHECK_SECONDS:  # listed since, perhaps
         strikes = _strikes(await _expirations(symbol, fresh=True), expiry, root)
     if not strikes:
         raise NotListed(expiry)

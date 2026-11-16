@@ -94,7 +94,8 @@ export function ExpirySection({ symbol, listed, initial, spot, quotedAt, skew25 
     queryKey: ["owner-live-chain", symbol, expiry],
     queryFn: () => fetchLiveChain(ownerKey as string, symbol, expiry),
     enabled: liveOn,
-    refetchInterval: liveOn ? LIVE_REFRESH_MS : false,
+    // An expiry tastytrade doesn't list (422) won't be listed 15 s later: stop asking.
+    refetchInterval: (q) => (liveOn && !(q.state.error instanceof ApiError && q.state.error.status === 422) ? LIVE_REFRESH_MS : false),
     gcTime: 0, // tastytrade's quotes leave memory with the view
     retry: false,
   });

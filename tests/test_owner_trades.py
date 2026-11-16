@@ -105,7 +105,7 @@ class _World:
         pages = max(1, -(-len(matching) // self.per_page))
         if self.pages_as == "absent":
             return {"data": {"items": page}}
-        count: Any = {"int": pages, "text": str(pages), "float": float(pages)}[self.pages_as]
+        count: Any = {"int": pages, "text": str(pages), "float": float(pages), "zero": 0}[self.pages_as]
         return {"data": {"items": page}, "pagination": {"total-pages": count, "page-offset": offset}}
 
 
@@ -365,7 +365,7 @@ async def test_sealing_runs_off_the_event_loop(world: _World, monkeypatch: pytes
     assert threads == [False, False]
 
 
-@pytest.mark.parametrize("pages_as", ["text", "float", "absent"])
+@pytest.mark.parametrize("pages_as", ["text", "float", "absent", "zero"])
 async def test_every_page_is_read_however_the_count_comes(world: _World, monkeypatch: pytest.MonkeyPatch, pages_as: str) -> None:
     """A count as digits or as 2.0, or none at all with a full page: the read
     goes on, rather than keep the first page as the whole history (#129's
@@ -383,4 +383,22 @@ async def test_a_trade_without_a_time_sorts_by_its_date(world: _World) -> None:
     await _sync(world)
     trades = await ot.list_trades(world.session)  # type: ignore[arg-type]
     assert [t.id for t in trades] == [2, 1]
+
+
+async def test_finding_the_newest_date_holds_no_connection(world: _World, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Decrypting the copy is CPU: the database connection is let go first
+    (#129's sixth AI review)."""
+    world.history = [_txn(1, "2026-10-01"), _txn(2, "2026-11-13")]
+    await _sync(world)  # the first, whole read decrypts nothing
+    held: list[bool] = []
+    unseal = vault.unseal
+
+    def recording(*args: Any, **kwargs: Any) -> Any:
+        held.append(world.session.in_tx)
+        return unseal(*args, **kwargs)
+
+    monkeypatch.setattr(vault, "unseal", recording)
+    world.later()
+    await _sync(world)  # incremental: reads the newest date from the copy
+    assert held == [False, False]
 

@@ -324,5 +324,11 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
       - `/option-chains/{symbol}/nested` is on the client's allowlist.
       - The strategy builder already prices from the live chain.
       - The dividend yield only checks the put-call-parity forward taken from the live quotes, so a yield of 0 when the report isn't cached on that machine barely moves it.
+  - **From #130's third AI review:**
+    - **One contract per strike.** An adjusted root that still declares 100 shares, or SPX beside SPXW on a third Friday, listed the same strikes again, which doubled their open interest. The standard root is kept: the ticker's own, else one without a digit.
+    - **Not changed:**
+      - The client's allowlist takes an encoded slash (`BRK%2FB`), and its tests cover it.
+      - The strategy builder prices from the live chain.
+      - A 404 clears the owner key only while the frontend is ahead of the backend on a deploy, since both ship from the same merge.
   - **`/positions` stays current while open** (#128's last AI review): it reads again every 15 s while the tab shows, matching the server's copy, and quote ages tick every 5 s between reads. A tab left open no longer freezes at "10s ago".
 

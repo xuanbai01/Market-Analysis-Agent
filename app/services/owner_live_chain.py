@@ -121,10 +121,13 @@ async def _expirations(symbol: str) -> list[dict[str, Any]]:
     return expirations
 
 
-def _strikes(expirations: list[dict[str, Any]], expiry: date) -> list[tuple[float, str, str]]:
-    """(strike, call symbol, put symbol) for ``expiry``; a symbol that isn't
-    an OCC one for that expiry is dropped, so nothing else reaches a query."""
-    found: list[tuple[float, str, str]] = []
+def _strikes(expirations: list[dict[str, Any]], expiry: date, root: str) -> list[tuple[float, str, str]]:
+    """(strike, call symbol, put symbol) for ``expiry``, one per strike; a
+    symbol that isn't an OCC one for that expiry is dropped, so nothing else
+    reaches a query. Where two roots list a strike (an adjusted root that
+    still declares 100 shares, SPX beside SPXW), the standard one is kept:
+    ``root`` itself, else one without a digit; so no strike counts twice."""
+    by_strike: dict[float, tuple[int, str, str]] = {}
     for expiration in expirations:
         if field_of(expiration, "expiration-date") != expiry.isoformat():
             continue
@@ -136,12 +139,16 @@ def _strikes(expirations: list[dict[str, Any]], expiry: date) -> list[tuple[floa
             if k is None or not isinstance(call, str) or not isinstance(put, str):
                 continue
             try:
-                ok = all(parse_occ(s).expiry == expiry for s in (call, put))
+                parsed = [parse_occ(s) for s in (call, put)]
             except ValueError:
-                ok = False
-            if ok:
-                found.append((k, call, put))
-    return sorted(set(found))
+                continue
+            if any(p.expiry != expiry for p in parsed):
+                continue
+            found_root = parsed[0].root
+            rank = 0 if found_root == root else 1 if not any(c.isdigit() for c in found_root) else 2
+            if k not in by_strike or rank < by_strike[k][0]:
+                by_strike[k] = (rank, call, put)
+    return sorted((k, call, put) for k, (_rank, call, put) in by_strike.items())
 
 
 async def _quotes(kind: str, symbols: list[str]) -> dict[str, dict[str, Any]]:
@@ -182,7 +189,7 @@ def _newest(items: list[dict[str, Any]]) -> datetime | None:
 
 
 async def _build(symbol: str, expiry: date) -> LiveChain:
-    strikes = _strikes(await _expirations(symbol), expiry)
+    strikes = _strikes(await _expirations(symbol), expiry, symbol.upper().replace("-", "").replace(".", ""))
     if not strikes:
         raise NotListed(expiry)
     underlying = _tastytrade_symbol(symbol)

@@ -230,7 +230,7 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Not changed:** a what-if below 1% IV is priced at 1%, and a failed price read leaves out the past-moves line without a note.
   - **Wiring:** totals across the page; a sidebar link when a key is stored; a dev-only `scripts/fake_owner_api.py` (and a `fake-owner-api` launch entry) to look at the page with made-up positions. The options and positions pages now share an 8.5 KB chunk; main 90.56 KB.
 - **The owner's trade copy, encrypted (2026-11-15, ADR 0009 amended):** the owner asked for a copy of their trades that both of their PCs can reach, and chose an encrypted copy in Neon.
-  - **The vault:** `owner_vault` seals each transaction with AES-256-GCM under `OWNER_VAULT_KEY` (32 random bytes, a Fly secret), with a fresh nonce and the transaction id as associated data. The app won't start with a malformed key or one equal to another key. `cryptography` 50.0.2 is pinned in `pyproject.toml` and the Dockerfile.
+  - **The vault:** `owner_vault` seals each transaction with AES-256-GCM under `OWNER_VAULT_KEY` (32 random bytes, a Fly secret), with a fresh nonce, and the transaction id, the key version and the estimated-fee flag as associated data. The app won't start with a malformed key or one equal to another key. `cryptography` 50.0.2 is pinned in `pyproject.toml` and the Dockerfile.
   - **The table:** `owner_transactions` (migration 0006) holds only the id, the key version and an estimated-fee flag in the clear, all three bound to the ciphertext. Rows are written once; the one update is a row stored with estimated fees taking the final ones.
   - **The sync:** `owner_trades.sync`, at most once a minute. It reads each account's transactions from a week before the newest stored, every page (2,000 a page), and holds no database connection during the fetch. It keeps a listed set of fields plus the account's 1-based number, never the account number.
   - **The routes:**
@@ -310,4 +310,5 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - the chains kept are capped;
     - builds lock per symbol and expiry, with a deadline.
   - **The fake backend** answers a made-up NVDA chain to look at the switch.
+  - **`/positions` stays current while open** (#128's last AI review): it reads again every 15 s while the tab shows, matching the server's copy, and quote ages tick every 5 s between reads. A tab left open no longer freezes at "10s ago".
 

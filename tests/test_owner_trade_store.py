@@ -23,10 +23,11 @@ async def test_rows_are_written_once(db_session: AsyncSession) -> None:
 
 
 async def test_a_first_sync_larger_than_one_statement_takes_is_written_in_chunks(db_session: AsyncSession) -> None:
-    """Postgres takes at most 32,767 parameters a statement: 6,000 rows of 5
-    in one would fail every time (PR 4's security review)."""
-    assert await store.insert(db_session, [_row(i) for i in range(1, 6001)]) == 6000
-    assert len(await store.stored(db_session)) == 6000
+    """Postgres takes at most 32,767 parameters a statement: 7,000 rows of 5
+    (35,000) in one would fail every time (PR 4's security review; #129's AI
+    review caught that the 6,000 this used to write fit in one)."""
+    assert await store.insert(db_session, [_row(i) for i in range(1, 7001)]) == 7000
+    assert len(await store.stored(db_session)) == 7000
 
 
 async def test_nothing_to_insert_writes_nothing(db_session: AsyncSession) -> None:

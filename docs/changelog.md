@@ -240,7 +240,7 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **Setup:** docs/deployment.md §11 makes the key.
   - **From the security review** (one medium each from two reviewers, both fixed):
     - **A bad key's start-up error** would have quoted the settings' values, a slice of the tastytrade refresh token included, into Fly's log. Settings now hide their input in errors.
-    - **A first sync over about 5,400 transactions** would have broken Postgres's parameter limit on every visit. Inserts now go 1,000 rows at a time.
+    - **A first sync over about 6,550 transactions** would have broken Postgres's parameter limit on every visit. Inserts now go 1,000 rows at a time.
     - **The vault:** the associated data now binds the key version and the estimated-fee flag too, a row under another version is refused, and a damaged row is the vault's error rather than a 500. The unused clear `stored_at` column is gone, and a CHECK holds the nonce's length.
     - **Syncs:** one at a time, a failed sync spaced like a good one, a 120 s deadline, decryption off the event loop, and a closed account skipped.
     - **Account numbers in free text** are replaced by "account N" before sealing.
@@ -293,4 +293,7 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **An empty copy with tastytrade unreachable** says so, rather than "No trades yet".
     - **An amount with no credit or debit** shows no figure rather than a guessed sign.
     - **Not changed:** the 503's title carries the route's detail, so "the key isn't set" is recognised.
+  - **From #129's tenth AI review:**
+    - **The chunked-insert test writes 7,000 rows (35,000 parameters).** The 6,000 it wrote fit in one statement, so it would have passed without chunking. The limit is about 6,550 transactions, not 5,400.
+    - **Not changed:** the client turns its own timeouts into `TastytradeUnavailable`, so a bare `TimeoutError` can only be the sync's deadline.
 

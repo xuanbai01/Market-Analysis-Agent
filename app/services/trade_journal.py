@@ -120,6 +120,11 @@ class _Journal:
         action = (trade.action or "").lower()
         direction = 1 if "buy" in action else -1 if "sell" in action else 0
         key = (trade.account, trade.symbol)
+        if direction == 0 and (trade.sub_type or "") in ENDINGS and self.lots[key]:
+            # An expiry, assignment or exercise sent without a buy or sell
+            # only removes what's open.
+            direction = -self.lots[key][0].sign
+            action = "to close"
         if direction == 0:
             what = trade.sub_type or trade.type or "an action with no buy or sell"
             self._unmatched(trade, f"not modelled: {what}")
@@ -136,7 +141,10 @@ class _Journal:
         if "to open" not in action:
             remaining = self._close(trade, key, direction, remaining, unit_cash, unit_fees, contract[0])
             if remaining > EPS and "to close" in action:
-                self._unmatched(trade, "nothing open to close: it may come from before the copy starts")
+                reason = "nothing open to close: it may come from before the copy starts"
+                if remaining < quantity - EPS:  # part of it closed what was open
+                    reason = f"{remaining:g} of {quantity:g} had {reason}"
+                self._unmatched(trade, reason)
                 return
         if remaining > EPS:
             self._open(trade, key, direction, remaining, unit_cash, unit_fees, contract)
@@ -253,7 +261,7 @@ class _Journal:
             id=position.id, account=position.account, underlying=position.underlying,
             structure=structure(legs, position.open_cash), legs=legs,
             opened_at=position.opened_at.isoformat(),
-            closed_at=position.closed_at.isoformat() if position.closed_at and status != "open" else None,
+            closed_at=position.closed_at.isoformat() if position.closed_at and status == "closed" else None,
             days_held=days, status=status, ended_by=ended_by,  # type: ignore[arg-type]
             origin=position.origin,  # type: ignore[arg-type]
             origin_position=self._delivered_from(position.delivered_by),
@@ -278,6 +286,7 @@ class _Journal:
                 realized=round(sum(self.months.values()), CENTS),
                 closed=len(closed),
                 profitable=sum(1 for p in closed if p.realized is not None and p.realized > 0),
+                partly=sum(1 for p in positions if p.status == "partly_closed" and p.realized is not None),
                 unpriced=len(done) - len(closed),
                 average_days=round(sum(days) / len(days), 1) if days else None,
                 fees=round(self.fees, CENTS),

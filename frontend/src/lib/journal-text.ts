@@ -33,25 +33,31 @@ export function monthLabel(month: string): string {
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
-/** What closed, how often at a profit, how long held, and what it came to;
- * what closed without a computed P&L (after a split) is counted apart. */
+/** What closed, how often at a profit, how long held, and what it came to
+ * (partial closes included, and said so); what closed without a computed
+ * P&L (after a split) is counted apart. */
 export function summarySentence(totals: TradeJournal["totals"]): Sentence {
   const plural = (n: number) => (n === 1 ? "" : "s");
-  if (totals.closed === 0) {
-    if (totals.unpriced === 0) return ["Nothing closed yet."];
-    return [{ strong: `${totals.unpriced}` }, ` position${plural(totals.unpriced)} closed without a computed P&L.`];
+  const parts: Sentence = [];
+  if (totals.closed > 0) {
+    const share = Math.round((totals.profitable / totals.closed) * 100);
+    parts.push({ strong: `${totals.closed}` }, ` position${plural(totals.closed)} closed, `, { strong: `${totals.profitable}` });
+    parts.push(" at a profit (", { strong: `${share}%` }, ")");
+    if (totals.average_days !== null) parts.push(", held ", { strong: heldLabel(Math.round(totals.average_days)) }, " on average");
+    parts.push(".");
+  } else if (totals.partly > 0) {
+    parts.push("Nothing closed in full yet.");
   }
-  const share = Math.round((totals.profitable / totals.closed) * 100);
-  const parts: Sentence = [
-    { strong: `${totals.closed}` },
-    ` position${plural(totals.closed)} closed, `,
-    { strong: `${totals.profitable}` },
-    " at a profit (",
-    { strong: `${share}%` },
-    ")",
-  ];
-  if (totals.average_days !== null) parts.push(", held ", { strong: heldLabel(Math.round(totals.average_days)) }, " on average");
-  parts.push(": ", { strong: signedUsd(totals.realized) }, " realized after ", { strong: usd(totals.fees) }, " in fees.");
-  if (totals.unpriced > 0) parts.push(" ", { strong: `${totals.unpriced}` }, " more closed without a computed P&L.");
-  return parts;
+  if (totals.closed > 0 || totals.partly > 0) {
+    parts.push(" Realized: ", { strong: signedUsd(totals.realized) }, " after ", { strong: usd(totals.fees) }, " in fees");
+    if (totals.partly > 0) {
+      parts.push(totals.closed > 0 ? ", including " : ", from ", { strong: `${totals.partly}` }, ` partly closed position${plural(totals.partly)}`);
+    }
+    parts.push(".");
+  }
+  if (totals.unpriced > 0) {
+    if (parts.length === 0) return [{ strong: `${totals.unpriced}` }, ` position${plural(totals.unpriced)} closed without a computed P&L.`];
+    parts.push(" ", { strong: `${totals.unpriced}` }, " more closed without a computed P&L.");
+  }
+  return parts.length === 0 ? ["Nothing closed yet."] : parts;
 }

@@ -176,6 +176,8 @@ class JournalTotals(BaseModel):
     # split, say): counted apart, not as closed at 0.
     closed: int = 0
     profitable: int = 0
+    # Positions closed in part, whose closed parts ``realized`` includes.
+    partly: int = 0
     unpriced: int = 0
     average_days: float | None = None
     # The fees inside ``realized``: the closed parts' own, not an open

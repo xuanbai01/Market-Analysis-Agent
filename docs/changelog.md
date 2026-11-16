@@ -312,4 +312,10 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **The fees beside the realized P&L are the closed parts' own.** They used to include an open position's entry fees.
     - **Stock delivered a session after its assignment** still links to the option: the latest assignment on that underlying on or before its date.
     - **A close reaches the lot it closes wherever it's queued**, not only at the front.
+  - **From #131's second AI review:**
+    - **A close bigger than what's open** lists only the rest ("2 of 5 had nothing open to close"), not the whole fill.
+    - **The realized figure says what's in it.** It includes partly closed positions (`partly`), and the sentence now names them.
+    - **An expiry, assignment or exercise sent without a buy or sell** still closes what's open.
+    - **A partly closed position has no `closed_at`.**
+    - **Not changed:** two puts on one underlying assigned the same day deliver one stock position, linked to one of them.
 

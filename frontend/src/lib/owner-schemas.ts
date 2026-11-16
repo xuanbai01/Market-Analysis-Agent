@@ -130,7 +130,7 @@ const JournalPositionSchema = z.object({
 });
 export type JournalPosition = z.infer<typeof JournalPositionSchema>;
 
-const EMPTY_TOTALS = { realized: 0, closed: 0, profitable: 0, unpriced: 0, average_days: null, fees: 0 };
+const EMPTY_TOTALS = { realized: 0, closed: 0, profitable: 0, partly: 0, unpriced: 0, average_days: null, fees: 0 };
 
 const TradeJournalSchema = z.object({
   positions: z.array(JournalPositionSchema).default([]),
@@ -141,6 +141,8 @@ const TradeJournalSchema = z.object({
       realized: z.number().default(0),
       closed: z.number().default(0),
       profitable: z.number().default(0),
+      /** Closed in part: their closed parts are in ``realized``. */
+      partly: z.number().default(0),
       /** Closed without a computed P&L (after a split): counted apart. */
       unpriced: z.number().default(0),
       average_days: MaybeNum,

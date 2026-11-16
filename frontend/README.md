@@ -41,7 +41,7 @@ CI runs lint, typecheck, test and build on every PR.
 
 ## Bundle budget
 
-The main chunk must stay under **100 KB gzipped**; it is 90.75 KB (2026-11-16). Every route except `/` and `/login` is lazy-loaded into its own chunk: dashboard 26.8 KB, demo shell + index 1.8 KB, compare 6.6 KB, lens 4.4 KB (+ 0.8 KB index), options 13.2 KB, positions 7.3 KB, trades 5.3 KB, search modal 1.3 KB. Shared between them: the options fetchers and strategy math 4.2 KB (options, positions; named after `options-strategy`), the owner fetchers, words and sign-out hook 5.8 KB (options, positions, trades; named after `useSignOutOn401`), `MultiLine`'s tick helper 3.3 KB (the dashboard, the trades journal), and the owner unlock form 2.6 KB (positions, trades). There is no charting library; charts are hand-rolled SVG. These sizes are kept only here. Check them with `npm run build` before adding a dependency.
+The main chunk must stay under **100 KB gzipped**; it is 90.74 KB (2026-11-16). Every route except `/` and `/login` is lazy-loaded into its own chunk: dashboard 26.8 KB, demo shell + index 1.8 KB, compare 6.6 KB, lens 4.4 KB (+ 0.8 KB index), options 14.3 KB, positions 7.4 KB, trades 5.3 KB, search modal 1.3 KB. Shared between them: the options fetchers and strategy math 4.2 KB (options, positions; named after `options-strategy`), the owner fetchers, words and sign-out hook 6.1 KB (options, positions, trades; named after `useSignOutOn401`), `MultiLine`'s tick helper 3.3 KB (the dashboard, the trades journal), and the owner unlock form 2.6 KB (positions, trades). There is no charting library; charts are hand-rolled SVG. These sizes are kept only here. Check them with `npm run build` before adding a dependency.
 
 ## Layout
 

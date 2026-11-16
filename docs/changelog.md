@@ -486,4 +486,14 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Closes** are range-checked and timestamps come back in UTC.
     - **The year** is the last 252 sessions, not the last 252 IVs.
     - **The percentile** compares today with the year's other sessions, so the year's high reads 100%.
+- **IV history from tastytrade, the panel (2026-11-16, tastytrade PR C):** the options page has an "IV history · tastytrade" panel with the owner key (`IvHistoryPanel`, `lib/iv-history-text.ts`).
+  - **The chart:** IV and RV20 over 1Y, 3Y or all (`MultiLine`, with a hover), in the term structure's colours.
+  - **The sentence:** where today's IV sits among the past year's sessions, and how far realized volatility is from it.
+  - **The table:** tastytrade's own IV index, rank, percentile, IV30 and HV30/60/90, labelled as its own.
+  - **The source line:** "Live · tastytrade · read … · shown to you only, never stored".
+  - **Errors:** a 422 says tastytrade has no history; a 503 gives the reason; only a 403 forgets the key, as on the Live switch.
+  - **Memory:** the figures leave with the page (`gcTime: 0`).
+  - **Overnight:** the panel shows even when Yahoo's chain comes back one-sided, since tastytrade's history doesn't depend on it.
+  - **Sizes:** main chunk 90.74 KB gz, options 14.3 KB.
+  - **The fake backend** (`scripts/fake_owner_api.py`) has made-up candles and metrics for any ticker.
 

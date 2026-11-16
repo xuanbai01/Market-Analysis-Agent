@@ -120,12 +120,17 @@ def _rows(expiration: dict[str, Any]) -> list[tuple[float, str, str]]:
     return rows
 
 
-async def _expirations(symbol: str) -> Chain:
-    """The standard chain (a non-standard deliverable is left out) as plain
-    rows by expiry, kept CHAIN_SECONDS."""
+def _kept(symbol: str) -> Chain | None:
     cached = _chains.get(symbol)
-    if cached is not None and _clock() - cached[0] < CHAIN_SECONDS:
-        return cached[1]
+    return cached[1] if cached is not None and _clock() - cached[0] < CHAIN_SECONDS else None
+
+
+async def _expirations(symbol: str, *, fresh: bool = False) -> Chain:
+    """The standard chain (a non-standard deliverable is left out) as plain
+    rows by expiry, kept CHAIN_SECONDS; ``fresh`` reads it again."""
+    kept = None if fresh else _kept(symbol)
+    if kept is not None:
+        return kept
     payload = await tt.get(f"/option-chains/{tt.symbol_path(symbol)}/nested", op="option_chain")
     # Tens of thousands of strikes for SPY or SPX: read on the options thread.
     chain = await options_chain.on_options_thread(_compact, payload)
@@ -208,7 +213,15 @@ def _newest(items: list[dict[str, Any]]) -> datetime | None:
 
 
 async def _build(symbol: str, expiry: date) -> LiveChain:
-    strikes = _strikes(await _expirations(symbol), expiry, symbol.upper().replace("-", "").replace(".", ""))
+    now = _now()
+    quoted_at = mc.quote_time(now)
+    if mc.years_to_expiry(quoted_at, expiry) <= 0:
+        raise NotListed(expiry)  # it has closed: no time left to price
+    root = symbol.upper().replace("-", "").replace(".", "")
+    was_kept = _kept(symbol) is not None
+    strikes = _strikes(await _expirations(symbol), expiry, root)
+    if not strikes and was_kept:  # listed since the chain was kept, perhaps
+        strikes = _strikes(await _expirations(symbol, fresh=True), expiry, root)
     if not strikes:
         raise NotListed(expiry)
     underlying = _tastytrade_symbol(symbol)
@@ -226,8 +239,6 @@ async def _build(symbol: str, expiry: date) -> LiveChain:
         calls=tuple(_quote(k, quotes.get(call)) for k, call, _ in near),
         puts=tuple(_quote(k, quotes.get(put)) for k, _, put in near),
     )
-    now = _now()
-    quoted_at = mc.quote_time(now)
     rate, _assumed = await options_chain.on_options_thread(options_chain.risk_free_rate)
     dividend_yield = cached[1] if cached else 0.0
     smile = await options_chain.on_options_thread(om.smile, chain, spot, quoted_at, rate, dividend_yield)

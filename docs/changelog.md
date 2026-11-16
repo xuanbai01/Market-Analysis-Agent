@@ -339,5 +339,11 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Open interest, walls, max pain and exposure come from the whole delayed chain while Live is on.** Live quotes cover only the 80 strikes near the price, and open interest is the day's figure anyway.
     - **Only a 403 clears the owner key on the Live switch.** A 404 there can't be told from a route the backend doesn't have yet, during a deploy. `/positions` and `/trades` handle a server with no owner key.
     - **The nested chain is read into rows on the options thread**, not the event loop.
+  - **From #130's sixth AI review:**
+    - **The kept chain is read again before an expiry is called "not listed"**, so a weekly listed since then is found.
+    - **An expiry that has closed is "not listed"**, not priced at a negative time to expiry.
+    - **Not changed:**
+      - The client's allowlist takes the nested-chain path and its quote parameters.
+      - `cached_underlying` returns nothing for a build with no fetched chain.
   - **`/positions` stays current while open** (#128's last AI review): it reads again every 15 s while the tab shows, matching the server's copy, and quote ages tick every 5 s between reads. A tab left open no longer freezes at "10s ago".
 

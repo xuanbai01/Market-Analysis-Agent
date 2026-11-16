@@ -86,6 +86,12 @@ Still deferred, triggers unchanged: Phase 6 (segment and geography mix; needs a 
 - [ ] **Options follow-ups (from the review, not bugs):** the snapshot's stored `next_earnings` is the calendar's date, not `earnings_calendar.next_report_date`; fetching one more expiry costs three Yahoo calls where one would do (a chains-only `fetch_chain`); the page computes the snapshot's raw-quote detail and throws it away; `_Built.parts` is an untyped dict. Known limits of the read: a bare number in any fact's name passes as a label, the direction guard can drop a correct point that uses a synonym, a headline's numbers carry no chip, and a report rebuilt with the same quote time keeps the earlier read. A report released during a session counts as traded from that session's open (the event move and the expiry flags go by the reaction date, not the release time).
 - [ ] **Owner:** compare IV30 for QQQ/SPY/NVDA with a broker after Monday's close (within about 2 points), and price two strategies in the builder against a broker's analysis tool.
 
+## The AI review (2026-11-16, #135)
+
+- [ ] **Measure it on the next feature PR:** tokens for the full review and each fix round, from the comment's footer. Count the findings that held and those that didn't, and compare with #128–#131 (changelog).
+- [ ] **Lows left from #135's reviews:** a full review run again keeps the earlier findings in its state, so answered ones stay listed (capped at 60). A failed thinking request's tokens aren't counted.
+- [ ] **The positions page measures time to expiry from the clock** (#134's review). Outside a session it should run from the last close, as the options code does (`market_calendar`): a weekend understates a leg's time value in the what-if and payoff.
+
 ## Plan — a clearer options page, and positioning views (2026-11-15)
 
 **Goal:** the owner finds `/options/:ticker` harder to read than OptionCharts, and the gap is mostly presentation. Each OptionCharts chart has a plain title, one sentence with the key numbers, a stats table, the price marked, and expiry labels with days and weekly/monthly. It also has positioning views we lack (largest open interest, max pain, gamma and delta exposure with walls), all computable by our code from Yahoo's chains and our IVs. Rules: code computes every figure, there are no sentiment labels, the GEX/DEX assumption is stated on the page, and the AI read is unchanged for now. One PR each, in order, before tastytrade PR B:

@@ -575,3 +575,11 @@ def test_a_full_review_again_sees_the_earlier_findings_and_replies(pr_env, monke
     assert all(rev == "aaaaaaa1...bbbbbbb2" for rev, _, _ in seen)  # the whole PR
     assert all("the old bug" in text and "x is checked" in text for text in asked)
     assert "the old bug" in pr_env["posted"][0]
+
+
+def test_a_docs_only_push_keeps_the_earlier_findings_in_view():
+    plan = ai_review.plan_parts([ai_review.split_diff(_file("docs/changelog.md"))[0]], 1000, 4)
+    body = ai_review.render_nothing_to_review(
+        "abc1234", plan, [{"severity": "medium", "path": "app/a.py", "line": 3, "defect": "the old bug"}])
+    assert "Nothing to review" in body and "the old bug" in body
+    assert ai_review.read_state(body)["findings"][0]["defect"] == "the old bug"

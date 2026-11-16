@@ -181,8 +181,11 @@ def render_comment(*, findings: list[Finding], riskiest: list[str], head_sha: st
 def render_nothing_to_review(head_sha: str, plan: Plan, earlier: list[dict]) -> str:
     why = _left_out(plan, []) or "the diff has no files"
     state = {"sha": head_sha, "findings": earlier}
+    # A docs-only push mustn't hide what the last review found.
+    folded = (f"\n<details><summary>Earlier findings ({len(earlier)})</summary>\n\n"
+              f"{describe_earlier(earlier)}\n\n</details>\n") if earlier else ""
     return (f"{MARKER}\n### AI review (DeepSeek)\n\nNothing to review at {head_sha[:7]}. "
-            f"Left out — {why}.\n{embed_state(state)}\n")
+            f"Left out — {why}.\n{folded}{embed_state(state)}\n")
 
 
 def find_comment_id(comments: list[dict]) -> int | None:

@@ -329,6 +329,17 @@ async def test_a_database_failure_mid_write_is_a_failed_sync_not_a_500(world: _W
     assert world.session.in_tx is False
 
 
+async def test_a_failed_sync_logs_the_error_s_kind_not_its_text(world: _World, caplog: pytest.LogCaptureFixture) -> None:
+    """An unexpected error's text can carry a request path with the account
+    number: the log names its type only (#129's fourth AI review)."""
+    world.history = [_txn(1, "2026-10-01")]
+    world.insert_fail = RuntimeError(f"lost the connection writing /accounts/{ACCOUNT}/transactions")
+    with caplog.at_level("DEBUG"), pytest.raises(ot.SyncFailed):
+        await _sync(world)
+    assert "RuntimeError" in caplog.text
+    assert ACCOUNT not in caplog.text
+
+
 async def test_sealing_runs_off_the_event_loop(world: _World, monkeypatch: pytest.MonkeyPatch) -> None:
     """A first sync seals the whole history: CPU that mustn't hold up other
     requests (#129's third AI review)."""

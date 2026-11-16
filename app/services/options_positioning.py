@@ -25,7 +25,7 @@ worthless: the one that pays holders least.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from app.schemas.options import Positioning, StrikeExposure, TopContract
@@ -195,3 +195,93 @@ def positioning(chain: ExpiryQuotes, s: Smile, spot: float, shown: Iterable[floa
         gamma_flip=gamma_flip(s, spot, vols, net_oi) if strikes and spot > 0 else None,
         assumption=ASSUMPTION,
     )
+
+
+def _exposures(chain: ExpiryQuotes, s: Smile) -> list[_Strike]:
+    """One expiry's exposure by strike, as ``positioning`` counts it."""
+    calls, puts = _open_interest(chain)
+    years = max(s.years, _MIN_YEARS)
+    rows = []
+    for k in sorted(k for k in calls.keys() | puts.keys() if calls.get(k, 0) or puts.get(k, 0)):
+        vol = _vol_at(s, k)
+        gamma = om.gamma76(s.forward, k, years, vol) * s.forward * s.forward
+        delta = om.delta76(s.forward, k, years, vol)
+        rows.append(_Strike(
+            strike=k,
+            call_gex=gamma * calls.get(k, 0),
+            put_gex=-gamma * puts.get(k, 0),
+            call_dex=delta * s.forward * calls.get(k, 0),
+            put_dex=(delta - 1) * s.forward * puts.get(k, 0),
+        ))
+    return rows
+
+
+def across(parts: Sequence[tuple[ExpiryQuotes, Smile]], spot: float, shown: Iterable[float] | None = None) -> Positioning:
+    """Positioning over several expiries at once (the owner's whole chain):
+    each expiry's exposure at its own forward, time and smile, added up by
+    strike. The walls, totals and largest contracts are the chain's; the
+    flip is where the chain's net gamma, every expiry moved together,
+    changes sign. Max pain is one expiry's settle, so there is none here."""
+    by_strike: dict[float, _Strike] = {}
+    calls: dict[float, int] = {}
+    puts: dict[float, int] = {}
+    for chain, s in parts:
+        c, p = _open_interest(chain)
+        for k, oi in c.items():
+            calls[k] = calls.get(k, 0) + oi
+        for k, oi in p.items():
+            puts[k] = puts.get(k, 0) + oi
+        for e in _exposures(chain, s):
+            seen = by_strike.get(e.strike)
+            by_strike[e.strike] = e if seen is None else _Strike(
+                strike=e.strike, call_gex=seen.call_gex + e.call_gex, put_gex=seen.put_gex + e.put_gex,
+                call_dex=seen.call_dex + e.call_dex, put_dex=seen.put_dex + e.put_dex,
+            )
+    exposure = [by_strike[k] for k in sorted(by_strike)]
+    window = set(shown) if shown is not None else None
+    call_oi, put_oi = sum(calls.values()), sum(puts.values())
+    contracts = [TopContract(strike=k, side="call", open_interest=oi) for k, oi in calls.items() if oi] + [
+        TopContract(strike=k, side="put", open_interest=oi) for k, oi in puts.items() if oi
+    ]
+    contracts.sort(key=lambda c: (-c.open_interest, c.strike))
+    call_gex, put_gex = sum(e.call_gex for e in exposure), sum(e.put_gex for e in exposure)
+    call_dex, put_dex = sum(e.call_dex for e in exposure), sum(e.put_dex for e in exposure)
+    with_calls = [e for e in exposure if e.call_gex > 0]
+    with_puts = [e for e in exposure if e.put_gex < 0]
+    return Positioning(
+        call_open_interest=call_oi,
+        put_open_interest=put_oi,
+        put_call=put_oi / call_oi if call_oi else None,
+        top=contracts[:TOP_CONTRACTS],
+        max_pain=None,
+        exposure=[e.row() for e in exposure if window is None or e.strike in window],
+        call_gex=call_gex,
+        put_gex=put_gex,
+        net_gex=call_gex + put_gex,
+        call_dex=call_dex,
+        put_dex=put_dex,
+        net_dex=call_dex + put_dex,
+        call_wall=max(with_calls, key=lambda e: e.call_gex).strike if with_calls else None,
+        put_wall=min(with_puts, key=lambda e: e.put_gex).strike if with_puts else None,
+        gamma_flip=_chain_flip(parts, spot) if exposure and spot > 0 else None,
+        assumption=ASSUMPTION,
+    )
+
+
+def _chain_flip(parts: Sequence[tuple[ExpiryQuotes, Smile]], spot: float) -> float | None:
+    """Where the chain's net gamma changes sign nearest ``spot``: every
+    expiry's forward moves with the stock, each strike's IV stays put."""
+    terms = []
+    for chain, s in parts:
+        calls, puts = _open_interest(chain)
+        net_oi = {k: calls.get(k, 0) - puts.get(k, 0) for k in calls.keys() | puts.keys()}
+        terms.append((s, max(s.years, _MIN_YEARS), {k: _vol_at(s, k) for k in net_oi}, net_oi))
+    steps = round(FLIP_RANGE / FLIP_STEP)
+    prices = [spot * (1 + i * FLIP_STEP) for i in range(-steps, steps + 1)]
+    values = [sum(_net_gamma(s.forward * p / spot, years, vols, oi) for s, years, vols, oi in terms) for p in prices]
+    crossings = [
+        p0 + (p1 - p0) * v0 / (v0 - v1)
+        for p0, p1, v0, v1 in zip(prices, prices[1:], values, values[1:], strict=False)
+        if v0 * v1 < 0
+    ]
+    return min(crossings, key=lambda p: abs(p - spot), default=None)

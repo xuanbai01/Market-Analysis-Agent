@@ -284,7 +284,7 @@ async def test_a_chain_is_kept_as_plain_rows(account: _Tastytrade) -> None:
     _at, kept = lc._chains["SPY"]
     assert set(kept) == {EXPIRY.isoformat()}
     rows = kept[EXPIRY.isoformat()]
-    assert len(rows) == len(STRIKES) and all(isinstance(r, tuple) and len(r) == 3 for r in rows)
+    assert len(rows) == len(STRIKES) and all(isinstance(r, tuple) and len(r) == 5 for r in rows)  # with streamer names
 
 
 async def test_a_chain_is_read_into_rows_off_the_event_loop(account: _Tastytrade, monkeypatch: pytest.MonkeyPatch) -> None:

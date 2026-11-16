@@ -58,6 +58,9 @@ from app.services import tastytrade_client as tt
 
 QUOTE_TOKEN_TTL_SECONDS = 23 * 3600
 FETCH_TIMEOUT_SECONDS = 20.0
+# Symbols per FEED_SUBSCRIPTION message: 4,816 in one was refused as
+# INVALID_MESSAGE (SPY's chain within 15%, on Fly); 500 at a time read them all.
+SUBSCRIBE_CHUNK = 500
 # Once events have come, a feed this quiet has sent all it will.
 IDLE_SECONDS = 3.0
 OPEN_TIMEOUT_SECONDS = 10.0
@@ -344,7 +347,12 @@ async def _run(event_type: str, subscriptions: list[dict[str, Any]], on_event: O
                 logger=_WS_LOGGER,
             ) as ws:
                 fields = await _open_feed(ws, token, event_type)
-                await _send(ws, {"type": "FEED_SUBSCRIPTION", "channel": _CHANNEL, "reset": True, "add": subscriptions})
+                for start in range(0, len(subscriptions), SUBSCRIBE_CHUNK):
+                    message = {"type": "FEED_SUBSCRIPTION", "channel": _CHANNEL,
+                               "add": subscriptions[start:start + SUBSCRIBE_CHUNK]}
+                    if start == 0:
+                        message["reset"] = True  # the first clears whatever came before
+                    await _send(ws, message)
                 subscribed = True
                 result = await _read(ws, event_type, fields, on_event, deadline)
         return result

@@ -496,4 +496,10 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
   - **Overnight:** the panel shows even when Yahoo's chain comes back one-sided, since tastytrade's history doesn't depend on it.
   - **Sizes:** main chunk 90.74 KB gz, options 14.3 KB.
   - **The fake backend** (`scripts/fake_owner_api.py`) has made-up candles and metrics for any ticker.
+- **Every expiry, live: the route (2026-11-16, options PR 5, ADR 0009):** the options page's positioning covers one expiry, and its across-expiries table only the expiries the report reads. `GET /v1/owner/options/{symbol}/chain` (`owner_whole_chain`), behind the owner key, reads tastytrade's whole chain.
+  - **What it reads:** every expiry out to 120 days, strikes within 15% of tastytrade's price.
+  - **How:** quotes and open interest over DXLink, one session each. One subscription of SPY's 4,816 contracts was refused (`INVALID_MESSAGE`), so `dxlink` now subscribes 500 at a time, and a session reads them all in about 3.5 s (checked on Fly, counts only).
+  - **The figures:** each expiry goes through the options page's own code: its smile from the mids, and its summary row (ATM IV, expected move, max pain, net gamma). The positioning is added up across the expiries (`options_positioning.across`): open interest, gamma and delta exposure by strike, and the chain's walls and gamma flip. There's no max pain for the chain, since that's one expiry's settle.
+  - **Live chain rows:** they keep each contract's DXLink name beside its OCC symbol.
+  - **Bounds:** at most 6,000 contracts, nearest expiries first (`capped` says so); a minute in memory for 4 symbols; a 60 s deadline. A symbol tastytrade lists no options on is a 422. Never stored.
 

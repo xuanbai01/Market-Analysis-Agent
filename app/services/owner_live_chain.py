@@ -74,7 +74,10 @@ def _now() -> datetime:
 # A chain by expiry (ISO date): (strike, call symbol, put symbol) rows, not
 # tastytrade's dicts. SPY's or SPX's lists every expiry's strikes, and ten
 # are kept on a 512 MB machine.
-Chain = dict[str, list[tuple[float, str, str]]]
+# (strike, call, put, call's streamer symbol, put's): the streamer symbols
+# are DXLink's names for the contracts (the whole chain reads them there).
+Row = tuple[float, str, str, str | None, str | None]
+Chain = dict[str, list[Row]]
 _chains: OrderedDict[str, tuple[float, Chain]] = OrderedDict()
 _live: dict[tuple[str, date], tuple[float, LiveChain]] = {}
 # One build at a time per symbol and expiry; others don't wait on it. A
@@ -113,7 +116,7 @@ def _tastytrade_symbol(symbol: str) -> str:
     return symbol.upper().replace("-", "/").replace(".", "/")
 
 
-def _rows(expiration: dict[str, Any]) -> list[tuple[float, str, str]]:
+def _rows(expiration: dict[str, Any]) -> list[Row]:
     rows = []
     strikes = field_of(expiration, "strikes")
     for strike in strikes if isinstance(strikes, list) else []:
@@ -122,7 +125,8 @@ def _rows(expiration: dict[str, Any]) -> list[tuple[float, str, str]]:
         k = finite_number(field_of(strike, "strike-price"))
         call, put = field_of(strike, "call"), field_of(strike, "put")
         if k is not None and isinstance(call, str) and isinstance(put, str):
-            rows.append((k, call, put))
+            streamers = [field_of(strike, f"{side}-streamer-symbol") for side in ("call", "put")]
+            rows.append((k, call, put, *(s if isinstance(s, str) else None for s in streamers)))
     return rows
 
 
@@ -184,7 +188,7 @@ def _strikes(chain: Chain, expiry: date, root: str) -> list[tuple[float, str, st
     still declares 100 shares, SPX beside SPXW), the standard one is kept:
     ``root`` itself, else one without a digit; so no strike counts twice."""
     by_strike: dict[float, tuple[int, str, str]] = {}
-    for k, call, put in chain.get(expiry.isoformat(), []):
+    for k, call, put, *_streamers in chain.get(expiry.isoformat(), []):
         try:
             parsed = [parse_occ(s) for s in (call, put)]
         except ValueError:
@@ -303,3 +307,38 @@ async def live_chain(symbol: str, expiry: date) -> LiveChain:
         if _users[key] == 0:  # no lock left behind per expiry ever asked
             del _users[key]
             _locks.pop(key, None)
+
+
+# ── For the whole chain (owner_whole_chain) ────────────────────────────
+
+
+async def expirations(symbol: str) -> Chain:
+    """The standard chain as plain rows by expiry, kept CHAIN_SECONDS."""
+    return await _expirations(symbol)
+
+
+def standard_strikes(chain: Chain, expiry: date, root: str) -> list[tuple[float, str, str]]:
+    """(strike, call, put) for ``expiry``, one per strike, OCC-checked."""
+    return _strikes(chain, expiry, root)
+
+
+def streamer_symbols(chain: Chain, expiry: date) -> dict[str, str]:
+    """Each contract's DXLink name, by its OCC symbol, for ``expiry``."""
+    names: dict[str, str] = {}
+    for _k, call, put, call_streamer, put_streamer in chain.get(expiry.isoformat(), []):
+        if call_streamer:
+            names[call] = call_streamer
+        if put_streamer:
+            names[put] = put_streamer
+    return names
+
+
+async def underlying_price(symbol: str) -> float:
+    """tastytrade's own price for the stock; ``LiveChainUnavailable`` without one."""
+    underlying = _tastytrade_symbol(symbol)
+    equity = (await _quotes("equity", [underlying])).get(underlying, {})
+    spot = finite_number(field_of(equity, "mark")) or finite_number(field_of(equity, "mid"))
+    if spot is None or spot <= 0:
+        raise LiveChainUnavailable("tastytrade sent no price for the underlying")
+    return spot
+

@@ -407,7 +407,9 @@ async def fetch_candles(symbol: str, period: str, from_time: datetime) -> Candle
             return True
         return False if len(by_time) >= MAX_CANDLES else None
 
-    summary = {"symbol": candle_symbol, "from": from_time.date().isoformat()}
+    # Counts, not the symbol: the owner's IV history asks for the tickers they
+    # look at (tastytrade_client._summary does the same for a query).
+    summary = {"symbols": 1, "period": period, "from": from_time.date().isoformat()}
     with log_external_call("dxlink.candles", summary) as call:
         complete = await _run("Candle", [{"type": "Candle", "symbol": candle_symbol, "fromTime": from_value}], on_event)
         call.record_output({"candles": len(by_time), "complete": complete, "snipped": snipped})

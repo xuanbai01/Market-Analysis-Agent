@@ -9,6 +9,8 @@ tastytrade and DXLink are faked here.
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -160,7 +162,8 @@ async def test_where_today_sits_in_the_past_year(account: _Tastytrade) -> None:
     year = (await ih.iv_history("NVDA")).year
     assert year.sessions == ih.YEAR_SESSIONS
     assert year.iv_high == pytest.approx(0.20 + 0.20 * 399 / 400, rel=1e-4)
-    assert year.iv_rank == pytest.approx(1.0) and year.iv_percentile == pytest.approx(251 / 252, rel=1e-4)
+    # Today against the year's other sessions: the high is above all of them.
+    assert year.iv_rank == pytest.approx(1.0) and year.iv_percentile == pytest.approx(1.0)
     assert year.iv_low < year.iv_median < year.iv_high
 
 
@@ -281,3 +284,133 @@ def test_the_history_is_never_written_to_the_database() -> None:
     with open(ih.__file__, encoding="utf-8") as fh:
         source = fh.read()
     assert "AsyncSession" not in source and "SessionLocal" not in source
+
+
+# ── from #138's reviews ─────────────────────────────────────────────────
+
+
+async def test_the_year_is_the_last_year_of_sessions_not_of_ivs(account: _Tastytrade) -> None:
+    # Sparse IVs mustn't stretch "the past year" over several.
+    account.candles = _candles(600, iv=lambda i: 0.3 if i < 300 or i % 10 == 0 else None)
+    year = (await ih.iv_history("NVDA")).year
+    assert year.sessions == 25  # the IVs among the last 252 sessions (every tenth of 348-599)
+
+
+async def test_metrics_missing_with_candles_present_is_a_history(account: _Tastytrade) -> None:
+    account.metrics = []
+    history = await ih.iv_history("NVDA")
+    assert history.points and history.metrics.iv_rank is None
+
+
+async def test_a_symbol_tastytrade_doesnt_know_for_metrics_lets_the_candles_decide(
+    account: _Tastytrade, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def not_found(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise tt.TastytradeNotFound("/market-metrics")
+
+    monkeypatch.setattr(ih.tt, "get", not_found)
+    assert (await ih.iv_history("NVDA")).points
+    account.candles = dxlink.CandleHistory(candles=(), complete=True)
+    ih.reset()
+    with pytest.raises(ih.NoHistory):
+        await ih.iv_history("NVDA")
+
+
+@pytest.mark.parametrize("payload", [[1, 2], {"data": "x"}, {"data": {"items": 5}}, {"data": {"items": ["x"]}}])
+async def test_a_wrong_shaped_metrics_answer_reads_as_none(
+    account: _Tastytrade, monkeypatch: pytest.MonkeyPatch, payload: Any
+) -> None:
+    async def odd(*args: Any, **kwargs: Any) -> Any:
+        return payload
+
+    monkeypatch.setattr(ih.tt, "get", odd)
+    history = await ih.iv_history("NVDA")
+    assert history.points and history.metrics.iv_index is None
+
+
+async def test_the_metrics_echoed_in_another_class_share_form_still_match(account: _Tastytrade) -> None:
+    account.metrics[0]["symbol"] = "BRK.B"
+    assert (await ih.iv_history("BRK-B")).metrics.iv_index == pytest.approx(0.4123)
+
+
+async def test_a_failed_metrics_call_stops_the_candle_fetch(
+    account: _Tastytrade, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stopped = []
+
+    async def slow_candles(*args: Any) -> dxlink.CandleHistory:
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            stopped.append(True)
+            raise
+        return account.candles
+
+    monkeypatch.setattr(ih.dxlink, "fetch_candles", slow_candles)
+    account.fail = tt.TastytradeUnavailable("tastytrade answered 503")
+    with pytest.raises(ih.IvHistoryUnavailable):
+        await ih.iv_history("NVDA")
+    assert stopped == [True]
+
+
+async def test_an_expired_history_is_dropped_on_any_visit(account: _Tastytrade) -> None:
+    await ih.iv_history("NVDA")
+    account.clock[0] += ih.CACHE_SECONDS + 1  # type: ignore[attr-defined]
+    account.fail = tt.TastytradeUnavailable("down")
+    with pytest.raises(ih.IvHistoryUnavailable):
+        await ih.iv_history("SPY")  # no build kept, yet NVDA's expired copy goes
+    assert "NVDA" not in ih._kept
+
+
+async def test_candles_outside_the_window_are_left_out(account: _Tastytrade) -> None:
+    # tastytrade sent everything when it misread fromTime (dxlink): keep ten years.
+    old = dxlink.Candle(time=datetime(1999, 1, 4, tzinfo=UTC), open=1, high=1, low=1, close=1.0, volume=1,
+                        imp_volatility=0.3, open_interest=None)
+    future = dxlink.Candle(time=NOW + timedelta(days=3), open=1, high=1, low=1, close=1.0, volume=1,
+                           imp_volatility=0.3, open_interest=None)
+    account.candles = dxlink.CandleHistory(candles=(old, *_candles(50).candles, future), complete=True)
+    points = (await ih.iv_history("NVDA")).points
+    assert len(points) == 50 and points[0].date.year == 2026
+
+
+@pytest.mark.parametrize("symbol", ["SPY,QQQ", "X{=d}", "", "toolongticker", "A/B/C"])
+async def test_the_service_checks_the_symbol_itself(account: _Tastytrade, symbol: str) -> None:
+    # The route's pattern is the first check; a later caller mustn't put a
+    # list or dxFeed's attribute syntax into tastytrade's query.
+    with pytest.raises(ih.NoHistory):
+        await ih.iv_history(symbol)
+    assert account.calls == [] and account.candle_asks == []
+
+
+async def test_two_forms_of_one_share_class_share_a_copy(account: _Tastytrade) -> None:
+    await ih.iv_history("BRK-B")
+    await ih.iv_history("BRK.B")
+    assert len(account.candle_asks) == 1
+
+
+async def test_a_close_that_isnt_a_price_is_no_close(account: _Tastytrade) -> None:
+    candles = list(_candles(30).candles)
+    candles[-1] = dxlink.Candle(time=candles[-1].time, open=0, high=0, low=0, close=0.0, volume=0,
+                                imp_volatility=0.3, open_interest=None)
+    account.candles = dxlink.CandleHistory(candles=tuple(candles), complete=True)
+    assert (await ih.iv_history("NVDA")).points[-1].close is None
+
+
+async def test_a_deadline_hit_is_logged_without_the_symbol(
+    account: _Tastytrade, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def stuck(*args: Any) -> dxlink.CandleHistory:
+        await asyncio.sleep(10)
+        return account.candles
+
+    monkeypatch.setattr(ih.dxlink, "fetch_candles", stuck)
+    monkeypatch.setattr(ih, "BUILD_SECONDS", 0.05)
+    with caplog.at_level(logging.WARNING, logger="app"), pytest.raises(ih.IvHistoryUnavailable):
+        await ih.iv_history("ZQXW")
+    messages = [r.getMessage() for r in caplog.records if r.name.startswith("app")]
+    assert any("gave up" in m for m in messages) and not any("ZQXW" in m for m in messages)
+
+
+def test_a_timestamp_comes_back_in_utc() -> None:
+    assert ih.metrics_of({"implied-volatility-updated-at": "2026-11-14T15:59:00-05:00"}).updated_at == datetime(
+        2026, 11, 14, 20, 59, tzinfo=UTC)

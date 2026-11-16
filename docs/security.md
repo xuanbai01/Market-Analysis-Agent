@@ -29,8 +29,11 @@ Active mitigations for the OWASP Top 10, scoped to this project's stack (FastAPI
     - **Status codes:** an unlisted expiry is a 422, so it isn't mistaken for the owner-key gate's 404.
     - **Memory:** it keeps at most 4 chains, each for 10 minutes, as plain rows: about 5.7 MB for an SPX-sized one.
   - **The IV history** (`owner_iv_history`, `/v1/owner/options/{symbol}/history`):
-    - **Memory only:** tastytrade's daily candles and market metrics, kept 15 minutes for at most 8 symbols, never stored. The module holds no database session; a test pins that.
-    - **Ranges:** every figure is range-checked before it's shown, so a unit tastytrade changed can't show as a 4,500% IV.
+    - **Memory only:** tastytrade's daily candles and market metrics, kept 15 minutes for at most 8 symbols and dropped on any visit once expired. Never stored: the module holds no database session, and a test pins that.
+    - **Bounds:** what comes back is cut to ten years of sessions. The arithmetic runs off the event loop, and a failed half stops the other, so a candle fetch can't keep the one DXLink session for nothing.
+    - **Ranges:** every figure is range-checked before it's shown, closes included, so a unit tastytrade changed can't show as a 4,500% IV.
+    - **The symbol:** the service checks tastytrade's form of the ticker itself, not only the route, so no list or dxFeed attribute syntax reaches the query.
+    - **Logs:** the candle fetch is logged as a count, not the symbol, as the client's queries are. A deadline hit is logged without the symbol.
     - **Status codes:** a symbol tastytrade has nothing for is a 422, not a 404.
   - **The dev-only fake backend** (`scripts/fake_owner_api.py`) runs with a throwaway shared secret and owner key, no LLM, news, FRED or tastytrade keys, and a database address nothing listens on, whatever `.env` says. It refuses to start on Fly. The Dockerfile doesn't copy `scripts/`.
   - [`tests/test_owner_auth.py`](../tests/test_owner_auth.py) pins the owner's routes.

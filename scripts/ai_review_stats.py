@@ -44,12 +44,18 @@ BEFORE = {
 _HELD = re.compile(r"^[\s*_]*held[\s*_]*:[\s*_]*(.*)$", re.I | re.M)
 _NOT_HELD = re.compile(r"^[\s*_]*didn['’]t hold[\s*_]*:[\s*_]*(.*)$", re.I | re.M)
 _NUMBERS = re.compile(r"(\d+)\s*[-–]\s*(\d+)|(\d+)")
+# The list at the start of a line: numbers and ranges joined by commas or
+# "and". Numbers in a reason after it aren't findings.
+_LIST = re.compile(r"\d+(?:\s*[-–]\s*\d+)?(?:\s*(?:,|and|&)\s*\d+(?:\s*[-–]\s*\d+)?)*")
 _MISSED = re.compile(r"missed by #(\d+)['’]s review", re.I)
 
 
 def _numbers(text: str) -> set[int]:
+    listed = _LIST.match(text.strip())
     found: set[int] = set()
-    for low, high, single in _NUMBERS.findall(text):
+    if not listed:
+        return found
+    for low, high, single in _NUMBERS.findall(listed.group(0)):
         if single:
             found.add(int(single))
         else:

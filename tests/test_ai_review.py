@@ -631,3 +631,14 @@ def test_main_adds_each_review_to_the_totals(pr_env, monkeypatch):
     assert ai_review.main() == 0
     after = ai_review.read_state(pr_env["posted"][0])["tokens"]
     assert after["reviews"] == 2 and after["read"] == 1100 and after["written"] == 100
+
+
+def test_totals_that_arent_whole_numbers_count_as_none():
+    # A hand-edited state mustn't crash the review after DeepSeek is paid.
+    body = _render(totals={"reviews": "2", "read": 1.5, "written": None, "cached": [1]})
+    tokens = ai_review.read_state(body)["tokens"]
+    assert tokens["reviews"] == 1 and tokens["read"] == 100 and tokens["written"] == 10
+
+
+def test_one_review_is_one_review():
+    assert "This PR so far: 1 review," in _render()

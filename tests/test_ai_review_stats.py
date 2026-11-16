@@ -65,3 +65,13 @@ def test_a_pr_from_before_the_totals_has_no_token_figures():
 def test_the_table_shows_the_old_review_beside_the_new():
     text = stats.table([stats.pr_row(140, [], {})])
     assert "#128" in text and "#140" in text and "before" in text
+
+
+@pytest.mark.parametrize(
+    ("line", "numbers"),
+    [("Held: 2, 14 — 3 of them high", {2, 14}), ("Held: 2 (the 512 MB case), 14", {2}),
+     ("Held: 1, 3 and 5-6.", {1, 3, 5, 6}), ("Held: none", set())],
+)
+def test_only_the_list_at_the_start_of_the_line_counts(line, numbers):
+    # Numbers in the reason after the list aren't findings.
+    assert stats.parse_reply("<!-- ai-review:reply -->\n" + line)[0] == numbers

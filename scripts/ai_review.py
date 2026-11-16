@@ -180,7 +180,8 @@ def render_comment(*, findings: list[Finding], riskiest: list[str], head_sha: st
         footer += (f" {failed_passes} of {parts * passes} passes failed; the other passes over"
                    " their parts stand.")
     so_far = add_totals(totals, usage)
-    footer += (f" This PR so far: {so_far['reviews']} reviews, {so_far['read']:,} tokens read "
+    reviews = f"{so_far['reviews']} review" + ("" if so_far["reviews"] == 1 else "s")
+    footer += (f" This PR so far: {reviews}, {so_far['read']:,} tokens read "
                f"({so_far['cached']:,} cached), {so_far['written']:,} written.")
     state = {"sha": head_sha, "findings": merge_state_findings(earlier, findings), "tokens": so_far}
     return "\n\n".join(sections) + f"\n\n---\n<sub>{footer}</sub>\n{embed_state(state)}\n"
@@ -188,7 +189,11 @@ def render_comment(*, findings: list[Finding], riskiest: list[str], head_sha: st
 
 def add_totals(totals: dict | None, usage: Usage) -> dict:
     """The PR's reviews so far, this one included: what ai_review_stats reads."""
-    so_far = {k: (totals or {}).get(k) or 0 for k in TOTAL_KEYS}
+    def whole(value: object) -> int:
+        # A hand-edited state mustn't crash the review after DeepSeek is paid.
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+    so_far = {k: whole((totals or {}).get(k)) for k in TOTAL_KEYS}
     so_far["reviews"] += 1
     for k in TOTAL_KEYS[1:]:
         so_far[k] += getattr(usage, k)

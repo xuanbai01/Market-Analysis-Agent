@@ -11,7 +11,7 @@ Active sprint for the Market Analysis Agent.
 ## In progress
 
 - **Options page: clarity and positioning** (plan below), PR 2 on `feature/options-clarity`.
-- **tastytrade, PR A** merged (#116); its review follow-up is on `fix/tastytrade-probe-robustness`. **Owner:** create the OAuth app and set the Fly secrets (deployment.md §9); then the probe runs during a session. Plan below.
+- **tastytrade, PR A** merged (#116); its review follow-up is on `fix/tastytrade-probe-robustness`. The Fly secrets are set; the probe runs during Monday's session. PR B (#130) and PR D (#131) are merged; the owner's own steps are in `tasks/owner-todo.md`. Plan below.
 - **Options analysis:** the plan's five PRs and the edge-case review are merged (#109–#115). Follow-ups below.
 
 ## Plan — after Phase 5 (2026-11-13)
@@ -135,9 +135,9 @@ So nothing from tastytrade is stored, sent to a prompt or shown in the demo. The
     - **B:** REST quotes already carry open interest, IV and Greeks, so live quotes need no DXLink.
     - **C:** a live chart of about 9 years of daily IV from candles, plus an option contract's price and IV path.
     - **D:** the journal can show each trade's contract path from candles.
-- [ ] **PR B — live quotes on the options page** *(branch `feature/live-quotes`)*: `GET /v1/owner/options/{symbol}/live/{expiry}`, behind the owner key (tastytrade's data is the owner's alone), cached 10 s; strikes from tastytrade's nested chain, bids, asks, volume and open interest from its quotes; our IVs from live mids; a Live switch on the expiry, refreshed every 15 s; the builder prices at live bid/ask. 422 for an unlisted expiry, since the page reads a 404 as a refused key.
+- [x] **PR B — live quotes on the options page** *(#130)*: `GET /v1/owner/options/{symbol}/live/{expiry}`, behind the owner key (tastytrade's data is the owner's alone), cached 10 s; strikes from tastytrade's nested chain, bids, asks, volume and open interest from its quotes; our IVs from live mids; a Live switch on the expiry, refreshed every 15 s; the builder prices at live bid/ask. 422 for an unlisted expiry, since the page reads a 404 as a refused key.
 - [ ] **PR C — market history, live:** `GET /v1/options/{symbol}/history` (market metrics; daily candles, with IV if they carry it); a "History · tastytrade" panel.
-- [ ] **PR D — the trade journal** *(branch `feature/trade-journal`)*: `trade_journal` (FIFO lots per account and contract, positions by opening order, structures named from legs, expirations, assignments and exercises, rolls, realized P&L with fees, unmatched rows with the reason), served with `GET /v1/owner/trades`; a Journal tab on `/trades`.
+- [x] **PR D — the trade journal** *(#131)*: `trade_journal` (FIFO lots per account and contract, positions by opening order, structures named from legs, expirations, assignments and exercises, rolls, realized P&L with fees, unmatched rows with the reason), served with `GET /v1/owner/trades`; a Journal tab on `/trades`.
 
 ## Handoff — pickup notes (2026-11-13)
 

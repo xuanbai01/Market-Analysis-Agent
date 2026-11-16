@@ -335,4 +335,11 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **The high:** shares delivered with no buy or sell, beside shares already held, were read as a close of the held ones, which would have booked a phantom loss. Delivered shares now go by their cash. Closing what's open applies only to an option's expiry, assignment or exercise.
     - **An option's expiry with nothing open** says "nothing open to close", not "not modelled".
     - **Only a symbol shaped like a ticker counts as stock**, so an unreadable option symbol without an instrument type is listed, not held as shares.
+  - **From #131's seventh AI review:**
+    - **A close is booked to its trading day.** A fill at 8 pm New York on Oct 31 is November in UTC. Its month and the days held follow the transaction date.
+    - **A butterfly with uneven wings is named broken-wing.**
+    - **Not changed:**
+      - A delivery that buys shares while the account is short them covers the short, as the account itself nets it. "Never a close" above means shares held long.
+      - `value` is on every trade, signed like the net value.
+      - `parse_occ` raises only `ValueError`.
 

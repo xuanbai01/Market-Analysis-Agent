@@ -32,7 +32,8 @@ def _two(a: JournalLeg, b: JournalLeg, flow: str) -> str | None:
 def _butterfly(legs: list[JournalLeg]) -> str | None:
     low, mid, high = sorted(legs, key=lambda leg: leg.strike or 0.0)
     if len({leg.kind for leg in legs}) == 1 and low.quantity == high.quantity and mid.quantity == -2 * low.quantity:
-        return f"{low.kind} butterfly"
+        even = (mid.strike or 0.0) - (low.strike or 0.0) == (high.strike or 0.0) - (mid.strike or 0.0)
+        return f"{'' if even else 'broken-wing '}{low.kind} butterfly"
     return None
 
 

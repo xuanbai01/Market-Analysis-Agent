@@ -73,6 +73,7 @@ class _Position:
     account: int
     underlying: str
     opened_at: datetime
+    opened_on: date  # the trading day, for days held
     legs: dict[str, JournalLeg] = field(default_factory=dict)
     open_cash: float | None = 0.0
     close_cash: float | None = 0.0
@@ -85,10 +86,20 @@ class _Position:
     parts: list[tuple[str, float, float]] = field(default_factory=list)
     endings: set[str] = field(default_factory=set)
     closed_at: datetime | None = None
+    closed_on: date | None = None
     origin: str | None = None
     delivered_by: tuple[str, str, str, int] | None = None  # date, underlying, ending, account
     note: str | None = None
     transactions: list[int] = field(default_factory=list)
+
+
+def _day(trade: OwnerTrade) -> date:
+    """The fill's trading day: its transaction date, not the UTC clock (a
+    fill at 8 pm New York is the next day in UTC)."""
+    try:
+        return date.fromisoformat(trade.date or "")
+    except ValueError:
+        return chronological(trade)[0].date()
 
 
 def _add(total: float | None, part: float | None) -> float | None:
@@ -199,12 +210,13 @@ class _Journal:
                 position.unknown = True
             else:
                 position.realized += part
-                position.parts.append((when.strftime("%Y-%m"), part, (lot.unit_fees + unit_fees) * size))
+                position.parts.append((_day(trade).strftime("%Y-%m"), part, (lot.unit_fees + unit_fees) * size))
             position.close_cash = _add(position.close_cash, None if unit_cash is None else unit_cash * size)
             position.fees += unit_fees * size
             position.legs[key[1]].closed += size
             position.endings.add(ending)
             position.closed_at = when
+            position.closed_on = _day(trade)
             if trade.id not in position.transactions:
                 position.transactions.append(trade.id)
             order = (trade.account, trade.order_id) if trade.order_id is not None else None
@@ -237,7 +249,7 @@ class _Journal:
         if position is None:
             position = _Position(
                 id=pid, account=trade.account, underlying=trade.underlying or trade.symbol or "?",
-                opened_at=chronological(trade)[0],
+                opened_at=chronological(trade)[0], opened_on=_day(trade),
             )
             self.positions[pid] = position
         if kind == "stock" and ending in DELIVERIES:
@@ -286,7 +298,7 @@ class _Journal:
         if status != "open":
             ended_by = next(iter(position.endings)) if len(position.endings) == 1 else "mixed"
         realized = None if status == "open" or position.unknown else round(position.realized, CENTS)
-        days = (position.closed_at.date() - position.opened_at.date()).days if status == "closed" and position.closed_at else None
+        days = (position.closed_on - position.opened_on).days if status == "closed" and position.closed_on else None
         rolled_from, rolled_to = links.get(position.id, (None, None))
         return JournalPosition(
             id=position.id, account=position.account, underlying=position.underlying,

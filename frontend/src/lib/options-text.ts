@@ -336,6 +336,8 @@ export const GLOSSARY = {
     "Delta exposure: the dollar change in the open options' own value for a 1% move in the stock, calls positive and puts negative, with no assumption about who holds them (a dealer's delta is the opposite of whatever side it holds). Some sites quote total dollar delta under this name, 100 times larger.",
   openInterestHistory:
     "Open contracts across every listed expiry, calls and puts, recorded after each session's close by our own daily run (from 2026-11-16; for a few tickers only, since it reads every expiry). One line per side; open interest is settled overnight, so each point is that session's.",
+  wholeChain:
+    "From your tastytrade account, shown to you only and never stored: every expiry out to four months at live quotes, for strikes within 15% of the price. Each expiry's IV, expected move, max pain and net gamma come from our own code, as for the delayed chain; gamma exposure is added up across the expiries by strike, under the same dealer assumption, and the walls are the chain's.",
   tastytradeIvHistory:
     "From your tastytrade account, shown to you only and never stored: the stock's own IV each session from tastytrade's daily candles (from about 2016), and RV20, what the stock actually moved over the 20 sessions before, on the same scale. The sentence places today's IV among the past year's sessions; the table gives tastytrade's own rank and percentile, which it computes its own way.",
   acrossExpiries:

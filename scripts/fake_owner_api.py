@@ -94,8 +94,16 @@ CHAIN_EXPIRY = date(2026, 12, 18)
 CHAIN_STRIKES = [120.0 + 2.5 * i for i in range(41)]  # 120 to 220
 
 
-def _occ(kind: str, strike: float) -> str:
-    return f"NVDA  {CHAIN_EXPIRY:%y%m%d}{kind}{int(strike * 1000):08d}"
+def _occ(kind: str, strike: float, expiry: date = CHAIN_EXPIRY) -> str:
+    return f"NVDA  {expiry:%y%m%d}{kind}{int(strike * 1000):08d}"
+
+
+# The whole chain (every expiry, live) reads these over a made-up DXLink.
+WHOLE_EXPIRIES = [date(2026, 11, 20), date(2026, 11, 27), CHAIN_EXPIRY, date(2027, 1, 15), date(2027, 2, 19)]
+
+
+def _streamer(kind: str, strike: float, expiry: date) -> str:
+    return f".NVDA{expiry:%y%m%d}{kind}{strike:g}"
 
 
 def _chain_quote(symbol: str) -> dict[str, Any] | None:
@@ -117,9 +125,11 @@ async def fake_get(path: str, params: dict[str, Any] | None = None, *, op: str) 
     if path == f"/accounts/{ACCOUNT}/positions":
         return {"data": {"items": POSITIONS}}
     if path == "/option-chains/NVDA/nested":
-        strikes = [{"strike-price": f"{k:.1f}", "call": _occ("C", k), "put": _occ("P", k)} for k in CHAIN_STRIKES]
-        return {"data": {"items": [{"root-symbol": "NVDA", "shares-per-contract": 100,
-                                    "expirations": [{"expiration-date": CHAIN_EXPIRY.isoformat(), "strikes": strikes}]}]}}
+        expirations = [{"expiration-date": e.isoformat(), "strikes": [
+            {"strike-price": f"{k:.1f}", "call": _occ("C", k, e), "put": _occ("P", k, e),
+             "call-streamer-symbol": _streamer("C", k, e), "put-streamer-symbol": _streamer("P", k, e)}
+            for k in CHAIN_STRIKES]} for e in WHOLE_EXPIRIES]
+        return {"data": {"items": [{"root-symbol": "NVDA", "shares-per-contract": 100, "expirations": expirations}]}}
     if path == "/market-data/by-type":
         asked = [s for value in (params or {}).values() for s in str(value).split(",")]
         items = [QUOTES.get(s) or _chain_quote(s) for s in asked]
@@ -133,6 +143,32 @@ async def fake_get(path: str, params: dict[str, Any] | None = None, *, op: str) 
             "historical-volatility-90-day": "33.0", "implied-volatility-updated-at": "2026-11-14T20:59:00+00:00",
         }]}}
     raise tt.TastytradeNotFound(path)
+
+
+async def fake_fetch_once(event_type: str, symbols: list[str]) -> dict[str, dict[str, Any]]:
+    """Made-up Quote and Summary events for the whole chain's contracts."""
+    import re  # noqa: PLC0415
+
+    from app.services import options_math as om  # noqa: PLC0415
+
+    spot, rate, now_ms = QUOTES["NVDA"]["mark"], 0.04, int(datetime.now(UTC).timestamp() * 1000)
+    out: dict[str, dict[str, Any]] = {}
+    for symbol in symbols:
+        m = re.fullmatch(r"\.NVDA(\d{6})([CP])([\d.]+)", symbol)
+        if m is None:
+            continue
+        expiry = datetime.strptime(m.group(1), "%y%m%d").date()
+        kind, strike = m.group(2), float(m.group(3))
+        years = max((expiry - datetime.now(UTC).date()).days, 1) / 365
+        vol = 0.55 + 0.25 * max(0.0, (spot - strike) / spot)
+        price = om.black76(spot * math.exp(rate * years), strike, years, vol, math.exp(-rate * years), call=kind == "C")
+        if event_type == "Quote":
+            out[symbol] = {"eventSymbol": symbol, "bidPrice": round(max(price - 0.05, 0), 2),
+                           "askPrice": round(price + 0.05, 2), "bidTime": now_ms, "askTime": now_ms}
+        else:
+            tilt = 1.4 if (kind == "P") == (strike < 175) else 0.7
+            out[symbol] = {"eventSymbol": symbol, "openInterest": int(4000 * tilt * math.exp(-abs(strike - 175) / 15))}
+    return out
 
 
 async def fake_candles(symbol: str, period: str, from_time: datetime) -> dxlink.CandleHistory:
@@ -206,6 +242,7 @@ async def fake_list_trades(_session: Any) -> list[OwnerTrade]:
 
 tt.get = fake_get  # type: ignore[assignment]
 dxlink.fetch_candles = fake_candles  # type: ignore[assignment]
+dxlink.fetch_once = fake_fetch_once  # type: ignore[assignment]
 owner_router.sync = fake_sync  # type: ignore[assignment]
 owner_router.list_trades = fake_list_trades  # type: ignore[assignment]
 tt.is_configured = lambda: True  # type: ignore[assignment]

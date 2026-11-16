@@ -5,7 +5,7 @@
  */
 import { z } from "zod";
 
-import { ExpiryChainSchema } from "./options-schemas";
+import { ExpiryChainSchema, ExpirySummarySchema, PositioningSchema } from "./options-schemas";
 
 const MaybeNum = z.number().nullable().default(null);
 
@@ -223,3 +223,23 @@ export const IvHistorySchema = z.object({
   source: z.literal("tastytrade"),
 });
 export type IvHistory = z.infer<typeof IvHistorySchema>;
+
+// The owner's whole chain from tastytrade (/v1/owner/options/{symbol}/chain):
+// every expiry to max_days, and the positioning added up across them.
+export const WholeChainSchema = z.object({
+  symbol: z.string(),
+  spot: z.number(),
+  quoted_at: z.string(),
+  as_of: z.string(),
+  updated_at: z.string().nullable().default(null),
+  expiries: z.array(ExpirySummarySchema).default([]),
+  positioning: PositioningSchema,
+  max_days: z.number(),
+  strike_range: z.number(),
+  options_read: z.number(),
+  options_quoted: z.number(),
+  left_out: z.array(z.string()).default([]),
+  capped: z.boolean().default(false),
+  source: z.literal("tastytrade"),
+});
+export type WholeChain = z.infer<typeof WholeChainSchema>;

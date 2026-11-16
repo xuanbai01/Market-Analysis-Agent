@@ -345,5 +345,12 @@ Per-PR task checklists for Phases 1–5 are in [tasks/archive-phases-1-5.md](../
     - **Not changed:**
       - The client's allowlist takes the nested-chain path and its quote parameters.
       - `cached_underlying` returns nothing for a build with no fetched chain.
+  - **From #130's seventh AI review:**
+    - **A contract filed under another strike is dropped**, so it can't shift the smile.
+    - **A symbol tastytrade lists no options for** reads as "not listed", not an outage.
+    - **Not changed:**
+      - `symbol_path` turns `BF.B` into `BF/B`, and the client's tests cover it.
+      - The status line gives the newest quote's age.
+      - The live route sits behind the owner key with no per-IP limit; the client backs off on 429.
   - **`/positions` stays current while open** (#128's last AI review): it reads again every 15 s while the tab shows, matching the server's copy, and quote ages tick every 5 s between reads. A tab left open no longer freezes at "10s ago".
 

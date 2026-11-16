@@ -46,6 +46,7 @@ BUILD_SECONDS = 30.0
 STRIKES_EACH_SIDE = 40
 QUOTE_BATCH = 100
 STANDARD_DELIVERABLE = 100
+STRIKE_TOLERANCE = 1e-6
 
 
 class LiveChainUnavailable(Exception):
@@ -131,7 +132,10 @@ async def _expirations(symbol: str, *, fresh: bool = False) -> Chain:
     kept = None if fresh else _kept(symbol)
     if kept is not None:
         return kept
-    payload = await tt.get(f"/option-chains/{tt.symbol_path(symbol)}/nested", op="option_chain")
+    try:
+        payload = await tt.get(f"/option-chains/{tt.symbol_path(symbol)}/nested", op="option_chain")
+    except tt.TastytradeNotFound:
+        payload = {"data": {"items": []}}  # no options on it: nothing listed, not an outage
     # Tens of thousands of strikes for SPY or SPX: read on the options thread.
     chain = await options_chain.on_options_thread(_compact, payload)
     _remember_chain(symbol, chain)
@@ -166,8 +170,8 @@ def _strikes(chain: Chain, expiry: date, root: str) -> list[tuple[float, str, st
             parsed = [parse_occ(s) for s in (call, put)]
         except ValueError:
             continue
-        if any(p.expiry != expiry for p in parsed):
-            continue
+        if any(p.expiry != expiry or abs(p.strike - k) > STRIKE_TOLERANCE for p in parsed):
+            continue  # another expiry, or a contract filed under another strike
         found_root = parsed[0].root
         rank = 0 if found_root == root else 1 if not any(c.isdigit() for c in found_root) else 2
         if k not in by_strike or rank < by_strike[k][0]:
